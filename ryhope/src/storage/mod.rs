@@ -48,14 +48,17 @@ where
     ) -> Result<Self>;
 }
 
-pub struct WideLineage<K, V> {
+pub struct WideLineage<K, V>
+where
+    K: Debug + Hash + Eq + Clone + Sync + Send,
+{
     /// The keys touched by the query itself
     pub core_keys: Vec<(Epoch, K)>,
     /// An epoch -> (K -> NodeContext, K -> Payload) mapping
     epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
 }
 
-impl<K: Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
+impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
     pub fn num_touched_rows(&self) -> usize {
         self.core_keys.len()
     }
