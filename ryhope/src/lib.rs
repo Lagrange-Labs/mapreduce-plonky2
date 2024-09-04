@@ -1,21 +1,33 @@
 use anyhow::*;
-use async_trait::async_trait;
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
-
 use storage::{
     updatetree::{Next, UpdatePlan, UpdateTree},
     view::TreeStorageView,
-    EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
-    TransactionalStorage, TreeStorage, TreeTransactionalStorage,
+    EpochKvStorage, EpochStorage, FromSettings, MetaOperations, PayloadStorage, RoEpochKvStorage,
+    SqlTransactionStorage, SqlTreeTransactionalStorage, TransactionalStorage, TreeStorage,
+    TreeTransactionalStorage, WideLineage,
 };
+use tokio_postgres::Transaction;
+use tracing::*;
 use tree::{sbbst, scapegoat, MutableTree, NodeContext, NodePath, PrintableTree, TreeTopology};
 
 pub mod storage;
 #[cfg(test)]
 mod tests;
 pub mod tree;
+
+/// The column containing the node key in the zkTable
+pub const KEY: &str = "__key";
+/// The column containing the node payload in the zkTable
+pub const PAYLOAD: &str = "__payload";
+/// The column containing the epoch in queries
+pub const EPOCH: &str = "__epoch";
+/// The column containing the first epoch of validity of the row in the zkTable
+pub const VALID_FROM: &str = "__valid_from";
+/// The column containing the last epoch of validity of the row in the zkTable
+pub const VALID_UNTIL: &str = "__valid_until";
 
 /// A timestamp in a versioned storage. Using a signed type allows for easy
 /// detection & debugging of erroneous subtractions.
@@ -24,8 +36,7 @@ pub type Epoch = i64;
 /// A payload attached to a node, that may need to compute aggregated values
 /// from the bottom of the tree to the top. If not, simply do not override the
 /// default definition of `aggregate`.
-#[async_trait]
-pub trait NodePayload: Sized + Serialize + for<'a> Deserialize<'a> {
+pub trait NodePayload: Debug + Sized + Serialize + for<'a> Deserialize<'a> {
     /// Set an aggregate value for the current node, computable from the payload
     /// of its children.
     ///
@@ -165,13 +176,11 @@ impl<
         self.tree.root(&self.storage).await
     }
     pub async fn root_at(&self, epoch: Epoch) -> Option<T::Key> {
-        let view = self.view_at(epoch);
-        self.tree.root(&view).await
+        self.tree.root(&self.storage.view_at(epoch)).await
     }
 
     pub async fn root_data_at(&self, epoch: Epoch) -> Option<V> {
-        let view = self.view_at(epoch);
-        if let Some(root) = self.tree.root(&view).await {
+        if let Some(root) = self.tree.root(&self.storage.view_at(epoch)).await {
             let root = self.storage.data().fetch_at(&root, epoch).await;
             Some(root)
         } else {
@@ -191,8 +200,7 @@ impl<
 
     /// Return the current root hash of the Merkle tree at the given epoch.
     pub async fn root_hash_at(&self, epoch: Epoch) -> Option<V> {
-        let view = self.view_at(epoch);
-        if let Some(root) = self.tree.root(&view).await {
+        if let Some(root) = self.tree.root(&self.storage.view_at(epoch)).await {
             Some(self.storage.data().fetch_at(&root, epoch).await)
         } else {
             None
@@ -221,7 +229,11 @@ impl<
         k: &T::Key,
         epoch: Epoch,
     ) -> Option<(NodeContext<T::Key>, V)> {
-        if let Some(ctx) = self.tree.node_context(k, &self.view_at(epoch)).await {
+        if let Some(ctx) = self
+            .tree
+            .node_context(k, &self.storage.view_at(epoch))
+            .await
+        {
             if let Some(v) = self.try_fetch_at(k, epoch).await {
                 return Some((ctx, v));
             }
@@ -301,13 +313,42 @@ impl<
     }
 }
 
+impl<
+        T: TreeTopology + MutableTree + Send,
+        V: NodePayload + Send + Sync,
+        S: TransactionalStorage
+            + TreeStorage<T>
+            + PayloadStorage<T::Key, V>
+            + FromSettings<T::State>
+            + MetaOperations<T, V>,
+    > MerkleTreeKvDb<T, V, S>
+{
+    pub async fn wide_update_trees(
+        &self,
+        keys_query: &S::KeySource,
+        bounds: (Epoch, Epoch),
+    ) -> Result<Vec<UpdateTree<T::Key>>> {
+        self.storage
+            .wide_update_trees(&self.tree, keys_query, bounds)
+            .await
+    }
+    pub async fn wide_lineage_between(
+        &self,
+        keys_query: &S::KeySource,
+        bounds: (Epoch, Epoch),
+    ) -> Result<WideLineage<T::Key, V>> {
+        self.storage
+            .wide_lineage_between(&self.tree, keys_query, bounds)
+            .await
+    }
+}
+
 // Data-related read-only operation are directly forwarded to the data
 // storage.
 //
 // Write operations need to (i) be forwarded to the key tree, and (ii) see their
 // dirty keys accumulated in order to build the dirty keys tree at the commiting
 // of the transaction.
-#[async_trait]
 impl<
         T: TreeTopology + MutableTree,
         V: NodePayload + Send + Sync,
@@ -336,7 +377,6 @@ impl<
     }
 }
 
-#[async_trait]
 impl<
         T: TreeTopology + MutableTree,
         V: NodePayload + Sync + Send,
@@ -344,6 +384,7 @@ impl<
     > EpochKvStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
 {
     async fn remove(&mut self, k: T::Key) -> Result<()> {
+        trace!("[MerkleTreeKvDb] removing {k:?}");
         self.dirty
             .extend(self.tree.delete(&k, &mut self.storage).await?);
         self.storage.data_mut().remove(k).await?;
@@ -351,6 +392,7 @@ impl<
     }
 
     async fn update(&mut self, k: T::Key, new_value: V) -> Result<()> {
+        trace!("[MerkleTreeKvDb] updating {k:?} -> {new_value:?}");
         self.storage.data_mut().update(k.clone(), new_value).await?;
         self.dirty.insert(k);
         Ok(())
@@ -365,6 +407,7 @@ impl<
     }
 
     async fn store(&mut self, k: T::Key, value: V) -> Result<()> {
+        trace!("[MerkleTreeKvDb] storing {k:?} -> {value:?}");
         let ds = self.tree.insert(k.clone(), &mut self.storage).await?;
         self.dirty.extend(ds.into_full_path());
         self.storage.data_mut().store(k, value).await
@@ -374,6 +417,7 @@ impl<
     /// destructive and irreversible operation; to merely get a view on the
     /// storage at a given epoch, use the `view_at` method.
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
+        trace!("[MerkleTreeKvDb] rolling back to {epoch}");
         self.storage.rollback_to(epoch).await
     }
 }
@@ -388,11 +432,13 @@ impl<
     > TreeTransactionalStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
 {
     async fn start_transaction(&mut self) -> Result<()> {
+        trace!("[MerkleTreeKvDb] calling start_transaction");
         self.storage.start_transaction()?;
         Ok(())
     }
 
     async fn commit_transaction(&mut self) -> Result<UpdateTree<T::Key>> {
+        trace!("[MerkleTreeKvDb@] calling commit_transaction");
         let mut paths = vec![];
         for k in self.dirty.drain() {
             if let Some(p) = self.tree.lineage(&k, &self.storage).await {
@@ -408,6 +454,40 @@ impl<
         self.storage.commit_transaction().await?;
 
         Ok(update_tree)
+    }
+}
+
+impl<
+        T: TreeTopology + MutableTree + Send + Sync,
+        V: NodePayload + Send + Sync,
+        S: SqlTransactionStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
+    > SqlTreeTransactionalStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
+{
+    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<UpdateTree<T::Key>> {
+        trace!("[MerkleTreeKvDb] calling commit_in");
+        let mut paths = vec![];
+        for k in self.dirty.drain() {
+            if let Some(p) = self.tree.lineage(&k, &self.storage).await {
+                paths.push(p.into_full_path().collect::<Vec<_>>());
+            }
+        }
+
+        let update_tree = UpdateTree::from_paths(paths, self.current_epoch() + 1);
+        let plan = update_tree.clone().into_workplan();
+        self.aggregate(plan.clone()).await?;
+        self.storage.commit_in(tx).await?;
+
+        Ok(update_tree)
+    }
+
+    fn commit_success(&mut self) {
+        trace!("[MerkleTreeKvDb] triggering commit_success");
+        self.storage.commit_success()
+    }
+
+    fn commit_failed(&mut self) {
+        trace!("[MerkleTreeKvDb] triggering commit_failed");
+        self.storage.commit_failed()
     }
 }
 

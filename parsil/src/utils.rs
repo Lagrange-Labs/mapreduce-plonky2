@@ -144,8 +144,8 @@ pub fn parse_and_validate<C: ContextProvider>(
     let mut query = parser::parse(&settings, query)?;
     expand::expand(&mut query);
 
-    placeholders::validate(&settings, &mut query)?;
-    validate::validate(&settings, &mut query)?;
+    placeholders::validate(&settings, &query)?;
+    validate::validate(&settings, &query)?;
     assembler::validate(&query, &settings)?;
     Ok(query)
 }

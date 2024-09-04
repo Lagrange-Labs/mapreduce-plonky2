@@ -16,7 +16,6 @@ use plonky2::{
 };
 use ryhope::{storage::pgsql::ToFromBytea, tree::scapegoat, NodePayload};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use verifiable_db::query::universal_circuit::universal_circuit_inputs::ColumnCell;
 
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
 pub type RowTreeKeyNonce = Vec<u8>;
@@ -44,12 +43,22 @@ where
 /// A unique identifier of a secondary-indexed row, from the secondary index value and an unique
 /// index since secondary index does not have to be unique.
 /// THis struct is kept in the JSON row as the "tree key".
-#[derive(Clone, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Default, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RowTreeKey {
     /// Value of the secondary index of the row
     pub value: U256,
     /// An value such that the pair (value,rest) is unique accross all rows
     pub rest: RowTreeKeyNonce,
+}
+impl std::fmt::Debug for RowTreeKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:x}@{}",
+            self.value,
+            self.rest.iter().map(|x| x.to_string()).collect::<String>()
+        )
+    }
 }
 
 impl RowTreeKey {

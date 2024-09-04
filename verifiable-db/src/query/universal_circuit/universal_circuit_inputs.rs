@@ -431,7 +431,7 @@ impl RowCells {
     }
 
     /// Return the set of column cells, placing primary and secondary index columns at the beginning of the array
-    pub(crate) fn to_cells(&self) -> Vec<ColumnCell> {
+    pub fn to_cells(&self) -> Vec<ColumnCell> {
         [&self.primary, &self.secondary]
             .into_iter()
             .chain(&self.rest)

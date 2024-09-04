@@ -183,9 +183,7 @@ mod tests {
     };
     use plonky2::{
         iop::target::Target,
-        plonk::{
-            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
-        },
+        plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
     };
     use rstest::rstest;
     use serde::{Deserialize, Serialize};

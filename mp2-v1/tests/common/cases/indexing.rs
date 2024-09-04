@@ -25,8 +25,8 @@ use crate::common::{
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::{
-        CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TableID,
-        TreeRowUpdate, TreeUpdateType,
+        CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TreeRowUpdate,
+        TreeUpdateType,
     },
     TestContext,
 };
@@ -104,6 +104,7 @@ impl TestCase {
         // + 1 because we are going to deploy some update to contract in a transaction, which for
         // Anvil means it's a new block
         let indexing_genesis_block = ctx.block_number().await + 1;
+        let chain_id = ctx.rpc.get_chain_id().await.unwrap();
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their o
         // own way of defining their table.
@@ -115,7 +116,12 @@ impl TestCase {
             },
             secondary: TableColumn {
                 name: "column_value".to_string(),
-                identifier: identifier_single_var_column(INDEX_SLOT, contract_address),
+                identifier: identifier_single_var_column(
+                    INDEX_SLOT,
+                    contract_address,
+                    chain_id,
+                    vec![],
+                ),
                 index: IndexType::Secondary,
             },
             rest: SINGLE_SLOTS
@@ -124,7 +130,8 @@ impl TestCase {
                 .filter_map(|(i, slot)| match i {
                     _ if *slot == INDEX_SLOT => None,
                     _ => {
-                        let identifier = identifier_single_var_column(*slot, contract_address);
+                        let identifier =
+                            identifier_single_var_column(*slot, contract_address, chain_id, vec![]);
                         Some(TableColumn {
                             name: format!("column_{}", i),
                             identifier,
@@ -147,6 +154,7 @@ impl TestCase {
             contract_extraction: ContractExtractionArgs {
                 slot: StorageSlot::Simple(CONTRACT_SLOT),
             },
+            chain_id: ctx.rpc.get_chain_id().await.unwrap(),
         })
     }
 
@@ -163,6 +171,7 @@ impl TestCase {
             contract.address()
         );
         let contract_address = contract.address();
+        let chain_id = ctx.rpc.get_chain_id().await.unwrap();
         // index genesis block is the first block where I start processing the data. it is one
         // block more than the deploy block
         // + 1 because we are going to deploy some update to contract in a transaction, which for
@@ -170,8 +179,10 @@ impl TestCase {
         let index_genesis_block = ctx.block_number().await + 1;
         // to toggle off and on
         let value_as_index = true;
-        let value_id = identifier_for_mapping_value_column(MAPPING_SLOT, contract_address);
-        let key_id = identifier_for_mapping_key_column(MAPPING_SLOT, contract_address);
+        let value_id =
+            identifier_for_mapping_value_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
+        let key_id =
+            identifier_for_mapping_key_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
         let (index_identifier, mapping_index, cell_identifier) = match value_as_index {
             true => (value_id, MappingIndex::Value(value_id), key_id),
             false => (key_id, MappingIndex::Key(key_id), value_id),
@@ -239,6 +250,7 @@ impl TestCase {
             contract_address: *contract_address,
             source,
             table,
+            chain_id: ctx.rpc.get_chain_id().await.unwrap(),
         })
     }
 
@@ -469,6 +481,7 @@ impl TestCase {
         };
 
         let table_id = &self.table.name.clone();
+        let chain_id = ctx.rpc.get_chain_id().await?;
         // we construct the proof key for both mappings and single variable in the same way since
         // it is derived from the table id which should be different for any tables we create.
         let proof_key = ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));
@@ -500,7 +513,8 @@ impl TestCase {
                     }
                 };
                 let slot_input = SlotInputs::Mapping(mapping.slot);
-                let metadata_hash = metadata_hash(slot_input, &self.contract_address);
+                let metadata_hash =
+                    metadata_hash(slot_input, &self.contract_address, chain_id, vec![]);
                 // it's a compoound value type of proof since we're not using the length
                 (mapping_root_proof, true, None, metadata_hash)
             }
@@ -525,7 +539,8 @@ impl TestCase {
                     }
                 };
                 let slot_input = SlotInputs::Simple(args.slots.clone());
-                let metadata_hash = metadata_hash(slot_input, &self.contract_address);
+                let metadata_hash =
+                    metadata_hash(slot_input, &self.contract_address, chain_id, vec![]);
                 // we're just proving a single set of a value
                 (single_value_proof, false, None, metadata_hash)
             }
@@ -626,6 +641,7 @@ impl TestCase {
                 let new_key = next_mapping_key();
                 let new_value: U256 = next_address().into_word().into();
                 let mapping_updates = match c {
+                    ChangeType::Silent => vec![],
                     ChangeType::Insertion => {
                         vec![MappingUpdate::Insertion(new_key, new_value)]
                     }
@@ -709,6 +725,7 @@ impl TestCase {
                 .await
                 .unwrap();
                 let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
+                let chain_id = ctx.rpc.get_chain_id().await.unwrap();
                 // NOTE HERE is the interesting bit for dist system as this is the logic to execute
                 // on receiving updates from scapper. This only needs to have the relevant
                 // information from update and it will translate that to changes in the tree.
@@ -717,6 +734,7 @@ impl TestCase {
                     mapping_updates,
                     index_type,
                     slot as u8,
+                    chain_id,
                 )
             }
             TableSourceSlot::SingleValues(_) => {
@@ -729,6 +747,7 @@ impl TestCase {
                     .await
                     .expect("can't get current values");
                 match c {
+                    ChangeType::Silent => {}
                     ChangeType::Deletion => {
                         panic!("can't remove a single row from blockchain data over single values")
                     }
@@ -792,7 +811,14 @@ impl TestCase {
                 .await
                 .unwrap();
                 let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-                self.mapping_to_table_update(new_block_number, mapping_updates, index, slot)
+                let chain_id = ctx.rpc.get_chain_id().await.unwrap();
+                self.mapping_to_table_update(
+                    new_block_number,
+                    mapping_updates,
+                    index,
+                    slot,
+                    chain_id,
+                )
             }
             TableSourceSlot::SingleValues(_) => {
                 let contract_update = SimpleSingleValue {
@@ -837,7 +863,12 @@ impl TestCase {
                 let mut rest_cells = Vec::new();
                 for slot in args.slots.iter() {
                     let query = ProofQuery::new_simple_slot(self.contract_address, *slot as usize);
-                    let id = identifier_single_var_column(*slot, &self.contract_address);
+                    let id = identifier_single_var_column(
+                        *slot,
+                        &self.contract_address,
+                        ctx.rpc.get_chain_id().await.unwrap(),
+                        vec![],
+                    );
                     // Instead of manually setting the value to U256, we really extract from the
                     // MPT proof to mimick the way to "see" update. Also, it ensures we are getting
                     // the formatting and endianness right.
@@ -871,6 +902,7 @@ impl TestCase {
         updates: Vec<MappingUpdate>,
         index: MappingIndex,
         slot: u8,
+        chain_id: u64,
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         updates
             .iter()
@@ -894,6 +926,7 @@ impl TestCase {
                             &index,
                             slot,
                             &self.contract_address,
+                            chain_id,
                             None,
                         );
                         vec![TableRowUpdate::Insertion(cells, index)]
@@ -921,6 +954,7 @@ impl TestCase {
                             // In the case the key is the cell, that's good, we don't need to do
                             // anything to the tree then since the doesn't change.
                             // In the case it's the value, then we'll have to reprove the cell.
+                            chain_id,
                             Some(previous_row_key.clone()),
                         );
                         match index {
@@ -1053,6 +1087,7 @@ pub enum ChangeType {
     Deletion,
     Insertion,
     Update(UpdateType),
+    Silent,
 }
 
 #[derive(Clone, Debug)]

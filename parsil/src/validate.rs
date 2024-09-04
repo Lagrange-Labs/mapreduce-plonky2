@@ -1,4 +1,3 @@
-use anyhow::*;
 use sqlparser::ast::{
     BinaryOperator, Distinct, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr,
     JoinOperator, Offset, OffsetRows, OrderBy, OrderByExpr, Query, Select, SelectItem, SetExpr,
@@ -9,23 +8,33 @@ use crate::{
     errors::ValidationError,
     symbols::ContextProvider,
     utils::{str_to_u256, ParsilSettings},
-    visitor::{AstPass, Visit},
+    visitor::{AstVisitor, Visit},
 };
+
+macro_rules! ensure {
+    ($cond:expr, $error:expr) => {
+        if !$cond {
+            return Err($error);
+        }
+    };
+}
 
 /// Ensure that a top-level [`Query`] is compatible with the currently
 /// implemented subset of SQL.
 pub struct SqlValidator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
 }
-impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
-    fn pre_unary_operator(&mut self, unary_operator: &mut UnaryOperator) -> Result<()> {
+impl<'a, C: ContextProvider> AstVisitor for SqlValidator<'a, C> {
+    type Error = ValidationError;
+
+    fn pre_unary_operator(&mut self, unary_operator: &UnaryOperator) -> Result<(), Self::Error> {
         match unary_operator {
             UnaryOperator::Plus | UnaryOperator::Not => Ok(()),
-            _ => bail!(ValidationError::UnsupportedUnaryOperator(*unary_operator)),
+            _ => Err(ValidationError::UnsupportedUnaryOperator(*unary_operator)),
         }
     }
 
-    fn pre_binary_operator(&mut self, op: &mut BinaryOperator) -> Result<()> {
+    fn pre_binary_operator(&mut self, op: &BinaryOperator) -> Result<(), ValidationError> {
         match op {
             BinaryOperator::Eq
             | BinaryOperator::NotEq
@@ -42,15 +51,26 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
             | BinaryOperator::Or
             | BinaryOperator::Xor => Ok(()),
 
-            _ => bail!(ValidationError::UnsupportedBinaryOperator(op.clone())),
+            _ => Err(ValidationError::UnsupportedBinaryOperator(op.clone())),
         }
     }
 
-    fn pre_expr(&mut self, expr: &mut Expr) -> Result<()> {
+    fn pre_expr(&mut self, expr: &Expr) -> Result<(), ValidationError> {
         match expr {
-            Expr::Identifier(_)
-            | Expr::CompoundIdentifier(_)
-            | Expr::IsFalse(_)
+            Expr::Identifier(name) => {
+                ensure!(
+                    !name.value.starts_with("__"),
+                    ValidationError::ReservedIdentifier(name.value.to_owned())
+                );
+            }
+            Expr::CompoundIdentifier(names) => {
+                let latest = names.last().unwrap();
+                ensure!(
+                    !latest.value.starts_with("__"),
+                    ValidationError::ReservedIdentifier(latest.value.to_owned())
+                );
+            }
+            Expr::IsFalse(_)
             | Expr::IsNotFalse(_)
             | Expr::IsTrue(_)
             | Expr::IsNotTrue(_)
@@ -66,7 +86,7 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
                     ValidationError::UnknownFunction(funcall.name.to_string())
                 );
 
-                if let FunctionArguments::List(arglist) = &mut funcall.args {
+                if let FunctionArguments::List(arglist) = &funcall.args {
                     ensure!(
                         arglist.args.len() == 1,
                         ValidationError::InvalidArity(
@@ -75,14 +95,16 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
                             arglist.args.len()
                         )
                     );
-                    match &mut arglist.args[0] {
+                    match &arglist.args[0] {
                         FunctionArg::Unnamed(FunctionArgExpr::Expr(_)) => {}
-                        _ => bail!(ValidationError::InvalidFunctionArgument(
-                            arglist.args[0].to_string()
-                        )),
+                        _ => {
+                            return Err(ValidationError::InvalidFunctionArgument(
+                                arglist.args[0].to_string(),
+                            ))
+                        }
                     }
                 } else {
-                    bail!(ValidationError::InvalidFunctionArgument(format!(
+                    return Err(ValidationError::InvalidFunctionArgument(format!(
                         "{}",
                         funcall.args
                     )));
@@ -92,9 +114,14 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
             Expr::Value(v) => match v {
                 Value::Number(_, _) | Value::Boolean(_) => {}
                 Value::Placeholder(p) => {
-                    self.settings.placeholders.resolve_placeholder(p)?;
+                    self.settings
+                        .placeholders
+                        .resolve_placeholder(p)
+                        .map_err(|_| ValidationError::UnknownPlaceholder(p.to_owned()))?;
                 }
-                Value::SingleQuotedString(s) => str_to_u256(s).map(|_| ())?,
+                Value::SingleQuotedString(s) => {
+                    str_to_u256(s).map_err(|_| ValidationError::InvalidInteger(s.to_owned()))?;
+                }
                 Value::HexStringLiteral(_)
                 | Value::DollarQuotedString(_)
                 | Value::TripleSingleQuotedString(_)
@@ -110,10 +137,12 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
                 | Value::TripleDoubleQuotedRawStringLiteral(_)
                 | Value::NationalStringLiteral(_)
                 | Value::DoubleQuotedString(_)
-                | Value::Null => bail!(ValidationError::UnsupportedImmediateValue(v.to_string())),
+                | Value::Null => {
+                    return Err(ValidationError::UnsupportedImmediateValue(v.to_string()))
+                }
             },
             Expr::Subquery(s) => {
-                bail!(ValidationError::NestedSelect(s.to_string()));
+                return Err(ValidationError::NestedSelect(s.to_string()));
             }
 
             Expr::AnyOp { .. }
@@ -164,14 +193,12 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
             | Expr::OuterJoin(_)
             | Expr::Prior(_)
             | Expr::Lambda(_)
-            | Expr::Map(_) => {
-                bail!(ValidationError::UnsupportedFeature(expr.to_string()))
-            }
+            | Expr::Map(_) => return Err(ValidationError::UnsupportedFeature(expr.to_string())),
         }
         Ok(())
     }
 
-    fn pre_select_item(&mut self, p: &mut SelectItem) -> Result<()> {
+    fn pre_select_item(&mut self, p: &SelectItem) -> Result<(), ValidationError> {
         match p {
             SelectItem::Wildcard(w) => {
                 ensure!(
@@ -197,18 +224,18 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
                 Ok(())
             }
             SelectItem::QualifiedWildcard(_, _) => {
-                bail!(ValidationError::UnsupportedFeature(p.to_string()))
+                Err(ValidationError::UnsupportedFeature(p.to_string()))
             }
             _ => Ok(()),
         }
     }
 
-    fn pre_table_factor(&mut self, j: &mut TableFactor) -> Result<()> {
+    fn pre_table_factor(&mut self, j: &TableFactor) -> Result<(), ValidationError> {
         match j {
             TableFactor::Table { .. } => Ok(()),
             TableFactor::Derived { .. } => {
                 // NOTE: when the time comes, let us be careful of LATERAL joins
-                bail!(ValidationError::NestedSelect(j.to_string()));
+                Err(ValidationError::NestedSelect(j.to_string()))
             }
             TableFactor::TableFunction { .. }
             | TableFactor::Function { .. }
@@ -218,12 +245,12 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
             | TableFactor::Pivot { .. }
             | TableFactor::Unpivot { .. }
             | TableFactor::MatchRecognize { .. } => {
-                bail!(ValidationError::UnsupportedJointure(format!("{j}:#?")))
+                Err(ValidationError::UnsupportedJointure(format!("{j}:#?")))
             }
         }
     }
 
-    fn pre_join_operator(&mut self, j: &mut JoinOperator) -> Result<()> {
+    fn pre_join_operator(&mut self, j: &JoinOperator) -> Result<(), ValidationError> {
         match j {
             JoinOperator::Inner(_)
             | JoinOperator::LeftOuter(_)
@@ -237,29 +264,27 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
             | JoinOperator::RightAnti(_)
             | JoinOperator::CrossApply
             | JoinOperator::OuterApply
-            | JoinOperator::AsOf { .. } => {
-                bail!(ValidationError::NonStandardSql(format!("{j:#?}")))
-            }
+            | JoinOperator::AsOf { .. } => Err(ValidationError::NonStandardSql(format!("{j:#?}"))),
         }
     }
 
-    fn pre_distinct(&mut self, distinct: &mut Distinct) -> Result<()> {
+    fn pre_distinct(&mut self, distinct: &Distinct) -> Result<(), ValidationError> {
         match distinct {
             Distinct::Distinct => Ok(()),
-            Distinct::On(_) => bail!(ValidationError::UnsupportedFeature("DISTINCT ON".into())),
+            Distinct::On(_) => Err(ValidationError::UnsupportedFeature("DISTINCT ON".into())),
         }
     }
 
-    fn pre_offset(&mut self, offset: &mut Offset) -> Result<()> {
+    fn pre_offset(&mut self, offset: &Offset) -> Result<(), ValidationError> {
         match offset.rows {
             OffsetRows::None => Ok(()),
             OffsetRows::Row | OffsetRows::Rows => {
-                bail!(ValidationError::UnsupportedFeature(offset.to_string()))
+                Err(ValidationError::UnsupportedFeature(offset.to_string()))
             }
         }
     }
 
-    fn pre_select(&mut self, s: &mut Select) -> Result<()> {
+    fn pre_select(&mut self, s: &Select) -> Result<(), ValidationError> {
         ensure!(
             s.top.is_none(),
             ValidationError::NonStandardSql("TOP".into())
@@ -273,7 +298,9 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
             ValidationError::UnsupportedFeature("LATERAL VIEW".into())
         );
         match &s.group_by {
-            GroupByExpr::All(_) => bail!(ValidationError::NonStandardSql(s.group_by.to_string())),
+            GroupByExpr::All(_) => {
+                return Err(ValidationError::NonStandardSql(s.group_by.to_string()))
+            }
             GroupByExpr::Expressions(es, _) => ensure!(
                 es.is_empty(),
                 ValidationError::UnsupportedFeature("GROUP BY".into())
@@ -306,20 +333,18 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
         Ok(())
     }
 
-    fn pre_set_expr(&mut self, s: &mut SetExpr) -> Result<()> {
+    fn pre_set_expr(&mut self, s: &SetExpr) -> Result<(), ValidationError> {
         match s {
             SetExpr::Select(_) => Ok(()),
-            SetExpr::Query(_) => {
-                bail!(ValidationError::NestedSelect(s.to_string()))
-            }
-            SetExpr::SetOperation { .. } => bail!(ValidationError::SetOperation(s.to_string())),
+            SetExpr::Query(_) => Err(ValidationError::NestedSelect(s.to_string())),
+            SetExpr::SetOperation { .. } => Err(ValidationError::SetOperation(s.to_string())),
             SetExpr::Values(_) | SetExpr::Insert(_) | SetExpr::Update(_) | SetExpr::Table(_) => {
-                bail!(ValidationError::MutableQueries(s.to_string()))
+                Err(ValidationError::MutableQueries(s.to_string()))
             }
         }
     }
 
-    fn pre_order_by(&mut self, o: &mut OrderBy) -> Result<()> {
+    fn pre_order_by(&mut self, o: &OrderBy) -> Result<(), ValidationError> {
         ensure!(
             o.exprs.len() <= 2,
             ValidationError::OrderByArity(format!("{o:?}"), 2)
@@ -331,15 +356,15 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
         Ok(())
     }
 
-    fn pre_order_by_expr(&mut self, o: &mut OrderByExpr) -> Result<()> {
+    fn pre_order_by_expr(&mut self, o: &OrderByExpr) -> Result<(), ValidationError> {
         ensure!(
             o.nulls_first.is_none(),
-            "NULL-related specifiers not supported"
+            ValidationError::NullRelatedOrdering
         );
         Ok(())
     }
 
-    fn pre_query(&mut self, q: &mut Query) -> Result<()> {
+    fn pre_query(&mut self, q: &Query) -> Result<(), ValidationError> {
         ensure!(
             q.with.is_none(),
             ValidationError::UnsupportedFeature("CTEs".into())
@@ -364,17 +389,13 @@ impl<'a, C: ContextProvider> AstPass for SqlValidator<'a, C> {
     }
 }
 /// Instantiate a new [`Validator`] and validate this query with it.
-pub fn validate<C: ContextProvider>(settings: &ParsilSettings<C>, query: &mut Query) -> Result<()> {
-    if let SetExpr::Select(ref mut select) = *query.body {
+pub fn validate<C: ContextProvider>(
+    settings: &ParsilSettings<C>,
+    query: &Query,
+) -> Result<(), ValidationError> {
+    if let SetExpr::Select(ref select) = *query.body {
         ensure!(
-            select.projection.iter().all(|s| !matches!(
-                s,
-                SelectItem::UnnamedExpr(Expr::Function(_))
-                    | SelectItem::ExprWithAlias {
-                        expr: Expr::Function(_),
-                        ..
-                    }
-            )) | select.projection.iter().all(|s| matches!(
+            select.projection.iter().all(|s| matches!(
                 s,
                 SelectItem::UnnamedExpr(Expr::Function(_))
                     | SelectItem::ExprWithAlias {
@@ -382,10 +403,10 @@ pub fn validate<C: ContextProvider>(settings: &ParsilSettings<C>, query: &mut Qu
                         ..
                     }
             )),
-            ValidationError::MixedQuery,
+            ValidationError::TabularQuery
         );
     } else {
-        bail!(ValidationError::NotASelect)
+        return Err(ValidationError::NotASelect);
     }
 
     let mut validator = SqlValidator { settings };

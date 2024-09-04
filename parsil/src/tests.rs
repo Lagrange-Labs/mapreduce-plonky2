@@ -1,4 +1,5 @@
 use crate::assembler::{assemble_dynamic, DynamicCircuitPis};
+use crate::isolator;
 use crate::{
     symbols::FileContextProvider,
     utils::{parse_and_validate, ParsilSettings, PlaceholderSettings},
@@ -24,11 +25,7 @@ fn must_accept() -> Result<()> {
 
     for q in [
         // "SELECT 25",
-        "SELECT foo, bar FROM table2 WHERE block = 3",
         "SELECT AVG(foo), MIN(bar) FROM table2 WHERE block = 3",
-        "SELECT foo FROM table2 WHERE block IN (1, 2, 4)",
-        "SELECT bar FROM table2 WHERE NOT block BETWEEN 12 AND 15",
-        "SELECT a, c FROM table2 AS tt (a, b, c)",
         // "SELECT '0x1122334455667788990011223344556677889900112233445566778899001122'",
         // "SELECT '0x'",
         // "SELECT '1234567'",
@@ -48,6 +45,10 @@ fn must_reject() {
     };
 
     for q in [
+        "SELECT foo, bar FROM table2 WHERE block = 3",
+        "SELECT foo FROM table2 WHERE block IN (1, 2, 4)",
+        "SELECT bar FROM table2 WHERE NOT block BETWEEN 12 AND 15",
+        "SELECT a, c FROM table2 AS tt (a, b, c)",
         // Mixing aggregates and scalars
         "SELECT q, MIN(r) FROM pipo WHERE block = 3",
         // Bitwise operators unsupported
@@ -88,12 +89,12 @@ fn must_resolve() -> Result<()> {
         placeholders: PlaceholderSettings::with_freestanding(3),
     };
     for q in [
-        "SELECT foo FROM table2",
-        "SELECT foo FROM table2 WHERE bar < 3",
-        "SELECT foo, * FROM table2",
+        // "SELECT foo FROM table2",
+        // "SELECT foo FROM table2 WHERE bar < 3",
+        // "SELECT foo, * FROM table2",
         "SELECT AVG(foo) FROM table2 WHERE block BETWEEN 43 and 68",
-        "SELECT foo, bar FROM table2 ORDER BY bar",
-        "SELECT foo, bar FROM table2 ORDER BY foo, bar",
+        // "SELECT foo, bar FROM table2 ORDER BY bar",
+        // "SELECT foo, bar FROM table2 ORDER BY foo, bar",
     ] {
         parse_and_validate(q, &settings)?;
     }
@@ -119,7 +120,7 @@ fn test_serde_circuit_pis() {
         placeholders: PlaceholderSettings::with_freestanding(3),
     };
 
-    let q = "SELECT foo FROM table2";
+    let q = "SELECT AVG(foo) FROM table2";
     let query = parse_and_validate(q, &settings).unwrap();
     let pis = assemble_dynamic(
         &query,
@@ -132,4 +133,77 @@ fn test_serde_circuit_pis() {
     let deserialized: DynamicCircuitPis = serde_json::from_slice(&serialized).unwrap();
 
     assert_eq!(pis, deserialized);
+}
+
+#[test]
+#[ignore = "wait for non-aggregation SELECT to come back"]
+fn isolation() {
+    fn isolated_to_string(q: &str, lo_sec: bool, hi_sec: bool) -> String {
+        let settings = ParsilSettings {
+            context: FileContextProvider::from_file("tests/context.json").unwrap(),
+            placeholders: PlaceholderSettings::with_freestanding(3),
+        };
+
+        let mut query = parse_and_validate(q, &settings).unwrap();
+        isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)
+            .unwrap()
+            .to_string()
+    }
+
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table1 WHERE block BETWEEN 1 AND 5",
+            false,
+            false
+        ),
+        "SELECT * FROM table1 WHERE (block >= 1 AND block <= 5)"
+    );
+
+    // Drop references to other columns
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN 1 AND 5 AND 3 = 4 OR bar = 5",
+            false,
+            false
+        ),
+        "SELECT * FROM table2 WHERE (block >= 1 AND block <= 5)"
+    );
+
+    // Drop sec. ind. references if it has no kown bounds.
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo < 5",
+            false,
+            false
+        ),
+        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK)"
+    );
+
+    // Drop sec.ind. < [...] if it has a defined higher bound
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo < 5",
+            true,
+            false
+        ),
+        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK)"
+    );
+
+    // Keep sec.ind. < [...] if it has a defined higher bound
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo < 5",
+            false,
+            true
+        ),
+        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) AND foo < 5"
+    );
+
+    // Nicholas's example
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN 5 AND 10 AND (foo = 4 OR foo = 15) AND bar = 12",
+            false,
+            false),
+        "SELECT * FROM table2 WHERE (block >= 5 AND block <= 10)");
 }

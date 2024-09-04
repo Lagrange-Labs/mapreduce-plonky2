@@ -302,7 +302,7 @@ mod test {
         field::extension::Extendable,
         hash::hash_types::RichField,
         iop::{target::Target, witness::PartialWitness},
-        plonk::{circuit_builder::CircuitBuilder, config::GenericConfig},
+        plonk::circuit_builder::CircuitBuilder,
     };
     use rand::{thread_rng, Rng};
 

@@ -1,4 +1,4 @@
-use alloy::primitives::{Address, U256};
+use alloy::primitives::U256;
 use anyhow::{ensure, Context, Result};
 use bb8::Pool;
 use bb8_postgres::{tokio_postgres::NoTls, PostgresConnectionManager};
@@ -8,7 +8,6 @@ use futures::{
 };
 use itertools::Itertools;
 use log::debug;
-use mp2_common::F;
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
     cell::{self, Cell, CellTreeKey, MerkleCellTree},
@@ -16,34 +15,21 @@ use mp2_v1::indexing::{
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
 };
-use parsil::{
-    executor::TranslatedQuery,
-    symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable},
-};
-use plonky2::field::types::Field;
+use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
 use ryhope::{
     storage::{
         pgsql::{SqlServerConnection, SqlStorageSettings},
         updatetree::UpdateTree,
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
-    tree::{
-        sbbst,
-        scapegoat::{self, Alpha},
-    },
+    tree::scapegoat::Alpha,
     Epoch, InitSettings,
 };
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, iter::once};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql};
-use verifiable_db::query::{
-    computational_hash_ids::PlaceholderIdentifier,
-    universal_circuit::universal_circuit_inputs::{ColumnCell, Placeholders},
-};
 
-use super::{
-    cases::query::SqlReturn, index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier,
-};
+use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 
 pub type TableID = String;
 
@@ -182,6 +168,7 @@ impl Table {
             index: index_tree,
         })
     }
+
     pub fn row_table_name(&self) -> String {
         row_table_name(&self.name)
     }
@@ -341,6 +328,7 @@ impl Table {
         new_primary: BlockPrimaryIndex,
         updates: Vec<TreeRowUpdate>,
     ) -> Result<RowUpdateResult> {
+        let current_epoch = self.row.current_epoch();
         let out = self
             .row
             .in_transaction(|t| {
@@ -403,6 +391,13 @@ impl Table {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
             let root = self.row.root_data().await.unwrap();
+            let new_epoch = self.row.current_epoch();
+            assert!(
+                current_epoch != new_epoch,
+                "new epoch {} vs previous epoch {}",
+                new_epoch,
+                current_epoch
+            );
             println!(
                 " ++ After row update, row cell tree root tree proof hash = {:?}",
                 hex::encode(root.cell_root_hash.unwrap().0)
@@ -452,12 +447,6 @@ impl Table {
             .await
             .context("while fetching current epoch")?;
         Ok(res)
-    }
-    pub fn table_info(&self) -> TableInfo {
-        TableInfo {
-            table_name: self.name.clone(),
-            columns: self.columns.clone(),
-        }
     }
 }
 
@@ -577,10 +566,6 @@ impl Table {
             columns: zk_columns,
         })
     }
-
-    fn current_block(&self) -> u64 {
-        todo!()
-    }
 }
 
 impl TableColumns {
@@ -611,10 +596,6 @@ impl ContextProvider for Table {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         <&Self as ContextProvider>::fetch_table(&self, table_name)
     }
-
-    fn output_ids(&self) -> Vec<u64> {
-        todo!()
-    }
 }
 impl ContextProvider for &Table {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
@@ -626,14 +607,4 @@ impl ContextProvider for &Table {
         );
         self.to_zktable()
     }
-
-    fn output_ids(&self) -> Vec<u64> {
-        todo!()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableInfo {
-    pub columns: TableColumns,
-    pub table_name: String,
 }

@@ -16,7 +16,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::CircuitConfig,
-        config::{GenericConfig, GenericHashOut, Hasher},
+        config::{GenericHashOut, Hasher},
         proof::ProofWithPublicInputsTarget,
     },
 };

@@ -7,10 +7,9 @@ use mp2_common::{
     poseidon::H,
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{Fieldable, ToFields},
+    utils::ToFields,
     F,
 };
-use plonky2::field::types::Field;
 use plonky2::field::types::Sample;
 use plonky2::{
     hash::hash_types::HashOut,

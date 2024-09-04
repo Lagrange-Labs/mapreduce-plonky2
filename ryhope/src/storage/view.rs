@@ -3,7 +3,6 @@
 use std::{fmt::Debug, marker::PhantomData};
 
 use anyhow::*;
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::{tree::TreeTopology, Epoch};
@@ -24,7 +23,6 @@ pub struct StorageView<
     PhantomData<T>,
 );
 
-#[async_trait]
 impl<
         's,
         T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + Send,
@@ -42,7 +40,6 @@ where
     }
 }
 
-#[async_trait]
 impl<
         's,
         T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + Send,
@@ -89,7 +86,6 @@ pub struct KvStorageAt<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>
     _p: PhantomData<T>,
 }
 
-#[async_trait]
 impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
     RoEpochKvStorage<T::Key, T::Node> for KvStorageAt<'a, T, S>
 {
@@ -121,7 +117,6 @@ impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
     }
 }
 
-#[async_trait]
 impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
     EpochKvStorage<T::Key, T::Node> for KvStorageAt<'a, T, S>
 {
@@ -172,7 +167,6 @@ impl<'a, T: TreeTopology + 'a, S: TreeStorage<T> + 'a> TreeStorageView<'a, T, S>
     }
 }
 
-#[async_trait]
 impl<'a, T: TreeTopology + 'a + Send, S: TreeStorage<T> + 'a> TreeStorage<T>
     for TreeStorageView<'a, T, S>
 where

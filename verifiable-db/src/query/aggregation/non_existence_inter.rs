@@ -400,33 +400,29 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use super::*;
     use crate::{
         query::{
             aggregation::{
-                output_computation::tests::compute_dummy_output_values, QueryBoundSecondary,
-                QueryBoundSource, QueryBounds,
+                output_computation::tests::compute_dummy_output_values, QueryBoundSource,
+                QueryBounds,
             },
             computational_hash_ids::{AggregationOperation, Identifiers},
-            universal_circuit::universal_circuit_inputs::{
-                Placeholder, PlaceholderId, Placeholders,
-            },
+            universal_circuit::universal_circuit_inputs::{PlaceholderId, Placeholders},
         },
         test_utils::random_aggregation_operations,
     };
     use mp2_common::{array::ToField, poseidon::H, utils::ToFields, C};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::{gen_random_field_hash, gen_random_u256, random_vector},
+        utils::gen_random_field_hash,
     };
     use plonky2::{
         field::types::{Field, Sample},
-        iop::witness::WitnessWrite,
         plonk::config::Hasher,
     };
-    use plonky2_ecgfp5::curve::curve::Point;
+
     use rand::{prelude::SliceRandom, thread_rng, Rng};
 
     const MAX_NUM_RESULTS: usize = 20;

@@ -4,7 +4,7 @@ use alloy::primitives::U256;
 use mp2_common::{
     keccak::{OutputHash, PACKED_HASH_LEN},
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::{CBuilder, GFp, CURVE_TARGET_LEN},
+    types::{CBuilder, CURVE_TARGET_LEN},
     u256::{self, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
     F,
@@ -193,10 +193,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{
-        utils::{Fieldable, ToFields},
-        C, D, F,
-    };
+    use mp2_common::{utils::ToFields, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

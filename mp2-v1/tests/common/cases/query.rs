@@ -1,43 +1,50 @@
 use plonky2::{
-    field::types::{Field, PrimeField64},
-    hash::hash_types::HashOut,
-    plonk::config::GenericHashOut,
+    field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
 };
+use rand::distributions::uniform::SampleRange;
 use std::{
     collections::{HashMap, HashSet},
-    iter::once,
-    process::Child,
+    fmt::Debug,
+    future::Future,
+    hash::Hash,
+    marker::PhantomData,
+    thread::current,
 };
 
 use crate::common::{
-    cases::indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
-    index_tree::{IndexStorage, MerkleIndexTree},
+    cases::{
+        indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
+        planner::{IndexInfo, RowInfo},
+    },
+    index_tree::MerkleIndexTree,
     proof_storage::{ProofKey, QueryID},
-    rowtree::{MerkleRowTree, RowStorage},
+    rowtree::MerkleRowTree,
     table::{self, TableColumns},
+    TableInfo,
 };
 
-use super::super::{context::TestContext, proof_storage::ProofStorage, table::Table};
-use alloy::{primitives::U256, rpc::types::Block};
-use anyhow::{anyhow, bail, ensure, Context, Result};
-use futures::{
-    future::{self, BoxFuture},
-    io::empty,
-    stream, FutureExt, StreamExt,
+use super::{
+    super::{context::TestContext, proof_storage::ProofStorage, table::Table},
+    planner::{QueryPlanner, TreeInfo},
 };
+use alloy::{primitives::U256, rpc::types::Block};
+use anyhow::{bail, ensure, Context, Result};
+use futures::{stream, FutureExt, StreamExt};
+
+use super::TableSourceSlot;
 use itertools::Itertools;
-use log::{debug, info, warn};
+use log::*;
 use mp2_common::{
-    array::ToField,
     poseidon::empty_poseidon_hash,
     proof::{deserialize_proof, ProofWithVK},
     types::HashOutput,
     C, D, F,
 };
 use mp2_v1::{
+    api::MetadataHash,
     indexing::{
         self,
-        block::{BlockPrimaryIndex, BlockTree},
+        block::{BlockPrimaryIndex, BlockTree, BlockTreeKey},
         cell::MerkleCell,
         index::IndexNode,
         row::{Row, RowPayload, RowTree, RowTreeKey},
@@ -50,7 +57,7 @@ use parsil::{
     bracketer::bracket_secondary_index,
     executor::TranslatedQuery,
     parse_and_validate,
-    symbols::ContextProvider,
+    queries::{core_keys_for_index_tree, core_keys_for_row_tree},
     ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
     DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
@@ -59,7 +66,7 @@ use ryhope::{
         pgsql::ToFromBytea,
         updatetree::{Next, UpdateTree},
         EpochKvStorage, FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage,
-        TreeStorage, TreeTransactionalStorage,
+        TreeStorage, TreeTransactionalStorage, WideLineage,
     },
     tree::{MutableTree, NodeContext, TreeTopology},
     Epoch, MerkleTreeKvDb, NodePayload,
@@ -116,31 +123,33 @@ pub type RevelationCircuitInput = verifiable_db::revelation::api::CircuitInput<
 pub type RevelationPublicInputs<'a> =
     PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
 
-pub enum TableType {
-    Mapping,
-    Single,
-}
-
-pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableType) -> Result<()> {
-    match t {
-        TableType::Mapping => query_mapping(ctx, &table).await?,
+pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
+    match &t.source {
+        TableSourceSlot::Mapping(_) => query_mapping(ctx, &table, t.metadata_hash()).await?,
         _ => unimplemented!("yet"),
     }
     Ok(())
 }
 
-async fn query_mapping(ctx: &mut TestContext, table: &Table) -> Result<()> {
-    let query_info = cook_query(table).await?;
-    test_query_mapping(ctx, table, query_info).await?;
+async fn query_mapping(
+    ctx: &mut TestContext,
+    table: &Table,
+    table_hash: MetadataHash,
+) -> Result<()> {
+    let query_info = cook_query_between_blocks(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+
+    let query_info = cook_query_unique_secondary_index(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with custom placeholders
     let query_info = cook_query_secondary_index_placeholder(table).await?;
-    test_query_mapping(ctx, table, query_info).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query filtering over a secondary index value not valid in all the blocks
     let query_info = cook_query_non_matching_entries_some_blocks(table).await?;
-    test_query_mapping(ctx, table, query_info).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with no valid blocks
     let query_info = cook_query_no_matching_entries(table).await?;
-    test_query_mapping(ctx, table, query_info).await
+    test_query_mapping(ctx, table, query_info, &table_hash).await
 }
 
 /// Run a test query on the mapping table such as created during the indexing phase
@@ -148,6 +157,7 @@ async fn test_query_mapping(
     ctx: &mut TestContext,
     table: &Table,
     query_info: QueryCooking,
+    table_hash: &MetadataHash,
 ) -> Result<()> {
     let settings = ParsilSettings {
         context: table,
@@ -163,10 +173,15 @@ async fn test_query_mapping(
     );
 
     // the query to use to actually get the outputs expected
-    let exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
+    let mut exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
     let query_params = exec_query.convert_placeholders(&query_info.placeholders);
     let res = table
-        .execute_row_query(&exec_query.query.to_string(), &query_params)
+        .execute_row_query(
+            &exec_query
+                .normalize_placeholder_names()
+                .to_pgsql_string_with_placeholder(),
+            &query_params,
+        )
         .await?;
     let res = if is_empty_result(&res, SqlType::Numeric) {
         vec![] // empty results, but Postgres still return 1 row
@@ -176,21 +191,50 @@ async fn test_query_mapping(
     info!(
         "Found {} results from query {}",
         res.len(),
-        exec_query.query.to_string()
+        exec_query.query.to_display()
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
-    let rows_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
-    let all_touched_rows = table
-        .execute_row_query(&rows_query.to_string(), &query_params)
+
+    let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)
+        .context("while assembling PIs")?;
+
+    let big_row_cache = table
+        .row
+        .wide_lineage_between(
+            &core_keys_for_row_tree(
+                &query_info.query,
+                &settings,
+                &pis.bounds,
+                &query_info.placeholders,
+            )?,
+            (query_info.min_block as Epoch, query_info.max_block as Epoch),
+        )
         .await?;
+    // We set the epoch at which we request all the lineages - that's a fixed epoch
+    // and we set the generate_series according to the query
+    let current_epoch = table.index.current_epoch();
+    // Integer default to i32 in PgSQL, they must be cast to i64, a.k.a. BIGINT.
+    let index_query =
+        core_keys_for_index_tree(current_epoch, (query_info.min_block, query_info.max_block))?;
+    let big_index_cache = table
+        .index
+        // The bounds here means between which versions of the tree should we look. For index tree,
+        // we only look at _one_ version of the tree.
+        .wide_lineage_between(&index_query, (current_epoch, current_epoch))
+        .await?;
+    // since we only analyze the index tree for one epoch
+    assert_eq!(big_index_cache.keys_by_epochs().len(), 1);
+
     prove_query(
         ctx,
         table,
         query_info,
         parsed,
         &settings,
-        all_touched_rows,
+        &big_row_cache,
+        &big_index_cache,
         res,
+        table_hash.clone(),
     )
     .await
     .expect("unable to run universal query proof");
@@ -204,88 +248,58 @@ async fn prove_query(
     query: QueryCooking,
     parsed: Query,
     settings: &ParsilSettings<&Table>,
-    all_touched_rows: Vec<PsqlRow>,
+    row_cache: &WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
+    index_cache: &WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     res: Vec<PsqlRow>,
+    metadata: MetadataHash,
 ) -> Result<()> {
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
-    // group the rows per block number
-    let touched_rows = all_touched_rows
-        .into_iter()
-        .map(|r| {
-            let row_key = r
-                .get::<_, Option<Vec<u8>>>(0)
-                .map(RowTreeKey::from_bytea)
-                .context("unable to parse row key tree")
-                .expect("");
-            let block: Epoch = r.get::<_, i64>(1);
-            (block as BlockPrimaryIndex, row_key)
-        })
-        .fold(
-            HashMap::<BlockPrimaryIndex, HashSet<RowTreeKey>>::new(),
-            |mut acc, (block, row_key)| {
-                acc.entry(block).or_default().insert(row_key);
-                acc
-            },
-        );
-    info!(
-        "Found {} ROW KEYS to process during proving time -> {:?}",
-        touched_rows.len(),
-        touched_rows.keys(),
-    );
+    let mut row_keys_per_epoch = row_cache.keys_by_epochs();
+    let all_epochs = query.min_block as Epoch..=query.max_block as Epoch;
+
     // prove the whole tree for each of the involved rows for each block
-    for (primary_value, row_keys) in &touched_rows {
-        let all_paths = stream::iter(row_keys)
-            .then(|row_key| async {
-                // would be nice to make it work directly with async returning impl but seems
-                // difficult
-                table
-                    .row
-                    // since the epoch starts at genesis we can directly give the block number !
-                    .lineage_at(row_key, *primary_value as Epoch)
-                    .await
-                    .expect("node doesn't have a lineage?")
-                    .into_full_path()
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>()
-            .await;
-        let proving_tree = UpdateTree::from_paths(all_paths, *primary_value as Epoch);
+    for (epoch, keys) in row_keys_per_epoch {
+        let up = row_cache
+            .update_tree_for(epoch as Epoch)
+            .expect("this epoch should exist");
         let planner = QueryPlanner {
             ctx,
-            table: &table,
             query: query.clone(),
             pis: &pis,
             settings: &settings,
+            table: &table,
+            columns: table.columns.clone(),
         };
         let info = RowInfo {
-            satisfiying_rows: row_keys.clone(),
+            tree: &table.row,
+            satisfiying_rows: keys,
         };
-        prove_query_on_tree(planner, info, proving_tree, *primary_value).await?;
+        prove_query_on_tree(planner, info, up, epoch as BlockPrimaryIndex).await?;
     }
-    // do the same for the single index tree now
+    let proving_tree = index_cache
+        .update_tree_for(table.index.current_epoch())
+        .expect("should get update tree for index");
     let mut planner = QueryPlanner {
         ctx,
-        table: &table,
         query: query.clone(),
-        pis: &pis,
         settings: &settings,
+        pis: &pis,
+        table: &table,
+        columns: table.columns.clone(),
     };
-    let initial_epoch = table.index.initial_epoch();
-    let current_epoch = table.index.current_epoch();
-    let block_range = {
-        let block_range = (query.min_block..query.max_block)
-            .filter(|&primary| {
-                (primary as Epoch) >= initial_epoch && (primary as Epoch) <= current_epoch
-            })
-            .collect_vec();
-        info!("found {} blocks in range", block_range.len());
-        if block_range.len() == 0 {
+
+    let initial_epoch = table.index.initial_epoch() as BlockPrimaryIndex;
+    let current_epoch = table.index.current_epoch() as BlockPrimaryIndex;
+    let update_tree = {
+        let block_range = (query.min_block.max(initial_epoch)..=query.max_block.min(current_epoch));
+        info!("found {} blocks in range", block_range.clone().count());
+        if block_range.is_empty() {
             // no valid blocks in the query range, so we need to choose a block to prove
-            // non-existence
-            let to_be_proven_node = if (query.max_block as Epoch) < initial_epoch {
+            // non-existence. Either the one after genesis or the last one
+            let to_be_proven_node = if query.max_block < initial_epoch {
                 initial_epoch + 1
-            } else if (query.min_block as Epoch) > current_epoch {
+            } else if query.min_block > current_epoch {
                 current_epoch
             } else {
                 bail!(
@@ -296,38 +310,41 @@ async fn prove_query(
                 );
             } as BlockPrimaryIndex;
             prove_non_existence_index(&mut planner, to_be_proven_node).await?;
-            vec![to_be_proven_node]
+            // we get the lineage of the node that proves the non existence of the index nodes
+            // required for the query. We specify the epoch at which we want to get this lineage as
+            // of the current epoch.
+            let lineage = table
+                .index
+                .lineage_at(&to_be_proven_node, current_epoch as Epoch)
+                .await
+                .expect("can't get lineage")
+                .into_full_path()
+                .collect();
+            UpdateTree::from_path(lineage, current_epoch as Epoch)
         } else {
-            block_range
+            /// This is ok because the cache only have the block that are in the range so the
+            /// filter_check is gonna return the same thing
+            /// TOOD: @franklin is that correct ?
+            index_cache
+                // this is the epoch we choose how to prove
+                .update_tree_for(current_epoch as Epoch)
+                .expect("this epoch should exist")
         }
     };
-    let all_paths = stream::iter(block_range)
-        .then(|primary| async move {
-            // NOTE : it is important to fetch the data at fixed epoch ! and this key fetched can be
-            // different
-            table
-                .index
-                .lineage_at(&primary, current_epoch)
-                .await
-                .expect("index node doesn't have lineage?")
-                .into_full_path()
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>()
-        .await;
-    let proving_tree = UpdateTree::from_paths(all_paths, current_epoch);
+
     let info = IndexInfo {
-        bounds: pis.bounds.clone(),
+        tree: &table.index,
+        bounds: (query.min_block, query.max_block),
     };
     prove_query_on_tree(
         planner,
         info,
         proving_tree,
-        current_epoch as BlockPrimaryIndex,
+        table.index.current_epoch() as BlockPrimaryIndex,
     )
     .await?;
     info!("Query proofs done! Generating revelation proof...");
-    let proof = prove_revelation(ctx, table, &query, &pis, current_epoch).await?;
+    let proof = prove_revelation(ctx, table, &query, &pis, table.index.current_epoch()).await?;
     info!("Revelation proof done! Checking public inputs...");
     // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
     // to check the public inputs
@@ -339,9 +356,10 @@ async fn prove_query(
         table,
         &query,
         &pis,
-        current_epoch,
-        touched_rows.len(),
+        table.index.current_epoch(),
+        row_cache.num_touched_rows(),
         res,
+        metadata,
     )?;
     info!("Revelation done!");
     Ok(())
@@ -391,6 +409,7 @@ fn check_final_outputs(
     tree_epoch: Epoch,
     num_touched_rows: usize,
     res: Vec<PsqlRow>,
+    offcircuit_md: MetadataHash,
 ) -> Result<()> {
     // fetch indexing proof, whose public inputs are needed to check correctness of revelation proof outputs
     let indexing_proof = {
@@ -411,6 +430,11 @@ fn check_final_outputs(
     let metadata_hash = HashOutput::try_from(
         HashOut::<F>::from_vec(indexing_pis.metadata_hash().to_vec()).to_bytes(),
     )?;
+    assert_eq!(
+        offcircuit_md, metadata_hash,
+        "metadata hash computed by circuit and offcircuit is not the same"
+    );
+
     let column_ids = ColumnIDs::new(
         table.columns.primary.identifier,
         table.columns.secondary.identifier,
@@ -465,7 +489,7 @@ fn check_final_outputs(
     );
     // check results
     res.into_iter()
-        .zip(revelation_pis.result_values().into_iter())
+        .zip(revelation_pis.result_values())
         .for_each(|(expected_res, res)| {
             (0..expected_res.len()).for_each(|i| {
                 let SqlReturn::Numeric(expected_res) =
@@ -486,31 +510,23 @@ fn check_final_outputs(
 /// tree
 /// clippy doesn't see that it can not be done
 #[allow(clippy::needless_lifetimes)]
-async fn prove_query_on_tree<'a, T, V, S, I>(
+async fn prove_query_on_tree<'a, I, K, V>(
     mut planner: QueryPlanner<'a>,
     info: I,
-    update: UpdateTree<<T as TreeTopology>::Key>,
+    update: UpdateTree<K>,
     primary: BlockPrimaryIndex,
 ) -> Result<Vec<u8>>
 where
-    I: TreeInfo<T, V, S>,
-    <T as TreeTopology>::Key: std::hash::Hash,
-    T: TreeTopology + MutableTree,
-    // NOTICE the ToValue here to get the value associated to a node
-    V: NodePayload + Send + Sync + LagrangeNode,
-    S: TransactionalStorage
-        + TreeStorage<T>
-        + PayloadStorage<T::Key, V>
-        + FromSettings<T::State>
-        + Send
-        + Sync,
+    I: TreeInfo<K, V>,
+    V: NodePayload + Send + Sync + LagrangeNode + Clone,
+    K: Debug + Hash + Clone + Eq + Sync + Send,
 {
     let query_id = planner.query.query.clone();
     let mut workplan = update.into_workplan();
     let mut proven_nodes = HashSet::new();
-    let fetch_only_proven_child = |nctx: NodeContext<<T as TreeTopology>::Key>,
+    let fetch_only_proven_child = |nctx: NodeContext<K>,
                                    cctx: &TestContext,
-                                   proven: &HashSet<<T as TreeTopology>::Key>|
+                                   proven: &HashSet<K>|
      -> (ChildPosition, Vec<u8>) {
         let (child_key, pos) = match (nctx.left, nctx.right) {
             (Some(left), Some(right)) => {
@@ -536,17 +552,17 @@ where
     while let Some(Next::Ready(wk)) = workplan.next() {
         let k = wk.k.clone();
         // closure performing all the operations necessary beofre jumping to the next iteration
-        let mut end_iteration =
-            |proven_nodes: &mut HashSet<<T as TreeTopology>::Key>| -> Result<()> {
-                proven_nodes.insert(k.clone());
-                workplan.done(&wk)?;
-                Ok(())
-            };
-        let (node_ctx, node_payload) = I::tree(&mut planner)
-            // since epoch starts at genesis now, we can directly give the value of the block
-            // number as epoch number
-            .fetch_with_context_at(&k, primary as Epoch)
-            .await;
+        let mut end_iteration = |proven_nodes: &mut HashSet<K>| -> Result<()> {
+            proven_nodes.insert(k.clone());
+            workplan.done(&wk)?;
+            Ok(())
+        };
+        // since epoch starts at genesis now, we can directly give the value of the block
+        // number as epoch number
+        let (node_ctx, node_payload) = info
+            .fetch_ctx_and_payload_at(primary as Epoch, &k)
+            .await
+            .expect("cache is not full");
         let is_satisfying_query = info.is_satisfying_query(&k);
         let embedded_proof = info
             .load_or_prove_embedded(&mut planner, primary, &k, &node_payload)
@@ -589,7 +605,7 @@ where
             );
             let (node_info, left_info, right_info) =
             // we can use primary as epoch now that tree stores epoch from genesis
-                get_node_info(I::tree(&mut planner), &k, primary as Epoch).await;
+                get_node_info(&info, &k, primary as Epoch).await;
             QueryCircuitInput::new_single_path(
                 SubProof::new_embedded_tree_proof(embedded_proof?.unwrap())?,
                 left_info,
@@ -612,7 +628,7 @@ where
                 let (child_pos, child_proof) =
                     fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                 let (node_info, left_info, right_info) = get_node_info(
-                    I::tree(&mut planner),
+                    &info,
                     &k,
                     // we can use primary as epoch since storage starts epoch at genesis
                     primary as Epoch,
@@ -631,7 +647,11 @@ where
             } else {
                 // this case is easy, since all that's left is partial or full where both
                 // child(ren) and current node belong to query
-                if node_ctx.left.is_some() && node_ctx.right.is_some() {
+                let is_correct_left = node_ctx.left.is_some()
+                    && proven_nodes.contains(node_ctx.left.as_ref().unwrap());
+                let is_correct_right = node_ctx.right.is_some()
+                    && proven_nodes.contains(node_ctx.right.as_ref().unwrap());
+                if is_correct_left && is_correct_right {
                     // full node case
                     let left_proof = info.load_proof(
                         planner.ctx,
@@ -658,7 +678,7 @@ where
                     let (child_pos, child_proof) =
                         fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                     let (_, left_info, right_info) =
-                        get_node_info(I::tree(&mut planner), &k, primary as Epoch).await;
+                        get_node_info(&info, &k, primary as Epoch).await;
                     let unproven = match child_pos {
                         ChildPosition::Left => right_info,
                         ChildPosition::Right => left_info,
@@ -675,266 +695,64 @@ where
                 }
             }
         };
-        if info
-            .load_proof(planner.ctx, &query_id, primary, &k)
-            .is_err()
-        {
-            info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
-            //debug!("input: {input:?}");
-            let proof = planner
-                .ctx
-                .run_query_proof(GlobalCircuitInput::Query(input))?;
-            info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
-        }
-        info!("Universal query proof DONE for {primary} -> {k:?} ");
+        info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
+        let proof = planner
+            .ctx
+            .run_query_proof(GlobalCircuitInput::Query(input))?;
+        info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
+        info!("query proof DONE for {primary} -> {k:?} ");
         end_iteration(&mut proven_nodes)?;
     }
     Ok(vec![])
 }
 
-struct QueryPlanner<'a> {
-    query: QueryCooking,
-    pis: &'a DynamicCircuitPis,
-    ctx: &'a mut TestContext,
-    table: &'a Table,
-    settings: &'a ParsilSettings<&'a Table>,
-}
-
-trait TreeInfo<T, V, S>
-where
-    T: TreeTopology + MutableTree,
-    <T as TreeTopology>::Key: std::hash::Hash,
-    // NOTICE the ToValue here to get the value associated to a node
-    V: NodePayload + Send + Sync + LagrangeNode,
-    S: TransactionalStorage
-        + TreeStorage<T>
-        + PayloadStorage<T::Key, V>
-        + FromSettings<T::State>
-        + Send
-        + Sync,
-{
-    fn is_row_tree(&self) -> bool;
-    fn is_satisfying_query(&self, k: &<T as TreeTopology>::Key) -> bool;
-    fn load_proof(
-        &self,
-        ctx: &TestContext,
-        query_id: &QueryID,
-        primary: BlockPrimaryIndex,
-        key: &<T as TreeTopology>::Key,
-    ) -> Result<Vec<u8>>;
-    fn save_proof(
-        &self,
-        ctx: &mut TestContext,
-        query_id: &QueryID,
-        primary: BlockPrimaryIndex,
-        key: &<T as TreeTopology>::Key,
-        proof: Vec<u8>,
-    ) -> Result<()>;
-    async fn load_or_prove_embedded<'a>(
-        &self,
-        planner: &mut QueryPlanner<'a>,
-        primary: BlockPrimaryIndex,
-        k: &<T as TreeTopology>::Key,
-        v: &V,
-    ) -> Result<Option<Vec<u8>>>;
-    fn tree<'a>(planner: &mut QueryPlanner<'a>) -> &'a MerkleTreeKvDb<T, V, S>;
-}
-
-struct IndexInfo {
-    bounds: QueryBounds,
-}
-
-impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexInfo {
-    fn is_row_tree(&self) -> bool {
-        false
-    }
-
-    fn is_satisfying_query(&self, k: &BlockPrimaryIndex) -> bool {
-        let primary = U256::from(*k);
-        self.bounds.is_primary_in_range(&primary)
-    }
-
-    fn load_proof(
-        &self,
-        ctx: &TestContext,
-        query_id: &QueryID,
-        primary: BlockPrimaryIndex,
-        key: &BlockPrimaryIndex,
-    ) -> Result<Vec<u8>> {
-        //assert_eq!(primary, *key);
-        info!("loading proof for {primary} -> {key:?}");
-        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
-        ctx.storage.get_proof_exact(&proof_key)
-    }
-
-    fn save_proof(
-        &self,
-        ctx: &mut TestContext,
-        query_id: &QueryID,
-        primary: BlockPrimaryIndex,
-        key: &BlockPrimaryIndex,
-        proof: Vec<u8>,
-    ) -> Result<()> {
-        //assert_eq!(primary, *key);
-        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
-        ctx.storage.store_proof(proof_key, proof)
-    }
-
-    async fn load_or_prove_embedded<'a>(
-        &self,
-        planner: &mut QueryPlanner<'a>,
-        primary: BlockPrimaryIndex,
-        k: &BlockPrimaryIndex,
-        v: &IndexNode<BlockPrimaryIndex>,
-    ) -> Result<Option<Vec<u8>>> {
-        //assert_eq!(primary, *k);
-        info!("loading embedded proof for node {primary} -> {k:?}");
-        Ok(if self.is_satisfying_query(k) {
-            // load the proof of the row root for this query, if it is already proven;
-            // otherwise, it means that there are no rows in the rows tree embedded in this
-            // node that satisfies the query bounds on secondary index, so we need to
-            // generate a non-existence proof for the row tree
-            let row_root_proof_key = ProofKey::QueryAggregateRow((
-                planner.query.query.clone(),
-                k.clone(),
-                v.row_tree_root_key.clone(),
-            ));
-            let proof = match planner.ctx.storage.get_proof_exact(&row_root_proof_key) {
-                Ok(proof) => proof,
-                Err(_) => {
-                    prove_non_existence_row(planner, *k).await?;
-                    info!("non existence proved for {primary} -> {k:?}");
-                    // fetch again the generated proof
-                    planner
-                        .ctx
-                        .storage
-                        .get_proof_exact(&row_root_proof_key)
-                        .expect(
-                            format!(
-                                "non-existence root proof not found for key {row_root_proof_key:?}"
-                            )
-                            .as_str(),
-                        )
-                }
-            };
-            Some(proof)
-        } else {
-            None
-        })
-    }
-
-    fn tree<'a>(
-        planner: &mut QueryPlanner<'a>,
-    ) -> &'a MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> {
-        &planner.table.index
-    }
-}
-#[derive(Default)]
-struct RowInfo {
-    satisfiying_rows: HashSet<RowTreeKey>,
-}
-
-impl TreeInfo<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> for RowInfo {
-    fn is_row_tree(&self) -> bool {
-        true
-    }
-
-    fn is_satisfying_query(&self, k: &RowTreeKey) -> bool {
-        self.satisfiying_rows.contains(k)
-    }
-
-    fn load_proof(
-        &self,
-        ctx: &TestContext,
-        query_id: &QueryID,
-        primary: BlockPrimaryIndex,
-        key: &RowTreeKey,
-    ) -> Result<Vec<u8>> {
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
-        ctx.storage.get_proof_exact(&proof_key)
-    }
-
-    fn save_proof(
-        &self,
-        ctx: &mut TestContext,
-        query_id: &QueryID,
-        primary: BlockPrimaryIndex,
-        key: &RowTreeKey,
-        proof: Vec<u8>,
-    ) -> Result<()> {
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
-        ctx.storage.store_proof(proof_key, proof)
-    }
-
-    async fn load_or_prove_embedded<'a>(
-        &self,
-        planner: &mut QueryPlanner<'a>,
-        primary: BlockPrimaryIndex,
-        k: &RowTreeKey,
-        _v: &RowPayload<BlockPrimaryIndex>,
-    ) -> Result<Option<Vec<u8>>> {
-        Ok(if self.is_satisfying_query(k) {
-            let tree = Self::tree(planner);
-            let ctx = &mut planner.ctx;
-            Some(
-                prove_single_row(
-                    ctx,
-                    tree,
-                    &planner.table.columns,
-                    primary,
-                    &k,
-                    &planner.pis,
-                    &planner.query,
-                )
-                .await?,
-            )
-        } else {
-            None
-        })
-    }
-
-    fn tree<'a>(
-        planner: &mut QueryPlanner<'a>,
-    ) -> &'a MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> {
-        &planner.table.row
-    }
-}
-
 // TODO: make it recursive with async - tentative in `fetch_child_info` but  it doesn't work,
 // recursion with async is weird.
-async fn get_node_info<T, V, S>(
-    tree: &MerkleTreeKvDb<T, V, S>,
-    k: &T::Key,
+async fn get_node_info<K, V, T: TreeInfo<K, V>>(
+    lookup: &T,
+    k: &K,
     at: Epoch,
 ) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>)
 where
-    T: TreeTopology + MutableTree,
+    K: Debug + Hash + Clone + Send + Sync + Eq,
     // NOTICE the ToValue here to get the value associated to a node
-    V: NodePayload + Send + Sync + LagrangeNode,
-    S: TransactionalStorage
-        + TreeStorage<T>
-        + PayloadStorage<T::Key, V>
-        + FromSettings<T::State>
-        + Send
-        + Sync,
+    V: NodePayload + Send + Sync + LagrangeNode + Clone,
 {
     // look at the left child first then right child, then build the node info
-    let (ctx, node_payload) = tree.fetch_with_context_at(k, at).await;
-    // this looks at the value of a child node (left and right), and fetches the grand child
+    let (ctx, node_payload) = lookup
+        .fetch_ctx_and_payload_at(at, k)
+        .await
+        .expect("cache not filled");
+    // this looks at the value of a child node (left and right), and fetches the grandchildren
     // information to be able to build their respective node info.
-    let fetch_ni = async |k: Option<T::Key>| -> (Option<NodeInfo>, Option<HashOutput>) {
+    let fetch_ni = async |k: Option<K>| -> (Option<NodeInfo>, Option<HashOutput>) {
         match k {
             None => (None, None),
             Some(child_k) => {
-                let (child_ctx, child_payload) = tree.fetch_with_context_at(&child_k, at).await;
+                let (child_ctx, child_payload) = lookup
+                    .fetch_ctx_and_payload_at(at, &child_k)
+                    .await
+                    .expect("cache not filled");
                 // we need the grand child hashes for constructing the node info of the
                 // children of the node in argument
                 let child_left_hash = match child_ctx.left {
-                    Some(left_left_k) => Some(tree.fetch_at(&left_left_k, at).await.hash()),
+                    Some(left_left_k) => {
+                        let (_, payload) = lookup
+                            .fetch_ctx_and_payload_at(at, &left_left_k)
+                            .await
+                            .expect("cache not filled");
+                        Some(payload.hash())
+                    }
                     None => None,
                 };
                 let child_right_hash = match child_ctx.right {
-                    Some(left_right_k) => Some(tree.fetch_at(&left_right_k, at).await.hash()),
+                    Some(left_right_k) => {
+                        let (_, payload) = lookup
+                            .fetch_ctx_and_payload_at(at, &left_right_k)
+                            .await
+                            .expect("cache not full");
+                        Some(payload.hash())
+                    }
                     None => None,
                 };
                 let left_ni = NodeInfo::new(
@@ -965,7 +783,7 @@ where
     )
 }
 
-fn generate_non_existence_proof<'a>(
+pub fn generate_non_existence_proof<'a>(
     node_info: NodeInfo,
     left_child_info: Option<NodeInfo>,
     right_child_info: Option<NodeInfo>,
@@ -1024,10 +842,14 @@ async fn prove_non_existence_index<'a>(
     planner: &mut QueryPlanner<'a>,
     primary: BlockPrimaryIndex,
 ) -> Result<()> {
-    let tree = IndexInfo::tree(planner);
+    let tree = &planner.table.index;
     let current_epoch = tree.current_epoch();
-    let (node_info, left_child_info, right_child_info) =
-        get_node_info(tree, &primary, current_epoch).await;
+    let (node_info, left_child_info, right_child_info) = get_node_info(
+        &IndexInfo::non_satisfying_info(tree),
+        &primary,
+        current_epoch,
+    )
+    .await;
     let proof_key = ProofKey::QueryAggregateIndex((planner.query.query.clone(), primary));
     info!("Non-existence circuit proof RUNNING for {current_epoch} -> {primary} ");
     let proof = generate_non_existence_proof(
@@ -1047,11 +869,11 @@ async fn prove_non_existence_index<'a>(
     Ok(())
 }
 
-async fn prove_non_existence_row<'a>(
+pub async fn prove_non_existence_row<'a>(
     planner: &mut QueryPlanner<'a>,
     primary: BlockPrimaryIndex,
 ) -> Result<()> {
-    let tree = RowInfo::tree(planner);
+    let row_tree = &planner.table.row;
     let (query_for_min, query_for_max) = bracket_secondary_index(
         &planner.table.row_table_name(),
         &planner.settings,
@@ -1080,13 +902,14 @@ async fn prove_non_existence_row<'a>(
         // among the nodes with the same index value of the node with `row_key`, we need to find
         // the one in the highest place in the tree, i.e., a node whose parent has not the same
         // index value
-        let (mut node_ctx, node_value) =
-            tree.fetch_with_context_at(&row_key, primary as Epoch).await;
+        let (mut node_ctx, node_value) = row_tree
+            .fetch_with_context_at(&row_key, primary as Epoch)
+            .await;
         let value = node_value.value();
         let get_parent_data = async |node_ctx: &NodeContext<RowTreeKey>| {
             if node_ctx.parent.is_some() {
                 let parent_key = node_ctx.parent.as_ref().unwrap();
-                let (ctx, value) = tree
+                let (ctx, value) = row_tree
                     .fetch_with_context_at(parent_key, primary as Epoch)
                     .await;
                 Some((ctx, value))
@@ -1108,8 +931,12 @@ async fn prove_non_existence_row<'a>(
             .await?
             .expect("No valid node found to prove non-existence, something is wrong"),
     };
-    let (node_info, left_child_info, right_child_info) =
-        get_node_info(tree, &to_be_proven_node, primary as Epoch).await;
+    let (node_info, left_child_info, right_child_info) = get_node_info(
+        &RowInfo::no_satisfying_rows(row_tree),
+        &to_be_proven_node,
+        primary as Epoch,
+    )
+    .await;
 
     let proof_key = ProofKey::QueryAggregateRow((
         planner.query.query.clone(),
@@ -1144,12 +971,13 @@ async fn prove_non_existence_row<'a>(
         .into_full_path()
         .collect_vec();
     let proving_tree = UpdateTree::from_paths([path], primary as Epoch);
-    let info = RowInfo::default();
+    let info = RowInfo::no_satisfying_rows(&planner.table.row);
     let planner = QueryPlanner {
         ctx: planner.ctx,
         table: planner.table,
         query: planner.query.clone(),
         pis: planner.pis,
+        columns: planner.columns.clone(),
         settings: &planner.settings,
     };
     prove_query_on_tree(planner, info, proving_tree, primary).await?;
@@ -1157,9 +985,9 @@ async fn prove_non_existence_row<'a>(
     Ok(())
 }
 
-async fn prove_single_row(
+pub async fn prove_single_row<T: TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>>(
     ctx: &mut TestContext,
-    tree: &MerkleRowTree,
+    tree: &T,
     columns: &TableColumns,
     primary: BlockPrimaryIndex,
     row_key: &RowTreeKey,
@@ -1168,7 +996,10 @@ async fn prove_single_row(
 ) -> Result<Vec<u8>> {
     // 1. Get the all the cells including primary and secondary index
     // Note we can use the primary as epoch since now epoch == primary in the storage
-    let (row_ctx, row_payload) = tree.fetch_with_context_at(row_key, primary as Epoch).await;
+    let (row_ctx, row_payload) = tree
+        .fetch_ctx_and_payload_at(primary as Epoch, row_key)
+        .await
+        .expect("cache not full");
 
     // API is gonna change on this but right now, we have to sort all the "rest" cells by index
     // in the tree, and put the primary one and secondary one in front
@@ -1215,14 +1046,36 @@ async fn prove_single_row(
 }
 
 #[derive(Clone, Debug)]
-struct QueryCooking {
-    query: String,
-    placeholders: Placeholders,
-    min_block: BlockPrimaryIndex,
-    max_block: BlockPrimaryIndex,
+pub struct QueryCooking {
+    pub(crate) query: String,
+    pub(crate) placeholders: Placeholders,
+    pub(crate) min_block: BlockPrimaryIndex,
+    pub(crate) max_block: BlockPrimaryIndex,
 }
 
 type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
+
+async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
+    let max = table.row.current_epoch();
+    let min = max - 1;
+
+    let value_column = table.columns.rest[0].name.clone();
+    let table_name = table.row_table_name();
+    let placeholders = Placeholders::new_empty(U256::from(min), U256::from(max));
+
+    let query_str = format!(
+        "SELECT AVG({value_column})
+                FROM {table_name}
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
+                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER};"
+    );
+    Ok(QueryCooking {
+        min_block: min as BlockPrimaryIndex,
+        max_block: max as BlockPrimaryIndex,
+        query: query_str,
+        placeholders,
+    })
+}
 
 // cook up a SQL query on the secondary index and with a predicate on the non-indexed column.
 // we just iterate on mapping keys and take the one that exist for most blocks. We also choose
@@ -1268,7 +1121,7 @@ async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCo
 
 // cook up a SQL query on the secondary index. For that we just iterate on mapping keys and
 // take the one that exist for most blocks
-async fn cook_query(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1280,6 +1133,7 @@ async fn cook_query(table: &Table) -> Result<QueryCooking> {
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
     let table_name = table.row_table_name();
+    let max_block = min_block + 1;
     // primary_min_placeholder = ".."
     // primary_max_placeholder = ".."
     // Address == $3 --> placeholders.hashmap empty, put in query bounds secondary_min = secondary_max = "$3""

@@ -1,10 +1,13 @@
-use crate::{tree::TreeTopology, Epoch};
+use crate::{
+    tree::{NodeContext, TreeTopology},
+    Epoch,
+};
 use anyhow::*;
-use futures::future::BoxFuture;
-use futures::FutureExt;
+use futures::{future::BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
+    fmt::Debug,
     hash::Hash,
 };
 
@@ -33,13 +36,13 @@ pub struct UpdateTreeNode<K: Clone + Hash + Eq> {
     /// Whether this node is a leaf of an update path
     is_path_end: bool,
 }
-impl<K: Clone + Hash + Eq> UpdateTreeNode<K> {
+impl<K: Debug + Clone + Hash + Eq> UpdateTreeNode<K> {
     fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
 }
 
-impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
+impl<K: Debug + Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
     /// Create an empty `UpdateTree`.
     fn empty(epoch: Epoch) -> Self {
         Self {
@@ -59,7 +62,7 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
         current: &'a K,
         nodes: &'a S,
     ) -> BoxFuture<'a, usize> {
-        async move {
+        async {
             let context = t.node_context(current, nodes).await.unwrap();
             let new_i = self.nodes.len();
             self.idx.insert(current.clone(), new_i);
@@ -165,7 +168,7 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
     pub fn extend_with_path(&mut self, mut path: Vec<K>) {
         path.reverse();
         if let Some(k) = path.pop() {
-            assert!(k == self.nodes[0].k);
+            assert_eq!(k, self.nodes[0].k);
             self.rec_from_path(0, path);
         }
     }
@@ -181,7 +184,49 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
     }
 }
 
-impl<K: Clone + Hash + Eq + std::fmt::Debug> UpdateTree<K> {
+impl<K: Clone + Hash + Eq + Sync + Send + std::fmt::Debug> UpdateTree<K> {
+    /// Instantiate a new `UpdateTree` mirroring the hierarchy of nodes
+    /// described by the given map of [`NodeContext`].
+    ///
+    /// This method assumes that the given map correctly encodes a binary tree
+    /// and will not perform any check.
+    pub fn from_map(epoch: Epoch, root: &K, nodes: &HashMap<K, NodeContext<K>>) -> Self {
+        let mut r = Self::empty(epoch);
+        r.rec_from_map(root, nodes, None);
+        r
+    }
+
+    fn rec_from_map(
+        &mut self,
+        current: &K,
+        nodes: &HashMap<K, NodeContext<K>>,
+        parent_i: Option<usize>,
+    ) -> Option<usize> {
+        if let Some(context) = nodes.get(current) {
+            let current_i = self.nodes.len();
+            if self.idx.insert(current.clone(), current_i).is_some() {
+                panic!("duplicated key found");
+            }
+            self.nodes.push(UpdateTreeNode {
+                parent: parent_i.clone(),
+                children: BTreeSet::new(),
+                k: current.clone(),
+                is_path_end: context.is_leaf(),
+            });
+            for child in [context.left.as_ref(), context.right.as_ref()]
+                .iter()
+                .flatten()
+            {
+                if let Some(child_i) = self.rec_from_map(child, nodes, Some(current_i)) {
+                    self.nodes[current_i].children.insert(child_i);
+                }
+            }
+            Some(current_i)
+        } else {
+            None
+        }
+    }
+
     fn rec_print(&self, i: usize, indent: usize) {
         let n = &self.nodes[i];
         if n.children.is_empty() {
@@ -248,11 +293,11 @@ impl<T: Clone + Hash + PartialEq + Eq> From<&UpdateTreeNode<T>> for WorkplanItem
 /// `[done(k)]` method shall be invoked to mark processed, which will allow
 /// `next()` to return their parents on its next invokation.
 #[derive(Clone, Serialize, Deserialize)]
-pub struct UpdatePlan<T: Clone + Hash + Eq> {
+pub struct UpdatePlan<T: Debug + Clone + Hash + Eq> {
     pub t: UpdateTree<T>,
     ready: Vec<WorkplanItem<T>>,
 }
-impl<T: Clone + Hash + Eq> UpdatePlan<T> {
+impl<T: Debug + Clone + Hash + Eq> UpdatePlan<T> {
     fn new(t: UpdateTree<T>) -> Self {
         let mut r = UpdatePlan {
             t,
@@ -292,8 +337,12 @@ impl<T: Clone + Hash + Eq> UpdatePlan<T> {
         }
         Ok(())
     }
+
+    pub fn completed(&self) -> bool {
+        self.t.nodes.is_empty()
+    }
 }
-impl<T: Clone + Hash + Eq> Iterator for UpdatePlan<T> {
+impl<T: Debug + Clone + Hash + Eq> Iterator for UpdatePlan<T> {
     type Item = Next<WorkplanItem<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -351,6 +400,8 @@ mod test {
                 break;
             }
         }
+
+        assert!(workplan.completed());
     }
 
     #[tokio::test]

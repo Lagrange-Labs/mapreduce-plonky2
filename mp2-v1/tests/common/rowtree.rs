@@ -299,7 +299,7 @@ impl TestContext {
             value: U256::from(primary).into(),
             row_tree_root_key: root_proof_key.tree_key,
             row_tree_hash: table.row.root_data().await.unwrap().hash,
-            row_tree_root_primary: primary,
+            row_tree_root_primary: root_proof_key.primary,
             ..Default::default()
         })
     }

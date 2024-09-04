@@ -8,7 +8,7 @@ use crate::{
     errors::ValidationError,
     symbols::ContextProvider,
     utils::ParsilSettings,
-    visitor::{AstPass, Visit},
+    visitor::{AstVisitor, Visit},
 };
 
 pub struct PlaceholderValidator<'a, C: ContextProvider> {
@@ -54,8 +54,10 @@ impl<'a, C: ContextProvider> PlaceholderValidator<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstPass for PlaceholderValidator<'a, C> {
-    fn pre_expr(&mut self, expr: &mut Expr) -> anyhow::Result<()> {
+impl<'a, C: ContextProvider> AstVisitor for PlaceholderValidator<'a, C> {
+    type Error = anyhow::Error;
+
+    fn pre_expr(&mut self, expr: &Expr) -> anyhow::Result<()> {
         if let Expr::Value(Value::Placeholder(name)) = expr {
             self.resolve(name)?;
         }
@@ -66,10 +68,7 @@ impl<'a, C: ContextProvider> AstPass for PlaceholderValidator<'a, C> {
 /// Instantiate a [`PlaceholderValidator`], then run ot on the given query.
 /// Return the number of used free-standing placeholders if successful, or
 /// an error if the placeholder use is inappropriate.
-pub fn validate<C: ContextProvider>(
-    settings: &ParsilSettings<C>,
-    query: &mut Query,
-) -> Result<usize> {
+pub fn validate<C: ContextProvider>(settings: &ParsilSettings<C>, query: &Query) -> Result<usize> {
     let mut validator = PlaceholderValidator::new(settings);
     query.visit(&mut validator)?;
     validator.close()

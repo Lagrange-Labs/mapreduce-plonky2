@@ -3,6 +3,12 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ValidationError {
+    // HACK: refuse non-aggregated queries
+    #[error(
+        "only aggregated query projections are supported for now, e.g. `SELECT AVG(x) FROM ...`"
+    )]
+    TabularQuery,
+
     #[error("query projection must not mix aggregates and scalars")]
     MixedQuery,
 
@@ -61,4 +67,13 @@ pub enum ValidationError {
 
     #[error("`{0}`: compounded table names unsupported")]
     CompoundTableName(String),
+
+    #[error("`{0}`: reserved identifier")]
+    ReservedIdentifier(String),
+
+    #[error("unable to convert `{0}` to a U256")]
+    InvalidInteger(String),
+
+    #[error("NULL-related ordering specifiers unsupported")]
+    NullRelatedOrdering,
 }

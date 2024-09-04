@@ -1,13 +1,21 @@
-use std::{fmt::Debug, hash::Hash};
-
 use anyhow::*;
-use async_trait::async_trait;
 use futures::future::BoxFuture;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-
-use crate::{tree::TreeTopology, Epoch, InitSettings};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    future::Future,
+    hash::Hash,
+};
+use tokio_postgres::Transaction;
+use view::TreeStorageView;
 
 use self::updatetree::UpdateTree;
+use crate::{
+    tree::{NodeContext, TreeTopology},
+    Epoch, InitSettings,
+};
 
 pub mod memory;
 pub mod pgsql;
@@ -28,7 +36,6 @@ pub enum Operation<K, V> {
 
 /// Characterize a type whose new instances can be built from a `Self::Settings`
 /// instance.
-#[async_trait]
 pub trait FromSettings<T>
 where
     Self: Sized,
@@ -41,11 +48,96 @@ where
     ) -> Result<Self>;
 }
 
+pub struct WideLineage<K, V>
+where
+    K: Debug + Hash + Eq + Clone + Sync + Send,
+{
+    /// The keys touched by the query itself
+    pub core_keys: Vec<(Epoch, K)>,
+    /// An epoch -> (K -> NodeContext, K -> Payload) mapping
+    epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
+}
+
+impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
+    pub fn is_touched_key(&self, to_search: &K) -> bool {
+        self.core_keys
+            .iter()
+            .find(|(_, k)| k == to_search)
+            .is_some()
+    }
+    pub fn num_touched_rows(&self) -> usize {
+        self.core_keys.len()
+    }
+
+    pub fn ctx_and_payload_at(&self, epoch: Epoch, key: &K) -> Option<(NodeContext<K>, V)> {
+        match (
+            self.node_context_at(epoch, key),
+            self.payload_at(epoch, key),
+        ) {
+            (Some(e), Some(f)) => Some((e, f)),
+            _ => None,
+        }
+    }
+    pub fn node_context_at(&self, epoch: Epoch, key: &K) -> Option<NodeContext<K>> {
+        self.epoch_lineages
+            .get(&epoch)
+            .and_then(|h| h.0.get(key))
+            .cloned()
+    }
+    pub fn payload_at(&self, epoch: Epoch, key: &K) -> Option<V> {
+        self.epoch_lineages
+            .get(&epoch)
+            .and_then(|h| h.1.get(key))
+            .cloned()
+    }
+
+    /// Returns the list of keys touching the query associated with each epoch
+    pub fn keys_by_epochs(&self) -> HashMap<Epoch, HashSet<K>> {
+        self.core_keys
+            .iter()
+            .fold(HashMap::new(), |mut acc, (epoch, k)| {
+                acc.entry(*epoch).or_default().insert(k.clone());
+                acc
+            })
+    }
+    pub fn update_tree_for(&self, epoch: Epoch) -> Option<UpdateTree<K>> {
+        let epoch_data = self.epoch_lineages.get(&epoch)?;
+        let all_paths = self
+            .core_keys
+            .iter()
+            .filter(|(e, _)| *e == epoch)
+            .map(|(_, k)| {
+                let mut path = vec![k.clone()];
+                // ok to unwrap since we passed the filter, so that key must exist
+                // otherwise it's ryhope failure
+                let mut ctx = epoch_data.0.get(k).expect("lineage should get all keys");
+                // go back up to there is no more parent anymore, i.e. the root
+                while ctx.parent.is_some() {
+                    let parent_k = ctx.parent.as_ref().unwrap();
+                    ctx = epoch_data
+                        .0
+                        .get(parent_k)
+                        .expect("lineage should get all keys");
+                    path.push(parent_k.clone());
+                }
+                // NOTE: these paths are *ascending*, whereas the update tree is
+                // built from *descending* ones.
+                path.reverse();
+                path
+            })
+            .collect_vec();
+        if all_paths.is_empty() {
+            None
+        } else {
+            Some(UpdateTree::from_paths(all_paths, epoch))
+        }
+    }
+}
+
 /// A `TreeStorage` stores all data related to the tree structure, i.e. (i) the
 /// state of the tree structure, (ii) the putative metadata associated to the
 /// tree nodes.
-#[async_trait]
-pub trait TreeStorage<T: TreeTopology>: Send + Sync {
+pub trait TreeStorage<T: TreeTopology>: Sized + Send + Sync {
     /// A storage backend for the underlying tree state
     type StateStorage: EpochStorage<T::State> + Send + Sync;
     /// A storage backend for the underlying tree nodes
@@ -73,10 +165,18 @@ pub trait TreeStorage<T: TreeTopology>: Send + Sync {
 
     /// Rollback this tree to the given epoch
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()>;
+
+    /// Return an epoch-locked, read-only, [`TreeStorage`] offering a view on
+    /// this Merkle tree as it was at the given epoch.
+    fn view_at<'a>(&'a self, epoch: Epoch) -> TreeStorageView<'a, T, Self>
+    where
+        T: 'a,
+    {
+        TreeStorageView::<'a, T, Self>::new(self, epoch)
+    }
 }
 
 /// A backend storing the payloads associated to the nodes of a tree.
-#[async_trait]
 pub trait PayloadStorage<K: Hash + Eq + Send + Sync, V: Send + Sync> {
     type DataStorage: EpochKvStorage<K, V> + Send + Sync;
 
@@ -86,7 +186,6 @@ pub trait PayloadStorage<K: Hash + Eq + Send + Sync, V: Send + Sync> {
     fn data_mut(&mut self) -> &mut Self::DataStorage;
 }
 
-#[async_trait]
 pub trait EpochStorage<T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>>:
     TransactionalStorage
 where
@@ -96,20 +195,22 @@ where
     fn current_epoch(&self) -> Epoch;
 
     /// Return the value stored at the current epoch.
-    async fn fetch(&self) -> T {
-        self.fetch_at(self.current_epoch()).await
+    fn fetch(&self) -> impl Future<Output = T> + Send {
+        async { self.fetch_at(self.current_epoch()).await }
     }
 
     /// Return the value stored at the given epoch.
-    async fn fetch_at(&self, epoch: Epoch) -> T;
+    fn fetch_at(&self, epoch: Epoch) -> impl Future<Output = T> + Send;
 
     /// Set the stored value at the current epoch.
-    async fn store(&mut self, t: T);
+    fn store(&mut self, t: T) -> impl Future<Output = ()> + Send;
 
-    async fn update<F: FnMut(&mut T) + Send>(&mut self, mut f: F) {
-        let mut t = self.fetch().await;
-        f(&mut t);
-        self.store(t).await;
+    fn update<F: FnMut(&mut T) + Send>(&mut self, mut f: F) -> impl Future<Output = ()> + Send {
+        async move {
+            let mut t = self.fetch().await;
+            f(&mut t);
+            self.store(t).await;
+        }
     }
 
     /// Roll back this storage one epoch in the past.
@@ -124,9 +225,9 @@ where
 /// A read-only, versioned, KV storage. Intended to be implemented in
 /// conjunction with [`EpochKvStorage`] or [`WriteOnceEpochKvStorage`] to inject
 /// data in the storage.
-#[async_trait]
 pub trait RoEpochKvStorage<K: Eq + Hash, V>
 where
+    Self: Sync,
     K: Send + Sync,
     V: Send + Sync,
 {
@@ -139,26 +240,26 @@ where
     /// Return the value associated to `k` in the current epoch.
     ///
     /// Panic if `k` is not associated to any value at the current epoch.
-    async fn fetch(&self, k: &K) -> V {
-        self.fetch_at(k, self.current_epoch()).await
+    fn fetch(&self, k: &K) -> impl Future<Output = V> + Send {
+        async { self.fetch_at(k, self.current_epoch()).await }
     }
 
     /// Return the value associated to `k` at the current epoch if it exists,
     /// `None` otherwise.
-    async fn try_fetch(&self, k: &K) -> Option<V> {
-        self.try_fetch_at(k, self.current_epoch()).await
+    fn try_fetch(&self, k: &K) -> impl Future<Output = Option<V>> + Send {
+        async { self.try_fetch_at(k, self.current_epoch()).await }
     }
 
     /// Return the value associated to `k` at the given `epoch`.
     ///
     /// Panic if `k` is not associated to any value at `epoch`.
-    async fn fetch_at(&self, k: &K, epoch: Epoch) -> V {
-        self.try_fetch_at(k, epoch).await.unwrap()
+    fn fetch_at(&self, k: &K, epoch: Epoch) -> impl Future<Output = V> + Send {
+        async move { self.try_fetch_at(k, epoch).await.unwrap() }
     }
 
     /// Return the value associated to `k` at the given `epoch` if it exists,
     /// `None` otherwise.
-    async fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Option<V>;
+    fn try_fetch_at(&self, k: &K, epoch: Epoch) -> impl Future<Output = Option<V>> + Send;
 
     /// Return whether the given key is present at the current epoch.
     async fn contains(&self, k: &K) -> bool {
@@ -176,37 +277,41 @@ where
 
 /// A versioned KV storage only allowed to mutate entries only in the current
 /// epoch.
-#[async_trait]
 pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>:
     RoEpochKvStorage<K, V>
 {
     /// Within a transaction, delete the existing storage entry at `k`.
     ///
     /// Fail if `k` does not exist.
-    async fn remove(&mut self, k: K) -> Result<()>;
+    fn remove(&mut self, k: K) -> impl Future<Output = Result<()>> + Send;
 
     /// Within a transaction, update the existing storage entry at `k` with
     /// value `new_value`.
     ///
     /// Fail if `k` does not exist.
-    async fn update(&mut self, k: K, new_value: V) -> Result<()>;
+    fn update(&mut self, k: K, new_value: V) -> impl Future<Output = Result<()>> + Send;
 
     /// Apply the given function `updater` onto the value associated to `k` and
     /// persist the updated value.
     ///
     /// Fail if `k` does not exist.
-    async fn update_with<F: Fn(&mut V) + Send + Sync>(&mut self, k: K, updater: F)
+    fn update_with<F: Fn(&mut V) + Send + Sync>(
+        &mut self,
+        k: K,
+        updater: F,
+    ) -> impl Future<Output = ()> + Send
     where
-        Self: Sync,
-        K: Sync + 'async_trait,
+        Self: Sync + Send,
     {
-        let mut v = self.fetch(&k).await;
-        updater(&mut v);
-        self.update(k, v).await.unwrap();
+        async move {
+            let mut v = self.fetch(&k).await;
+            updater(&mut v);
+            self.update(k, v).await.unwrap();
+        }
     }
 
     /// Associate `value` to `k`.
-    async fn store(&mut self, k: K, value: V) -> Result<()>;
+    fn store(&mut self, k: K, value: V) -> impl Future<Output = Result<()>> + Send;
 
     /// Rollback this storage one epoch back. Please note that this is a
     /// destructive and irreversible operation.
@@ -220,7 +325,6 @@ pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>:
 }
 
 /// Characterizes a trait allowing for epoch-based atomic updates.
-#[async_trait]
 pub trait TransactionalStorage {
     /// Start a new transaction, defining a transition between the storage at
     /// two epochs.
@@ -233,14 +337,37 @@ pub trait TransactionalStorage {
     /// Execute the given function acting on `Self` within a transaction.
     ///
     /// Will fail if the transaction failed.
-    async fn in_transaction<F: Fn(&mut Self) -> BoxFuture<'_, Result<()>> + Send>(
-        &mut self,
-        f: F,
-    ) -> Result<()> {
+    async fn in_transaction<Fut, F: FnOnce(&mut Self) -> Fut>(&mut self, f: F) -> Result<()>
+    where
+        Fut: Future<Output = Result<()>>,
+    {
         self.start_transaction()?;
         f(self).await?;
         self.commit_transaction().await
     }
+}
+
+/// This trait is similar to [`TransactionalStorage`], but let the caller re-use
+/// an existing SQL transaction rather than letting the implementer handle
+/// transaction creation & execution.
+pub trait SqlTransactionStorage: TransactionalStorage {
+    /// Similar to the [`commit`] method of [`TransactionalStorage`], but
+    /// re-using a given transaction.
+    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()>;
+
+    /// Types implementing this trait may implement this method if there is code
+    /// they want to have run after the transaction successful execution, _e.g._
+    /// to clean up inner state and/or caches.
+    ///
+    /// This hook **MUST** be called after the **SUCCESSFUL** execution of the
+    /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
+    /// transaction execution failed.
+    fn commit_success(&mut self);
+
+    /// This hook **MUST** be called after the **FAILED** execution of the
+    /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
+    /// transaction execution is successful.
+    fn commit_failed(&mut self);
 }
 
 /// Similar to [`TransactionalStorage`], but returns a [`Minitree`] of the
@@ -292,5 +419,72 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
             }
         }
         self.commit_transaction().await
+    }
+}
+
+/// This trait is similar to [`TreeTransactionalStorage`], but let the caller
+/// re-use an existing SQL transaction rather than letting the implementer
+/// handle transaction creation & execution.
+///
+/// This trait requires that the caller take care of the following precautions:
+///
+///   * a **single** transaction in a **single** connection must be used;
+///
+///   * the `post_commit` hook **must** be called after, and only after, a
+///   successful SQL transaction execution.
+pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send + Sync>:
+    TreeTransactionalStorage<K, V>
+{
+    /// Similar to the [`commit`] method of [`TreeTransactionalStorage`], but
+    /// re-using a given transaction.
+    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<UpdateTree<K>>;
+
+    /// Types implementing this trait may implement this method if there is code
+    /// they want to have run after the transaction successful execution, _e.g._
+    /// to clean up inner state and/or caches.
+    ///
+    /// This hook **MUST** be called after the **SUCCESSFUL** execution of the
+    /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
+    /// transaction execution failed.
+    fn commit_success(&mut self);
+
+    /// This hook **MUST** be called after the **FAILED** execution of the
+    /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
+    /// transaction execution is successful.
+    fn commit_failed(&mut self);
+}
+
+/// The meta-operations trait gathers high-level operations that may be
+/// optimized depending on the backend.
+pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
+    TreeStorage<T> + PayloadStorage<T::Key, V>
+{
+    /// The type of the artefact used to retrieve a dynamic set of keys for the
+    /// [`TreeStorage`] implementing this trait.
+    type KeySource;
+
+    /// Fetch the subtree defined as the 2-depth extension of the subtree formed
+    /// by the union of all the paths-to-the-root for the given keys.
+    async fn wide_lineage_between(
+        &self,
+        t: &T,
+        keys: &Self::KeySource,
+        bounds: (Epoch, Epoch),
+    ) -> Result<WideLineage<T::Key, V>>;
+
+    async fn wide_update_trees(
+        &self,
+        t: &T,
+        keys: &Self::KeySource,
+        bounds: (Epoch, Epoch),
+    ) -> Result<Vec<UpdateTree<T::Key>>> {
+        let wide_lineage = self.wide_lineage_between(t, keys, bounds).await?;
+        let mut r = Vec::new();
+        for (epoch, nodes) in wide_lineage.epoch_lineages.iter() {
+            if let Some(root) = t.root(&self.view_at(*epoch)).await {
+                r.push(UpdateTree::from_map(*epoch, &root, &nodes.0));
+            }
+        }
+        Ok(r)
     }
 }

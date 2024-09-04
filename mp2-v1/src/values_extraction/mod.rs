@@ -4,7 +4,8 @@ use mp2_common::{
     group_hashing::map_to_curve_point,
     poseidon::H,
     types::{GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
-    utils::{pack_and_compute_poseidon_value, Endianness, Packer, ToFields},
+    utils::{Endianness, Packer, ToFields},
+    F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
@@ -31,41 +32,72 @@ pub(crate) const VALUE_ID_PREFIX: &[u8] = b"VAL";
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
 pub fn identifier_block_column() -> u64 {
-    pack_and_compute_poseidon_value::<GFp>(BLOCK_ID_DST, Endianness::Big).elements[0]
-        .to_canonical_u64()
+    let inputs: Vec<F> = BLOCK_ID_DST.to_fields();
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
 }
 
 /// Calculate `id = Poseidon(slot || contract_address)[0]` for single variable.
-pub fn identifier_single_var_column(slot: u8, contract_address: &Address) -> u64 {
-    let packed_contract_address: Vec<_> = contract_address.0.pack(Endianness::Big).to_fields();
+pub fn identifier_single_var_column(
+    slot: u8,
+    contract_address: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+) -> u64 {
+    let fields = contract_address
+        .0
+        .to_vec()
+        .into_iter()
+        .chain(chain_id.to_be_bytes())
+        .chain(extra.into_iter())
+        .collect::<Vec<u8>>()
+        .to_fields();
 
     let inputs: Vec<_> = iter::once(GFp::from_canonical_u8(slot))
-        .chain(packed_contract_address)
+        .chain(fields)
         .collect();
 
     H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
 }
 
 /// Calculate `key_id = Poseidon(KEY || slot || contract_address)[0]` for mapping variable leaf.
-pub fn identifier_for_mapping_key_column(slot: u8, contract_address: &Address) -> u64 {
-    compute_id_with_prefix(KEY_ID_PREFIX, slot, contract_address)
+pub fn identifier_for_mapping_key_column(
+    slot: u8,
+    contract_address: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+) -> u64 {
+    compute_id_with_prefix(KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
 /// Calculate `value_id = Poseidon(VAL || slot || contract_address)[0]` for mapping variable leaf.
-pub fn identifier_for_mapping_value_column(slot: u8, contract_address: &Address) -> u64 {
-    compute_id_with_prefix(VALUE_ID_PREFIX, slot, contract_address)
+pub fn identifier_for_mapping_value_column(
+    slot: u8,
+    contract_address: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+) -> u64 {
+    compute_id_with_prefix(VALUE_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
 /// Calculate ID with prefix.
-fn compute_id_with_prefix(prefix: &[u8], slot: u8, contract_address: &Address) -> u64 {
-    let inputs: Vec<_> = prefix
+fn compute_id_with_prefix(
+    prefix: &[u8],
+    slot: u8,
+    contract_address: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+) -> u64 {
+    let inputs: Vec<F> = prefix
         .iter()
         .cloned()
         .chain(iter::once(slot))
         .chain(contract_address.0)
-        .collect();
+        .chain(chain_id.to_be_bytes())
+        .chain(extra)
+        .collect::<Vec<u8>>()
+        .to_fields();
 
-    pack_and_compute_poseidon_value::<GFp>(&inputs, Endianness::Big).elements[0].to_canonical_u64()
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
 }
 
 /// Calculate `values_digest = D(D(key_id || key) + D(value_id || value))` for mapping variable leaf.

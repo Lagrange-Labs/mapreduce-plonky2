@@ -1,5 +1,10 @@
 //! Utility structs and functions used for integration tests
+use alloy::primitives::Address;
 use anyhow::Result;
+use cases::TableSourceSlot;
+use mp2_v1::api::{metadata_hash, MetadataHash, SlotInputs};
+use serde::{Deserialize, Serialize};
+use table::TableColumns;
 pub mod benchmarker;
 pub mod bindings;
 mod block_extraction;
@@ -58,4 +63,24 @@ pub fn mkdir_all(params_path_str: &str) -> Result<()> {
         std::fs::create_dir_all(&params_path).context("while creating parameters folder")?;
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableInfo {
+    pub columns: TableColumns,
+    pub table_name: String,
+    pub contract_address: Address,
+    pub chain_id: u64,
+    pub source: TableSourceSlot,
+}
+
+impl TableInfo {
+    pub fn metadata_hash(&self) -> MetadataHash {
+        let slots = match &self.source {
+            TableSourceSlot::Mapping((mapping, _)) => SlotInputs::Mapping(mapping.slot),
+            // mapping with length not tested right now
+            TableSourceSlot::SingleValues(args) => SlotInputs::Simple(args.slots.clone()),
+        };
+        metadata_hash(slots, &self.contract_address, self.chain_id, vec![])
+    }
 }

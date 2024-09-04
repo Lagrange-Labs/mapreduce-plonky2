@@ -4,7 +4,7 @@ use crate::{array::Array, D, F};
 use anyhow::ensure;
 use derive_more::Deref;
 use plonky2::{
-    field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
+    field::extension::quintic::QuinticExtension,
     hash::hash_types::HashOut,
     iop::target::Target,
     plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
