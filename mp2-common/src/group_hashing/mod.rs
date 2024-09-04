@@ -118,7 +118,7 @@ impl ToTargets for CurveTarget {
     }
 }
 
-impl FromFields<GFp> for WeierstrassPoint {
+impl FromFields<GoldilocksField> for WeierstrassPoint {
     fn from_fields(t: &[GFp]) -> Self {
         let x = std::array::from_fn::<_, EXTENSION_DEGREE, _>(|i| t[i]);
         let y = std::array::from_fn::<_, EXTENSION_DEGREE, _>(|i| t[i + EXTENSION_DEGREE]);

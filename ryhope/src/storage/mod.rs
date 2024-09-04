@@ -62,6 +62,16 @@ impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
     pub fn num_touched_rows(&self) -> usize {
         self.core_keys.len()
     }
+
+    pub fn ctx_and_payload_at(&self, epoch: Epoch, key: &K) -> Option<(NodeContext<K>, V)> {
+        match (
+            self.node_context_at(epoch, key),
+            self.payload_at(epoch, key),
+        ) {
+            (Some(e), Some(f)) => Some((e, f)),
+            _ => None,
+        }
+    }
     pub fn node_context_at(&self, epoch: Epoch, key: &K) -> Option<NodeContext<K>> {
         self.epoch_lineages
             .get(&epoch)
