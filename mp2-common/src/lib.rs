@@ -6,7 +6,7 @@
 #![feature(generic_const_items)]
 use plonky2::plonk::{
     circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
-    config::{GenericConfig, PoseidonGoldilocksConfig},
+    config::GenericConfig,
     proof::ProofWithPublicInputs,
 };
 use poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
@@ -69,14 +69,10 @@ mod test {
     };
     use anyhow::Result;
     use plonky2::field::types::Field;
-    use plonky2::{
-        field::extension::Extendable,
-        hash::hash_types::RichField,
-        plonk::{
-            circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
-            config::GenericConfig,
-            proof::CompressedProofWithPublicInputs,
-        },
+    use plonky2::plonk::{
+        circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
+        config::GenericConfig,
+        proof::CompressedProofWithPublicInputs,
     };
     use plonky2::{
         iop::witness::{PartialWitness, WitnessWrite},

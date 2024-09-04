@@ -421,9 +421,7 @@ mod test {
             target::{BoolTarget, Target},
             witness::PartialWitness,
         },
-        plonk::{
-            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
-        },
+        plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, RngCore};

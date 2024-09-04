@@ -7,6 +7,7 @@ use futures::{future::BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
+    fmt::Debug,
     hash::Hash,
 };
 
@@ -35,13 +36,13 @@ pub struct UpdateTreeNode<K: Clone + Hash + Eq> {
     /// Whether this node is a leaf of an update path
     is_path_end: bool,
 }
-impl<K: Clone + Hash + Eq> UpdateTreeNode<K> {
+impl<K: Debug + Clone + Hash + Eq> UpdateTreeNode<K> {
     fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
 }
 
-impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
+impl<K: Debug + Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
     /// Create an empty `UpdateTree`.
     fn empty(epoch: Epoch) -> Self {
         Self {
@@ -167,7 +168,7 @@ impl<K: Clone + Hash + Eq + Sync + Send> UpdateTree<K> {
     pub fn extend_with_path(&mut self, mut path: Vec<K>) {
         path.reverse();
         if let Some(k) = path.pop() {
-            assert!(k == self.nodes[0].k);
+            assert_eq!(k, self.nodes[0].k);
             self.rec_from_path(0, path);
         }
     }
@@ -292,11 +293,11 @@ impl<T: Clone + Hash + PartialEq + Eq> From<&UpdateTreeNode<T>> for WorkplanItem
 /// `[done(k)]` method shall be invoked to mark processed, which will allow
 /// `next()` to return their parents on its next invokation.
 #[derive(Clone, Serialize, Deserialize)]
-pub struct UpdatePlan<T: Clone + Hash + Eq> {
+pub struct UpdatePlan<T: Debug + Clone + Hash + Eq> {
     pub t: UpdateTree<T>,
     ready: Vec<WorkplanItem<T>>,
 }
-impl<T: Clone + Hash + Eq> UpdatePlan<T> {
+impl<T: Debug + Clone + Hash + Eq> UpdatePlan<T> {
     fn new(t: UpdateTree<T>) -> Self {
         let mut r = UpdatePlan {
             t,
@@ -341,7 +342,7 @@ impl<T: Clone + Hash + Eq> UpdatePlan<T> {
         self.t.nodes.is_empty()
     }
 }
-impl<T: Clone + Hash + Eq> Iterator for UpdatePlan<T> {
+impl<T: Debug + Clone + Hash + Eq> Iterator for UpdatePlan<T> {
     type Item = Next<WorkplanItem<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {

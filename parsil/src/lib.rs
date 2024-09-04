@@ -17,6 +17,7 @@ mod expand;
 pub mod isolator;
 mod parser;
 mod placeholders;
+pub mod queries;
 pub mod symbols;
 #[cfg(test)]
 mod tests;

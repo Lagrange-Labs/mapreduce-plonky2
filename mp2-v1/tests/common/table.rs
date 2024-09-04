@@ -1,4 +1,4 @@
-use alloy::primitives::{Address, U256};
+use alloy::primitives::U256;
 use anyhow::{ensure, Context, Result};
 use bb8::Pool;
 use bb8_postgres::{tokio_postgres::NoTls, PostgresConnectionManager};
@@ -8,7 +8,6 @@ use futures::{
 };
 use itertools::Itertools;
 use log::debug;
-use mp2_common::F;
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
     cell::{self, Cell, CellTreeKey, MerkleCellTree},
@@ -16,34 +15,21 @@ use mp2_v1::indexing::{
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
 };
-use parsil::{
-    executor::TranslatedQuery,
-    symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable},
-};
-use plonky2::field::types::Field;
+use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
 use ryhope::{
     storage::{
         pgsql::{SqlServerConnection, SqlStorageSettings},
         updatetree::UpdateTree,
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
-    tree::{
-        sbbst,
-        scapegoat::{self, Alpha},
-    },
+    tree::scapegoat::Alpha,
     Epoch, InitSettings,
 };
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, iter::once};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql};
-use verifiable_db::query::{
-    computational_hash_ids::PlaceholderIdentifier,
-    universal_circuit::universal_circuit_inputs::{ColumnCell, Placeholders},
-};
 
-use super::{
-    cases::query::SqlReturn, index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier,
-};
+use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 
 pub type TableID = String;
 
@@ -578,10 +564,6 @@ impl Table {
             user_name: self.name.clone(),
             columns: zk_columns,
         })
-    }
-
-    fn current_block(&self) -> u64 {
-        todo!()
     }
 }
 

@@ -74,9 +74,7 @@ mod tests {
     use plonky2::{
         field::{extension::quintic::QuinticExtension, types::Field},
         iop::witness::{PartialWitness, WitnessWrite},
-        plonk::{
-            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
-        },
+        plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
     };
     use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use rand::Rng;

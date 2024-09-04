@@ -349,7 +349,6 @@ mod tests {
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::GenericConfig;
 
     use crate::array::Array;
     use crate::rlp::{

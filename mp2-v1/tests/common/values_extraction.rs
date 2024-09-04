@@ -1,8 +1,6 @@
 //! Test utilities for Values Extraction (C.1)
 
-use std::str::FromStr;
-
-use super::{proof_storage::ProofStorage, storage_trie::TestStorageTrie, TestContext};
+use super::{storage_trie::TestStorageTrie, TestContext};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
@@ -12,7 +10,6 @@ use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     mpt_sequential::utils::bytes_to_nibbles,
-    proof::ProofWithVK,
     F,
 };
 use mp2_v1::values_extraction::public_inputs::PublicInputs;

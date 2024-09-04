@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::repeat};
+use std::iter::repeat;
 
 use crate::query::aggregation::full_node_index_leaf::FullNodeIndexLeafCircuit;
 
@@ -22,15 +22,15 @@ use super::{
             NUM_VERIFIED_PROOFS as NUM_PROOFS_FN2,
         },
         non_existence_inter::{
-            self, NonExistenceInterNodeCircuit, NonExistenceInterNodeWires,
+            NonExistenceInterNodeCircuit, NonExistenceInterNodeWires,
             NUM_VERIFIED_PROOFS as NUM_PROOFS_NE_INTER,
         },
         non_existence_leaf::{
-            self, NonExistenceLeafCircuit, NonExistenceLeafWires,
+            NonExistenceLeafCircuit, NonExistenceLeafWires,
             NUM_VERIFIED_PROOFS as NUM_PROOFS_NE_LEAF,
         },
         partial_node::{
-            self, PartialNodeCircuit, PartialNodeWires, NUM_VERIFIED_PROOFS as NUM_PROOFS_PN,
+            PartialNodeCircuit, PartialNodeWires, NUM_VERIFIED_PROOFS as NUM_PROOFS_PN,
         },
         ChildPosition, ChildProof, CommonInputs, NodeInfo, NonExistenceInput,
         OneProvenChildNodeInput, QueryBounds, QueryHashNonExistenceCircuits, SinglePathInput,
@@ -41,13 +41,12 @@ use super::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
         universal_circuit_inputs::{
-            BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure, RowCells,
+            BasicOperation, PlaceholderId, Placeholders, ResultStructure, RowCells,
         },
         universal_query_circuit::{
             placeholder_hash, QueryBound, UniversalCircuitInput, UniversalQueryCircuitInputs,
             UniversalQueryCircuitWires,
         },
-        ComputationalHash, PlaceholderHash,
     },
     PI_LEN,
 };
@@ -809,13 +808,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{cmp::Ordering, collections::HashMap, iter::once};
+    use std::{cmp::Ordering, iter::once};
 
-    use alloy::{primitives::U256, signers::k256::elliptic_curve::consts::U2};
+    use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
-        poseidon::empty_poseidon_hash,
-        proof::{self, ProofWithVK},
+        proof::ProofWithVK,
         types::HashOutput,
         utils::{Fieldable, ToFields},
         F,
@@ -827,12 +825,11 @@ mod tests {
         plonk::config::GenericHashOut,
     };
     use rand::{thread_rng, Rng};
-    use ryhope::tree::scapegoat::Node;
 
     use crate::query::{
         aggregation::{
-            ChildPosition, NodeInfo, QueryBoundSecondary, QueryBoundSource, QueryBounds,
-            QueryHashNonExistenceCircuits, SubProof,
+            ChildPosition, NodeInfo, QueryBoundSource, QueryBounds, QueryHashNonExistenceCircuits,
+            SubProof,
         },
         api::{CircuitInput, Parameters},
         computational_hash_ids::{

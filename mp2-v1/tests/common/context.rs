@@ -1,7 +1,7 @@
 //! Test context used in the test cases
 use alloy::{
     eips::{BlockId, BlockNumberOrTag},
-    network::{EthereumWallet, Network},
+    network::EthereumWallet,
     node_bindings::{Anvil, AnvilInstance},
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::{Block, BlockTransactionsKind, EIP1186AccountProofResponse},
@@ -18,7 +18,7 @@ use std::{
     io::{BufReader, BufWriter},
     path::PathBuf,
 };
-use verifiable_db::{api::QueryParameters, query};
+use verifiable_db::api::QueryParameters;
 
 use crate::common::mkdir_all;
 
@@ -31,7 +31,7 @@ use super::{
             MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULTS, MAX_NUM_RESULT_OPS,
         },
     },
-    proof_storage::{ProofKV, ProofStorage},
+    proof_storage::ProofKV,
 };
 
 #[derive(Envconfig)]

@@ -22,6 +22,8 @@ pub mod tree;
 pub const KEY: &str = "__key";
 /// The column containing the node payload in the zkTable
 pub const PAYLOAD: &str = "__payload";
+/// The column containing the epoch in queries
+pub const EPOCH: &str = "__epoch";
 /// The column containing the first epoch of validity of the row in the zkTable
 pub const VALID_FROM: &str = "__valid_from";
 /// The column containing the last epoch of validity of the row in the zkTable

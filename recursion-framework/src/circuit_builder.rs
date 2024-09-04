@@ -1,7 +1,5 @@
 use plonky2::{
-    field::extension::Extendable,
     gates::noop::NoopGate,
-    hash::hash_types::RichField,
     iop::{target::Target, witness::PartialWitness},
     plonk::{
         circuit_builder::CircuitBuilder,
@@ -85,7 +83,7 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
     /// employing the configuration `config`. Besides verifying proofs, the universal verifier,
     /// which is a fundamental building block of circuits built with such data structure, also checks
     /// that the verifier data employed for proof verification belongs to a set of admissible verifier data;
-    /// the size of such a set corresponds to `circuit_set_size`, which must be provided as input.  
+    /// the size of such a set corresponds to `circuit_set_size`, which must be provided as input.
     pub fn new<C: GenericConfig<D, F = F> + 'static>(
         config: CircuitConfig,
         circuit_set_size: usize,
@@ -326,7 +324,7 @@ where
     /// This method returns the number of gates of the wrapped circuit, that is the circuit whose proofs
     /// are recursively verified by the wrapping circuit; this is mostly intended to let the caller learn
     /// the size of the wrapped circuit, given that the final wrapping circuit, which is the one whose
-    /// `CircuitData` are accessbiel through the `circuit_data` method has a fixed size  
+    /// `CircuitData` are accessbiel through the `circuit_data` method has a fixed size
     pub fn wrapped_circuit_size(&self) -> usize {
         self.circuit_data.common.degree()
     }
@@ -348,7 +346,7 @@ pub(crate) mod tests {
 
     use plonky2::{
         gates::gate::Gate,
-        hash::hash_types::NUM_HASH_OUT_ELTS,
+        hash::hash_types::{RichField, NUM_HASH_OUT_ELTS},
         iop::{target::Target, witness::WitnessWrite},
     };
 

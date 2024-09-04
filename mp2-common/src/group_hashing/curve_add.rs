@@ -61,9 +61,7 @@ mod tests {
             types::{Field, Sample},
         },
         iop::witness::PartialWitness,
-        plonk::{
-            circuit_builder::CircuitBuilder, circuit_data::CircuitConfig, config::GenericConfig,
-        },
+        plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
     };
     use plonky2_ecgfp5::{
         curve::curve::{Point, WeierstrassPoint},
