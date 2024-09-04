@@ -1,7 +1,11 @@
 use plonky2::{
     field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
 };
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+};
 
 use crate::common::{
     cases::indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
@@ -444,7 +448,7 @@ async fn prove_query_on_tree<'a, I, K, V>(
 ) -> Result<Vec<u8>>
 where
     I: TreeInfo<K, V>,
-    V: NodePayload + Send + Sync + LagrangeNode,
+    V: NodePayload + Send + Sync + LagrangeNode + Clone,
     K: Debug + Hash + Clone + Eq + Sync + Send,
 {
     let query_id = planner.query.query.clone();
@@ -481,7 +485,7 @@ where
         // number as epoch number
         let (node_ctx, node_payload) = planner
             .cache
-            .node_context_at(primary as Epoch, &k)
+            .ctx_and_payload_at(primary as Epoch, &k)
             .expect("cache is not full");
         let is_satisfying_query = info.is_satisfying_query(&k);
         let embedded_proof = info
@@ -657,7 +661,7 @@ where
     ) -> Result<()>;
     async fn load_or_prove_embedded<'a>(
         &self,
-        planner: &mut QueryPlanner<K, V>,
+        planner: &mut QueryPlanner<'a, K, V>,
         primary: BlockPrimaryIndex,
         k: &K,
         v: &V,
@@ -797,39 +801,33 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo {
 
 // TODO: make it recursive with async - tentative in `fetch_child_info` but  it doesn't work,
 // recursion with async is weird.
-async fn get_node_info<T, V, S>(
-    cache: &WideLineage<T::Key, V>,
-    k: &T::Key,
+async fn get_node_info<K, V>(
+    cache: &WideLineage<K, V>,
+    k: &K,
     at: Epoch,
 ) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>)
 where
-    T: TreeTopology + MutableTree,
+    K: Debug + Hash + Clone + Send + Sync + Eq,
     // NOTICE the ToValue here to get the value associated to a node
     V: NodePayload + Send + Sync + LagrangeNode + Clone,
-    S: TransactionalStorage
-        + TreeStorage<T>
-        + PayloadStorage<T::Key, V>
-        + FromSettings<T::State>
-        + Send
-        + Sync,
 {
     // look at the left child first then right child, then build the node info
     let (ctx, node_payload) = cache.ctx_and_payload_at(at, k).expect("cache not full");
     // this looks at the value of a child node (left and right), and fetches the grand child
     // information to be able to build their respective node info.
-    let fetch_ni = async |k: Option<T::Key>| -> (Option<NodeInfo>, Option<HashOutput>) {
+    let fetch_ni = async |k: Option<K>| -> (Option<NodeInfo>, Option<HashOutput>) {
         match k {
             None => (None, None),
             Some(child_k) => {
                 let (child_ctx, child_payload) = cache
-                    .ctx_and_payload_at(&child_k, at)
+                    .ctx_and_payload_at(at, &child_k)
                     .expect("cache not full");
                 // we need the grand child hashes for constructing the node info of the
                 // children of the node in argument
                 let child_left_hash = match child_ctx.left {
                     Some(left_left_k) => Some(
                         cache
-                            .payload_at(&left_left_k, at)
+                            .payload_at(at, &left_left_k)
                             .expect("cache not full")
                             .hash(),
                     ),
@@ -838,7 +836,7 @@ where
                 let child_right_hash = match child_ctx.right {
                     Some(left_right_k) => Some(
                         cache
-                            .payload_at(&left_right_k, at)
+                            .payload_at(at, &left_right_k)
                             .expect("cache not full")
                             .hash(),
                     ),
@@ -874,7 +872,7 @@ where
 
 async fn prove_single_row(
     ctx: &mut TestContext,
-    cache: WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
+    cache: &WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     columns: &TableColumns,
     primary: BlockPrimaryIndex,
     row_key: &RowTreeKey,
