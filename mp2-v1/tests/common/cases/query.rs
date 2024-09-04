@@ -41,7 +41,9 @@ use mp2_v1::{
 };
 use parsil::{
     assembler::{DynamicCircuitPis, StaticCircuitPis},
-    parse_and_validate, ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
+    parse_and_validate,
+    queries::{core_keys_for_index_tree, core_keys_for_row_tree},
+    ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
     DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
@@ -51,7 +53,7 @@ use ryhope::{
         TreeStorage, TreeTransactionalStorage, WideLineage,
     },
     tree::{MutableTree, NodeContext, TreeTopology},
-    Epoch, MerkleTreeKvDb, NodePayload, EPOCH, KEY,
+    Epoch, MerkleTreeKvDb, NodePayload,
 };
 use sqlparser::ast::Query;
 use tokio_postgres::Row as PsqlRow;
@@ -103,7 +105,7 @@ pub type RevelationPublicInputs<'a> =
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
     match &t.source {
-        TableSourceSlot::Mapping((map, _)) => query_mapping(ctx, &table, t.metadata_hash()).await?,
+        TableSourceSlot::Mapping(_) => query_mapping(ctx, &table, t.metadata_hash()).await?,
         _ => unimplemented!("yet"),
     }
     Ok(())
@@ -149,7 +151,9 @@ async fn test_query_mapping(
     let query_params = exec_query.convert_placeholders(&query_info.placeholders);
     let res = table
         .execute_row_query(
-            &exec_query.normalize_placeholder_names().to_pgsql_string(),
+            &exec_query
+                .normalize_placeholder_names()
+                .to_pgsql_string_with_placeholder(),
             &query_params,
         )
         .await?;
@@ -163,19 +167,15 @@ async fn test_query_mapping(
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)
         .context("while assembling PIs")?;
 
-    let mut rows_query =
-        parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
-            .context("while genrating keys in index bounds")?;
-    println!(
-        " -- touched rows query: {:?}",
-        rows_query.query.to_display()
-    );
     let big_row_cache = table
         .row
         .wide_lineage_between(
-            &rows_query
-                .interpolate(&settings, &query_info.placeholders)?
-                .to_pgsql_string(),
+            &core_keys_for_row_tree(
+                &query_info.query,
+                &settings,
+                &pis.bounds,
+                &query_info.placeholders,
+            )?,
             (query_info.min_block as Epoch, query_info.max_block as Epoch),
         )
         .await?;
@@ -183,10 +183,8 @@ async fn test_query_mapping(
     // and we set the generate_series according to the query
     let current_epoch = table.index.current_epoch();
     // Integer default to i32 in PgSQL, they must be cast to i64, a.k.a. BIGINT.
-    let index_query = format!(
-        "SELECT {current_epoch}::BIGINT as {EPOCH}, generate_series({}::BIGINT, {}::BIGINT) AS {KEY}",
-        query_info.min_block, query_info.max_block
-    );
+    let index_query =
+        core_keys_for_index_tree(current_epoch, (query_info.min_block, query_info.max_block))?;
     let big_index_cache = table
         .index
         // The bounds here means between which versions of the tree should we look. For index tree,

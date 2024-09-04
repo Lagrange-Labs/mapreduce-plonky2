@@ -42,10 +42,23 @@ impl SafeQuery {
     ///
     /// Panic if the query is not executable by PgSQL, i.e. if its
     /// zkPlaceholders have not been converted into a format usable by PgSQL.
-    pub fn to_pgsql_string(&self) -> String {
+    pub fn to_pgsql_string_with_placeholder(&self) -> String {
         match self {
             SafeQuery::ZkQuery(_) => panic!("ZkQuery can not be transmitted to PgSQL"),
-            SafeQuery::PgSqlQuery(q) | SafeQuery::InterpolatedQuery(q) => q.to_string(),
+            SafeQuery::PgSqlQuery(q) => q.to_string(),
+            SafeQuery::InterpolatedQuery(_) => {
+                panic!("Interpolated query can not be used in PgSQL with placeholders")
+            }
+        }
+    }
+
+    pub fn to_pgsql_string_no_placeholders(&self) -> String {
+        match self {
+            SafeQuery::ZkQuery(_) => panic!("ZkQuery can not be transmitted to PgSQL"),
+            SafeQuery::PgSqlQuery(_) => {
+                panic!("Query with placeholders can not be used in PgSQL without placeholders")
+            }
+            SafeQuery::InterpolatedQuery(q) => q.to_string(),
         }
     }
 
