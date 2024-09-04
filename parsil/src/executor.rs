@@ -24,12 +24,61 @@ use crate::{
     ParsilSettings,
 };
 
+/// Safely wraps a [`Query`], ensuring its meaning and the status of its
+/// placeholders.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SafeQuery {
+    /// A query featuring placeholders as defined in a [`PlaceholderRegister`]
+    ZkQuery(Query),
+    /// A query featuring placeholders acceptable for PgSQL (i.e. only numeric
+    /// ones)
+    PgSqlQuery(Query),
+    /// A query where all the placeholders have been replaced by their numeric
+    /// values, as defined in a [`Placeholders`] structure.
+    InterpolatedQuery(Query),
+}
+impl SafeQuery {
+    /// Convert a safe query into a string ready to be executed by PgSQL.
+    ///
+    /// Panic if the query is not executable by PgSQL, i.e. if its
+    /// zkPlaceholders have not been converted into a format usable by PgSQL.
+    pub fn to_pgsql_string(&self) -> String {
+        match self {
+            SafeQuery::ZkQuery(_) => panic!("ZkQuery can not be transmitted to PgSQL"),
+            SafeQuery::PgSqlQuery(q) | SafeQuery::InterpolatedQuery(q) => q.to_string(),
+        }
+    }
+
+    /// Convert a safe query into a string.
+    pub fn to_unsafe_string(&self) -> String {
+        match self {
+            SafeQuery::ZkQuery(q) | SafeQuery::PgSqlQuery(q) | SafeQuery::InterpolatedQuery(q) => {
+                q.to_string()
+            }
+        }
+    }
+}
+impl AsRef<Query> for SafeQuery {
+    fn as_ref(&self) -> &Query {
+        match self {
+            SafeQuery::ZkQuery(q) | SafeQuery::PgSqlQuery(q) | SafeQuery::InterpolatedQuery(q) => q,
+        }
+    }
+}
+impl AsMut<Query> for SafeQuery {
+    fn as_mut(&mut self) -> &mut Query {
+        match self {
+            SafeQuery::ZkQuery(q) | SafeQuery::PgSqlQuery(q) | SafeQuery::InterpolatedQuery(q) => q,
+        }
+    }
+}
+
 /// A data structure wrapping a zkSQL query converted into a pgSQL able to be
 /// executed on zkTables and its accompanying metadata.
 #[derive(Debug)]
 pub struct TranslatedQuery {
     /// The translated query, should be converted to string
-    pub query: Query,
+    pub query: SafeQuery,
     /// Where each placeholder from the zkSQL query should be put in the array
     /// of PgSQL placeholder.
     pub placeholder_mapping: HashMap<PlaceholderId, usize>,
@@ -40,10 +89,10 @@ pub struct TranslatedQuery {
 }
 impl TranslatedQuery {
     pub fn make<C: ContextProvider>(
-        mut query: Query,
+        mut query: SafeQuery,
         settings: &ParsilSettings<C>,
     ) -> Result<Self> {
-        let largest_placeholder = placeholders::validate(settings, &mut query)?;
+        let largest_placeholder = placeholders::validate(settings, query.as_mut())?;
         let placeholder_mapping = std::iter::once(PlaceholderId::MinQueryOnIdx1)
             .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
             .chain((1..=largest_placeholder).map(|i| PlaceholderId::Generic(i)))
@@ -71,10 +120,11 @@ impl TranslatedQuery {
     /// Combine the encapsulated query and placeholder mappings to generate a
     /// SQL query with name placeholders replaced with the corresponding numeric
     /// placeholders.
-    pub fn normalize_placeholder_names(&mut self) -> Query {
-        let mut r = self.query.clone();
+    pub fn normalize_placeholder_names(&mut self) -> SafeQuery {
+        assert!(matches!(self.query, SafeQuery::ZkQuery(_)));
+        let mut r = self.query.as_ref().to_owned();
         r.visit(self).unwrap();
-        r
+        SafeQuery::PgSqlQuery(r)
     }
 
     /// How many PgSQL placeholders should be allocated
@@ -98,14 +148,15 @@ impl TranslatedQuery {
         &mut self,
         settings: &ParsilSettings<C>,
         placeholders: &Placeholders,
-    ) -> Result<Query> {
-        let mut r = self.query.clone();
+    ) -> Result<SafeQuery> {
+        assert!(matches!(self.query, SafeQuery::ZkQuery(_)));
+        let mut r = self.query.as_ref().to_owned();
         let mut interpolator = PlaceholderInterpolator {
             settings,
             placeholders,
         };
         r.visit(&mut interpolator)?;
-        Ok(r)
+        Ok(SafeQuery::InterpolatedQuery(r))
     }
 }
 
@@ -618,19 +669,19 @@ pub fn generate_query_execution<C: ContextProvider>(
     let mut query_execution = query.clone();
     query_execution.visit(&mut executor)?;
 
-    TranslatedQuery::make(query_execution, settings)
+    TranslatedQuery::make(SafeQuery::ZkQuery(query_execution), settings)
 }
 
 pub fn generate_query_keys<C: ContextProvider>(
     query: &mut Query,
     settings: &ParsilSettings<C>,
 ) -> Result<TranslatedQuery> {
-    let mut pis = KeyFetcher::new(settings)?;
-    let mut query_pis = query.clone();
-    pis.process(&mut query_pis)?;
+    let mut key_fetcher = KeyFetcher::new(settings)?;
+    let mut key_query = query.clone();
+    key_fetcher.process(&mut key_query)?;
 
-    info!("PIs: {query_pis}");
-    TranslatedQuery::make(query_pis, settings)
+    info!("PIs: {key_query}");
+    TranslatedQuery::make(SafeQuery::ZkQuery(key_query), settings)
 }
 
 /// Return two queries, respectively returning the largest sec. ind. value

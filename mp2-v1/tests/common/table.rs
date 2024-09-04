@@ -579,10 +579,6 @@ impl Table {
             columns: zk_columns,
         })
     }
-
-    fn current_block(&self) -> u64 {
-        todo!()
-    }
 }
 
 impl TableColumns {

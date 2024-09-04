@@ -1,18 +1,11 @@
 use plonky2::{
-    field::types::{Field, PrimeField64},
-    hash::hash_types::HashOut,
-    plonk::config::GenericHashOut,
+    field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    iter::once,
-    process::Child,
-    thread::current,
-};
+use std::collections::{HashMap, HashSet};
 
 use crate::common::{
     cases::indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
-    index_tree::{IndexStorage, MerkleIndexTree},
+    index_tree::IndexStorage,
     proof_storage::{ProofKey, QueryID},
     rowtree::{MerkleRowTree, RowStorage},
     table::TableColumns,
@@ -23,13 +16,12 @@ use super::{
     super::{context::TestContext, proof_storage::ProofStorage, table::Table},
     TableSourceSlot,
 };
-use alloy::{primitives::U256, rpc::types::Block};
+use alloy::primitives::U256;
 use anyhow::{Context, Result};
-use futures::{future::BoxFuture, io::empty, stream, FutureExt, StreamExt};
+use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
-use log::{debug, info, warn};
+use log::*;
 use mp2_common::{
-    array::ToField,
     poseidon::empty_poseidon_hash,
     proof::{deserialize_proof, ProofWithVK},
     types::HashOutput,
@@ -48,16 +40,12 @@ use mp2_v1::{
     values_extraction::identifier_block_column,
 };
 use parsil::{
-    assembler::{CircuitPis, DynamicCircuitPis, StaticCircuitPis},
-    executor::TranslatedQuery,
-    parse_and_validate,
-    symbols::ContextProvider,
-    ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
+    assembler::{DynamicCircuitPis, StaticCircuitPis},
+    parse_and_validate, ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
     DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{
-        pgsql::ToFromBytea,
         updatetree::{Next, UpdateTree},
         EpochKvStorage, FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage,
         TreeStorage, TreeTransactionalStorage, WideLineage,
@@ -66,18 +54,17 @@ use ryhope::{
     Epoch, MerkleTreeKvDb, NodePayload, EPOCH, KEY,
 };
 use sqlparser::ast::Query;
-use tokio_postgres::{types::Json, Row as PsqlRow};
+use tokio_postgres::Row as PsqlRow;
 use verifiable_db::{
     ivc::PublicInputs as IndexingPIS,
     query::{
-        self,
-        aggregation::{ChildPosition, NodeInfo, QueryBoundSource, QueryBounds, SubProof},
+        aggregation::{ChildPosition, NodeInfo, QueryBounds, SubProof},
         computational_hash_ids::{ColumnIDs, Identifiers},
         universal_circuit::universal_circuit_inputs::{
             ColumnCell, PlaceholderId, Placeholders, RowCells,
         },
     },
-    revelation::{PublicInputs, NUM_QUERY_IO},
+    revelation::PublicInputs,
 };
 
 pub const MAX_NUM_RESULT_OPS: usize = 20;
@@ -162,14 +149,14 @@ async fn test_query_mapping(
     let query_params = exec_query.convert_placeholders(&query_info.placeholders);
     let res = table
         .execute_row_query(
-            &exec_query.normalize_placeholder_names().to_string(),
+            &exec_query.normalize_placeholder_names().to_pgsql_string(),
             &query_params,
         )
         .await?;
     info!(
         "Found {} results from query {}",
         res.len(),
-        exec_query.query.to_string()
+        exec_query.query.to_unsafe_string()
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
 
@@ -179,13 +166,16 @@ async fn test_query_mapping(
     let mut rows_query =
         parsil::keys_in_index_boundaries(&query_info.query, &settings, &pis.bounds)
             .context("while genrating keys in index bounds")?;
-    println!(" -- touched rows query: {:?}", rows_query.query.to_string());
+    println!(
+        " -- touched rows query: {:?}",
+        rows_query.query.to_unsafe_string()
+    );
     let big_row_cache = table
         .row
         .wide_lineage_between(
             &rows_query
                 .interpolate(&settings, &query_info.placeholders)?
-                .to_string(),
+                .to_pgsql_string(),
             (query_info.min_block as Epoch, query_info.max_block as Epoch),
         )
         .await?;
