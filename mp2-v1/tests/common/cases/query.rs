@@ -156,7 +156,7 @@ async fn test_query_mapping(
     info!(
         "Found {} results from query {}",
         res.len(),
-        exec_query.query.to_unsafe_string()
+        exec_query.query.to_display()
     );
     print_vec_sql_rows(&res, SqlType::Numeric);
 
@@ -168,7 +168,7 @@ async fn test_query_mapping(
             .context("while genrating keys in index bounds")?;
     println!(
         " -- touched rows query: {:?}",
-        rows_query.query.to_unsafe_string()
+        rows_query.query.to_display()
     );
     let big_row_cache = table
         .row

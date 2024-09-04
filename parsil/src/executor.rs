@@ -50,7 +50,7 @@ impl SafeQuery {
     }
 
     /// Convert a safe query into a string.
-    pub fn to_unsafe_string(&self) -> String {
+    pub fn to_display(&self) -> String {
         match self {
             SafeQuery::ZkQuery(q) | SafeQuery::PgSqlQuery(q) | SafeQuery::InterpolatedQuery(q) => {
                 q.to_string()
