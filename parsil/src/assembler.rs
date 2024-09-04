@@ -27,7 +27,7 @@ use crate::{
     errors::ValidationError,
     symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
     utils::{str_to_u256, ParsilSettings},
-    visitor::{AstMutator, Visit},
+    visitor::{AstVisitor, Visit},
 };
 
 /// A Wire carry data that can be injected in universal query circuits. It
@@ -763,10 +763,10 @@ pub type StaticCircuitPis = CircuitPis<StaticQueryBounds>;
 /// runtime.
 pub type DynamicCircuitPis = CircuitPis<QueryBounds>;
 
-impl<'a, C: ContextProvider> AstMutator for Assembler<'a, C> {
+impl<'a, C: ContextProvider> AstVisitor for Assembler<'a, C> {
     type Error = anyhow::Error;
 
-    fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<(), Self::Error> {
+    fn pre_table_factor(&mut self, table_factor: &TableFactor) -> Result<(), Self::Error> {
         match &table_factor {
             TableFactor::Table {
                 name, alias, args, ..
@@ -883,21 +883,21 @@ impl<'a, C: ContextProvider> AstMutator for Assembler<'a, C> {
         Ok(())
     }
 
-    fn post_table_factor(&mut self, _: &mut TableFactor) -> Result<()> {
+    fn post_table_factor(&mut self, _: &TableFactor) -> Result<()> {
         self.exit_scope()
     }
 
     /// SELECT always generate standard context, that will expose the SELECTed
     /// items to their parent while ensuring that they are actually contained in
     /// its providers.
-    fn pre_select(&mut self, s: &mut Select) -> Result<()> {
+    fn pre_select(&mut self, s: &Select) -> Result<()> {
         self.scopes
             .enter_scope(format!("Select: {s}"), Kind::Standard);
         Ok(())
     }
 
-    fn post_select(&mut self, select: &mut Select) -> Result<()> {
-        if let Some(where_clause) = select.selection.as_mut() {
+    fn post_select(&mut self, select: &Select) -> Result<()> {
+        if let Some(where_clause) = select.selection.as_ref() {
             // As the expression are traversed depth-first, the top level
             // expression will mechnically find itself at the last position, as
             // required by the universal query circuit API.
@@ -907,12 +907,12 @@ impl<'a, C: ContextProvider> AstMutator for Assembler<'a, C> {
         self.exit_scope()
     }
 
-    fn post_query(&mut self, query: &mut Query) -> Result<()> {
+    fn post_query(&mut self, query: &Query) -> Result<()> {
         if let SetExpr::Select(_) = *query.body {
-            if let Some(order_by) = query.order_by.as_mut() {
-                for order_by_expr in order_by.exprs.iter_mut() {
+            if let Some(order_by) = query.order_by.as_ref() {
+                for order_by_expr in order_by.exprs.iter() {
                     let wire_id = self
-                        .compile(&mut order_by_expr.expr, &mut StorageTarget::Query)?
+                        .compile(&order_by_expr.expr, &mut StorageTarget::Query)?
                         .to_wire_id();
                     ensure!(
                         self.scopes
@@ -931,7 +931,7 @@ impl<'a, C: ContextProvider> AstMutator for Assembler<'a, C> {
 
     /// All the [`SelectItem`] in the SELECT clause are exposed to the current
     /// context parent.
-    fn pre_select_item(&mut self, select_item: &mut SelectItem) -> Result<()> {
+    fn pre_select_item(&mut self, select_item: &SelectItem) -> Result<()> {
         let provided = match select_item {
             SelectItem::ExprWithAlias { expr, alias } => Symbol::NamedExpression {
                 name: Handle::Simple(alias.value.clone()),
@@ -953,22 +953,19 @@ impl<'a, C: ContextProvider> AstMutator for Assembler<'a, C> {
 /// Validate the given query, ensuring that it satisfies all the requirements of
 /// the circuit.
 pub fn validate<C: ContextProvider>(query: &Query, settings: &ParsilSettings<C>) -> Result<()> {
-    let mut converted_query = query.clone();
     let mut resolver = Assembler::new(settings);
-    converted_query.visit(&mut resolver)?;
+    query.visit(&mut resolver)?;
     resolver.prepare_result().map(|_| ())
 }
 
 /// Generate static circuit public inputs, i.e. without reference to runtime
 /// placeholder values.
 pub fn assemble_static<C: ContextProvider>(
-    q: &Query,
+    query: &Query,
     settings: &ParsilSettings<C>,
 ) -> Result<StaticCircuitPis> {
-    let mut converted_query = q.clone();
-
     let mut resolver = Assembler::new(settings);
-    converted_query.visit(&mut resolver)?;
+    query.visit(&mut resolver)?;
 
     resolver.to_static_inputs()
 }
@@ -976,13 +973,12 @@ pub fn assemble_static<C: ContextProvider>(
 /// Generate dynamic circuit public inputs, i.e. referencing runtime placeholder
 /// values.
 pub fn assemble_dynamic<C: ContextProvider>(
-    q: &Query,
+    query: &Query,
     settings: &ParsilSettings<C>,
     placeholders: &Placeholders,
 ) -> Result<DynamicCircuitPis> {
-    let mut converted_query = q.clone();
     let mut resolver = Assembler::new(settings);
-    converted_query.visit(&mut resolver)?;
+    query.visit(&mut resolver)?;
 
     resolver.to_dynamic_inputs(&placeholders)
 }

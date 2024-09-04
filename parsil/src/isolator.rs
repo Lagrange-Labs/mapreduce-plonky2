@@ -9,7 +9,7 @@ use crate::{
     errors::ValidationError,
     symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
     utils::ParsilSettings,
-    visitor::{AstMutator, Visit},
+    visitor::{AstMutator, VisitMut},
 };
 
 /// Define on which side(s) the secondary index is known to be bounded within a query.
@@ -395,6 +395,6 @@ pub fn isolate_with<C: ContextProvider>(
 ) -> Result<Query> {
     let mut converted_query = query.clone();
     let mut insulator = Isolator::new(settings, SecondaryIndexBounds::from_lo_hi(lo_sec, hi_sec));
-    converted_query.visit(&mut insulator)?;
+    converted_query.visit_mut(&mut insulator)?;
     Ok(converted_query)
 }

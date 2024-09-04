@@ -8,7 +8,7 @@ use crate::{
     errors::ValidationError,
     symbols::ContextProvider,
     utils::{str_to_u256, ParsilSettings},
-    visitor::{AstMutator, Visit},
+    visitor::{AstVisitor, Visit},
 };
 
 macro_rules! ensure {
@@ -24,20 +24,17 @@ macro_rules! ensure {
 pub struct SqlValidator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
 }
-impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
+impl<'a, C: ContextProvider> AstVisitor for SqlValidator<'a, C> {
     type Error = ValidationError;
 
-    fn pre_unary_operator(
-        &mut self,
-        unary_operator: &mut UnaryOperator,
-    ) -> Result<(), Self::Error> {
+    fn pre_unary_operator(&mut self, unary_operator: &UnaryOperator) -> Result<(), Self::Error> {
         match unary_operator {
             UnaryOperator::Plus | UnaryOperator::Not => Ok(()),
             _ => Err(ValidationError::UnsupportedUnaryOperator(*unary_operator)),
         }
     }
 
-    fn pre_binary_operator(&mut self, op: &mut BinaryOperator) -> Result<(), ValidationError> {
+    fn pre_binary_operator(&mut self, op: &BinaryOperator) -> Result<(), ValidationError> {
         match op {
             BinaryOperator::Eq
             | BinaryOperator::NotEq
@@ -58,7 +55,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
         }
     }
 
-    fn pre_expr(&mut self, expr: &mut Expr) -> Result<(), ValidationError> {
+    fn pre_expr(&mut self, expr: &Expr) -> Result<(), ValidationError> {
         match expr {
             Expr::Identifier(name) => {
                 ensure!(
@@ -89,7 +86,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
                     ValidationError::UnknownFunction(funcall.name.to_string())
                 );
 
-                if let FunctionArguments::List(arglist) = &mut funcall.args {
+                if let FunctionArguments::List(arglist) = &funcall.args {
                     ensure!(
                         arglist.args.len() == 1,
                         ValidationError::InvalidArity(
@@ -98,7 +95,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
                             arglist.args.len()
                         )
                     );
-                    match &mut arglist.args[0] {
+                    match &arglist.args[0] {
                         FunctionArg::Unnamed(FunctionArgExpr::Expr(_)) => {}
                         _ => {
                             return Err(ValidationError::InvalidFunctionArgument(
@@ -201,7 +198,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
         Ok(())
     }
 
-    fn pre_select_item(&mut self, p: &mut SelectItem) -> Result<(), ValidationError> {
+    fn pre_select_item(&mut self, p: &SelectItem) -> Result<(), ValidationError> {
         match p {
             SelectItem::Wildcard(w) => {
                 ensure!(
@@ -233,7 +230,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
         }
     }
 
-    fn pre_table_factor(&mut self, j: &mut TableFactor) -> Result<(), ValidationError> {
+    fn pre_table_factor(&mut self, j: &TableFactor) -> Result<(), ValidationError> {
         match j {
             TableFactor::Table { .. } => Ok(()),
             TableFactor::Derived { .. } => {
@@ -253,7 +250,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
         }
     }
 
-    fn pre_join_operator(&mut self, j: &mut JoinOperator) -> Result<(), ValidationError> {
+    fn pre_join_operator(&mut self, j: &JoinOperator) -> Result<(), ValidationError> {
         match j {
             JoinOperator::Inner(_)
             | JoinOperator::LeftOuter(_)
@@ -271,14 +268,14 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
         }
     }
 
-    fn pre_distinct(&mut self, distinct: &mut Distinct) -> Result<(), ValidationError> {
+    fn pre_distinct(&mut self, distinct: &Distinct) -> Result<(), ValidationError> {
         match distinct {
             Distinct::Distinct => Ok(()),
             Distinct::On(_) => Err(ValidationError::UnsupportedFeature("DISTINCT ON".into())),
         }
     }
 
-    fn pre_offset(&mut self, offset: &mut Offset) -> Result<(), ValidationError> {
+    fn pre_offset(&mut self, offset: &Offset) -> Result<(), ValidationError> {
         match offset.rows {
             OffsetRows::None => Ok(()),
             OffsetRows::Row | OffsetRows::Rows => {
@@ -287,7 +284,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
         }
     }
 
-    fn pre_select(&mut self, s: &mut Select) -> Result<(), ValidationError> {
+    fn pre_select(&mut self, s: &Select) -> Result<(), ValidationError> {
         ensure!(
             s.top.is_none(),
             ValidationError::NonStandardSql("TOP".into())
@@ -336,7 +333,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
         Ok(())
     }
 
-    fn pre_set_expr(&mut self, s: &mut SetExpr) -> Result<(), ValidationError> {
+    fn pre_set_expr(&mut self, s: &SetExpr) -> Result<(), ValidationError> {
         match s {
             SetExpr::Select(_) => Ok(()),
             SetExpr::Query(_) => Err(ValidationError::NestedSelect(s.to_string())),
@@ -347,7 +344,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
         }
     }
 
-    fn pre_order_by(&mut self, o: &mut OrderBy) -> Result<(), ValidationError> {
+    fn pre_order_by(&mut self, o: &OrderBy) -> Result<(), ValidationError> {
         ensure!(
             o.exprs.len() <= 2,
             ValidationError::OrderByArity(format!("{o:?}"), 2)
@@ -359,7 +356,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
         Ok(())
     }
 
-    fn pre_order_by_expr(&mut self, o: &mut OrderByExpr) -> Result<(), ValidationError> {
+    fn pre_order_by_expr(&mut self, o: &OrderByExpr) -> Result<(), ValidationError> {
         ensure!(
             o.nulls_first.is_none(),
             ValidationError::NullRelatedOrdering
@@ -367,7 +364,7 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
         Ok(())
     }
 
-    fn pre_query(&mut self, q: &mut Query) -> Result<(), ValidationError> {
+    fn pre_query(&mut self, q: &Query) -> Result<(), ValidationError> {
         ensure!(
             q.with.is_none(),
             ValidationError::UnsupportedFeature("CTEs".into())
@@ -394,9 +391,9 @@ impl<'a, C: ContextProvider> AstMutator for SqlValidator<'a, C> {
 /// Instantiate a new [`Validator`] and validate this query with it.
 pub fn validate<C: ContextProvider>(
     settings: &ParsilSettings<C>,
-    query: &mut Query,
+    query: &Query,
 ) -> Result<(), ValidationError> {
-    if let SetExpr::Select(ref mut select) = *query.body {
+    if let SetExpr::Select(ref select) = *query.body {
         ensure!(
             select.projection.iter().all(|s| matches!(
                 s,
