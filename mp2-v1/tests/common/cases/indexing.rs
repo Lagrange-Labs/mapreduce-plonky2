@@ -25,8 +25,8 @@ use crate::common::{
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::{
-        CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TableID,
-        TreeRowUpdate, TreeUpdateType,
+        CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TreeRowUpdate,
+        TreeUpdateType,
     },
     TestContext,
 };

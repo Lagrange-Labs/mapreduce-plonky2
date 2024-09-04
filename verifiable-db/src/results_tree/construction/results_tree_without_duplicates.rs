@@ -23,7 +23,7 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecdsa::gadgets::{biguint::BigUintTarget, nonnative::CircuitBuilderNonNative};
-use plonky2_ecgfp5::{curve::scalar_field::Scalar, gadgets::curve::CircuitBuilderEcGFp5};
+use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::{array, iter};
@@ -345,7 +345,10 @@ mod tests {
             .collect();
         let mut exp_accumulator = map_to_curve_point(&accumulator_inputs);
         let multiplicity_biguint = multiplicity.to_canonical_biguint();
-        let multiplicity_scalar = Scalar::from_noncanonical_biguint(multiplicity_biguint);
+        let multiplicity_scalar =
+            plonky2_ecgfp5::curve::scalar_field::Scalar::from_noncanonical_biguint(
+                multiplicity_biguint,
+            );
         exp_accumulator *= multiplicity_scalar;
         assert_eq!(pi.accumulator(), exp_accumulator.to_weierstrass());
     }

@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use alloy::primitives::Address;
 use log::info;
 use mp2_common::{
@@ -10,7 +8,7 @@ use plonky2::field::types::Field;
 
 use crate::common::storage_trie::TestStorageTrie;
 
-use super::{proof_storage::ProofStorage, TestContext};
+use super::TestContext;
 
 impl TestContext {
     /// Generate the Values Extraction (C.2) proof for single variables.

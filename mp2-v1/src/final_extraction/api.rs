@@ -179,7 +179,7 @@ mod tests {
         C, D, F,
     };
     use mp2_test::circuit::TestDummyCircuit;
-    use plonky2_ecgfp5::curve::curve::Point;
+
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
 
     use crate::{

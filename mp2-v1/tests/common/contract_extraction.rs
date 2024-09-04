@@ -1,7 +1,7 @@
 //! Test utilities for Contract Extraction (C.3)
 
-use super::{proof_storage::ProofStorage, TestContext};
-use alloy::{eips::BlockNumberOrTag, primitives::Address, rpc::types::Block};
+use super::TestContext;
+use alloy::{eips::BlockNumberOrTag, primitives::Address};
 use eth_trie::Nibbles;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
@@ -14,7 +14,7 @@ use mp2_common::{
     F,
 };
 use mp2_v1::{
-    api::{generate_proof, CircuitInput, PublicParameters},
+    api::{generate_proof, CircuitInput},
     contract_extraction::{self, compute_metadata_digest, PublicInputs},
     indexing::block::BlockPrimaryIndex,
 };

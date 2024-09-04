@@ -4,29 +4,16 @@ use super::{
     utils::{write_plonky2_proof, write_query_input, write_query_output},
     TestContext, TestQueryInput, TestQueryOutput,
 };
-use alloy::primitives::{B256, U256};
+use alloy::primitives::B256;
 use itertools::Itertools;
 use mp2_common::{
     proof::{serialize_proof, ProofWithVK},
-    utils::{Fieldable, ToFields},
     F,
 };
-use mp2_test::utils::gen_random_u256;
-use plonky2::{field::types::PrimeField64, plonk::config::GenericHashOut};
-use rand::{thread_rng, Rng};
+use plonky2::field::types::PrimeField64;
+use rand::thread_rng;
 use verifiable_db::{
-    query::{
-        aggregation::{QueryBounds, QueryHashNonExistenceCircuits},
-        api::CircuitInput as QueryInput,
-        computational_hash_ids::{
-            AggregationOperation, ColumnIDs, Operation, PlaceholderIdentifier,
-        },
-        public_inputs::{PublicInputs as QueryPI, QueryPublicInputs},
-        universal_circuit::universal_circuit_inputs::{
-            BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders, ResultStructure,
-            RowCells,
-        },
-    },
+    query::api::CircuitInput as QueryInput,
     revelation::{api::CircuitInput, PublicInputs as RevelationPI},
     test_utils::{
         TestRevelationData, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,

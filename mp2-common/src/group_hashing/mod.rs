@@ -5,8 +5,7 @@ use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::iop::target::BoolTarget;
 use plonky2::{
-    field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
-    plonk::circuit_builder::CircuitBuilder,
+    field::extension::Extendable, iop::target::Target, plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::curve::curve::Point;
 use plonky2_ecgfp5::gadgets::base_field::QuinticExtensionTarget;

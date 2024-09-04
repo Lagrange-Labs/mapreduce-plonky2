@@ -24,7 +24,6 @@ use mp2_common::{
     utils::{Fieldable, ToFields},
 };
 use plonky2::{
-    hash::hashing::hash_n_to_hash_no_pad,
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };

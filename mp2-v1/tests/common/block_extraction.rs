@@ -9,7 +9,7 @@ use mp2_common::{
 };
 use mp2_v1::{api, block_extraction};
 
-use super::{proof_storage::ProofStorage, TestContext};
+use super::TestContext;
 
 pub(crate) fn block_number_to_u256_limbs(number: u64) -> Vec<F> {
     const NUM_LIMBS: usize = u256::NUM_LIMBS;

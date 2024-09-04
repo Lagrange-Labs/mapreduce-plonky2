@@ -1,13 +1,13 @@
 //! Storage trie for proving tests
 
-use super::{benchmarker::Benchmarker, proof_storage::ProofStorage, TestContext};
+use super::{benchmarker::Benchmarker, TestContext};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
 };
 use log::debug;
 use mp2_common::{
-    eth::{left_pad32, ProofQuery, StorageSlot},
+    eth::{ProofQuery, StorageSlot},
     mpt_sequential::{MPT_BRANCH_RLP_SIZE, MPT_EXTENSION_RLP_SIZE},
     proof::ProofWithVK,
     utils::{keccak256, Endianness, Packer},
@@ -17,7 +17,6 @@ use mp2_v1::{
     length_extraction,
     values_extraction::{self},
 };
-use rand::{thread_rng, Rng};
 use rlp::{Prototype, Rlp};
 use std::collections::HashMap;
 

@@ -13,7 +13,6 @@ use mp2_v1::{
 use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
-        memory::InMemory,
         pgsql::PgsqlStorage,
         updatetree::{Next, UpdateTree},
         RoEpochKvStorage,

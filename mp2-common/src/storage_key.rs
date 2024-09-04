@@ -304,7 +304,7 @@ mod test {
         field::extension::Extendable,
         hash::hash_types::RichField,
         iop::{target::Target, witness::PartialWitness},
-        plonk::{circuit_builder::CircuitBuilder, config::GenericConfig},
+        plonk::circuit_builder::CircuitBuilder,
     };
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
 

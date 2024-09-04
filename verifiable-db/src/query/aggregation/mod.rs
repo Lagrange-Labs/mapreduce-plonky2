@@ -7,11 +7,7 @@ use mp2_common::{
     types::HashOutput,
     F,
 };
-use plonky2::{
-    field::types::{Field, Sample},
-    hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
-    plonk::config::GenericHashOut,
-};
+use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::GenericHashOut};
 use serde::{Deserialize, Serialize};
 
 pub(crate) mod child_proven_single_path_node;
@@ -27,11 +23,9 @@ mod utils;
 
 use super::{
     api::CircuitInput,
-    computational_hash_ids::{ColumnIDs, Identifiers, Output, PlaceholderIdentifier},
+    computational_hash_ids::{ColumnIDs, Identifiers, PlaceholderIdentifier},
     universal_circuit::{
-        universal_circuit_inputs::{
-            BasicOperation, PlaceholderId, Placeholders, ResultStructure, RowCells,
-        },
+        universal_circuit_inputs::{BasicOperation, PlaceholderId, Placeholders, ResultStructure},
         universal_query_circuit::{
             placeholder_hash, placeholder_hash_without_query_bounds, QueryBound,
         },

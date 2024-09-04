@@ -225,7 +225,7 @@ pub(crate) mod test {
         field::types::{PrimeField64, Sample},
         hash::hash_types::HashOut,
         iop::witness::WitnessWrite,
-        plonk::config::{GenericConfig, GenericHashOut},
+        plonk::config::GenericHashOut,
     };
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use values_extraction::public_inputs::tests::new_extraction_public_inputs;

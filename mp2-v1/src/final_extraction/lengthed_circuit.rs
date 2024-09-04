@@ -153,7 +153,7 @@ mod test {
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{iop::witness::WitnessWrite, plonk::config::GenericConfig};
+    use plonky2::iop::witness::WitnessWrite;
 
     #[derive(Clone, Debug)]
     struct TestLengthedCircuit {

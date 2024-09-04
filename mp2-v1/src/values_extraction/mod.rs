@@ -4,7 +4,7 @@ use mp2_common::{
     group_hashing::map_to_curve_point,
     poseidon::H,
     types::{GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
-    utils::{pack_and_compute_poseidon_value, Endianness, Packer, ToFields},
+    utils::{Endianness, Packer, ToFields},
     F,
 };
 use plonky2::{

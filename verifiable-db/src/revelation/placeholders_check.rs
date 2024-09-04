@@ -1,10 +1,7 @@
 //! Check the placeholder identifiers and values with the specified `final_placeholder_hash`,
 //! compute and return the `num_placeholders` and the `placeholder_ids_hash`.
 
-use crate::query::{
-    aggregation::QueryBounds, computational_hash_ids::PlaceholderIdentifier,
-    universal_circuit::universal_circuit_inputs::PlaceholderIdsSet,
-};
+use crate::query::computational_hash_ids::PlaceholderIdentifier;
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{

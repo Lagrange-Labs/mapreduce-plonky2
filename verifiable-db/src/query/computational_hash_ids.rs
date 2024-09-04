@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::HashMap,
     iter::{once, repeat},
     mem::variant_count,
 };
@@ -31,11 +31,10 @@ use serde::{Deserialize, Serialize};
 use crate::revelation::placeholders_check::placeholder_ids_hash;
 
 use super::{
-    aggregation::{QueryBoundSource, QueryBounds},
+    aggregation::QueryBoundSource,
     universal_circuit::{
         universal_circuit_inputs::{
-            BasicOperation, InputOperand, OutputItem, PlaceholderId, PlaceholderIdsSet,
-            ResultStructure,
+            BasicOperation, InputOperand, OutputItem, PlaceholderIdsSet, ResultStructure,
         },
         universal_query_circuit::QueryBound,
         ComputationalHash, ComputationalHashTarget,

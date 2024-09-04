@@ -132,7 +132,6 @@ mod test {
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
     use mp2_common::C;
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::plonk::config::GenericConfig;
 
     #[derive(Clone, Debug)]
     struct TestSimpleCircuit {

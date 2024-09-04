@@ -11,11 +11,7 @@ use std::{
     path::PathBuf,
 };
 
-use alloy::{
-    eips::BlockNumberOrTag,
-    primitives::{Address, U256},
-    providers::ProviderBuilder,
-};
+use alloy::primitives::U256;
 use anyhow::{Context, Result};
 
 use common::{
@@ -27,20 +23,18 @@ use common::{
         },
     },
     context::{self, ParamsType, TestContextConfig},
-    proof_storage::{ProofKV, ProofStorage, DEFAULT_PROOF_STORE_FOLDER},
+    proof_storage::{ProofKV, DEFAULT_PROOF_STORE_FOLDER},
     table::Table,
-    TableInfo, TestCase, TestContext,
+    TableInfo, TestCase,
 };
 use envconfig::Envconfig;
 use log::info;
-use mp2_common::{eth::ProofQuery, proof::ProofWithVK};
 use parsil::{
     assembler::DynamicCircuitPis,
     parse_and_validate,
     symbols::{ContextProvider, ZkTable},
     ParsilSettings, PlaceholderSettings,
 };
-use serde::Deserialize;
 use test_log::test;
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 

@@ -1,27 +1,24 @@
 use std::{
-    collections::HashMap,
     fmt::Debug,
     iter::{once, repeat},
 };
 
 use alloy::primitives::U256;
-use anyhow::{anyhow, bail, ensure, Error, Result};
+use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    default_config,
     poseidon::{empty_poseidon_hash, H},
-    proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    u256::{CircuitBuilderU256, UInt256Target},
     utils::{FromFields, SelectHashBuilder, ToFields, ToTargets},
-    CHasher, C, D, F,
+    CHasher, D, F,
 };
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::{hash_types::HashOutTarget, hashing::hash_n_to_hash_no_pad},
+    field::types::Field,
+    hash::hashing::hash_n_to_hash_no_pad,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -32,12 +29,7 @@ use plonky2::{
         proof::ProofWithPublicInputsTarget,
     },
 };
-use recursion_framework::{
-    circuit_builder::{
-        CircuitLogicWires, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder,
-    },
-    framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
-};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
@@ -58,8 +50,8 @@ use super::{
     output_no_aggregation::Circuit as NoAggOutputCircuit,
     output_with_aggregation::Circuit as AggOutputCircuit,
     universal_circuit_inputs::{
-        BasicOperation, ColumnCell, InputOperand, Placeholder, PlaceholderId, Placeholders,
-        ResultStructure, RowCells,
+        BasicOperation, InputOperand, Placeholder, PlaceholderId, Placeholders, ResultStructure,
+        RowCells,
     },
     ComputationalHash, ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
 };
@@ -1186,10 +1178,10 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-        aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
+        aggregation::{QueryBoundSource, QueryBounds},
         api::{CircuitInput, Parameters},
         computational_hash_ids::{
-            AggregationOperation, ColumnIDs, HashPermutation, Identifiers, Operation, Output,
+            AggregationOperation, ColumnIDs, HashPermutation, Identifiers, Operation,
             PlaceholderIdentifier,
         },
         public_inputs::PublicInputs,
