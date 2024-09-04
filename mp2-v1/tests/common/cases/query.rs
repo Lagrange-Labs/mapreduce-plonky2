@@ -1,7 +1,11 @@
 use plonky2::{
     field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
 };
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+};
 
 use crate::common::{
     cases::indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
@@ -240,7 +244,7 @@ async fn prove_query(
             genesis: table.genesis_block,
             query: query.clone(),
             pis: &pis,
-            tree: &table.row,
+            cache: row_cache,
             columns: table.columns.clone(),
         };
         let info = RowInfo {
@@ -257,7 +261,7 @@ async fn prove_query(
         query: query.clone(),
         genesis: table.genesis_block,
         pis: &pis,
-        tree: &table.index,
+        cache: index_cache,
         columns: table.columns.clone(),
     };
     let info = IndexInfo {
@@ -436,31 +440,23 @@ fn check_final_outputs(
 /// tree
 /// clippy doesn't see that it can not be done
 #[allow(clippy::needless_lifetimes)]
-async fn prove_query_on_tree<'a, T, V, S, I>(
-    mut planner: QueryPlanner<'a, T, V, S>,
+async fn prove_query_on_tree<'a, I, K, V>(
+    mut planner: QueryPlanner<'a, K, V>,
     info: I,
-    update: UpdateTree<<T as TreeTopology>::Key>,
+    update: UpdateTree<K>,
     primary: BlockPrimaryIndex,
 ) -> Result<Vec<u8>>
 where
-    I: TreeInfo<T, V, S>,
-    <T as TreeTopology>::Key: std::hash::Hash,
-    T: TreeTopology + MutableTree,
-    // NOTICE the ToValue here to get the value associated to a node
-    V: NodePayload + Send + Sync + LagrangeNode,
-    S: TransactionalStorage
-        + TreeStorage<T>
-        + PayloadStorage<T::Key, V>
-        + FromSettings<T::State>
-        + Send
-        + Sync,
+    I: TreeInfo<K, V>,
+    V: NodePayload + Send + Sync + LagrangeNode + Clone,
+    K: Debug + Hash + Clone + Eq + Sync + Send,
 {
     let query_id = planner.query.query.clone();
     let mut workplan = update.into_workplan();
     let mut proven_nodes = HashSet::new();
-    let fetch_only_proven_child = |nctx: NodeContext<<T as TreeTopology>::Key>,
+    let fetch_only_proven_child = |nctx: NodeContext<K>,
                                    cctx: &TestContext,
-                                   proven: &HashSet<<T as TreeTopology>::Key>|
+                                   proven: &HashSet<K>|
      -> (ChildPosition, Vec<u8>) {
         let (child_key, pos) = match (nctx.left, nctx.right) {
             (Some(left), Some(right)) => {
@@ -485,12 +481,12 @@ where
     };
     while let Some(Next::Ready(wk)) = workplan.next() {
         let k = wk.k.clone();
+        // since epoch starts at genesis now, we can directly give the value of the block
+        // number as epoch number
         let (node_ctx, node_payload) = planner
-            .tree
-            // since epoch starts at genesis now, we can directly give the value of the block
-            // number as epoch number
-            .fetch_with_context_at(&k, primary as Epoch)
-            .await;
+            .cache
+            .ctx_and_payload_at(primary as Epoch, &k)
+            .expect("cache is not full");
         let is_satisfying_query = info.is_satisfying_query(&k);
         let embedded_proof = info
             .load_or_prove_embedded(&mut planner, primary, &k, &node_payload)
@@ -526,7 +522,7 @@ where
             );
             let (node_info, left_info, right_info) =
             // we can use primary as epoch now that tree stores epoch from genesis
-                get_node_info(&planner.tree, &k, primary as Epoch).await;
+                get_node_info(&planner.cache, &k, primary as Epoch).await;
             QueryCircuitInput::new_single_path(
                 SubProof::new_embedded_tree_proof(embedded_proof.unwrap())?,
                 left_info,
@@ -549,7 +545,7 @@ where
                 let (child_pos, child_proof) =
                     fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                 let (node_info, left_info, right_info) = get_node_info(
-                    planner.tree,
+                    &planner.cache,
                     &k,
                     // we can use primary as epoch since storage starts epoch at genesis
                     primary as Epoch,
@@ -599,7 +595,7 @@ where
                     let (child_pos, child_proof) =
                         fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                     let (_, left_info, right_info) =
-                        get_node_info(planner.tree, &k, primary as Epoch).await;
+                        get_node_info(&planner.cache, &k, primary as Epoch).await;
                     let unproven = match child_pos {
                         ChildPosition::Left => right_info,
                         ChildPosition::Right => left_info,
@@ -628,61 +624,46 @@ where
     Ok(vec![])
 }
 
-struct QueryPlanner<'a, T, V, S>
+struct QueryPlanner<'a, K, V>
 where
-    T: TreeTopology + MutableTree,
-    // NOTICE the ToValue here to get the value associated to a node
-    V: NodePayload + Send + Sync + LagrangeNode,
-    S: TransactionalStorage
-        + TreeStorage<T>
-        + PayloadStorage<T::Key, V>
-        + FromSettings<T::State>
-        + Send
-        + Sync,
+    K: Debug + Hash + Eq + Clone + Sync + Send,
+    V: Clone,
 {
     query: QueryCooking,
     genesis: BlockPrimaryIndex,
     pis: &'a DynamicCircuitPis,
     ctx: &'a mut TestContext,
-    tree: &'a MerkleTreeKvDb<T, V, S>,
+    cache: &'a WideLineage<K, V>,
     columns: TableColumns,
 }
 
-trait TreeInfo<T, V, S>
+trait TreeInfo<K, V>
 where
-    T: TreeTopology + MutableTree,
-    <T as TreeTopology>::Key: std::hash::Hash,
-    // NOTICE the ToValue here to get the value associated to a node
-    V: NodePayload + Send + Sync + LagrangeNode,
-    S: TransactionalStorage
-        + TreeStorage<T>
-        + PayloadStorage<T::Key, V>
-        + FromSettings<T::State>
-        + Send
-        + Sync,
+    K: Debug + Hash + Eq + Clone + Sync + Send,
+    V: Clone,
 {
     fn is_row_tree(&self) -> bool;
-    fn is_satisfying_query(&self, k: &<T as TreeTopology>::Key) -> bool;
+    fn is_satisfying_query(&self, k: &K) -> bool;
     fn load_proof(
         &self,
         ctx: &TestContext,
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
-        key: &<T as TreeTopology>::Key,
+        key: &K,
     ) -> Result<Vec<u8>>;
     fn save_proof(
         &self,
         ctx: &mut TestContext,
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
-        key: &<T as TreeTopology>::Key,
+        key: &K,
         proof: Vec<u8>,
     ) -> Result<()>;
     async fn load_or_prove_embedded<'a>(
         &self,
-        planner: &mut QueryPlanner<'a, T, V, S>,
+        planner: &mut QueryPlanner<'a, K, V>,
         primary: BlockPrimaryIndex,
-        k: &<T as TreeTopology>::Key,
+        k: &K,
         v: &V,
     ) -> Option<Vec<u8>>;
 }
@@ -691,7 +672,7 @@ struct IndexInfo {
     bounds: QueryBounds,
 }
 
-impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexInfo {
+impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo {
     fn is_row_tree(&self) -> bool {
         false
     }
@@ -728,7 +709,7 @@ impl TreeInfo<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage> for IndexIn
 
     async fn load_or_prove_embedded<'a>(
         &self,
-        planner: &mut QueryPlanner<'a, BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>,
+        planner: &mut QueryPlanner<'a, BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>,
         primary: BlockPrimaryIndex,
         k: &BlockPrimaryIndex,
         v: &IndexNode<BlockPrimaryIndex>,
@@ -758,7 +739,7 @@ struct RowInfo {
     satisfiying_rows: HashSet<RowTreeKey>,
 }
 
-impl TreeInfo<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> for RowInfo {
+impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo {
     fn is_row_tree(&self) -> bool {
         true
     }
@@ -792,7 +773,7 @@ impl TreeInfo<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> for RowInfo {
 
     async fn load_or_prove_embedded<'a>(
         &self,
-        planner: &mut QueryPlanner<'a, RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>,
+        planner: &mut QueryPlanner<'a, RowTreeKey, RowPayload<BlockPrimaryIndex>>,
         primary: BlockPrimaryIndex,
         k: &RowTreeKey,
         _v: &RowPayload<BlockPrimaryIndex>,
@@ -802,7 +783,7 @@ impl TreeInfo<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> for RowInfo {
             Some(
                 prove_single_row(
                     ctx,
-                    &planner.tree,
+                    planner.cache,
                     &planner.columns,
                     primary,
                     &k,
@@ -820,39 +801,45 @@ impl TreeInfo<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage> for RowInfo {
 
 // TODO: make it recursive with async - tentative in `fetch_child_info` but  it doesn't work,
 // recursion with async is weird.
-async fn get_node_info<T, V, S>(
-    tree: &MerkleTreeKvDb<T, V, S>,
-    k: &T::Key,
+async fn get_node_info<K, V>(
+    cache: &WideLineage<K, V>,
+    k: &K,
     at: Epoch,
 ) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>)
 where
-    T: TreeTopology + MutableTree,
+    K: Debug + Hash + Clone + Send + Sync + Eq,
     // NOTICE the ToValue here to get the value associated to a node
-    V: NodePayload + Send + Sync + LagrangeNode,
-    S: TransactionalStorage
-        + TreeStorage<T>
-        + PayloadStorage<T::Key, V>
-        + FromSettings<T::State>
-        + Send
-        + Sync,
+    V: NodePayload + Send + Sync + LagrangeNode + Clone,
 {
     // look at the left child first then right child, then build the node info
-    let (ctx, node_payload) = tree.fetch_with_context_at(k, at).await;
-    // this looks at the value of a child node (left and right), and fetches the grand child
+    let (ctx, node_payload) = cache.ctx_and_payload_at(at, k).expect("cache not filled");
+    // this looks at the value of a child node (left and right), and fetches the grandchildren
     // information to be able to build their respective node info.
-    let fetch_ni = async |k: Option<T::Key>| -> (Option<NodeInfo>, Option<HashOutput>) {
+    let fetch_ni = async |k: Option<K>| -> (Option<NodeInfo>, Option<HashOutput>) {
         match k {
             None => (None, None),
             Some(child_k) => {
-                let (child_ctx, child_payload) = tree.fetch_with_context_at(&child_k, at).await;
+                let (child_ctx, child_payload) = cache
+                    .ctx_and_payload_at(at, &child_k)
+                    .expect("cache not filled");
                 // we need the grand child hashes for constructing the node info of the
                 // children of the node in argument
                 let child_left_hash = match child_ctx.left {
-                    Some(left_left_k) => Some(tree.fetch_at(&left_left_k, at).await.hash()),
+                    Some(left_left_k) => Some(
+                        cache
+                            .payload_at(at, &left_left_k)
+                            .expect("cache not filled")
+                            .hash(),
+                    ),
                     None => None,
                 };
                 let child_right_hash = match child_ctx.right {
-                    Some(left_right_k) => Some(tree.fetch_at(&left_right_k, at).await.hash()),
+                    Some(left_right_k) => Some(
+                        cache
+                            .payload_at(at, &left_right_k)
+                            .expect("cache not full")
+                            .hash(),
+                    ),
                     None => None,
                 };
                 let left_ni = NodeInfo::new(
@@ -885,7 +872,7 @@ where
 
 async fn prove_single_row(
     ctx: &mut TestContext,
-    tree: &MerkleRowTree,
+    cache: &WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     columns: &TableColumns,
     primary: BlockPrimaryIndex,
     row_key: &RowTreeKey,
@@ -894,7 +881,9 @@ async fn prove_single_row(
 ) -> Result<Vec<u8>> {
     // 1. Get the all the cells including primary and secondary index
     // Note we can use the primary as epoch since now epoch == primary in the storage
-    let (row_ctx, row_payload) = tree.fetch_with_context_at(row_key, primary as Epoch).await;
+    let (row_ctx, row_payload) = cache
+        .ctx_and_payload_at(primary as Epoch, row_key)
+        .expect("cache not full");
 
     // API is gonna change on this but right now, we have to sort all the "rest" cells by index
     // in the tree, and put the primary one and secondary one in front
