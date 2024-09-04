@@ -70,4 +70,10 @@ pub enum ValidationError {
 
     #[error("`{0}`: reserved identifier")]
     ReservedIdentifier(String),
+
+    #[error("unable to convert `{0}` to a U256")]
+    InvalidInteger(String),
+
+    #[error("NULL-related ordering specifiers unsupported")]
+    NullRelatedOrdering,
 }

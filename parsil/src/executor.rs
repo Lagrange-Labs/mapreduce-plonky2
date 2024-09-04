@@ -20,7 +20,7 @@ use crate::{
     placeholders,
     symbols::{ColumnKind, ContextProvider},
     utils::str_to_u256,
-    visitor::{AstPass, Visit},
+    visitor::{AstMutator, AstVisitor, Visit, VisitMut},
     ParsilSettings,
 };
 
@@ -136,7 +136,7 @@ impl TranslatedQuery {
     pub fn normalize_placeholder_names(&mut self) -> SafeQuery {
         assert!(matches!(self.query, SafeQuery::ZkQuery(_)));
         let mut r = self.query.as_ref().to_owned();
-        r.visit(self).unwrap();
+        r.visit_mut(self).unwrap();
         SafeQuery::PgSqlQuery(r)
     }
 
@@ -168,12 +168,13 @@ impl TranslatedQuery {
             settings,
             placeholders,
         };
-        r.visit(&mut interpolator)?;
+        r.visit_mut(&mut interpolator)?;
         Ok(SafeQuery::InterpolatedQuery(r))
     }
 }
 
-impl AstPass for TranslatedQuery {
+impl AstMutator for TranslatedQuery {
+    type Error = anyhow::Error;
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         if let Expr::Value(Value::Placeholder(name)) = expr {
             *name = self.placeholder_name_mapping[name].to_string();
@@ -186,7 +187,9 @@ struct PlaceholderInterpolator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
     placeholders: &'a Placeholders,
 }
-impl<'a, C: ContextProvider> AstPass for PlaceholderInterpolator<'a, C> {
+impl<'a, C: ContextProvider> AstMutator for PlaceholderInterpolator<'a, C> {
+    type Error = anyhow::Error;
+
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         if let Some(replacement) = if let Expr::Value(Value::Placeholder(name)) = expr {
             let value = self
@@ -333,7 +336,7 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
     }
 
     fn process(&mut self, query: &mut Query) -> Result<()> {
-        query.visit(self)?;
+        query.visit_mut(self)?;
 
         let r = Query {
             with: None,
@@ -386,7 +389,9 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
         Ok(())
     }
 }
-impl<'a, C: ContextProvider> AstPass for KeyFetcher<'a, C> {
+impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
+    type Error = anyhow::Error;
+
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
         // When we meet a SELECT, insert a * to be sure to bubble up the key &
         // block number
@@ -533,7 +538,9 @@ impl<'a, C: ContextProvider> Executor<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstPass for Executor<'a, C> {
+impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
+    type Error = anyhow::Error;
+
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         convert_number_string(expr)?;
         convert_funcalls(expr)?;
@@ -680,7 +687,7 @@ pub fn generate_query_execution<C: ContextProvider>(
 ) -> Result<TranslatedQuery> {
     let mut executor = Executor::new(settings)?;
     let mut query_execution = query.clone();
-    query_execution.visit(&mut executor)?;
+    query_execution.visit_mut(&mut executor)?;
 
     TranslatedQuery::make(SafeQuery::ZkQuery(query_execution), settings)
 }

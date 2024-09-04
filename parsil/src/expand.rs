@@ -1,13 +1,13 @@
 //! Expand high-level operations (e.g. IN or BETWEEN) into combination of
 //! operations supported by the circuits.
 
+use crate::visitor::{AstMutator, VisitMut};
 use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
 
-use crate::visitor::{AstPass, Visit};
-
 struct Expander;
+impl AstMutator for Expander {
+    type Error = anyhow::Error;
 
-impl AstPass for Expander {
     fn pre_expr(&mut self, e: &mut Expr) -> anyhow::Result<()> {
         #[allow(non_snake_case)]
         let TRUE = Expr::Value(Value::Number("1".to_string(), false));
@@ -134,5 +134,5 @@ impl AstPass for Expander {
 }
 
 pub fn expand(q: &mut Query) {
-    q.visit(&mut Expander).expect("can not fail");
+    q.visit_mut(&mut Expander).expect("can not fail");
 }
