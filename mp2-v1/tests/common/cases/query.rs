@@ -812,8 +812,8 @@ where
     V: NodePayload + Send + Sync + LagrangeNode + Clone,
 {
     // look at the left child first then right child, then build the node info
-    let (ctx, node_payload) = cache.ctx_and_payload_at(at, k).expect("cache not full");
-    // this looks at the value of a child node (left and right), and fetches the grand child
+    let (ctx, node_payload) = cache.ctx_and_payload_at(at, k).expect("cache not filled");
+    // this looks at the value of a child node (left and right), and fetches the grandchildren
     // information to be able to build their respective node info.
     let fetch_ni = async |k: Option<K>| -> (Option<NodeInfo>, Option<HashOutput>) {
         match k {
@@ -821,14 +821,14 @@ where
             Some(child_k) => {
                 let (child_ctx, child_payload) = cache
                     .ctx_and_payload_at(at, &child_k)
-                    .expect("cache not full");
+                    .expect("cache not filled");
                 // we need the grand child hashes for constructing the node info of the
                 // children of the node in argument
                 let child_left_hash = match child_ctx.left {
                     Some(left_left_k) => Some(
                         cache
                             .payload_at(at, &left_left_k)
-                            .expect("cache not full")
+                            .expect("cache not filled")
                             .hash(),
                     ),
                     None => None,
