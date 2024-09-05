@@ -15,7 +15,10 @@ use mp2_common::{
 use mp2_v1::{
     api::{generate_proof, CircuitInput, PublicParameters},
     length_extraction,
-    values_extraction::{self},
+    values_extraction::{
+        self, identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+        identifier_single_var_column,
+    },
 };
 use rlp::{Prototype, Rlp};
 use std::collections::HashMap;
@@ -217,27 +220,44 @@ impl TrieNode {
 
         // Build the leaf circuit input.
         let (name, input) = match slot {
-            StorageSlot::Simple(slot) => (
-                "indexing::extraction::mpt::leaf::single",
-                values_extraction::CircuitInput::new_single_variable_leaf(
-                    node.clone(),
-                    *slot as u8,
+            StorageSlot::Simple(slot) => {
+                let slot = *slot as u8;
+                let column_id =
+                    identifier_single_var_column(slot, ctx.contract_address, ctx.chain_id, vec![]);
+                (
+                    "indexing::extraction::mpt::leaf::single",
+                    values_extraction::CircuitInput::new_single_variable_leaf(
+                        node.clone(),
+                        slot,
+                        column_id,
+                    ),
+                )
+            }
+            StorageSlot::Mapping(mapping_key, slot) => {
+                let slot = *slot as u8;
+                let key_id = identifier_for_mapping_key_column(
+                    slot,
                     ctx.contract_address,
                     ctx.chain_id,
                     vec![],
-                ),
-            ),
-            StorageSlot::Mapping(mapping_key, slot) => (
-                "indexing::extraction::mpt::leaf::mapping",
-                values_extraction::CircuitInput::new_mapping_variable_leaf(
-                    node.clone(),
-                    *slot as u8,
-                    mapping_key.clone(),
+                );
+                let value_id = identifier_for_mapping_value_column(
+                    slot,
                     ctx.contract_address,
                     ctx.chain_id,
                     vec![],
-                ),
-            ),
+                );
+                (
+                    "indexing::extraction::mpt::leaf::mapping",
+                    values_extraction::CircuitInput::new_mapping_variable_leaf(
+                        node.clone(),
+                        slot,
+                        mapping_key.clone(),
+                        key_id,
+                        value_id,
+                    ),
+                )
+            }
         };
         let input = CircuitInput::ValuesExtraction(input);
 
