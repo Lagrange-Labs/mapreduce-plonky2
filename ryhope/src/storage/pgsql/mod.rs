@@ -642,16 +642,22 @@ where
     // FIXME: should return Result
     fn on_commit_success(&mut self) {
         assert!(self.in_tx);
-        trace!("[{self}] commit succesful; updating inner state");
+        trace!(
+            "[{self}] commit succesful; updating inner state - current epoch {}",
+            self.epoch
+        );
         self.in_tx = false;
-        self.epoch = self.epoch + 1;
+        self.epoch += 1;
         self.state.commit_success();
         self.tree_store.lock().unwrap().new_epoch();
     }
 
     fn on_commit_failed(&mut self) {
         assert!(self.in_tx);
-        trace!("[{self}] commit failed; updating inner state");
+        trace!(
+            "[{self}] commit failed; updating inner state - current epoch {}",
+            self.epoch
+        );
         self.in_tx = false;
         self.state.commit_failed();
         self.tree_store.lock().unwrap().clear();
