@@ -3,14 +3,11 @@
 use super::{
     branch::{BranchCircuit, BranchWires},
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
-    identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-    identifier_single_var_column,
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
 };
 use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
-use alloy::primitives::Address;
 use anyhow::{bail, Result};
 use log::debug;
 use mp2_common::{
@@ -53,19 +50,11 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     /// Create a circuit input for proving a leaf MPT node of single variable.
-    pub fn new_single_variable_leaf(
-        node: Vec<u8>,
-        slot: u8,
-        contract_address: &Address,
-        chain_id: u64,
-        extra: Vec<u8>,
-    ) -> Self {
-        let id = identifier_single_var_column(slot, contract_address, chain_id, extra);
-
+    pub fn new_single_variable_leaf(node: Vec<u8>, slot: u8, column_id: u64) -> Self {
         CircuitInput::LeafSingle(LeafSingleCircuit {
             node,
             slot: SimpleSlot::new(slot),
-            id,
+            id: column_id,
         })
     }
 
@@ -74,14 +63,9 @@ impl CircuitInput {
         node: Vec<u8>,
         slot: u8,
         mapping_key: Vec<u8>,
-        contract_address: &Address,
-        chain_id: u64,
-        extra: Vec<u8>,
+        key_id: u64,
+        value_id: u64,
     ) -> Self {
-        let key_id =
-            identifier_for_mapping_key_column(slot, contract_address, chain_id, extra.clone());
-        let value_id = identifier_for_mapping_value_column(slot, contract_address, chain_id, extra);
-
         CircuitInput::LeafMapping(LeafMappingCircuit {
             node,
             slot: MappingSlot::new(slot, mapping_key),
@@ -621,21 +605,21 @@ mod tests {
 
         println!("Proving leaf 1...");
         let leaf_input1 = if is_simple_aggregation {
-            CircuitInput::new_single_variable_leaf(
-                proof1[1].clone(),
-                TEST_SLOT,
-                &contract_address,
-                chain_id,
-                vec![],
-            )
+            let column_id =
+                identifier_single_var_column(TEST_SLOT, &contract_address, chain_id, vec![]);
+            CircuitInput::new_single_variable_leaf(proof1[1].clone(), TEST_SLOT, column_id)
         } else {
+            let key_id =
+                identifier_for_mapping_key_column(TEST_SLOT, &contract_address, chain_id, vec![]);
+            let value_id =
+                identifier_for_mapping_value_column(TEST_SLOT, &contract_address, chain_id, vec![]);
+
             CircuitInput::new_mapping_variable_leaf(
                 proof1[1].clone(),
                 TEST_SLOT,
                 key1.to_vec(),
-                &contract_address,
-                chain_id,
-                vec![],
+                key_id,
+                value_id,
             )
         };
         let now = std::time::Instant::now();
@@ -653,21 +637,20 @@ mod tests {
 
         println!("Proving leaf 2...");
         let leaf_input2 = if is_simple_aggregation {
-            CircuitInput::new_single_variable_leaf(
-                proof2[1].clone(),
-                TEST_SLOT + 1,
-                &contract_address,
-                chain_id,
-                vec![],
-            )
+            let column_id =
+                identifier_single_var_column(TEST_SLOT + 1, &contract_address, chain_id, vec![]);
+            CircuitInput::new_single_variable_leaf(proof2[1].clone(), TEST_SLOT + 1, column_id)
         } else {
+            let key_id =
+                identifier_for_mapping_key_column(TEST_SLOT, &contract_address, chain_id, vec![]);
+            let value_id =
+                identifier_for_mapping_value_column(TEST_SLOT, &contract_address, chain_id, vec![]);
             CircuitInput::new_mapping_variable_leaf(
                 proof2[1].clone(),
                 TEST_SLOT,
                 key2.to_vec(),
-                &contract_address,
-                chain_id,
-                vec![],
+                key_id,
+                value_id,
             )
         };
         let now = std::time::Instant::now();
@@ -721,21 +704,24 @@ mod tests {
         assert_eq!(p1[p1.len() - 2], p2[p2.len() - 2]);
 
         let l1_inputs = if is_simple_aggregation {
+            let column_id =
+                identifier_single_var_column(TEST_SLOT, &contract_address, chain_id, vec![]);
             CircuitInput::new_single_variable_leaf(
                 p1.last().unwrap().to_vec(),
                 TEST_SLOT,
-                &contract_address,
-                chain_id,
-                vec![],
+                column_id,
             )
         } else {
+            let key_id =
+                identifier_for_mapping_key_column(TEST_SLOT, &contract_address, chain_id, vec![]);
+            let value_id =
+                identifier_for_mapping_value_column(TEST_SLOT, &contract_address, chain_id, vec![]);
             CircuitInput::new_mapping_variable_leaf(
                 p1.last().unwrap().to_vec(),
                 TEST_SLOT,
                 test_data.mapping_key.clone().unwrap(),
-                &contract_address,
-                chain_id,
-                vec![],
+                key_id,
+                value_id,
             )
         };
 
