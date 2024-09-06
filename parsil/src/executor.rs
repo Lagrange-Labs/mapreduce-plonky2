@@ -622,7 +622,7 @@ impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
                                 into: None,
                                 from: vec![TableWithJoins {
                                     relation: TableFactor::Table {
-                                        name: ObjectName(vec![Ident::new(concrete_table_name)]),
+                                        name: ObjectName(vec![Ident::new(table.zktable_name)]),
                                         alias: None,
                                         args: None,
                                         with_hints: vec![],
