@@ -1002,7 +1002,7 @@ async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
     let min = max - 1;
 
     let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.row_table_name();
+    let table_name = table.name.clone();
     let placeholders = Placeholders::new_empty(U256::from(min), U256::from(max));
 
     let query_str = format!(
@@ -1033,7 +1033,7 @@ async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCo
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.row_table_name();
+    let table_name = table.name.clone();
 
     let filtering_value = *BASE_VALUE + U256::from(5);
 
@@ -1074,7 +1074,7 @@ async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.row_table_name();
+    let table_name = table.name.clone();
     let max_block = min_block + 1;
     // primary_min_placeholder = ".."
     // primary_max_placeholder = ".."

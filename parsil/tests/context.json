@@ -1,7 +1,7 @@
 [
     {
-        "user_name": "table1",
-        "name": "contract_user_table1",
+        "user_facing_name": "table1",
+        "zktable_name": "contract_user_table1",
         "columns": [
             {
                 "name": "block",
@@ -16,8 +16,8 @@
         ]
     },
     {
-        "user_name": "table2",
-        "name": "contract_user_table2",
+        "user_facing_name": "table2",
+        "zktable_name": "contract_user_table2",
         "id": 123456,
         "columns": [
             {
@@ -38,8 +38,8 @@
         ]
     },
     {
-        "user_name": "T",
-        "name": "contract_user_T",
+        "user_facing_name": "T",
+        "zktable_name": "contract_user_T",
         "columns": [
             {
                 "name": "block",
@@ -79,8 +79,8 @@
         ]
     },
     {
-        "user_name": "row_mapping_table",
-        "name": "row_mapping_table",
+        "user_facing_name": "row_mapping_table",
+        "zktable_name": "row_mapping_table_rows",
         "columns": [
             {
                 "name": "block_number",

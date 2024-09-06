@@ -8,6 +8,7 @@ use sqlparser::ast::Query;
 use symbols::{ContextProvider, FileContextProvider};
 use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
+use visitor::AstMutator;
 
 mod assembler;
 mod bracketer;
@@ -112,11 +113,11 @@ fn main() -> Result<()> {
             match kind {
                 QueryKind::Execute => {
                     let mut translated = executor::generate_query_execution(&mut query, &settings)?;
-                    println!("{}", translated.apply());
+                    println!("{}", translated.query.to_display());
                 }
                 QueryKind::Keys => {
                     let mut translated = executor::generate_query_keys(&mut query, &settings)?;
-                    println!("{}", translated.apply());
+                    println!("{}", translated.query.to_display());
                 }
             }
         }
@@ -130,7 +131,7 @@ fn main() -> Result<()> {
             let mut q = isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
             if to_keys {
                 let mut q = executor::generate_query_keys(&mut q, &settings)?;
-                println!("Query: {}", q.apply());
+                println!("Query: {}", q.query.to_display());
             } else {
                 println!("{}", q);
             }
