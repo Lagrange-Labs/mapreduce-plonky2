@@ -378,10 +378,10 @@ mod tests {
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
 
-        let key = random_vector(32);
+        let key: Vec<u8> = random_vector(32);
         for i in 0..N_REAL {
             let mut key = key.clone();
-            key[31] = key[31] + i as u8;
+            key[31] = key[31].wrapping_add(i as u8);
             let value = random_vector(32);
             trie.insert(&key, &value).unwrap();
 
