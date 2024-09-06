@@ -7,9 +7,9 @@ use std::{collections::HashMap, fmt::Debug};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZkTable {
     /// The user-facing name of this table
-    pub user_name: String,
+    pub user_facing_name: String,
     /// The inner name of this table
-    pub name: String,
+    pub zktable_name: String,
     /// Columns accessible from this table
     pub columns: Vec<ZkColumn>,
 }
@@ -126,7 +126,7 @@ impl FileContextProvider {
         Ok(FileContextProvider {
             tables: tables
                 .into_iter()
-                .map(|t| (t.user_name.clone(), t))
+                .map(|t| (t.user_facing_name.clone(), t))
                 .collect(),
         })
     }

@@ -20,7 +20,7 @@ use crate::{
     placeholders,
     symbols::{ColumnKind, ContextProvider},
     utils::str_to_u256,
-    visitor::{AstMutator, AstVisitor, Visit, VisitMut},
+    visitor::{AstMutator, VisitMut},
     ParsilSettings,
 };
 
@@ -411,11 +411,11 @@ impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
     fn post_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         if let Some(replacement) = match table_factor {
             TableFactor::Table { name, alias, .. } => {
-                // The actual table being referenced
-                let concrete_table_name = &name.0[0].value;
+                // The vTable being referenced
+                let user_facing_name = &name.0[0].value;
 
                 // Fetch all the column declared in this table
-                let table = self.settings.context.fetch_table(&concrete_table_name)?;
+                let table = self.settings.context.fetch_table(&user_facing_name)?;
                 let table_columns = &table.columns;
 
                 // Extract the apparent table name (either the concrete one
@@ -431,7 +431,7 @@ impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
                         },
                     )
                 } else {
-                    (concrete_table_name.to_owned(), None)
+                    (user_facing_name.to_owned(), None)
                 };
 
                 let select_items =
@@ -479,7 +479,7 @@ impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
                             into: None,
                             from: vec![TableWithJoins {
                                 relation: TableFactor::Table {
-                                    name: ObjectName(vec![Ident::new(concrete_table_name)]),
+                                    name: ObjectName(vec![Ident::new(table.zktable_name)]),
                                     alias: None,
                                     args: None,
                                     with_hints: vec![],

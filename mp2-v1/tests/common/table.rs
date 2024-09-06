@@ -560,8 +560,8 @@ impl Table {
         let zk_columns = self.columns.to_zkcolumns();
         Ok(ZkTable {
             // NOTE : we always look data in the row table
-            name: self.row_table_name(),
-            user_name: self.name.clone(),
+            zktable_name: self.row_table_name(),
+            user_facing_name: self.name.clone(),
             columns: zk_columns,
         })
     }
