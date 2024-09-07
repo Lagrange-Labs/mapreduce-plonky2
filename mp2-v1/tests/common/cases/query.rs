@@ -136,20 +136,20 @@ async fn query_mapping(
     table: &Table,
     table_hash: MetadataHash,
 ) -> Result<()> {
-    //let query_info = cook_query_between_blocks(table).await?;
-    //test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    let query_info = cook_query_between_blocks(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
 
-    //let query_info = cook_query_unique_secondary_index(table).await?;
-    //test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    let query_info = cook_query_unique_secondary_index(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     //// cook query with custom placeholders
-    //let query_info = cook_query_secondary_index_placeholder(table).await?;
-    //test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    let query_info = cook_query_secondary_index_placeholder(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query filtering over a secondary index value not valid in all the blocks
     let query_info = cook_query_non_matching_entries_some_blocks(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with no valid blocks
-    //let query_info = cook_query_no_matching_entries(table).await?;
-    //test_query_mapping(ctx, table, query_info, &table_hash).await
+    let query_info = cook_query_no_matching_entries(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     Ok(())
 }
 
