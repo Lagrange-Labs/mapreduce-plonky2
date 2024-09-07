@@ -16,11 +16,11 @@ use crate::common::{
         indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
         planner::{IndexInfo, RowInfo},
     },
-    hash::Hash,
     index_tree::MerkleIndexTree,
     proof_storage::{ProofKey, QueryID},
     rowtree::MerkleRowTree,
     table::{self, TableColumns},
+    TableInfo,
 };
 
 use super::{
@@ -63,6 +63,7 @@ use parsil::{
 };
 use ryhope::{
     storage::{
+        pgsql::ToFromBytea,
         updatetree::{Next, UpdateTree},
         EpochKvStorage, FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage,
         TreeStorage, TreeTransactionalStorage, WideLineage,
@@ -731,7 +732,6 @@ where
                 let (child_ctx, child_payload) = lookup
                     .fetch_ctx_and_payload_at(at, &child_k)
                     .await
-                    .ctx_and_payload_at(at, &child_k)
                     .expect("cache not filled");
                 // we need the grand child hashes for constructing the node info of the
                 // children of the node in argument
@@ -1054,28 +1054,6 @@ pub struct QueryCooking {
 }
 
 type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
-
-async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
-    let max = table.row.current_epoch();
-    let min = max - 1;
-
-    let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.row_table_name();
-    let placeholders = Placeholders::new_empty(U256::from(min), U256::from(max));
-
-    let query_str = format!(
-        "SELECT AVG({value_column})
-                FROM {table_name}
-                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
-                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER};"
-    );
-    Ok(QueryCooking {
-        min_block: min as BlockPrimaryIndex,
-        max_block: max as BlockPrimaryIndex,
-        query: query_str,
-        placeholders,
-    })
-}
 
 async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
     let max = table.row.current_epoch();
