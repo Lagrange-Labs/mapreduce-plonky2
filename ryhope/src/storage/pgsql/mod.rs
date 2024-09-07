@@ -511,14 +511,22 @@ where
             )
             .await?;
 
-        Ok(if rows.is_empty() {
+        if rows.is_empty() {
             // The row may not exist
-            None
+            Ok(None)
         } else if rows.len() == 1 {
-            Some((T::node_from_row(&rows[0])?, T::payload_from_row(&rows[0])?))
+            Ok(Some((
+                T::node_from_row(&rows[0])?,
+                T::payload_from_row(&rows[0])?,
+            )))
         } else {
-            panic!("unexpected duplicated row");
-        })
+            bail!(
+                "[{self}] failed to roll back {key:?} to {}: {} rows matched the roll back query (i.e. {KEY} = {key:?} AND {VALID_UNTIL} = {})",
+                self.epoch,
+                rows.len(),
+                self.epoch+1
+            )
+        }
     }
 
     /// Birth a new node at the new epoch
@@ -537,7 +545,7 @@ where
 
     async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
         ensure!(self.in_tx, "not in a transaction");
-        trace!("[{}] commiting in a transaction...", self);
+        trace!("[{self}] commiting in a transaction...");
 
         // The putative new stamps if everything goes well
         let new_epoch = self.epoch + 1;
