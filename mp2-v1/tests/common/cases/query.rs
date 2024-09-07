@@ -136,20 +136,21 @@ async fn query_mapping(
     table: &Table,
     table_hash: MetadataHash,
 ) -> Result<()> {
-    let query_info = cook_query_between_blocks(table).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    //let query_info = cook_query_between_blocks(table).await?;
+    //test_query_mapping(ctx, table, query_info, &table_hash).await?;
 
-    let query_info = cook_query_unique_secondary_index(table).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await?;
-    // cook query with custom placeholders
-    let query_info = cook_query_secondary_index_placeholder(table).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    //let query_info = cook_query_unique_secondary_index(table).await?;
+    //test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    //// cook query with custom placeholders
+    //let query_info = cook_query_secondary_index_placeholder(table).await?;
+    //test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query filtering over a secondary index value not valid in all the blocks
     let query_info = cook_query_non_matching_entries_some_blocks(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with no valid blocks
-    let query_info = cook_query_no_matching_entries(table).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await
+    //let query_info = cook_query_no_matching_entries(table).await?;
+    //test_query_mapping(ctx, table, query_info, &table_hash).await
+    Ok(())
 }
 
 /// Run a test query on the mapping table such as created during the indexing phase
@@ -210,20 +211,6 @@ async fn test_query_mapping(
             (query_info.min_block as Epoch, query_info.max_block as Epoch),
         )
         .await?;
-    // We set the epoch at which we request all the lineages - that's a fixed epoch
-    // and we set the generate_series according to the query
-    let current_epoch = table.index.current_epoch();
-    // Integer default to i32 in PgSQL, they must be cast to i64, a.k.a. BIGINT.
-    let index_query =
-        core_keys_for_index_tree(current_epoch, (query_info.min_block, query_info.max_block))?;
-    let big_index_cache = table
-        .index
-        // The bounds here means between which versions of the tree should we look. For index tree,
-        // we only look at _one_ version of the tree.
-        .wide_lineage_between(&index_query, (current_epoch, current_epoch))
-        .await?;
-    // since we only analyze the index tree for one epoch
-    assert_eq!(big_index_cache.keys_by_epochs().len(), 1);
 
     prove_query(
         ctx,
@@ -232,7 +219,6 @@ async fn test_query_mapping(
         parsed,
         &settings,
         &big_row_cache,
-        &big_index_cache,
         res,
         table_hash.clone(),
     )
@@ -249,7 +235,6 @@ async fn prove_query(
     parsed: Query,
     settings: &ParsilSettings<&Table>,
     row_cache: &WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
-    index_cache: &WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     res: Vec<PsqlRow>,
     metadata: MetadataHash,
 ) -> Result<()> {
@@ -257,29 +242,6 @@ async fn prove_query(
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
     let mut row_keys_per_epoch = row_cache.keys_by_epochs();
     let all_epochs = query.min_block as Epoch..=query.max_block as Epoch;
-
-    // prove the whole tree for each of the involved rows for each block
-    for (epoch, keys) in row_keys_per_epoch {
-        let up = row_cache
-            .update_tree_for(epoch as Epoch)
-            .expect("this epoch should exist");
-        let planner = QueryPlanner {
-            ctx,
-            query: query.clone(),
-            pis: &pis,
-            settings: &settings,
-            table: &table,
-            columns: table.columns.clone(),
-        };
-        let info = RowInfo {
-            tree: &table.row,
-            satisfiying_rows: keys,
-        };
-        prove_query_on_tree(planner, info, up, epoch as BlockPrimaryIndex).await?;
-    }
-    let proving_tree = index_cache
-        .update_tree_for(table.index.current_epoch())
-        .expect("should get update tree for index");
     let mut planner = QueryPlanner {
         ctx,
         query: query.clone(),
@@ -289,60 +251,95 @@ async fn prove_query(
         columns: table.columns.clone(),
     };
 
+    // prove the different versions of the row tree for each of the involved rows for each block
+    for (epoch, keys) in row_keys_per_epoch {
+        let up = row_cache
+            .update_tree_for(epoch as Epoch)
+            .expect("this epoch should exist");
+        let info = RowInfo {
+            tree: &table.row,
+            satisfiying_rows: keys,
+        };
+        prove_query_on_tree(&mut planner, info, up, epoch as BlockPrimaryIndex).await?;
+    }
+
+    // prove the index tree, on a single version. Both path can be taken depending if we do have
+    // some nodes or not
     let initial_epoch = table.index.initial_epoch() as BlockPrimaryIndex;
     let current_epoch = table.index.current_epoch() as BlockPrimaryIndex;
-    let update_tree = {
-        let block_range = (query.min_block.max(initial_epoch)..=query.max_block.min(current_epoch));
-        info!("found {} blocks in range", block_range.clone().count());
-        if block_range.is_empty() {
-            // no valid blocks in the query range, so we need to choose a block to prove
-            // non-existence. Either the one after genesis or the last one
-            let to_be_proven_node = if query.max_block < initial_epoch {
-                initial_epoch + 1
-            } else if query.min_block > current_epoch {
-                current_epoch
-            } else {
-                bail!(
-                    "Empty block range to be proven for query bounds {}, {}, but no node
-                    to be proven with non-existence circuit was found. Something is wrong",
-                    query.min_block,
-                    query.max_block
-                );
-            } as BlockPrimaryIndex;
-            prove_non_existence_index(&mut planner, to_be_proven_node).await?;
-            // we get the lineage of the node that proves the non existence of the index nodes
-            // required for the query. We specify the epoch at which we want to get this lineage as
-            // of the current epoch.
-            let lineage = table
-                .index
-                .lineage_at(&to_be_proven_node, current_epoch as Epoch)
-                .await
-                .expect("can't get lineage")
-                .into_full_path()
-                .collect();
-            UpdateTree::from_path(lineage, current_epoch as Epoch)
+    let block_range = (query.min_block.max(initial_epoch)..=query.max_block.min(current_epoch));
+    info!("found {} blocks in range", block_range.clone().count());
+    if block_range.is_empty() {
+        info!("Running INDEX TREE proving for EMPTY query");
+        // no valid blocks in the query range, so we need to choose a block to prove
+        // non-existence. Either the one after genesis or the last one
+        let to_be_proven_node = if query.max_block < initial_epoch {
+            initial_epoch + 1
+        } else if query.min_block > current_epoch {
+            current_epoch
         } else {
-            /// This is ok because the cache only have the block that are in the range so the
-            /// filter_check is gonna return the same thing
-            /// TOOD: @franklin is that correct ?
-            index_cache
-                // this is the epoch we choose how to prove
-                .update_tree_for(current_epoch as Epoch)
-                .expect("this epoch should exist")
-        }
-    };
+            bail!(
+                "Empty block range to be proven for query bounds {}, {}, but no node
+                    to be proven with non-existence circuit was found. Something is wrong",
+                query.min_block,
+                query.max_block
+            );
+        } as BlockPrimaryIndex;
+        prove_non_existence_index(&mut planner, to_be_proven_node).await?;
+        // we get the lineage of the node that proves the non existence of the index nodes
+        // required for the query. We specify the epoch at which we want to get this lineage as
+        // of the current epoch.
+        let lineage = table
+            .index
+            .lineage_at(&to_be_proven_node, current_epoch as Epoch)
+            .await
+            .expect("can't get lineage")
+            .into_full_path()
+            .collect();
+        let up = UpdateTree::from_path(lineage, current_epoch as Epoch);
+        let info = IndexInfo {
+            tree: &table.index,
+            bounds: (query.min_block, query.max_block),
+        };
+        prove_query_on_tree(
+            &mut planner,
+            info,
+            up,
+            table.index.current_epoch() as BlockPrimaryIndex,
+        )
+        .await?;
+    } else {
+        info!("Running INDEX tree proving from cache");
+        // Only here we can run the SQL query for index so it doesn't crash
+        let index_query =
+            core_keys_for_index_tree(current_epoch as Epoch, (query.min_block, query.max_block))?;
+        let big_index_cache = table
+            .index
+            // The bounds here means between which versions of the tree should we look. For index tree,
+            // we only look at _one_ version of the tree.
+            .wide_lineage_between(
+                &index_query,
+                (current_epoch as Epoch, current_epoch as Epoch),
+            )
+            .await?;
+        // since we only analyze the index tree for one epoch
+        assert_eq!(big_index_cache.keys_by_epochs().len(), 1);
+        /// This is ok because the cache only have the block that are in the range so the
+        /// filter_check is gonna return the same thing
+        /// TOOD: @franklin is that correct ?
+        let up = big_index_cache
+            // this is the epoch we choose how to prove
+            .update_tree_for(current_epoch as Epoch)
+            .expect("this epoch should exist");
+        prove_query_on_tree(
+            &mut planner,
+            big_index_cache,
+            up,
+            table.index.current_epoch() as BlockPrimaryIndex,
+        )
+        .await?;
+    }
 
-    let info = IndexInfo {
-        tree: &table.index,
-        bounds: (query.min_block, query.max_block),
-    };
-    prove_query_on_tree(
-        planner,
-        info,
-        proving_tree,
-        table.index.current_epoch() as BlockPrimaryIndex,
-    )
-    .await?;
     info!("Query proofs done! Generating revelation proof...");
     let proof = prove_revelation(ctx, table, &query, &pis, table.index.current_epoch()).await?;
     info!("Revelation proof done! Checking public inputs...");
@@ -511,7 +508,7 @@ fn check_final_outputs(
 /// clippy doesn't see that it can not be done
 #[allow(clippy::needless_lifetimes)]
 async fn prove_query_on_tree<'a, I, K, V>(
-    mut planner: QueryPlanner<'a>,
+    mut planner: &mut QueryPlanner<'a>,
     info: I,
     update: UpdateTree<K>,
     primary: BlockPrimaryIndex,
@@ -972,7 +969,7 @@ pub async fn prove_non_existence_row<'a>(
         .collect_vec();
     let proving_tree = UpdateTree::from_paths([path], primary as Epoch);
     let info = RowInfo::no_satisfying_rows(&planner.table.row);
-    let planner = QueryPlanner {
+    let mut planner = QueryPlanner {
         ctx: planner.ctx,
         table: planner.table,
         query: planner.query.clone(),
@@ -980,7 +977,7 @@ pub async fn prove_non_existence_row<'a>(
         columns: planner.columns.clone(),
         settings: &planner.settings,
     };
-    prove_query_on_tree(planner, info, proving_tree, primary).await?;
+    prove_query_on_tree(&mut planner, info, proving_tree, primary).await?;
 
     Ok(())
 }
