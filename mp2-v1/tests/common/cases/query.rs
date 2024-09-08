@@ -393,7 +393,10 @@ async fn prove_revelation(
         &query.placeholders,
         pis_hash,
     )?;
-    let proof = ctx.run_query_proof(GlobalCircuitInput::Revelation(input))?;
+    let proof = ctx.run_query_proof(
+        "querying::revelation",
+        GlobalCircuitInput::Revelation(input),
+    )?;
     Ok(proof)
 }
 
@@ -586,7 +589,7 @@ where
         // It is sufficient to check if this node is one of the leaves we in this update tree.Note
         // it is not the same meaning as a "leaf of a tree", here it just means is it the first
         // node in the merkle path.
-        let input = if wk.is_path_end {
+        let (name, input) = if wk.is_path_end {
             info!("node {primary} -> {k:?} is at path end");
             if !is_satisfying_query {
                 // if the node of the key does not satisfy the query, but this node is at the end of
@@ -603,15 +606,18 @@ where
             let (node_info, left_info, right_info) =
             // we can use primary as epoch now that tree stores epoch from genesis
                 get_node_info(&info, &k, primary as Epoch).await;
-            QueryCircuitInput::new_single_path(
-                SubProof::new_embedded_tree_proof(embedded_proof?.unwrap())?,
-                left_info,
-                right_info,
-                node_info,
-                info.is_row_tree(),
-                &planner.pis.bounds,
+            (
+                "querying::aggregation::single",
+                QueryCircuitInput::new_single_path(
+                    SubProof::new_embedded_tree_proof(embedded_proof?.unwrap())?,
+                    left_info,
+                    right_info,
+                    node_info,
+                    info.is_row_tree(),
+                    &planner.pis.bounds,
+                )
+                .expect("can't create leaf input"),
             )
-            .expect("can't create leaf input")
         } else {
             // here we are guaranteed there is a node below that we have already proven
             // It can not be a single path with the embedded tree only since that falls into the
@@ -632,15 +638,18 @@ where
                 )
                 .await;
                 // we look which child is the one to load from storage, the one we already proved
-                QueryCircuitInput::new_single_path(
-                    SubProof::new_child_proof(child_proof, child_pos)?,
-                    left_info,
-                    right_info,
-                    node_info,
-                    info.is_row_tree(),
-                    &planner.pis.bounds,
+                (
+                    "querying::aggregation::single",
+                    QueryCircuitInput::new_single_path(
+                        SubProof::new_child_proof(child_proof, child_pos)?,
+                        left_info,
+                        right_info,
+                        node_info,
+                        info.is_row_tree(),
+                        &planner.pis.bounds,
+                    )
+                    .expect("can't create leaf input"),
                 )
-                .expect("can't create leaf input")
             } else {
                 // this case is easy, since all that's left is partial or full where both
                 // child(ren) and current node belong to query
@@ -662,14 +671,17 @@ where
                         primary,
                         node_ctx.right.as_ref().unwrap(),
                     )?;
-                    QueryCircuitInput::new_full_node(
-                        left_proof,
-                        right_proof,
-                        embedded_proof?.expect("should be a embedded_proof here"),
-                        info.is_row_tree(),
-                        &planner.pis.bounds,
+                    (
+                        "querying::aggregation::full",
+                        QueryCircuitInput::new_full_node(
+                            left_proof,
+                            right_proof,
+                            embedded_proof?.expect("should be a embedded_proof here"),
+                            info.is_row_tree(),
+                            &planner.pis.bounds,
+                        )
+                        .expect("can't create full node circuit input"),
                     )
-                    .expect("can't create full node circuit input")
                 } else {
                     // partial case
                     let (child_pos, child_proof) =
@@ -680,22 +692,25 @@ where
                         ChildPosition::Left => right_info,
                         ChildPosition::Right => left_info,
                     };
-                    QueryCircuitInput::new_partial_node(
-                        child_proof,
-                        embedded_proof?.expect("should be an embedded_proof here too"),
-                        unproven,
-                        child_pos,
-                        info.is_row_tree(),
-                        &planner.pis.bounds,
+                    (
+                        "querying::aggregation::partial",
+                        QueryCircuitInput::new_partial_node(
+                            child_proof,
+                            embedded_proof?.expect("should be an embedded_proof here too"),
+                            unproven,
+                            child_pos,
+                            info.is_row_tree(),
+                            &planner.pis.bounds,
+                        )
+                        .expect("can't build new partial node input"),
                     )
-                    .expect("can't build new partial node input")
                 }
             }
         };
         info!("AGGREGATE query proof RUNNING for {primary} -> {k:?} ");
         let proof = planner
             .ctx
-            .run_query_proof(GlobalCircuitInput::Query(input))?;
+            .run_query_proof(name, GlobalCircuitInput::Query(input))?;
         info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
         info!("query proof DONE for {primary} -> {k:?} ");
         end_iteration(&mut proven_nodes)?;
@@ -831,7 +846,7 @@ pub fn generate_non_existence_proof<'a>(
     )?;
     planner
         .ctx
-        .run_query_proof(GlobalCircuitInput::Query(input))
+        .run_query_proof("querying::non_existence", GlobalCircuitInput::Query(input))
 }
 
 /// Generate a proof for a node of the index tree which is outside of the query bounds
@@ -1033,7 +1048,7 @@ pub async fn prove_single_row<T: TreeInfo<RowTreeKey, RowPayload<BlockPrimaryInd
     let proof = {
         info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
         let proof = ctx
-            .run_query_proof(GlobalCircuitInput::Query(input))
+            .run_query_proof("querying::universal", GlobalCircuitInput::Query(input))
             .expect("unable to generate universal proof for {epoch} -> {row_key:?}");
         info!("Universal query proof DONE for {primary} -> {row_key:?} ");
         ctx.storage.store_proof(proof_key, proof.clone())?;
