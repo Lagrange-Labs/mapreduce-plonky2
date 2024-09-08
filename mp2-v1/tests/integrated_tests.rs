@@ -202,7 +202,7 @@ async fn test_andrus_query() -> Result<()> {
         pis_hash,
     )?;
     info!("Generating the revelation proof");
-    let proof = ctx.run_query_proof(GlobalCircuitInput::Revelation(input))?;
+    let proof = ctx.run_query_proof("revelation", GlobalCircuitInput::Revelation(input))?;
     info!("all good");
     Ok(())
 }
