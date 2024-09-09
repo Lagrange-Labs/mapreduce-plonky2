@@ -3,7 +3,7 @@
 
 use crate::{keys_in_index_boundaries, symbols::ContextProvider, ParsilSettings};
 use anyhow::*;
-use ryhope::{tree::sbbst::NodeIdx, Epoch, EPOCH, KEY};
+use ryhope::{tree::sbbst::NodeIdx, Epoch, EPOCH, KEY, VALID_FROM, VALID_UNTIL};
 use verifiable_db::query::{
     aggregation::QueryBounds, universal_circuit::universal_circuit_inputs::Placeholders,
 };
@@ -28,8 +28,17 @@ pub fn core_keys_for_index_tree(
 
     // Integer default to i32 in PgSQL, they must be cast to i64, a.k.a. BIGINT.
     Ok(format!(
-        "SELECT {}::BIGINT as {EPOCH}, generate_series({}::BIGINT, {}::BIGINT) AS {KEY}",
-        execution_epoch, query_min_block, query_max_block
+        "SELECT {}::BIGINT as {EPOCH},
+                generate_series(
+                    GREATEST((SELECT MIN({VALID_FROM}))::BIGINT, {}::BIGINT),
+                    LEAST((SELECT MAX({VALID_UNTIL}))::BIGINT, {}::BIGINT)) AS {KEY}",
+        execution_epoch,
+        query_min_block,
+        query_max_block.min(
+            execution_epoch
+                .try_into()
+                .with_context(|| format!("unable to convert {} to i64", execution_epoch))?
+        )
     ))
 }
 

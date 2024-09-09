@@ -213,14 +213,17 @@ where
         keys_query: &str,
         bounds: (Epoch, Epoch),
     ) -> Result<WideLineage<NodeIdx, V>> {
+        // In the SBBST case, parsil will not be able to inject the table name;
+        // so we do it here.
+        let keys_query = format!("{keys_query} FROM {table}");
         // Execute `keys_query` to retrieve the core keys from the DB
         let core_keys = db
             .get()
             .await
             .context("failed to get a connection")?
-            .query(keys_query, &[])
+            .query(&keys_query, &[])
             .await
-            .context("failed to execute `keys_query`")?
+            .with_context(|| format!("failed to execute `{}` on `{}`", keys_query, table))?
             .iter()
             .map(|row| (row.get::<_, i64>(EPOCH), row.get::<_, i64>(KEY) as NodeIdx))
             .collect::<Vec<_>>();
