@@ -150,6 +150,9 @@ async fn query_mapping(
     // cook query with no valid blocks
     let query_info = cook_query_no_matching_entries(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // cook query with block query range partially overlapping with blocks in the DB
+    let query_info = cook_query_partial_block_range(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     Ok(())
 }
 
@@ -267,8 +270,12 @@ async fn prove_query(
     // some nodes or not
     let initial_epoch = table.index.initial_epoch() as BlockPrimaryIndex;
     let current_epoch = table.index.current_epoch() as BlockPrimaryIndex;
-    let block_range = (query.min_block.max(initial_epoch)..=query.max_block.min(current_epoch));
-    info!("found {} blocks in range", block_range.clone().count());
+    let block_range = (query.min_block.max(initial_epoch + 1)..=query.max_block.min(current_epoch));
+    info!(
+        "found {} blocks in range: {:?}",
+        block_range.clone().count(),
+        block_range
+    );
     if block_range.is_empty() {
         info!("Running INDEX TREE proving for EMPTY query");
         // no valid blocks in the query range, so we need to choose a block to prove
@@ -311,8 +318,10 @@ async fn prove_query(
     } else {
         info!("Running INDEX tree proving from cache");
         // Only here we can run the SQL query for index so it doesn't crash
-        let index_query =
-            core_keys_for_index_tree(current_epoch as Epoch, (query.min_block, query.max_block))?;
+        let index_query = core_keys_for_index_tree(
+            current_epoch as Epoch,
+            (*block_range.start(), *block_range.end()),
+        )?;
         let big_index_cache = table
             .index
             // The bounds here means between which versions of the tree should we look. For index tree,
@@ -1188,6 +1197,38 @@ async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking
     //          * we can't have "sec_index < $3" OR "sec_index > $4"
     //          * but we can have "sec_index < $3 AND (price < $3 -10 OR sec_index * price < $4 + 20")
     //              * only the first predicate is used in range query
+    let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
+
+    let query_str = format!(
+        "SELECT AVG({value_column})
+                FROM {table_name}
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
+                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
+                AND {key_column} = '0x{key_value}';"
+    );
+    Ok(QueryCooking {
+        min_block: min_block as BlockPrimaryIndex,
+        max_block: max_block as BlockPrimaryIndex,
+        query: query_str,
+        placeholders,
+    })
+}
+
+async fn cook_query_partial_block_range(table: &Table) -> Result<QueryCooking> {
+    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
+    let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
+    info!(
+        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
+        min_block, max_block, key_value
+    );
+    // now we can fetch the key that we want
+    let key_column = table.columns.secondary.name.clone();
+    // Assuming this is mapping with only two columns !
+    let value_column = table.columns.rest[0].name.clone();
+    let table_name = table.row_table_name();
+    let initial_epoch = table.row.initial_epoch();
+    // choose a min query bound smaller than initial epoch
+    let min_block = initial_epoch - 1;
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
 
     let query_str = format!(
