@@ -104,18 +104,28 @@ impl TestContext {
             revelation_pi.flat_computational_hash(),
         ]
         .map(|h| {
-            B256::from_slice(
-                &h.iter()
-                    .flat_map(|u| {
-                        // Each field of the packed Keccak hash is an u32.
-                        let u = u.to_canonical_u64();
-                        assert!(u <= u32::MAX as u64);
+            h.iter()
+                .flat_map(|u| {
+                    // Each field of the packed Keccak hash is an u32.
+                    let u = u.to_canonical_u64();
+                    assert!(u <= u32::MAX as u64);
 
-                        (u as u32).to_be_bytes()
-                    })
-                    .collect_vec(),
-            )
+                    (u as u32).to_be_bytes()
+                })
+                .collect_vec()
         });
+        // Revert the bytes in each Uint32 of block hash to make consistent with
+        // the block hash onchain.
+        let block_hash = block_hash
+            .chunks(4)
+            .flat_map(|bytes| {
+                let mut bytes = bytes.to_vec();
+                bytes.reverse();
+                bytes
+            })
+            .collect_vec();
+        let [block_hash, computational_hash] =
+            [block_hash, computational_hash].map(|bytes| B256::from_slice(&bytes));
         let query_input = TestQueryInput {
             query_limit,
             query_offset,

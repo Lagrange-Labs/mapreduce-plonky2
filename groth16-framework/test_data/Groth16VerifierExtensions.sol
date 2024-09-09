@@ -187,7 +187,9 @@ contract Query is Verifier {
         bytes32 rem = data[PI_REM_OFFSET];
 
         // Check the block hash and computational hash.
-        bytes32 blockHash = data[PI_OFFSET + BLOCK_HASH_POS];
+        bytes32 blockHash = convertToBlockHash(
+            data[PI_OFFSET + BLOCK_HASH_POS]
+        );
         require(
             blockHash == query.blockHash,
             "Block hash must equal as expected."
@@ -280,5 +282,20 @@ contract Query is Verifier {
         });
 
         return output;
+    }
+
+    // Revert the bytes of each Uint32 in block hash.
+    // Since we pack to little-endian for each Uint32 in block hash.
+    function convertToBlockHash(
+        bytes32 original
+    ) internal pure returns (bytes32) {
+        bytes32 result;
+        for (uint256 i = 0; i < 8; ++i) {
+            for (uint256 j = 0; j < 4; ++j) {
+                result |= bytes32(original[i * 4 + j]) >> (8 * (i * 4 + 3 - j));
+            }
+        }
+
+        return result;
     }
 }
