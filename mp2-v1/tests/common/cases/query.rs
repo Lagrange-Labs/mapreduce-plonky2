@@ -320,7 +320,7 @@ async fn prove_query(
         // Only here we can run the SQL query for index so it doesn't crash
         let index_query = core_keys_for_index_tree(
             current_epoch as Epoch,
-            (*block_range.start(), *block_range.end()),
+            (query.min_block, query.max_block),
         )?;
         let big_index_cache = table
             .index
