@@ -184,6 +184,22 @@ where
         None
     }
 
+    async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, K)> + Send>(
+        &self,
+        data: I,
+    ) -> Result<Vec<Option<(Epoch, K, V)>>>
+    where
+        <I as IntoIterator>::IntoIter: Send,
+    {
+        let mut r = Vec::new();
+        for (epoch, k) in data.into_iter() {
+            let v = self.try_fetch_at(&k, epoch).await;
+
+            r.push(v.map(|v| (epoch, k, v)));
+        }
+        Ok(r)
+    }
+
     // Expensive, but only used in test context.
     async fn size(&self) -> usize {
         let all_keys = self
