@@ -318,10 +318,8 @@ async fn prove_query(
     } else {
         info!("Running INDEX tree proving from cache");
         // Only here we can run the SQL query for index so it doesn't crash
-        let index_query = core_keys_for_index_tree(
-            current_epoch as Epoch,
-            (query.min_block, query.max_block),
-        )?;
+        let index_query =
+            core_keys_for_index_tree(current_epoch as Epoch, (query.min_block, query.max_block))?;
         let big_index_cache = table
             .index
             // The bounds here means between which versions of the tree should we look. For index tree,
