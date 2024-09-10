@@ -3,7 +3,6 @@
 //! row tree tables.
 use alloy::primitives::U256;
 use anyhow::*;
-use log::*;
 use ryhope::{EPOCH, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL};
 use sqlparser::ast::{
     BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Function, FunctionArg,

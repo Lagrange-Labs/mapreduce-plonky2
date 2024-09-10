@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use alloy::primitives::U256;
 use anyhow::*;
+use assembler::assemble_static;
 use clap::{Parser, Subcommand};
 use log::Level;
 use sqlparser::ast::Query;
@@ -107,6 +108,8 @@ fn main() -> Result<()> {
         Command::Circuit { request } => {
             let mut query = parse_and_validate(&request, &settings)?;
             assembler::validate(&query, &settings)?;
+            let circuit = assemble_static(&query, &settings)?;
+            println!("Statically assembled circuit PIs:\n{circuit:#?}");
         }
         Command::Query { request, kind } => {
             let mut query = parse_and_validate(&request, &settings)?;
