@@ -395,7 +395,14 @@ pub fn validate<C: ContextProvider>(
 ) -> Result<(), ValidationError> {
     if let SetExpr::Select(ref select) = *query.body {
         ensure!(
-            select.projection.iter().all(|s| matches!(
+            select.projection.iter().all(|s| !matches!(
+                s,
+                SelectItem::UnnamedExpr(Expr::Function(_))
+                    | SelectItem::ExprWithAlias {
+                        expr: Expr::Function(_),
+                        ..
+                    }
+            )) || select.projection.iter().all(|s| matches!(
                 s,
                 SelectItem::UnnamedExpr(Expr::Function(_))
                     | SelectItem::ExprWithAlias {
@@ -403,7 +410,7 @@ pub fn validate<C: ContextProvider>(
                         ..
                     }
             )),
-            ValidationError::TabularQuery
+            ValidationError::MixedQuery
         );
     } else {
         return Err(ValidationError::NotASelect);
