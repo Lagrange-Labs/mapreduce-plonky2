@@ -700,7 +700,6 @@ pub fn generate_query_keys<C: ContextProvider>(
     let mut key_query = query.clone();
     key_fetcher.process(&mut key_query)?;
 
-    info!("PIs: {key_query}");
     TranslatedQuery::make(SafeQuery::ZkQuery(key_query), settings)
 }
 

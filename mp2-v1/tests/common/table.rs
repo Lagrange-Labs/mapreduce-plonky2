@@ -168,6 +168,7 @@ impl Table {
             index: index_tree,
         })
     }
+
     pub fn row_table_name(&self) -> String {
         row_table_name(&self.name)
     }

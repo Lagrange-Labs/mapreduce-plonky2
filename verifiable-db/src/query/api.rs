@@ -25,10 +25,6 @@ use super::{
             NonExistenceInterNodeCircuit, NonExistenceInterNodeWires,
             NUM_VERIFIED_PROOFS as NUM_PROOFS_NE_INTER,
         },
-        non_existence_leaf::{
-            NonExistenceLeafCircuit, NonExistenceLeafWires,
-            NUM_VERIFIED_PROOFS as NUM_PROOFS_NE_LEAF,
-        },
         partial_node::{
             PartialNodeCircuit, PartialNodeWires, NUM_VERIFIED_PROOFS as NUM_PROOFS_PN,
         },
@@ -238,8 +234,10 @@ where
     /// Initialize input to prove a node storing a value of the primary or secondary index which
     /// is outside of the query bounds, from the following inputs:
     /// - `node_info`: Data about the node being proven
-    /// - `child_info`: Data aboout the child of the node being proven, altogether with the child position;
-    ///     must be `None` if the node being proven has no children
+    /// - `left_child_info`: Data aboout the left child of the node being proven; must be `None` if
+    ///     the node being proven has no left child
+    /// - `right_child_info`: Data aboout the right child of the node being proven; must be `None` if
+    ///     the node being proven has no right child
     /// - `primary_index_value`: Value of the primary index associated to the current node
     /// - `index_ids`: Identifiers of the primary and secondary index columns
     /// - `aggregation_ops`: Set of aggregation operations employed to aggregate the results of the query
@@ -250,7 +248,8 @@ where
     #[allow(clippy::too_many_arguments)] // doesn't make sense to aggregate arguments
     pub fn new_non_existence_input(
         node_info: NodeInfo,
-        child_info: Option<(NodeInfo, ChildPosition)>,
+        left_child_info: Option<NodeInfo>,
+        right_child_info: Option<NodeInfo>,
         primary_index_value: U256,
         index_ids: &[u64; 2],
         aggregation_ops: &[AggregationOperation],
@@ -277,8 +276,8 @@ where
         }?;
         Ok(CircuitInput::NonExistence(NonExistenceInput {
             node_info,
-            child_info: child_info.clone().map(|info| info.0),
-            is_child_left: child_info.map(|info| info.1.to_flag()),
+            left_child_info,
+            right_child_info,
             primary_index_value,
             index_ids: index_ids
                 .iter()
@@ -446,13 +445,6 @@ pub struct Parameters<
         NUM_PROOFS_EMBEDDED,
         EmbeddedTreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
     >,
-    non_existence_leaf: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        NUM_PROOFS_NE_LEAF,
-        NonExistenceLeafWires<MAX_NUM_RESULTS>,
-    >,
     non_existence_intermediate: CircuitWithUniversalVerifier<
         F,
         C,
@@ -495,7 +487,6 @@ where
         let single_path_proven_child = builder.build_circuit(());
         let single_path_embedded_tree = builder.build_circuit(());
         info!("Building non-existence circuits..");
-        let non_existence_leaf = builder.build_circuit(());
         let non_existence_intermediate = builder.build_circuit(());
 
         let circuits = vec![
@@ -507,7 +498,6 @@ where
             prepare_recursive_circuit_for_circuit_set(&partial_node),
             prepare_recursive_circuit_for_circuit_set(&single_path_proven_child),
             prepare_recursive_circuit_for_circuit_set(&single_path_embedded_tree),
-            prepare_recursive_circuit_for_circuit_set(&non_existence_leaf),
             prepare_recursive_circuit_for_circuit_set(&non_existence_intermediate),
         ];
 
@@ -523,7 +513,6 @@ where
             partial_node,
             single_path_proven_child,
             single_path_embedded_tree,
-            non_existence_leaf,
             non_existence_intermediate,
         }
     }
@@ -728,8 +717,8 @@ where
             }
             CircuitInput::NonExistence(NonExistenceInput {
                 node_info,
-                child_info,
-                is_child_left,
+                left_child_info,
+                right_child_info,
                 primary_index_value,
                 index_ids,
                 computational_hash,
@@ -739,62 +728,44 @@ where
                 min_query,
                 max_query,
             }) => {
-                match child_info {
-                    Some(child_data) => {
-                        // intermediate node
-                        let input = NonExistenceInterNodeCircuit {
-                            is_rows_tree_node,
-                            is_left_child: is_child_left.unwrap(),
-                            min_query,
-                            max_query,
-                            value: node_info.value,
-                            index_value: primary_index_value,
-                            child_value: child_data.value,
-                            child_min: child_data.min,
-                            child_max: child_data.max,
-                            index_ids,
-                            ops: aggregation_ops,
-                            subtree_hash: node_info.embedded_tree_hash,
-                            computational_hash,
-                            placeholder_hash,
-                            child_subtree_hash: child_data.embedded_tree_hash,
-                            grand_child_hashes: child_data.child_hashes,
-                        };
-                        (
-                            self.circuit_set.generate_proof(
-                                &self.non_existence_intermediate,
-                                [],
-                                [],
-                                input,
-                            )?,
-                            self.non_existence_intermediate.get_verifier_data().clone(),
-                        )
-                    }
-                    None => {
-                        // leaf node
-                        let input = NonExistenceLeafCircuit {
-                            is_rows_tree_node: is_rows_tree_node,
-                            min_query: min_query,
-                            max_query: max_query,
-                            value: node_info.value,
-                            index_value: primary_index_value,
-                            index_ids,
-                            ops: aggregation_ops,
-                            subtree_hash: node_info.embedded_tree_hash,
-                            computational_hash,
-                            placeholder_hash,
-                        };
-                        (
-                            self.circuit_set.generate_proof(
-                                &self.non_existence_leaf,
-                                [],
-                                [],
-                                input,
-                            )?,
-                            self.non_existence_leaf.get_verifier_data().clone(),
-                        )
-                    }
-                }
+                // intermediate node
+                let left_child_exists = left_child_info.is_some();
+                let right_child_exists = right_child_info.is_some();
+                let left_child_data = left_child_info.unwrap_or_default();
+                let right_child_data = right_child_info.unwrap_or_default();
+                let input = NonExistenceInterNodeCircuit {
+                    is_rows_tree_node,
+                    left_child_exists,
+                    right_child_exists,
+                    min_query,
+                    max_query,
+                    value: node_info.value,
+                    index_value: primary_index_value,
+                    left_child_value: left_child_data.value,
+                    left_child_min: left_child_data.min,
+                    left_child_max: left_child_data.max,
+                    right_child_value: right_child_data.value,
+                    right_child_min: right_child_data.min,
+                    right_child_max: right_child_data.max,
+                    index_ids,
+                    ops: aggregation_ops,
+                    subtree_hash: node_info.embedded_tree_hash,
+                    computational_hash,
+                    placeholder_hash,
+                    left_tree_hash: left_child_data.embedded_tree_hash,
+                    left_grand_children: left_child_data.child_hashes,
+                    right_tree_hash: right_child_data.embedded_tree_hash,
+                    right_grand_children: right_child_data.child_hashes,
+                };
+                (
+                    self.circuit_set.generate_proof(
+                        &self.non_existence_intermediate,
+                        [],
+                        [],
+                        input,
+                    )?,
+                    self.non_existence_intermediate.get_verifier_data().clone(),
+                )
             }
         });
 
@@ -1447,6 +1418,7 @@ mod tests {
         let input = Input::new_non_existence_input(
             node_info_0.clone(),
             None,
+            None,
             node_info_0.value,
             &[
                 column_ids.primary.to_canonical_u64(),
@@ -1554,7 +1526,8 @@ mod tests {
         .unwrap();
         let input = Input::new_non_existence_input(
             node_info_1.clone(),
-            Some((node_info_0, ChildPosition::Left)), // node 0 is the left child
+            Some(node_info_0), // node 0 is the left child
+            None,
             node_info_1.value,
             &[
                 column_ids.primary.to_canonical_u64(),
@@ -1656,6 +1629,7 @@ mod tests {
         .unwrap();
         let input = Input::new_non_existence_input(
             node_info_2.clone(),
+            None,
             None,
             column_values[2][0], // we need to place the primary index value associated to this row
             &[

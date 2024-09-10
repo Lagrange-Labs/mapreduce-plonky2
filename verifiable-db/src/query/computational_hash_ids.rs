@@ -600,7 +600,7 @@ impl Output {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default, Serialize, Deserialize)]
 pub enum AggregationOperation {
     #[default]
     SumOp,

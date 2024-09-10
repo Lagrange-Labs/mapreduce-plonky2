@@ -24,6 +24,7 @@ use super::{
 };
 
 pub mod indexing;
+pub mod planner;
 pub mod query;
 
 /// The key,value such that the combination is unique. This can be turned into a RowTreeKey.

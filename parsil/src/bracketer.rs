@@ -4,8 +4,8 @@ use verifiable_db::query::aggregation::QueryBounds;
 
 use crate::{symbols::ContextProvider, ParsilSettings};
 
-/// Return two queries, respectively returning the largest sec. ind. value/// smaller than the given lower bound, and the smallest sec. ind. value larger
-/// than the given higher bound.
+/// Return two queries, respectively returning the largest sec. ind. value smaller than the
+/// given lower bound, and the smallest sec. ind. value larger than the given higher bound.
 ///
 /// If the lower or higher bound are the extrema of the U256 definition domain,
 /// the associated query is `None`, reflecting the impossibility for a node

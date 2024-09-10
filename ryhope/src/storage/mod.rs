@@ -59,6 +59,12 @@ where
 }
 
 impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
+    pub fn is_touched_key(&self, to_search: &K) -> bool {
+        self.core_keys
+            .iter()
+            .find(|(_, k)| k == to_search)
+            .is_some()
+    }
     pub fn num_touched_rows(&self) -> usize {
         self.core_keys.len()
     }

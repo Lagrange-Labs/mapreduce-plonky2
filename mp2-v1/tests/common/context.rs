@@ -268,7 +268,13 @@ impl TestContext {
         self.rpc = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
     }
 
-    pub fn run_query_proof(&self, input: cases::query::GlobalCircuitInput) -> Result<Vec<u8>> {
-        self.query_params.as_ref().unwrap().generate_proof(input)
+    pub fn run_query_proof(
+        &self,
+        name: &str,
+        input: cases::query::GlobalCircuitInput,
+    ) -> Result<Vec<u8>> {
+        self.b.bench(name, || {
+            self.query_params.as_ref().unwrap().generate_proof(input)
+        })
     }
 }
