@@ -34,12 +34,11 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
     secondary_lo: &U256,
     secondary_hi: &U256,
 ) -> (Option<String>, Option<String>) {
-    let sec_ind_column = settings
-        .context
-        .fetch_table(table_name)
-        .unwrap()
-        .secondary_index_column()
-        .id;
+    let zk_table = settings.context.fetch_table(table_name).unwrap();
+
+    let internal_name = zk_table.zktable_name.clone();
+
+    let sec_ind_column = zk_table.secondary_index_column().id;
 
     // A simple alias for the sec. ind. values
     let sec_index = format!("({PAYLOAD} -> 'cells' -> '{sec_ind_column}' ->> 'value')::NUMERIC");
@@ -49,7 +48,7 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
     let largest_below = if *secondary_lo == U256::ZERO {
         None
     } else {
-        Some(format!("SELECT {KEY} FROM {table_name}
+        Some(format!("SELECT {KEY} FROM {internal_name}
                            WHERE {sec_index} < '{secondary_lo}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
                            ORDER BY {sec_index} DESC LIMIT 1"))
     };
@@ -58,7 +57,7 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
     let smallest_above = if *secondary_hi == U256::MAX {
         None
     } else {
-        Some(format!("SELECT {KEY} FROM {table_name}
+        Some(format!("SELECT {KEY} FROM {internal_name}
                            WHERE {sec_index} > '{secondary_hi}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
                            ORDER BY {sec_index} ASC LIMIT 1"))
     };
