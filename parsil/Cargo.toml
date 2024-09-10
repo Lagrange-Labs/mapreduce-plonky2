@@ -26,8 +26,9 @@ serde_json.workspace = true
 sqlparser = "0.49.0"
 verifiable-db = { path = "../verifiable-db" }
 clap = { version = "4.5.4", features = ["derive"], optional = true }
+sqlformat = { version = "0.2", optional = true }
 stderrlog = { version = "0.6.0", default-features = false, optional = true }
 thiserror = "1.0.63"
 
 [features]
-cli = ["dep:stderrlog", "dep:clap"]
+cli = ["dep:stderrlog", "dep:clap", "dep:sqlformat"]

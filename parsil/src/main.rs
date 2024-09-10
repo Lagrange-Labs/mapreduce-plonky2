@@ -87,6 +87,21 @@ fn prepare<C: ContextProvider>(settings: &ParsilSettings<C>, query: &str) -> Res
     Ok(query)
 }
 
+fn print_sql(q: &str) {
+    println!(
+        "{}",
+        sqlformat::format(
+            &q,
+            &sqlformat::QueryParams::None,
+            sqlformat::FormatOptions {
+                indent: sqlformat::Indent::Spaces(2),
+                uppercase: true,
+                lines_between_queries: 2,
+            }
+        )
+    );
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     stderrlog::new().verbosity(Level::Debug).init().unwrap();
@@ -102,7 +117,7 @@ fn main() -> Result<()> {
             if args.verbose {
                 println!("{:#?}", query);
             }
-            println!("Final query:\n{}", query);
+            print_sql(&query.to_string());
         }
         Command::Circuit { request } => {
             let mut query = parse_and_validate(&request, &settings)?;
@@ -110,16 +125,17 @@ fn main() -> Result<()> {
         }
         Command::Query { request, kind } => {
             let mut query = parse_and_validate(&request, &settings)?;
-            match kind {
+            let query_str = match kind {
                 QueryKind::Execute => {
                     let mut translated = executor::generate_query_execution(&mut query, &settings)?;
-                    println!("{}", translated.query.to_display());
+                    translated.query.to_display()
                 }
                 QueryKind::Keys => {
                     let mut translated = executor::generate_query_keys(&mut query, &settings)?;
-                    println!("{}", translated.query.to_display());
+                    translated.query.to_display()
                 }
-            }
+            };
+            print_sql(&query_str);
         }
         Command::Isolate {
             request,
@@ -131,9 +147,9 @@ fn main() -> Result<()> {
             let mut q = isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)?;
             if to_keys {
                 let mut q = executor::generate_query_keys(&mut q, &settings)?;
-                println!("Query: {}", q.query.to_display());
+                print_sql(&q.query.to_display());
             } else {
-                println!("{}", q);
+                print_sql(&q.to_string());
             }
         }
         Command::Bracket {
