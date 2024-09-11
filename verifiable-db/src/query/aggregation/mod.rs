@@ -1,13 +1,21 @@
+use std::iter::once;
+
 use alloy::primitives::U256;
 use anyhow::Result;
+use itertools::Itertools;
 use mp2_common::{
-    poseidon::empty_poseidon_hash,
+    poseidon::{empty_poseidon_hash, HashPermutation},
     proof::ProofWithVK,
     serialization::{deserialize_long_array, serialize_long_array},
     types::HashOutput,
+    utils::ToFields,
     F,
 };
-use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::GenericHashOut};
+use plonky2::{
+    field::types::Field,
+    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
+    plonk::config::GenericHashOut,
+};
 use serde::{Deserialize, Serialize};
 
 pub(crate) mod child_proven_single_path_node;
@@ -185,6 +193,21 @@ impl NodeInfo {
             min,
             max,
         }
+    }
+
+    pub(crate) fn compute_node_hash(&self, index_id: F) -> HashOut<F> {
+        hash_n_to_hash_no_pad::<F, HashPermutation>(
+            &self
+                .child_hashes
+                .into_iter()
+                .flat_map(|h| h.to_vec())
+                .chain(self.min.to_fields())
+                .chain(self.max.to_fields())
+                .chain(once(index_id))
+                .chain(self.value.to_fields())
+                .chain(self.embedded_tree_hash.to_vec())
+                .collect_vec(),
+        )
     }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

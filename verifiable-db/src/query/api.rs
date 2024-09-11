@@ -813,23 +813,6 @@ mod tests {
         },
     };
 
-    impl NodeInfo {
-        pub(crate) fn compute_node_hash(&self, index_id: F) -> HashOut<F> {
-            hash_n_to_hash_no_pad::<F, HashPermutation>(
-                &self
-                    .child_hashes
-                    .into_iter()
-                    .flat_map(|h| h.to_vec())
-                    .chain(self.min.to_fields())
-                    .chain(self.max.to_fields())
-                    .chain(once(index_id))
-                    .chain(self.value.to_fields())
-                    .chain(self.embedded_tree_hash.to_vec())
-                    .collect_vec(),
-            )
-        }
-    }
-
     #[test]
     fn test_api() {
         // Simple query for testing SELECT SUM(C1 + C3) FROM T WHERE C3 >= 5 AND C1 > 56 AND C1 <= 67 AND C2 > 34 AND C2 <= $1
