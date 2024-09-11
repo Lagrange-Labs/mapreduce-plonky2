@@ -163,12 +163,7 @@ fn val_to_expr(x: U256) -> Expr {
     if let Result::Ok(x_int) = TryInto::<i32>::try_into(x) {
         Expr::Value(Value::Number(x_int.to_string(), false))
     } else {
-        Expr::Cast {
-            kind: CastKind::DoubleColon,
-            expr: Box::new(Expr::Value(Value::SingleQuotedString(format!("{}", x)))),
-            data_type: DataType::Numeric(ExactNumberInfo::None),
-            format: None,
-        }
+        Expr::Value(Value::SingleQuotedString(format!("0x{x:x}")))
     }
 }
 
