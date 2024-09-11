@@ -598,7 +598,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     unreachable!()
                 }
             }
-            _ => unreachable!(),
+            _ => unreachable!("trying to compile `{expr}`"),
         }
     }
 

@@ -97,7 +97,7 @@ impl TestContext {
             // generated.
             let cell_root_primary = row.fetch_cell_root_info().unwrap().primary;
             let cell_proof_key = CellProofIdentifier {
-                table: table.name.clone(),
+                table: table.public_name.clone(),
                 primary: cell_root_primary,
                 tree_key: row.cell_root_key.unwrap(),
                 secondary: k.clone(), // the cells proofs is already stored under the new key, even in the
@@ -153,7 +153,7 @@ impl TestContext {
                 let child_row = table.row.fetch(&child_key).await;
 
                 let proof_key = RowProofIdentifier {
-                    table: table.name.clone(),
+                    table: table.public_name.clone(),
                     primary: child_row.primary_index_value(),
                     tree_key: child_key,
                 };
@@ -184,14 +184,14 @@ impl TestContext {
                 let left_key = context.left.unwrap();
                 let left_row = table.row.fetch(&left_key).await;
                 let left_proof_key = RowProofIdentifier {
-                    table: table.name.clone(),
+                    table: table.public_name.clone(),
                     primary: left_row.primary_index_value(),
                     tree_key: left_key,
                 };
                 let right_key = context.right.unwrap();
                 let right_row = table.row.fetch(&right_key).await;
                 let right_proof_key = RowProofIdentifier {
-                    table: table.name.clone(),
+                    table: table.public_name.clone(),
                     primary: right_row.primary_index_value(),
                     tree_key: right_key,
                 };
@@ -223,7 +223,7 @@ impl TestContext {
                     .expect("while proving full node")
             };
             let new_proof_key = RowProofIdentifier {
-                table: table.name.clone(),
+                table: table.public_name.clone(),
                 // we save the new proof under the new row key
                 primary,
                 tree_key: k.clone(),
@@ -243,7 +243,7 @@ impl TestContext {
         let root = t.root().await.unwrap();
         let row = table.row.fetch(&root).await;
         let root_proof_key = RowProofIdentifier {
-            table: table.name.clone(),
+            table: table.public_name.clone(),
             primary: row.primary_index_value(),
             tree_key: root,
         };
