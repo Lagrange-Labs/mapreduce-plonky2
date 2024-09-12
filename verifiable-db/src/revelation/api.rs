@@ -30,7 +30,7 @@ use crate::{
             universal_query_circuit::QueryBound,
         },
     },
-    revelation::placeholders_check::CheckedPlaceholder,
+    revelation::placeholders_check::{CheckPlaceholderGadget, CheckedPlaceholder},
 };
 
 use super::{
@@ -206,13 +206,15 @@ impl<
             })
             .collect::<Result<Vec<_>>>()?;
         let revelation_circuit = RevelationWithoutResultsTreeCircuit {
-            num_placeholders,
-            placeholder_ids: padded_placeholder_ids.try_into().unwrap(),
-            placeholder_values: padded_placeholder_values.try_into().unwrap(),
-            to_be_checked_placeholders: to_be_checked_placeholders.try_into().unwrap(),
-            secondary_query_bound_placeholders: secondary_query_bound_placeholders
-                .try_into()
-                .unwrap(),
+            check_placeholder: CheckPlaceholderGadget {
+                num_placeholders,
+                placeholder_ids: padded_placeholder_ids.try_into().unwrap(),
+                placeholder_values: padded_placeholder_values.try_into().unwrap(),
+                to_be_checked_placeholders: to_be_checked_placeholders.try_into().unwrap(),
+                secondary_query_bound_placeholders: secondary_query_bound_placeholders
+                    .try_into()
+                    .unwrap(),
+            }
         };
 
         Ok(CircuitInput::NoResultsTree {

@@ -11,33 +11,63 @@ use mp2_common::{
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{Fieldable, SelectHashBuilder, ToTargets},
     D, F,
+    serialization::{serialize_array, serialize_long_array, deserialize_array, deserialize_long_array},
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
     iop::{
-        target::{self, BoolTarget, Target},
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use serde::{Deserialize, Serialize};
 
 use super::aggregation::{ChildPosition, NodeInfo};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for Merkle path verification gadget
 pub struct MerklePathTargetInputs<const MAX_DEPTH: usize>
 where
     [(); MAX_DEPTH - 1]:,
 {
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     is_left_child: [BoolTarget; MAX_DEPTH - 1],
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     sibling_hash: [HashOutTarget; MAX_DEPTH - 1],
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     node_min: [UInt256Target; MAX_DEPTH - 1],
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     node_max: [UInt256Target; MAX_DEPTH - 1],
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     node_value: [UInt256Target; MAX_DEPTH - 1],
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     embedded_tree_hash: [HashOutTarget; MAX_DEPTH - 1],
     /// Array of MAX_DEPTH-1 flags specifying whether the current node is a real node in the path or a dummy one.
     /// That is, if the path being proven has depth d <= MAX_DEPTH, then the first d-1 entries of this array
     /// are true, while the remaining D-d ones are false
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     is_real_node: [BoolTarget; MAX_DEPTH - 1],
 }
 
@@ -47,31 +77,72 @@ pub struct MerklePathTarget<const MAX_DEPTH: usize>
 where
     [(); MAX_DEPTH - 1]:,
 {
-    inputs: MerklePathTargetInputs<MAX_DEPTH>,
+    pub(crate) inputs: MerklePathTargetInputs<MAX_DEPTH>,
     /// Recomputed root for the Merkle path
-    root: HashOutTarget,
+    pub(crate) root: HashOutTarget,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct MerklePathGadget<const MAX_DEPTH: usize>
 where
     [(); MAX_DEPTH - 1]:,
 {
     /// Array of MAX_DEPTH-1 flags, each specifying whether the previous node in the path
     /// is the left child of a given node in the path
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     is_left_child: [bool; MAX_DEPTH - 1],
     /// Hash of the sibling of the previous node in the path (empty hash if there is no sibling)
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     sibling_hash: [HashOut<F>; MAX_DEPTH - 1],
     /// Minimum value associated to each node in the path
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     node_min: [U256; MAX_DEPTH - 1],
     /// Maximum value associated to each node in the path
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     node_max: [U256; MAX_DEPTH - 1],
     /// Value stored in each node in the path
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     node_value: [U256; MAX_DEPTH - 1],
     /// Hash of the embedded tree stored in each node in the path
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     embedded_tree_hash: [HashOut<F>; MAX_DEPTH - 1],
     /// Number of real nodes in the path
     num_real_nodes: usize,
+}
+
+impl<const MAX_DEPTH: usize> Default for MerklePathGadget<MAX_DEPTH> 
+where
+    [(); MAX_DEPTH - 1]:,
+{
+    fn default() -> Self {
+        Self { 
+            is_left_child: [Default::default(); MAX_DEPTH-1], 
+            sibling_hash: [Default::default(); MAX_DEPTH-1], 
+            node_min: [Default::default(); MAX_DEPTH-1], 
+            node_max: [Default::default(); MAX_DEPTH-1], 
+            node_value: [Default::default(); MAX_DEPTH-1], 
+            embedded_tree_hash: [Default::default(); MAX_DEPTH-1], 
+            num_real_nodes: Default::default(), 
+        }
+    }
 }
 
 impl<const MAX_DEPTH: usize> MerklePathGadget<MAX_DEPTH>
@@ -108,10 +179,12 @@ where
             node_value[i] = node.value;
         });
 
-        let sibling_hash = array::from_fn(|i| match &siblings[i % num_real_nodes] {
-            Some(node) => node.compute_node_hash(index_id.to_field()),
-            None => *empty_poseidon_hash(),
-        });
+        let sibling_hash = array::from_fn(|i| 
+            siblings.get(i).and_then(
+                |sibling|
+                    sibling.clone().and_then(|node| Some(node.compute_node_hash(index_id.to_field())))
+            ).unwrap_or(*empty_poseidon_hash())
+        );
 
         Ok(Self {
             is_left_child,

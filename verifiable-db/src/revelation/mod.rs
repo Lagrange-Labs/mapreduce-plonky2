@@ -7,6 +7,7 @@ pub mod api;
 pub(crate) mod placeholders_check;
 mod public_inputs;
 mod revelation_without_results_tree;
+mod revelation_unproven_offset;
 
 pub use public_inputs::PublicInputs;
 
@@ -32,8 +33,9 @@ pub(crate) mod tests {
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{array::ToField, poseidon::H, utils::ToFields, F};
+    use mp2_test::utils::gen_random_u256;
     use placeholders_check::{
-        placeholder_ids_hash, CheckedPlaceholder, NUM_SECONDARY_INDEX_PLACEHOLDERS,
+        placeholder_ids_hash, CheckPlaceholderGadget, CheckedPlaceholder, NUM_SECONDARY_INDEX_PLACEHOLDERS
     };
     use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
@@ -45,12 +47,7 @@ pub(crate) mod tests {
     #[derive(Clone, Debug)]
     pub(crate) struct TestPlaceholders<const PH: usize, const PP: usize> {
         // Input arguments for `check_placeholders` function
-        pub(crate) num_placeholders: usize,
-        pub(crate) placeholder_ids: [F; PH],
-        pub(crate) placeholder_values: [U256; PH],
-        pub(crate) to_be_checked_placeholders: [CheckedPlaceholder; PP],
-        pub(crate) secondary_query_bound_placeholders:
-            [CheckedPlaceholder; NUM_SECONDARY_INDEX_PLACEHOLDERS],
+        pub(crate) check_placeholder_inputs: CheckPlaceholderGadget<PH, PP>,
         pub(crate) final_placeholder_hash: HashOut<F>,
         // Output result for `check_placeholders` function
         pub(crate) placeholder_ids_hash: HashOut<F>,
@@ -71,6 +68,12 @@ pub(crate) mod tests {
             let mut placeholder_ids: [PlaceholderIdentifier; PH] =
                 array::from_fn(|_| PlaceholderIdentifier::Generic(rng.gen()));
             let mut placeholder_values = array::from_fn(|_| U256::from_limbs(rng.gen()));
+
+            // ensure that min_query <= max_query
+            while placeholder_values[0] > placeholder_values[1] {
+                placeholder_values[0] = gen_random_u256(rng);
+                placeholder_values[1] = gen_random_u256(rng);
+            }
 
             // Set the first 2 placeholder identifiers as below constants.
             [
@@ -132,10 +135,18 @@ pub(crate) mod tests {
                 }
             });
 
+            let check_placeholder_inputs = CheckPlaceholderGadget::<PH, PP> {
+                num_placeholders,
+                placeholder_ids,
+                placeholder_values,
+                to_be_checked_placeholders,
+                secondary_query_bound_placeholders,
+            };
+
             // Re-compute the placeholder hash from placeholder_pairs and minmum,
             // maximum query bounds. Then check it should be same with the specified
             // final placeholder hash.
-            let [min_i1, max_i1] = array::from_fn(|i| &placeholder_values[i]);
+            let (min_i1, max_i1) = check_placeholder_inputs.primary_query_bounds();
             let placeholder_hash = H::hash_no_pad(&placeholder_hash_payload);
             // query_placeholder_hash = H(placeholder_hash || min_i2 || max_i2)
             let inputs = placeholder_hash
@@ -161,14 +172,10 @@ pub(crate) mod tests {
                 .collect_vec();
             let final_placeholder_hash = H::hash_no_pad(&inputs);
 
-            let [min_query, max_query] = [*min_i1, *max_i1];
+            let [min_query, max_query] = [min_i1, max_i1];
 
             Self {
-                num_placeholders,
-                placeholder_ids,
-                placeholder_values,
-                to_be_checked_placeholders,
-                secondary_query_bound_placeholders,
+                check_placeholder_inputs,
                 final_placeholder_hash,
                 placeholder_ids_hash,
                 query_placeholder_hash,

@@ -148,7 +148,7 @@ impl QueryBounds {
 }
 
 /// Data structure containing all the information needed as input by aggregation circuits for a single node of the tree
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NodeInfo {
     /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
     /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
@@ -165,6 +165,8 @@ pub struct NodeInfo {
     /// minimum value associated to the current node. It can be a primary index value if the node is a node in the index tree,
     /// a secondary index value if the node is a node in a rows tree
     pub(crate) max: U256,
+    /// Flag specifying whether this is a leaf node or not
+    pub(crate) is_leaf: bool,
 }
 
 impl NodeInfo {
@@ -192,6 +194,7 @@ impl NodeInfo {
             value,
             min,
             max,
+            is_leaf: left_child_hash.is_none() && right_child_hash.is_none(),
         }
     }
 
