@@ -13,11 +13,12 @@ use mp2_common::{
 };
 use plonky2::{
     iop::{
-        target::Target,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
+use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
@@ -26,6 +27,8 @@ use std::iter;
 pub struct LeafWires {
     identifier: Target,
     value: UInt256Target,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    is_multiplier: BoolTarget,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -34,12 +37,15 @@ pub struct LeafCircuit {
     pub(crate) identifier: F,
     /// Uint256 value
     pub(crate) value: U256,
+    /// Multiplier
+    pub(crate) is_multiplier: bool,
 }
 
 impl LeafCircuit {
     fn build(b: &mut CBuilder) -> LeafWires {
         let identifier = b.add_virtual_target();
         let value = b.add_virtual_u256();
+        let is_multiplier = b.add_virtual_bool_target_safe();
 
         // h = Poseidon(Poseidon("") || Poseidon("") || identifier || value)
         let empty_hash = empty_poseidon_hash();
@@ -57,17 +63,25 @@ impl LeafCircuit {
         // digest_cell = D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs).to_targets();
+        let zero = b.curve_zero();
+        let digest_mul = b.curve_select(is_multiplier, dc, zero);
+        let digest_ind = b.curve_select(is_multiplier, zero, dc);
 
         // Register the public inputs.
-        PublicInputs::new(&h, &dc).register(b);
+        PublicInputs::new(&h, &digest_ind, &digest_mul).register(b);
 
-        LeafWires { identifier, value }
+        LeafWires {
+            identifier,
+            value,
+            is_multiplier,
+        }
     }
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
         pw.set_target(wires.identifier, self.identifier);
         pw.set_u256_target(&wires.value, self.value);
+        pw.set_bool_target(&wires.is_multiplier, self.is_multiplier)
     }
 }
 
@@ -150,7 +164,7 @@ mod tests {
             let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
             let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
 
-            assert_eq!(pi.digest_point(), exp_digest);
+            assert_eq!(pi.individual_digest_point(), exp_digest);
         }
     }
 }

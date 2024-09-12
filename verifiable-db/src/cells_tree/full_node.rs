@@ -1,6 +1,6 @@
 //! Module handling the intermediate node with 2 children inside a cells tree
 
-use super::public_inputs::PublicInputs;
+use super::{accumulate_proof_digest, decide_digest_section, public_inputs::PublicInputs};
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
@@ -13,7 +13,7 @@ use mp2_common::{
 };
 use plonky2::{
     iop::{
-        target::Target,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::proof::ProofWithPublicInputsTarget,
@@ -26,6 +26,8 @@ use std::{array, iter};
 pub struct FullNodeWires {
     identifier: Target,
     value: UInt256Target,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    is_multiplier: BoolTarget,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -34,12 +36,15 @@ pub struct FullNodeCircuit {
     pub(crate) identifier: F,
     /// Value of the column
     pub(crate) value: U256,
+    /// Multiplier
+    pub(crate) is_multiplier: bool,
 }
 
 impl FullNodeCircuit {
     pub fn build(b: &mut CBuilder, child_proofs: [PublicInputs<Target>; 2]) -> FullNodeWires {
         let identifier = b.add_virtual_target();
         let value = b.add_virtual_u256();
+        let is_multiplier = b.add_virtual_bool_target_safe();
 
         // h = Poseidon(p1.H || p2.H || identifier || value)
         let [p1_hash, p2_hash] = [0, 1].map(|i| child_proofs[i].node_hash());
@@ -56,13 +61,20 @@ impl FullNodeCircuit {
         // digest_cell = p1.digest_cell + p2.digest_cell + D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs);
-        let [p1_dc, p2_dc] = [0, 1].map(|i| child_proofs[i].digest_target());
-        let dc = b.add_curve_point(&[p1_dc, p2_dc, dc]).to_targets();
+        let (digest_ind, digest_mult) = decide_digest_section(b, dc, is_multiplier);
+        let (digest_ind, digest_mult) =
+            accumulate_proof_digest(b, digest_ind, digest_mult, child_proofs[0]);
+        let (digest_ind, digest_mult) =
+            accumulate_proof_digest(b, digest_ind, digest_mult, child_proofs[1]);
 
         // Register the public inputs.
-        PublicInputs::new(&h, &dc).register(b);
+        PublicInputs::new(&h, &digest_ind, digest_mult).register(b);
 
-        FullNodeWires { identifier, value }
+        FullNodeWires {
+            identifier,
+            value,
+            is_multiplier,
+        }
     }
 
     /// Assign the wires.
@@ -192,7 +204,7 @@ mod tests {
             let exp_digest =
                 add_curve_point(&[exp_digest, child_digests[0], child_digests[1]]).to_weierstrass();
 
-            assert_eq!(pi.digest_point(), exp_digest);
+            assert_eq!(pi.individual_digest_point(), exp_digest);
         }
     }
 }

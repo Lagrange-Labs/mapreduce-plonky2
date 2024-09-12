@@ -1,6 +1,6 @@
 //! Module handling the intermediate node with 1 child inside a cells tree
 
-use super::public_inputs::PublicInputs;
+use super::{accumulate_proof_digest, decide_digest_section, public_inputs::PublicInputs};
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
@@ -14,11 +14,12 @@ use mp2_common::{
 };
 use plonky2::{
     iop::{
-        target::Target,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::proof::ProofWithPublicInputsTarget,
 };
+use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
@@ -27,6 +28,8 @@ use std::iter;
 pub struct PartialNodeWires {
     identifier: Target,
     value: UInt256Target,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    is_multiplier: BoolTarget,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -35,12 +38,16 @@ pub struct PartialNodeCircuit {
     pub(crate) identifier: F,
     /// Uint256 value
     pub(crate) value: U256,
+    /// Multiplier means that the digest goes into the multiplier public input, otherwise goes as
+    /// usual in the individual digest (status quo)
+    pub(crate) is_multiplier: bool,
 }
 
 impl PartialNodeCircuit {
     pub fn build(b: &mut CBuilder, child_proof: PublicInputs<Target>) -> PartialNodeWires {
         let identifier = b.add_virtual_target();
         let value = b.add_virtual_u256();
+        let is_multiplier = b.add_virtual_bool_target_safe();
 
         // h = Poseidon(p.H || Poseidon("") || identifier || value)
         let child_hash = child_proof.node_hash();
@@ -59,19 +66,27 @@ impl PartialNodeCircuit {
         // digest_cell = p.digest_cell + D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs);
-        let child_digest = child_proof.digest_target();
-        let dc = b.add_curve_point(&[child_digest, dc]).to_targets();
+        let (digest_ind, digest_mult) = decide_digest_section(b, dc, is_multiplier);
+
+        /// aggregate the digest of the child proof in the right digest
+        let (digest_ind, digest_mul) =
+            accumulate_proof_digest(b, digest_ind, digest_mult, child_proof);
 
         // Register the public inputs.
-        PublicInputs::new(&h, &dc).register(b);
+        PublicInputs::new(&h, &digest_ind, digest_mult).register(b);
 
-        PartialNodeWires { identifier, value }
+        PartialNodeWires {
+            identifier,
+            value,
+            is_multiplier,
+        }
     }
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &PartialNodeWires) {
         pw.set_target(wires.identifier, self.identifier);
         pw.set_u256_target(&wires.value, self.value);
+        pw.set_bool_target(wires.is_multiplier, self.is_multiplier);
     }
 }
 
@@ -154,7 +169,13 @@ mod tests {
         let child_hash = random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
         let child_digest = Point::sample(&mut rng);
         let dc = &child_digest.to_weierstrass().to_fields();
-        let child_pi = &PublicInputs { h: &child_hash, dc }.to_vec();
+        let neutral = Point::NEUTRAL.to_fields();
+        let child_pi = &PublicInputs {
+            h: &child_hash,
+            ind: dc,
+            mul: &neutral,
+        }
+        .to_vec();
 
         let test_circuit = TestPartialNodeCircuit {
             c: PartialNodeCircuit { identifier, value },
@@ -181,7 +202,7 @@ mod tests {
             let exp_digest = map_to_curve_point(&inputs);
             let exp_digest = add_curve_point(&[exp_digest, child_digest]).to_weierstrass();
 
-            assert_eq!(pi.digest_point(), exp_digest);
+            assert_eq!(pi.individual_digest_point(), exp_digest);
         }
     }
 }
