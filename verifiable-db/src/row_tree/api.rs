@@ -379,7 +379,7 @@ mod test {
             assert_eq!(hash, pi.root_hash_hashout());
             // child_proof.DR + D(cells_proof.DC + D(index_id || index_value)) as DR
             let inner = map_to_curve_point(&tuple.to_fields());
-            let cells_point = weierstrass_to_point(&p.cells_pi().digest_point());
+            let cells_point = weierstrass_to_point(&p.cells_pi().individual_digest_point());
             let inner2 = inner + cells_point;
             let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
             let child_d = weierstrass_to_point(&child_pi.rows_digest_field());
@@ -430,7 +430,7 @@ mod test {
             {
                 // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
                 let inner = map_to_curve_point(&tuple.to_fields());
-                let cells_point = weierstrass_to_point(&p.cells_pi().digest_point());
+                let cells_point = weierstrass_to_point(&p.cells_pi().individual_digest_point());
                 let inner2 = inner + cells_point;
                 let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
                 let left_d = weierstrass_to_point(&left_pi.rows_digest_field());
@@ -478,7 +478,7 @@ mod test {
         }
         {
             // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
-            let cells_point = weierstrass_to_point(&cells_pi.digest_point());
+            let cells_point = weierstrass_to_point(&cells_pi.individual_digest_point());
             let inner = map_to_curve_point(&tuple.to_fields());
             let inner2 = inner + cells_point;
             let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
