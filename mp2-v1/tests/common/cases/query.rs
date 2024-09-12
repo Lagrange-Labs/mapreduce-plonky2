@@ -193,6 +193,9 @@ async fn test_query_mapping(
     let big_row_cache = table
         .row
         .wide_lineage_between(
+            // TODO: @nikolasgg we may want to use another value for the
+            // execution block
+            query_info.max_block as Epoch,
             &core_keys_for_row_tree(
                 &query_info.query,
                 &settings,
@@ -313,6 +316,9 @@ async fn prove_query(
             // The bounds here means between which versions of the tree should we look. For index tree,
             // we only look at _one_ version of the tree.
             .wide_lineage_between(
+                // TODO: @nikolasgg we may want to use another value for the
+                // execution block
+                current_epoch as Epoch,
                 &index_query,
                 (current_epoch as Epoch, current_epoch as Epoch),
             )

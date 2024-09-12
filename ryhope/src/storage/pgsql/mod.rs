@@ -826,12 +826,20 @@ where
 
     async fn wide_lineage_between(
         &self,
+        at: Epoch,
         t: &T,
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<WideLineage<T::Key, V>> {
-        let r =
-            T::wide_lineage_between(t, self, self.db.clone(), &self.table, &keys, bounds).await?;
+        let r = T::wide_lineage_between(
+            t,
+            &self.view_at(at),
+            self.db.clone(),
+            &self.table,
+            &keys,
+            bounds,
+        )
+        .await?;
 
         Ok(r)
     }
