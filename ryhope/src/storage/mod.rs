@@ -280,7 +280,14 @@ where
     }
 
     /// Return the number of stored K/V pairs at the current epoch.
-    async fn size(&self) -> usize;
+    async fn size(&self) -> usize {
+        self.size_at(self.current_epoch()).await
+    }
+
+    /// Return the number of stored K/V pairs at the gievm epoch
+    async fn size_at(&self, epoch: Epoch) -> usize;
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<K>;
 }
 
 /// A versioned KV storage only allowed to mutate entries only in the current

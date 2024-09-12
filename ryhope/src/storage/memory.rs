@@ -216,6 +216,30 @@ where
         }
         count
     }
+
+    async fn size_at(&self, epoch: Epoch) -> usize {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
+        let mut keys = HashSet::new();
+
+        for i in (0..=epoch as usize).rev() {
+            keys.extend(self.mem[i].keys())
+        }
+
+        keys.len()
+    }
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<K> {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
+        let mut keys = HashSet::new();
+
+        for i in (0..=epoch as usize).rev() {
+            keys.extend(self.mem[i].keys())
+        }
+
+        keys.into_iter().cloned().collect()
+    }
 }
 
 impl<K, V> EpochKvStorage<K, V> for VersionedKvStorage<K, V>
