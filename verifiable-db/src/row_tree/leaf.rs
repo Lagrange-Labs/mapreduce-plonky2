@@ -1,6 +1,6 @@
 use mp2_common::{
     default_config,
-    group_hashing::CircuitBuilderGroupHashing,
+    group_hashing::{scalar_mul, CircuitBuilderGroupHashing},
     poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -20,7 +20,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cells_tree;
+use crate::cells_tree::{self, accumulate_proof_digest, decide_digest_section};
 
 use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
 use derive_more::{Constructor, Deref, From};
@@ -39,12 +39,12 @@ impl LeafCircuit {
         // D(index_id||pack_u32(index_value)
         let tuple = IndexTupleWire::new(b);
         let d1 = tuple.digest(b);
-        // D(proof.DC + D(index_id||pack_u32(index_value)))
-        let cells_digest = cells_pis.digest_target();
-        let input_digest = b.curve_add(cells_digest, d1);
-        let row_digest = b
-            .map_to_curve_point(&input_digest.to_targets())
-            .to_targets();
+        let (digest_ind, digest_mult) = decide_digest_section(b, d1, tuple.is_multiplier);
+        // final_digest = HashToInt(mul_digest) * D(ind_digest)
+        let (digest_ind, digest_mult) =
+            accumulate_proof_digest(b, digest_ind, digest_mult, cells_pis);
+        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets()).to_targets();
+        let final_digest = scalar_mul(b, digest_mult, digest_ind);
         // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
         // in our case, min == max == index_value
         // left_child_hash == right_child_hash == empty_hash since there is not children
@@ -63,7 +63,7 @@ impl LeafCircuit {
         let value_fields = tuple.index_value.to_targets();
         PublicInputs::new(
             &row_hash.elements,
-            &row_digest,
+            &final_digest,
             &value_fields,
             &value_fields,
         )

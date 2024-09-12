@@ -65,9 +65,15 @@ impl FullNodeCircuit {
             .collect::<Vec<_>>();
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
         // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
-        let inner = tuple.digest(b);
-        let inner2 = b.curve_add(inner, cells_pi.digest_target());
-        let row_digest = b.map_to_curve_point(&inner2.to_targets());
+        let (digest_ind, digest_mult) =
+            decide_digest_section(b, tuple.digest(b), tuple.is_multiplier);
+        // final_digest = HashToInt(mul_digest) * D(ind_digest)
+        let (digest_ind, digest_mult) =
+            accumulate_proof_digest(b, digest_ind, digest_mult, cells_pis);
+        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets()).to_targets();
+        let row_digest = scalar_mul(b, digest_mult, digest_ind);
+
+        let row_digest = b.map_to_curve_point(&row_digest.to_targets());
         let final_digest = b.curve_add(min_child.rows_digest(), max_child.rows_digest());
         let final_digest = b.curve_add(final_digest, row_digest);
         PublicInputs::new(

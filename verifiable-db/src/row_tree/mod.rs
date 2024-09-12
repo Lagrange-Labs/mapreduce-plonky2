@@ -8,7 +8,7 @@ use mp2_common::{
 };
 use plonky2::{
     iop::{
-        target::Target,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
@@ -32,6 +32,8 @@ pub struct IndexTuple {
     index_identifier: F,
     /// secondary index value
     index_value: U256,
+    /// is the secondary value should be included in multiplier digest or not
+    is_multiplier: bool,
 }
 
 impl IndexTuple {
@@ -55,6 +57,8 @@ impl ToFields<F> for IndexTuple {
 pub(crate) struct IndexTupleWire {
     index_value: UInt256Target,
     index_identifier: Target,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    is_multiplier: BoolTarget,
 }
 
 impl IndexTupleWire {
@@ -62,6 +66,7 @@ impl IndexTupleWire {
         Self {
             index_value: b.add_virtual_u256(),
             index_identifier: b.add_virtual_target(),
+            is_multiplier: b.add_virtual_bool_target_safe(),
         }
     }
     pub(crate) fn digest(&self, b: &mut CircuitBuilder<F, D>) -> CurveTarget {

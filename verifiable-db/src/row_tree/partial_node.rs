@@ -2,7 +2,7 @@ use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 
 use mp2_common::{
     default_config,
-    group_hashing::CircuitBuilderGroupHashing,
+    group_hashing::{scalar_mul, CircuitBuilderGroupHashing},
     hash::hash_maybe_first,
     poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
@@ -98,14 +98,19 @@ impl PartialNodeCircuit {
             child_pi.root_hash().elements,
             &rest,
         );
-        // child_proof.DR + D(cells_proof.DC + D(index_id || index_value))
+
+        // final_digest = HashToInt(mul_digest) * D(ind_digest)
         let inner = tuple.digest(b);
-        let inner2 = b.curve_add(inner, cells_pi.digest_target());
-        let outer = b.map_to_curve_point(&inner2.to_targets());
-        let result = b.curve_add(child_pi.rows_digest(), outer);
+        let (digest_ind, digest_mult) = decide_digest_section(b, inner, tuple.is_multiplier);
+        let (digest_ind, digest_mult) =
+            accumulate_proof_digest(b, digest_ind, digest_mult, cells_pi);
+        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets()).to_targets();
+        let row_digest = scalar_mul(b, digest_mult, digest_ind);
+
+        let final_digest = b.curve_add(child_pi.rows_digest(), row_digest);
         PublicInputs::new(
             &node_hash,
-            &result.to_targets(),
+            &final_digest.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
         )
