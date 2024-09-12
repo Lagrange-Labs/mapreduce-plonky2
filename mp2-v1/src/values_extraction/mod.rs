@@ -19,6 +19,7 @@ mod branch;
 mod extension;
 mod leaf_mapping;
 mod leaf_single;
+mod merge;
 pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};

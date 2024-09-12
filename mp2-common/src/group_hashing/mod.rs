@@ -7,6 +7,8 @@ use plonky2::iop::target::BoolTarget;
 use plonky2::{
     field::extension::Extendable, iop::target::Target, plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
+
 use plonky2_ecgfp5::curve::curve::Point;
 use plonky2_ecgfp5::gadgets::base_field::QuinticExtensionTarget;
 use plonky2_ecgfp5::{
@@ -30,13 +32,14 @@ pub use curve_add::{add_curve_point, add_weierstrass_point};
 /// Field-to-curve and curve point addition functions
 pub use field_to_curve::map_to_curve_point;
 
-use crate::poseidon::HashableField;
+use crate::poseidon::{hash_to_int_target, HashableField};
 use crate::types::CURVE_TARGET_LEN;
 use crate::utils::ToTargets;
 use crate::{
     types::{GFp, GFp5},
     utils::{FromFields, FromTargets, ToFields},
 };
+use crate::{CHasher, D, F};
 
 /// Trait for adding field-to-curve and curve point addition functions to
 /// circuit builder
@@ -55,6 +58,13 @@ pub trait CircuitBuilderGroupHashing {
     /// check for the zero point which infinity flag is true as
     /// [NEUTRAL](https://github.com/Lagrange-Labs/plonky2-ecgfp5/blob/d5a6a0b7dfee4ab69d8c1c315f9f4407502f07eb/src/curve/curve.rs#L70).
     fn connect_curve_points(&mut self, a: CurveTarget, b: CurveTarget);
+    /// Selects a curve target depending on the condition a.
+    fn select_curve_point(
+        &mut self,
+        condition: BoolTarget,
+        a: CurveTarget,
+        b: CurveTarget,
+    ) -> CurveTarget;
 }
 
 impl<F, const D: usize> CircuitBuilderGroupHashing for CircuitBuilder<F, D>
@@ -84,6 +94,20 @@ where
 
         // Constrain the infinity flags are equal.
         self.connect(a_is_inf.target, b_is_inf.target);
+    }
+    fn select_curve_point(
+        &mut self,
+        condition: BoolTarget,
+        a: CurveTarget,
+        b: CurveTarget,
+    ) -> CurveTarget {
+        let ts = a
+            .to_targets()
+            .into_iter()
+            .zip(b.to_targets())
+            .map(|(a, b)| self.select(condition, a, b))
+            .collect::<Vec<_>>();
+        CurveTarget::from_targets(&ts)
     }
 }
 
@@ -162,4 +186,17 @@ pub fn weierstrass_to_point(w: &WeierstrassPoint) -> Point {
     let p = Point::decode(w.encode()).expect("input weierstrass point invalid");
     assert_eq!(&p.to_weierstrass(), w);
     p
+}
+
+/// Common function to compute the digest of the block tree which uses a special format using
+/// scalar1 multiplication
+pub fn scalar_mul(
+    b: &mut CircuitBuilder<F, D>,
+    inputs: Vec<Target>,
+    base: CurveTarget,
+) -> CurveTarget {
+    let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
+    let int = hash_to_int_target(b, hash);
+    let scalar = b.biguint_to_nonnative(&int);
+    b.curve_scalar_mul(base, &scalar)
 }

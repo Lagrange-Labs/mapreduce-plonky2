@@ -2,7 +2,7 @@
 //! an existing node (or if there is no existing node, which happens for the
 //! first block number).
 
-use super::{compute_index_digest, public_inputs::PublicInputs};
+use super::{public_inputs::PublicInputs, scalar_mul};
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
@@ -82,7 +82,7 @@ impl LeafCircuit {
         let inputs = iter::once(index_identifier)
             .chain(index_value.iter().cloned())
             .collect();
-        let node_digest = compute_index_digest(b, inputs, rows_tree_pi.rows_digest());
+        let node_digest = scalar_mul(b, inputs, rows_tree_pi.rows_digest());
 
         // Compute hash of the inserted node
         // node_min = block_number
