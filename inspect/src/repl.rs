@@ -3,6 +3,7 @@ use std::io::Write;
 use anyhow::*;
 use colored::Colorize;
 use dialoguer::{console, theme::ColorfulTheme, FuzzySelect, Input};
+use itertools::Itertools;
 use ryhope::{
     storage::{FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage},
     tree::{MutableTree, PrintableTree, TreeTopology},
@@ -18,6 +19,26 @@ pub(crate) trait PayloadFormatter<V: std::fmt::Debug> {
     fn settings(&mut self, tty: &mut console::Term) -> Result<()> {
         write!(tty, "no settings for payload formatter").unwrap();
         Ok(())
+    }
+}
+
+fn menu(tty: &mut console::Term, title: &str, choices: &[(char, &str)]) -> Option<char> {
+    let prompt = format!(
+        "{}: {} - {}uit",
+        title.white().bold(),
+        choices
+            .iter()
+            .map(|(trigger, rest)| format!("{}{rest}", format!("[{trigger}]").yellow().bold()))
+            .join(" - "),
+        "[q]".red().bold(),
+    );
+    loop {
+        writeln!(tty, "{}", prompt).unwrap();
+        match tty.read_char().unwrap() {
+            x if choices.iter().any(|(trigger, _)| *trigger == x) => return Some(x),
+            'q' => return None,
+            _ => {}
+        }
     }
 }
 
@@ -242,66 +263,45 @@ impl<
     }
 
     async fn view_tree(&mut self) -> Result<()> {
-        loop {
-            writeln!(
-                self.tty,
-                "from: {}urrent - {}oot - {}ey - {}uit",
-                "[c]".yellow().bold(),
-                "[r]".yellow().bold(),
-                "[k]".yellow().bold(),
-                "[q]".red().bold(),
-            )
-            .unwrap();
-
-            if let Err(e) = match self.tty.read_char().unwrap() {
-                c @ ('c' | 'r' | 'k') => {
-                    if let Some(root) = match c {
-                        'c' => Some(self.current_key.clone()),
-                        'r' => self.db.root_at(self.current_epoch).await,
-                        'k' => self.select_key().await,
-                        _ => unreachable!(),
-                    } {
-                        write!(
-                            self.tty,
-                            "\n{}",
-                            self.db
-                                .tree()
-                                .subtree_to_string(&self.db.view_at(self.current_epoch), &root)
-                                .await
-                        )
-                        .unwrap();
-                    } else {
-                        write!(self.tty, "Empty tree").unwrap();
-                    }
-                    return Ok(());
-                }
-                'q' => return Ok(()),
-                _ => Ok(()),
+        if let Some(choice) = menu(
+            &mut self.tty,
+            "from",
+            &[('c', "urrent"), ('r', "oot"), ('k', "ey")],
+        ) {
+            if let Some(root) = match choice {
+                'c' => Some(self.current_key.clone()),
+                'r' => self.db.root_at(self.current_epoch).await,
+                'k' => self.select_key().await,
+                _ => unreachable!(),
             } {
-                write!(self.tty, "{}", e.to_string().red()).unwrap();
+                write!(
+                    self.tty,
+                    "\n{}",
+                    self.db
+                        .tree()
+                        .subtree_to_string(&self.db.view_at(self.current_epoch), &root)
+                        .await
+                )
+                .unwrap();
+            } else {
+                write!(self.tty, "Empty tree").unwrap();
             }
         }
+
+        Ok(())
     }
 
     fn settings(&mut self) -> Result<()> {
-        loop {
-            writeln!(
-                self.tty,
-                "\n{} {}ayload view - {}uit",
-                "Settings".white().bold(),
-                "[p]".yellow().bold(),
-                "[q]".yellow().bold(),
-            )
-            .unwrap();
-
-            if let Err(e) = match self.tty.read_char().unwrap() {
+        if let Some(choice) = menu(&mut self.tty, "settings", &[('p', "ayload view")]) {
+            if let Err(e) = match choice {
                 'p' => self.payload_fmt.settings(&mut self.tty),
-                'q' => return Ok(()),
-                _ => Ok(()),
+                _ => unreachable!(),
             } {
                 write!(self.tty, "{}", e.to_string().red()).unwrap();
             }
         }
+
+        Ok(())
     }
 
     pub async fn run(&mut self) -> Result<()> {
