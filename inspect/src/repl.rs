@@ -110,16 +110,25 @@ impl<
 
     async fn travel(&mut self) -> Result<()> {
         loop {
-            let epoch: Epoch = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("target epoch:")
-                .interact_text()?;
+            let epoch: Epoch = Input::new().with_prompt("target epoch:").interact_text()?;
 
-            if epoch < 0 || epoch > self.db.current_epoch() {
-                bail!("erroneous epoch {}", epoch);
-            } else {
-                self.current_epoch = epoch;
-                return Ok(());
+            if epoch < self.db.initial_epoch() {
+                bail!(
+                    "epoch `{}` is older than initial epoch `{}`",
+                    epoch,
+                    self.db.initial_epoch()
+                );
             }
+            if epoch > self.db.current_epoch() {
+                bail!(
+                    "epoch `{}` is newer than latest epoch `{}`",
+                    epoch,
+                    self.db.current_epoch()
+                );
+            }
+
+            self.current_epoch = epoch;
+            return Ok(());
         }
     }
 
