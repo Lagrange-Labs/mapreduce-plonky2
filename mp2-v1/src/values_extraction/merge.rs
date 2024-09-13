@@ -1,6 +1,6 @@
 use super::{public_inputs::PublicInputsArgs, PublicInputs};
 use mp2_common::{
-    group_hashing::{scalar_mul, CircuitBuilderGroupHashing},
+    group_hashing::{circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
     types::CBuilder,
@@ -39,7 +39,7 @@ impl MergeTable {
         let input_b = table_b.values_digest_target();
         let multiplier = b.select_curve_point(is_table_a_multiplier, input_a, input_b);
         let base = b.select_curve_point(is_table_a_multiplier, input_b, input_a);
-        let new_dv = scalar_mul(b, multiplier.to_targets(), base);
+        let new_dv = circuit_hashed_scalar_mul(b, multiplier.to_targets(), base);
 
         /// combine the table metadata hashes together
         let input_a = table_a.metadata_digest_target();

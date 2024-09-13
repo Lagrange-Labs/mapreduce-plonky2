@@ -12,8 +12,6 @@ use plonky2::{
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 use std::{array, fmt::Debug};
 
-use crate::ivc::public_inputs::DV_RANGE;
-
 // Cells Tree Construction public inputs:
 // - `H : [4]F` : Poseidon hash of the subtree at this node
 // - `DI : Digest[F]` : Cells digests accumulated up so far for INDIVIDUAL digest
@@ -35,18 +33,18 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
 
     fn register_args(&self, cb: &mut CBuilder) {
         cb.register_public_inputs(self.h);
-        cb.register_public_inputs(self.di);
-        cb.register_public_inputs(self.dm);
+        cb.register_public_inputs(self.ind);
+        cb.register_public_inputs(self.mul);
     }
 }
 
 impl<'a> PublicInputs<'a, GFp> {
     /// Get the cells digest point.
     pub fn individual_digest_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(self.di)
+        WeierstrassPoint::from_fields(self.ind)
     }
     pub fn multiplier_digest_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(self.dm)
+        WeierstrassPoint::from_fields(self.mul)
     }
 }
 
@@ -58,12 +56,12 @@ impl<'a> PublicInputs<'a, Target> {
 
     /// Get the individual digest target.
     pub fn individual_digest_target(&self) -> CurveTarget {
-        CurveTarget::from_targets(self.di)
+        CurveTarget::from_targets(self.ind)
     }
 
     /// Get the cells multiplier digest
     pub fn multiplier_digest_target(&self) -> CurveTarget {
-        CurveTarget::from_targets(self.dm)
+        CurveTarget::from_targets(self.mul)
     }
 }
 
@@ -88,7 +86,12 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 
     /// Combine to a vector.
     pub fn to_vec(&self) -> Vec<T> {
-        self.h.iter().chain(self.dc).cloned().collect()
+        self.h
+            .iter()
+            .chain(self.ind)
+            .chain(self.mul)
+            .cloned()
+            .collect()
     }
 
     pub fn h_raw(&self) -> &'a [T] {

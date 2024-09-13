@@ -7,7 +7,7 @@ mod public_inputs;
 pub use api::{CircuitInput, PublicParameters};
 use mp2_common::{poseidon::hash_to_int_target, CHasher, D, F};
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
-use plonky2_ecdsa::gadgets::{curve::CircuitBuilderCurve, nonnative::CircuitBuilderNonNative};
+use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
 
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 pub use public_inputs::PublicInputs;

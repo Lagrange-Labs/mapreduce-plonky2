@@ -8,9 +8,8 @@ use crate::{
     revelation::{
         self, api::Parameters as RevelationParams, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
     },
-    row_tree::{self, Cell},
+    row_tree::{self},
 };
-use alloy::primitives::U256;
 use anyhow::Result;
 use log::info;
 use mp2_common::{

@@ -191,7 +191,7 @@ impl CircuitInput {
     ) -> Result<Self> {
         let circuit = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         Ok(CircuitInput::Leaf {
-            witness: circuit,
+            witness: circuit.into(),
             cells_proof,
         })
     }
@@ -222,7 +222,7 @@ impl CircuitInput {
     ) -> Result<Self> {
         let circuit = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         Ok(CircuitInput::Full {
-            witness: circuit,
+            witness: circuit.into(),
             left_proof,
             right_proof,
             cells_proof,
@@ -331,10 +331,10 @@ mod test {
                 params,
                 cells_proof: cells_proof[0].clone(),
                 cells_vk,
-                leaf1: Cell::new(identifier, v1),
-                leaf2: Cell::new(identifier, v2),
-                full: Cell::new(identifier, v_full),
-                partial: Cell::new(identifier, v_partial),
+                leaf1: Cell::new(identifier, v1, false),
+                leaf2: Cell::new(identifier, v2, false),
+                full: Cell::new(identifier, v_full, false),
+                partial: Cell::new(identifier, v_partial, false),
             })
         }
 
@@ -349,8 +349,12 @@ mod test {
             // generate cells tree input and fake proof
             let cells_hash = HashOut::rand().to_fields();
             let cells_digest = Point::rand().to_weierstrass().to_fields();
-            let cells_pi =
-                cells_tree::PublicInputs::new(&cells_hash, &cells_digest, Point::NEUTRAL).to_vec();
+            let cells_pi = cells_tree::PublicInputs::new(
+                &cells_hash,
+                &cells_digest,
+                &Point::NEUTRAL.to_fields(),
+            )
+            .to_vec();
             cells_pi
         }
     }

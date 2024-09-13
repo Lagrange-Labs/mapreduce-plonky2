@@ -2,7 +2,7 @@ use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 
 use mp2_common::{
     default_config,
-    group_hashing::{scalar_mul, CircuitBuilderGroupHashing},
+    group_hashing::{circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     hash::hash_maybe_first,
     poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
@@ -29,7 +29,9 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cells_tree::{self, accumulate_proof_digest, decide_digest_section, Cell, CellWire};
+use crate::cells_tree::{
+    self, circuit_accumulate_proof_digest, circuit_decide_digest_section, Cell, CellWire,
+};
 use derive_more::{From, Into};
 
 use super::public_inputs::PublicInputs;
@@ -102,11 +104,12 @@ impl PartialNodeCircuit {
 
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
         let inner = tuple.digest(b);
-        let (digest_ind, digest_mult) = decide_digest_section(b, inner, tuple.is_multiplier);
         let (digest_ind, digest_mult) =
-            accumulate_proof_digest(b, digest_ind, digest_mult, cells_pi);
-        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets()).to_targets();
-        let row_digest = scalar_mul(b, digest_mult.to_fields(), digest_ind);
+            circuit_decide_digest_section(b, inner, tuple.is_multiplier);
+        let (digest_ind, digest_mult) =
+            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &cells_pi);
+        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
+        let row_digest = circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind);
 
         let final_digest = b.curve_add(child_pi.rows_digest(), row_digest);
         PublicInputs::new(
@@ -198,10 +201,10 @@ pub mod test {
     };
 
     use crate::{
-        cells_tree,
+        cells_tree::{self, Cell},
         row_tree::{
             full_node::test::generate_random_pi, partial_node::PartialNodeCircuit,
-            public_inputs::PublicInputs, Cell,
+            public_inputs::PublicInputs,
         },
     };
 
@@ -256,7 +259,7 @@ pub mod test {
     }
 
     fn partial_node_circuit(child_at_left: bool) {
-        let tuple = Cell::new(F::rand(), U256::from(18));
+        let tuple = Cell::new(F::rand(), U256::from(18), false);
         let (child_min, child_max) = match child_at_left {
             true => (U256::from(10), U256::from(15)),
             false => (U256::from(20), U256::from(25)),

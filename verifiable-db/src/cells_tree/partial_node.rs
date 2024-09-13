@@ -1,7 +1,8 @@
 //! Module handling the intermediate node with 1 child inside a cells tree
 
 use super::{
-    accumulate_proof_digest, decide_digest_section, public_inputs::PublicInputs, Cell, CellWire,
+    circuit_accumulate_proof_digest, circuit_decide_digest_section, public_inputs::PublicInputs,
+    Cell, CellWire,
 };
 use alloy::primitives::U256;
 use anyhow::Result;
@@ -56,14 +57,14 @@ impl PartialNodeCircuit {
         // digest_cell = p.digest_cell + D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs);
-        let (digest_ind, digest_mult) = decide_digest_section(b, dc, is_multiplier);
+        let (digest_ind, digest_mult) = circuit_decide_digest_section(b, dc, is_multiplier);
 
-        /// aggregate the digest of the child proof in the right digest
+        // aggregate the digest of the child proof in the right digest
         let (digest_ind, digest_mul) =
-            accumulate_proof_digest(b, digest_ind, digest_mult, child_proof);
+            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &child_proof);
 
         // Register the public inputs.
-        PublicInputs::new(&h, &digest_ind, digest_mult).register(b);
+        PublicInputs::new(&h, &digest_ind.to_targets(), &digest_mult.to_targets()).register(b);
 
         CellWire {
             identifier,
@@ -75,7 +76,7 @@ impl PartialNodeCircuit {
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &PartialNodeWires) {
-        self.assign(pw, wires);
+        self.0.assign_wires(pw, &wires.0);
     }
 }
 
@@ -171,7 +172,8 @@ mod tests {
                 identifier,
                 value,
                 is_multiplier: false,
-            },
+            }
+            .into(),
             child_pi,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);

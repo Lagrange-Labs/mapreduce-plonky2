@@ -1,7 +1,7 @@
 use derive_more::{Deref, From, Into};
 use mp2_common::{
     default_config,
-    group_hashing::{scalar_mul, CircuitBuilderGroupHashing},
+    group_hashing::{circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     poseidon::H,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -23,7 +23,9 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 use std::array::from_fn as create_array;
 
-use crate::cells_tree::{self, accumulate_proof_digest, decide_digest_section, Cell, CellWire};
+use crate::cells_tree::{
+    self, circuit_accumulate_proof_digest, circuit_decide_digest_section, Cell, CellWire,
+};
 
 use super::public_inputs::PublicInputs;
 // Arity not strictly needed now but may be an easy way to increase performance
@@ -68,14 +70,17 @@ impl FullNodeCircuit {
             .cloned()
             .collect::<Vec<_>>();
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
-        // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
+
+        // compute the digest of the cell
+        let cell_digest = tuple.digest(b);
+        // then decide if it's for indidivual or multiplier cell
         let (digest_ind, digest_mult) =
-            decide_digest_section(b, tuple.digest(b), tuple.is_multiplier);
+            circuit_decide_digest_section(b, cell_digest, tuple.is_multiplier);
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
         let (digest_ind, digest_mult) =
-            accumulate_proof_digest(b, digest_ind, digest_mult, cells_pi);
-        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets()).to_targets();
-        let row_digest = scalar_mul(b, digest_mult, digest_ind);
+            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &cells_pi);
+        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
+        let row_digest = circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind);
 
         let row_digest = b.map_to_curve_point(&row_digest.to_targets());
         let final_digest = b.curve_add(min_child.rows_digest(), max_child.rows_digest());
@@ -90,7 +95,7 @@ impl FullNodeCircuit {
         FullNodeWires(tuple)
     }
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &FullNodeWires) {
-        self.assign_wires(pw, wires);
+        self.0.assign_wires(pw, &wires.0);
     }
 }
 
@@ -164,12 +169,9 @@ pub(crate) mod test {
     };
     use plonky2_ecgfp5::curve::curve::Point;
 
-    use crate::{
-        cells_tree,
-        row_tree::{public_inputs::PublicInputs, Cell},
-    };
+    use crate::{cells_tree, row_tree::public_inputs::PublicInputs};
 
-    use super::{FullNodeCircuit, FullNodeWires};
+    use super::{FullNodeCircuit, FullNodeWires, *};
 
     #[derive(Clone, Debug)]
     struct TestFullNodeCircuit {
@@ -229,7 +231,7 @@ pub(crate) mod test {
         let (right_min, right_max) = (18, 30);
         let value = U256::from(18); // 15 < 18 < 23
         let identifier = F::rand();
-        let tuple = Cell::new(identifier, value);
+        let tuple = Cell::new(identifier, value, false);
         let node_circuit = FullNodeCircuit::from(tuple.clone());
         let left_pi = generate_random_pi(left_min, left_max);
         let right_pi = generate_random_pi(right_min, right_max);
@@ -255,7 +257,7 @@ pub(crate) mod test {
             .chain(right_hash.to_fields().iter())
             .chain(left_pis.min_value_u256().to_fields().iter())
             .chain(right_pis.max_value_u256().to_fields().iter())
-            .chain(Cell::new(identifier, value).to_fields().iter())
+            .chain(Cell::new(identifier, value, false).to_fields().iter())
             .chain(cells_hash.iter())
             .cloned()
             .collect::<Vec<_>>();

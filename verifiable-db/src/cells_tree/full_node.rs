@@ -1,24 +1,17 @@
 //! Module handling the intermediate node with 2 children inside a cells tree
 
 use super::{
-    accumulate_proof_digest, decide_digest_section, public_inputs::PublicInputs, Cell, CellWire,
+    circuit_accumulate_proof_digest, circuit_decide_digest_section, public_inputs::PublicInputs,
+    Cell, CellWire,
 };
-use alloy::primitives::U256;
 use anyhow::Result;
-use derive_more::{Deref, From};
+use derive_more::{From, Into};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing,
-    public_inputs::PublicInputCommon,
-    types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::ToTargets,
-    CHasher, D, F,
+    group_hashing::CircuitBuilderGroupHashing, public_inputs::PublicInputCommon, types::CBuilder,
+    u256::CircuitBuilderU256, utils::ToTargets, CHasher, D, F,
 };
 use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::proof::ProofWithPublicInputsTarget,
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
@@ -52,14 +45,14 @@ impl FullNodeCircuit {
         // digest_cell = p1.digest_cell + p2.digest_cell + D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
         let dc = b.map_to_curve_point(&inputs);
-        let (digest_ind, digest_mult) = decide_digest_section(b, dc, is_multiplier);
+        let (digest_ind, digest_mult) = circuit_decide_digest_section(b, dc, is_multiplier);
         let (digest_ind, digest_mult) =
-            accumulate_proof_digest(b, digest_ind, digest_mult, child_proofs[0]);
+            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &child_proofs[0]);
         let (digest_ind, digest_mult) =
-            accumulate_proof_digest(b, digest_ind, digest_mult, child_proofs[1]);
+            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &child_proofs[1]);
 
         // Register the public inputs.
-        PublicInputs::new(&h, &digest_ind, digest_mult).register(b);
+        PublicInputs::new(&h, &digest_ind.to_targets(), &digest_mult.to_targets()).register(b);
 
         CellWire {
             identifier,
@@ -71,7 +64,7 @@ impl FullNodeCircuit {
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &FullNodeWires) {
-        self.assign(pw, wires);
+        self.0.assign_wires(pw, &wires.0);
     }
 }
 
@@ -102,6 +95,7 @@ impl CircuitLogicWires<F, D, 2> for FullNodeWires {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::primitives::U256;
     use mp2_common::{
         group_hashing::{add_curve_point, map_to_curve_point},
         poseidon::H,
@@ -164,7 +158,7 @@ mod tests {
         let child_digests = [0; 2].map(|_| Point::sample(&mut rng));
         let child_pis = &array::from_fn(|i| {
             let h = &child_hashs[i];
-            let dc = &child_digests[i].to_weierstrass().to_fields();
+            let ind = &child_digests[i].to_weierstrass().to_fields();
             let neutral = Point::NEUTRAL.to_fields();
 
             PublicInputs {
@@ -180,7 +174,8 @@ mod tests {
                 identifier,
                 value,
                 is_multiplier: false,
-            },
+            }
+            .into(),
             child_pis,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);

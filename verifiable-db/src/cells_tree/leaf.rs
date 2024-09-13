@@ -51,10 +51,10 @@ impl LeafCircuit {
 
         // digest_cell = D(identifier || value)
         let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
-        let dc = b.map_to_curve_point(&inputs).to_targets();
+        let dc = b.map_to_curve_point(&inputs);
         let zero = b.curve_zero();
-        let digest_mul = b.curve_select(is_multiplier, dc, zero);
-        let digest_ind = b.curve_select(is_multiplier, zero, dc);
+        let digest_mul = b.curve_select(is_multiplier, dc, zero).to_targets();
+        let digest_ind = b.curve_select(is_multiplier, zero, dc).to_targets();
 
         // Register the public inputs.
         PublicInputs::new(&h, &digest_ind, &digest_mul).register(b);
@@ -69,7 +69,7 @@ impl LeafCircuit {
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
-        self.assign(pw, wires);
+        self.0.assign_wires(pw, &wires.0);
     }
 }
 
@@ -128,11 +128,12 @@ mod tests {
         let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let value_fields = value.to_fields();
 
-        let test_circuit = Cell {
+        let test_circuit: LeafCircuit = Cell {
             identifier,
             value,
             is_multiplier: false,
-        };
+        }
+        .into();
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);

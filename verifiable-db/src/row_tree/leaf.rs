@@ -1,7 +1,7 @@
 use derive_more::{From, Into};
 use mp2_common::{
     default_config,
-    group_hashing::{scalar_mul, CircuitBuilderGroupHashing},
+    group_hashing::{circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -12,7 +12,6 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
@@ -21,13 +20,15 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cells_tree::{self, accumulate_proof_digest, decide_digest_section, Cell, CellWire};
+use crate::cells_tree::{
+    self, circuit_accumulate_proof_digest, circuit_decide_digest_section, Cell, CellWire,
+};
 
 use super::public_inputs::PublicInputs;
 
 // new type to implement the circuit logic on each differently
 // deref to access directly the same members - read only so it's ok
-#[derive(Clone, Debug, Deref, From, Into)]
+#[derive(Clone, Debug, From, Into)]
 pub struct LeafCircuit(Cell);
 
 #[derive(Clone, Serialize, Deserialize, From, Into)]
@@ -39,12 +40,16 @@ impl LeafCircuit {
         // D(index_id||pack_u32(index_value)
         let tuple = CellWire::new(b);
         let d1 = tuple.digest(b);
-        let (digest_ind, digest_mult) = decide_digest_section(b, d1, tuple.is_multiplier);
-        // final_digest = HashToInt(mul_digest) * D(ind_digest)
+        // set the right digest depending on the multiplier
+        let (digest_ind, digest_mult) = circuit_decide_digest_section(b, d1, tuple.is_multiplier);
         let (digest_ind, digest_mult) =
-            accumulate_proof_digest(b, digest_ind, digest_mult, cells_pis);
-        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets()).to_targets();
-        let final_digest = scalar_mul(b, digest_mult, digest_ind);
+            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &cells_pis);
+        // final_digest = HashToInt(mul_digest) * D(ind_digest)
+        // NOTE This additional digest is necessary since the individual digest is supposed to be a
+        // full row, that is how it is extracted from MPT
+        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
+        let final_digest =
+            circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind).to_targets();
         // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
         // in our case, min == max == index_value
         // left_child_hash == right_child_hash == empty_hash since there is not children
@@ -72,7 +77,7 @@ impl LeafCircuit {
     }
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
-        self.0.assign_wires(pw, wires);
+        self.0.assign_wires(pw, &wires.0);
     }
 }
 
@@ -130,10 +135,12 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 #[cfg(test)]
 mod test {
 
-    use alloy::primitives::U256;
+    use alloy::{dyn_abi::parser::utils::identifier, primitives::U256};
     use mp2_common::{
-        group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::ToFields, CHasher,
-        C, D, F,
+        group_hashing::{field_hashed_scalar_mul, map_to_curve_point},
+        poseidon::empty_poseidon_hash,
+        utils::ToFields,
+        CHasher, C, D, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
@@ -146,8 +153,8 @@ mod test {
     use rand::{thread_rng, Rng};
 
     use crate::{
-        cells_tree,
-        row_tree::{public_inputs::PublicInputs, Cell},
+        cells_tree::{self, field_accumulate_proof_digest, field_decide_digest_section, Cell},
+        row_tree::public_inputs::PublicInputs,
     };
 
     use super::{LeafCircuit, LeafWires};
@@ -177,13 +184,20 @@ mod test {
         let mut rng = thread_rng();
         let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let identifier = F::rand();
-        let tuple = Cell::new(identifier, value);
+        let is_row_multiplier = false;
+        let row_cell = Cell::new(identifier, value, is_row_multiplier);
+        let (ind_row_digest, mul_row_digest) =
+            field_decide_digest_section(row_cell.digest(), is_row_multiplier);
+        let tuple = Cell::new(identifier, value, is_row_multiplier);
         let circuit = LeafCircuit::from(tuple.clone());
-        let cells_point = Point::rand();
-        let cells_digest = cells_point.to_weierstrass().to_fields();
+
+        let ind_cells_digest = Point::rand().to_fields();
+        // TODO: test with other than neutral
+        let mul_cells_digest = Point::NEUTRAL.to_fields();
         let cells_hash = HashOut::rand().to_fields();
-        let neutral = Point::NEUTRAL.to_fields();
-        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest, &neutral).to_vec();
+        let cells_pi_struct =
+            cells_tree::PublicInputs::new(&cells_hash, &ind_cells_digest, &mul_cells_digest);
+        let cells_pi = cells_pi_struct.to_vec();
         let test_circuit = TestLeafCircuit { circuit, cells_pi };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
@@ -202,10 +216,11 @@ mod test {
             .collect::<Vec<_>>();
         let row_hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&inputs);
         assert_eq!(row_hash, pi.root_hash_hashout());
-        // D(proof.DC + D(index_id||pack_u32(index_value)))
-        let inner = map_to_curve_point(&tuple.to_fields());
-        let result_inner = inner + cells_point;
-        let result = map_to_curve_point(&result_inner.to_weierstrass().to_fields());
+        // final_digest = HashToInt(mul_digest) * D(ind_digest)
+        let (ind_final, mul_final) =
+            field_accumulate_proof_digest(ind_row_digest, mul_row_digest, &cells_pi_struct);
+        let ind_final = map_to_curve_point(&ind_final.to_fields());
+        let result = field_hashed_scalar_mul(mul_final.to_fields(), ind_final);
         assert_eq!(result.to_weierstrass(), pi.rows_digest_field())
     }
 }
