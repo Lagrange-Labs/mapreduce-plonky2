@@ -60,7 +60,7 @@ use ryhope::{
         updatetree::{Next, UpdateTree},
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage, WideLineage,
     },
-    tree::NodeContext,
+    tree::{NodeContext, TreeTopology},
     Epoch, NodePayload,
 };
 use sqlparser::ast::Query;
@@ -232,8 +232,7 @@ async fn prove_query(
 ) -> Result<()> {
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
-    let mut row_keys_per_epoch = row_cache.keys_by_epochs();
-    let all_epochs = query.min_block as Epoch..=query.max_block as Epoch;
+    let row_keys_per_epoch = row_cache.keys_by_epochs();
     let mut planner = QueryPlanner {
         ctx,
         query: query.clone(),
@@ -321,9 +320,9 @@ async fn prove_query(
             .await?;
         // since we only analyze the index tree for one epoch
         assert_eq!(big_index_cache.keys_by_epochs().len(), 1);
-        /// This is ok because the cache only have the block that are in the range so the
-        /// filter_check is gonna return the same thing
-        /// TOOD: @franklin is that correct ?
+        // This is ok because the cache only have the block that are in the range so the
+        // filter_check is gonna return the same thing
+        // TOOD: @franklin is that correct ?
         let up = big_index_cache
             // this is the epoch we choose how to prove
             .update_tree_for(current_epoch as Epoch)
@@ -898,41 +897,61 @@ pub async fn prove_non_existence_row<'a>(
             .table
             .execute_row_query(&query.unwrap(), &[])
             .await?;
+
         if rows.len() == 0 {
             // no node found, return None
             info!("Search node for non-existence circuit: no node found");
             return Ok(None);
         }
+
         let row_key = rows[0]
             .get::<_, Option<Vec<u8>>>(0)
             .map(RowTreeKey::from_bytea)
             .context("unable to parse row key tree")
             .expect("");
+
         // among the nodes with the same index value of the node with `row_key`, we need to find
         // the one in the highest place in the tree, i.e., a node whose parent has not the same
         // index value
-        let (mut node_ctx, node_value) = row_tree
-            .fetch_with_context_at(&row_key, primary as Epoch)
-            .await;
-        let value = node_value.value();
-        let get_parent_data = async |node_ctx: &NodeContext<RowTreeKey>| {
-            if node_ctx.parent.is_some() {
-                let parent_key = node_ctx.parent.as_ref().unwrap();
-                let (ctx, value) = row_tree
-                    .fetch_with_context_at(parent_key, primary as Epoch)
-                    .await;
-                Some((ctx, value))
+        let primary_epoch = primary as Epoch;
+        let lineage = row_tree
+            .tree()
+            .lineage(&row_key, &row_tree.at(primary_epoch))
+            .await
+            .unwrap();
+
+        // fetch all the lineage node payloads in a single query
+        let all_payloads = row_tree
+            .try_fetch_many_at(lineage.full_path().cloned().map(|k| (primary_epoch, k)))
+            .await
+            .with_context(|| format!("while fetching ascendance payloads for `{:?}`", row_key))?
+            .into_iter()
+            // accumulate everything in a single key -> payload hashmap, as we
+            // know for sure everything is in primary_epoch.
+            .filter_map(|maybe_data| {
+                maybe_data.map(|(epoch, k, v)| {
+                    // safety check, we should never encounter another epoch
+                    assert_eq!(epoch, primary_epoch);
+                    (k, v)
+                })
+            })
+            .collect::<HashMap<_, _>>();
+
+        let value = row_tree.fetch_at(&row_key, primary_epoch).await.value();
+        let mut current_node = &row_key;
+        // NOTE: the `.rev()` to convert the lineage into an ascendance
+        let mut ascendance = lineage.full_path().rev();
+
+        while let Some(parent) = ascendance.next() {
+            if all_payloads[parent].value() == value {
+                current_node = parent;
             } else {
-                None
+                break;
             }
-        };
-        let mut parent_data = get_parent_data(&node_ctx).await;
-        while parent_data.is_some() && parent_data.as_ref().unwrap().1.value() == value {
-            node_ctx = parent_data.unwrap().0;
-            parent_data = get_parent_data(&node_ctx).await;
         }
-        Ok(Some(node_ctx.node_id))
+        Ok(Some(current_node.to_owned()))
     };
+
     // try first with lower node than secondary min query bound
     let to_be_proven_node = match find_node_for_proof(query_for_min).await? {
         Some(node) => node,
@@ -1350,7 +1369,7 @@ async fn find_longest_lived_key(
                 Some((k, l, start))
             }
         })
-        .max_by_key(|(k, l, start)| *l)
+        .max_by_key(|(_k, l, _start)| *l)
         .unwrap_or_else(|| {
             panic!(
                 "unable to find longest row? -> length all _table {}, max {}",

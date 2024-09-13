@@ -155,8 +155,7 @@ where
         db: DBPool,
         table: &str,
         data: I,
-    ) -> impl std::future::Future<Output = Result<Vec<Option<(Epoch, Self::Key, V)>>>> + std::marker::Send
-    {
+    ) -> impl std::future::Future<Output = Result<Vec<Option<(Epoch, Self::Key, V)>>>> + Send {
         async move {
             let data = data.into_iter().collect::<Vec<_>>();
             let connection = db.get().await.unwrap();
@@ -169,7 +168,9 @@ where
                     )
                 })
                 .join(", ");
-            Ok(connection
+
+            let mut r = Vec::new();
+            for row in connection
             .query(
                 &format!(
                    "SELECT batch.key, batch.epoch, {table}.{PAYLOAD} FROM
@@ -182,14 +183,13 @@ where
             )
                .await
                .context("while fetching payload from database")?
-               .iter()
-               .map(|row| {
+                .iter() {
                    let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
                    let epoch = row.get::<_, Epoch>(1);
                    let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
-                   v.map(|v| (epoch, k, v))
-               })
-               .collect())
+                   r.push( v.map(|v| (epoch, k, v)));
+                }
+            Ok(r)
         }
     }
 

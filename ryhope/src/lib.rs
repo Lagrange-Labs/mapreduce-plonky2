@@ -290,9 +290,15 @@ impl<
         self.tree.lineage(k, &s).await
     }
 
+    /// Return a handle to this merkle tree storage, as it stands at its most
+    /// recent epoch.
+    pub fn now(&self) -> &S {
+        &self.storage
+    }
+
     /// Return an epoch-locked, read-only, [`TreeStorage`] offering a view on
     /// this Merkle tree as it was at the given epoch.
-    pub fn view_at(&self, epoch: Epoch) -> TreeStorageView<'_, T, S> {
+    pub fn at(&self, epoch: Epoch) -> TreeStorageView<'_, T, S> {
         TreeStorageView::<'_, T, S>::new(&self.storage, epoch)
     }
 

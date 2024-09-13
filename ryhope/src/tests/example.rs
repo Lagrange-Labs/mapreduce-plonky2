@@ -77,7 +77,7 @@ async fn run() -> Result<()> {
     tree.tree().print(&tree.storage).await;
 
     println!("tree at epoch {first_stamp} was:");
-    let previous_state = tree.view_at(first_stamp);
+    let previous_state = tree.at(first_stamp);
     tree.tree().print(&previous_state).await;
 
     println!(
