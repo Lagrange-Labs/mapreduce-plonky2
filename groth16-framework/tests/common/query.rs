@@ -73,7 +73,7 @@ impl TestContext {
         .unwrap();
         let revelation_proof = self
             .revelation_params
-            .generate_proof(input, self.query_circuits.get_recursive_circuit_set())
+            .generate_proof(input, self.query_circuits.get_recursive_circuit_set(), None)
             .unwrap();
         let revelation_proof = ProofWithVK::deserialize(&revelation_proof).unwrap();
         let (revelation_proof_with_pi, _) = revelation_proof.clone().into();

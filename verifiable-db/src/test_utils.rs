@@ -47,6 +47,8 @@ pub const MAX_NUM_PLACEHOLDERS: usize = 14;
 pub const MAX_NUM_COLUMNS: usize = 20;
 pub const MAX_NUM_PREDICATE_OPS: usize = 20;
 pub const MAX_NUM_RESULT_OPS: usize = 20;
+pub const ROW_TREE_MAX_DEPTH: usize = 10;
+pub const INDEX_TREE_MAX_DEPTH: usize = 15;
 pub const NUM_COLUMNS: usize = 4;
 
 /// Generate a random original tree proof for testing.
