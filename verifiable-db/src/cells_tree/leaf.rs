@@ -128,7 +128,11 @@ mod tests {
         let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let value_fields = value.to_fields();
 
-        let test_circuit = LeafCircuit { identifier, value };
+        let test_circuit = Cell {
+            identifier,
+            value,
+            is_multiplier: false,
+        };
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);

@@ -165,12 +165,22 @@ mod tests {
         let child_pis = &array::from_fn(|i| {
             let h = &child_hashs[i];
             let dc = &child_digests[i].to_weierstrass().to_fields();
+            let neutral = Point::NEUTRAL.to_fields();
 
-            PublicInputs { h, dc }.to_vec()
+            PublicInputs {
+                h,
+                ind,
+                mul: &neutral,
+            }
+            .to_vec()
         });
 
         let test_circuit = TestFullNodeCircuit {
-            c: FullNodeCircuit { identifier, value },
+            c: Cell {
+                identifier,
+                value,
+                is_multiplier: false,
+            },
             child_pis,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);

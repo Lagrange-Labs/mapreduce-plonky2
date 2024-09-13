@@ -5,8 +5,11 @@ mod leaf;
 mod partial_node;
 mod public_inputs;
 
+use serde::{Deserialize, Serialize};
+
 use alloy::primitives::U256;
 pub use api::{build_circuits_params, extract_hash_from_proof, CircuitInput, PublicParameters};
+use derive_more::Constructor;
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     types::CBuilder,
@@ -21,12 +24,12 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::CurveTarget;
+use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 pub use public_inputs::PublicInputs;
 
 /// A cell represents a column || value tuple. it can be given in the cells tree or as the
 /// secondary index value in the row tree.
-#[derive(Clone, Debug, Constructor)]
+#[derive(Clone, Debug, Serialize, Deserialize, Constructor)]
 pub struct Cell {
     /// identifier of the column for the secondary index
     pub identifier: F,
@@ -89,9 +92,9 @@ pub(crate) fn decide_digest_section(
     digest: CurveTarget,
     is_multiplier: BoolTarget,
 ) -> (CurveTarget, CurveTarget) {
-    let zero_curve = b.curve_zero();
-    let digest_ind = b.curve_select(is_multiplier, zero_curve, digest);
-    let digest_mult = b.curve_select(is_multiplier, digest, zero_curve);
+    let zero_curve = c.curve_zero();
+    let digest_ind = c.curve_select(is_multiplier, zero_curve, digest);
+    let digest_mult = c.curve_select(is_multiplier, digest, zero_curve);
     (digest_ind, digest_mult)
 }
 /// aggregate the digest of the child proof in the right digest

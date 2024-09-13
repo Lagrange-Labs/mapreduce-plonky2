@@ -162,7 +162,7 @@ impl TestContext {
                 "[+] [+] Merkle SLOT identifier {:?} -> value {} value.digest() = {:?}",
                 cell.identifier(),
                 cell.value(),
-                pi.digest_point()
+                pi.individual_digest_point()
             );
 
             self.storage

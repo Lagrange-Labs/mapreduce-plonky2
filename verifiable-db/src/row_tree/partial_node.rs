@@ -106,7 +106,7 @@ impl PartialNodeCircuit {
         let (digest_ind, digest_mult) =
             accumulate_proof_digest(b, digest_ind, digest_mult, cells_pi);
         let digest_ind = b.map_to_curve_point(&digest_ind.to_targets()).to_targets();
-        let row_digest = scalar_mul(b, digest_mult, digest_ind);
+        let row_digest = scalar_mul(b, digest_mult.to_fields(), digest_ind);
 
         let final_digest = b.curve_add(child_pi.rows_digest(), row_digest);
         PublicInputs::new(
@@ -267,7 +267,8 @@ pub mod test {
         let cells_point = Point::rand();
         let cells_digest = cells_point.to_weierstrass().to_fields();
         let cells_hash = HashOut::rand().to_fields();
-        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest).to_vec();
+        let neutral = Point::NEUTRAL.to_fields();
+        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest, &neutral).to_vec();
         let test_circuit = TestPartialNodeCircuit {
             circuit: node_circuit,
             cells_pi: cells_pi.clone(),

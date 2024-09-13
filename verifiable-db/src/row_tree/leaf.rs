@@ -182,7 +182,8 @@ mod test {
         let cells_point = Point::rand();
         let cells_digest = cells_point.to_weierstrass().to_fields();
         let cells_hash = HashOut::rand().to_fields();
-        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest).to_vec();
+        let neutral = Point::NEUTRAL.to_fields();
+        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest, &neutral).to_vec();
         let test_circuit = TestLeafCircuit { circuit, cells_pi };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);

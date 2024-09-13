@@ -7,14 +7,26 @@ mod public_inputs;
 pub use api::{CircuitInput, PublicParameters};
 use mp2_common::{poseidon::hash_to_int_target, CHasher, D, F};
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
-use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
+use plonky2_ecdsa::gadgets::{curve::CircuitBuilderCurve, nonnative::CircuitBuilderNonNative};
 
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 pub use public_inputs::PublicInputs;
 
 /// Common function to compute the digest of the block tree which uses a special format using
-/// scalar1 multiplication
+/// scalar multiplication
 pub fn scalar_mul(
+    b: &mut CircuitBuilder<F, D>,
+    inputs: Vec<Target>,
+    base: CurveTarget,
+) -> CurveTarget {
+    let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
+    let int = hash_to_int_target(b, hash);
+    let scalar = b.biguint_to_nonnative(&int);
+    b.curve_scalar_mul(base, &scalar)
+}
+/// Common function to compute the digest of the block tree which uses a special format using
+/// scalar1 multiplication
+pub(crate) fn compute_index_digest(
     b: &mut CircuitBuilder<F, D>,
     inputs: Vec<Target>,
     base: CurveTarget,

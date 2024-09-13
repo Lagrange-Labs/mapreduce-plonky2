@@ -40,21 +40,27 @@ impl CircuitInput {
     /// It is not considered a multiplier column. Please use `leaf_multiplier` for registering a
     /// multiplier column.
     pub fn leaf(identifier: u64, value: U256) -> Self {
-        CircuitInput::Leaf(Cell {
-            identifier: F::from_canonical_u64(identifier),
-            value,
-            is_multiplier: false,
-        })
+        CircuitInput::Leaf(
+            Cell {
+                identifier: F::from_canonical_u64(identifier),
+                value,
+                is_multiplier: false,
+            }
+            .into(),
+        )
     }
     /// Create a circuit input for proving a leaf node whose value is considered as a multiplier
     /// depending on the boolean value.
     /// i.e. it means it's one of the repeated value amongst all the rows
     pub fn leaf_multiplier(identifier: u64, value: U256, is_multiplier: bool) -> Self {
-        CircuitInput::Leaf(Cell {
-            identifier: F::from_canonical_u64(identifier),
-            value,
-            is_multiplier,
-        })
+        CircuitInput::Leaf(
+            Cell {
+                identifier: F::from_canonical_u64(identifier),
+                value,
+                is_multiplier,
+            }
+            .into(),
+        )
     }
 
     /// Create a circuit input for proving a full node of 2 children.

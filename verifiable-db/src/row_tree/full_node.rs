@@ -73,7 +73,7 @@ impl FullNodeCircuit {
             decide_digest_section(b, tuple.digest(b), tuple.is_multiplier);
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
         let (digest_ind, digest_mult) =
-            accumulate_proof_digest(b, digest_ind, digest_mult, cells_pis);
+            accumulate_proof_digest(b, digest_ind, digest_mult, cells_pi);
         let digest_ind = b.map_to_curve_point(&digest_ind.to_targets()).to_targets();
         let row_digest = scalar_mul(b, digest_mult, digest_ind);
 
@@ -221,7 +221,8 @@ pub(crate) mod test {
         let cells_point = Point::rand();
         let cells_digest = cells_point.to_weierstrass().to_fields();
         let cells_hash = HashOut::rand().to_fields();
-        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest).to_vec();
+        let neutral = Point::NEUTRAL.to_fields();
+        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest, &neutral).to_vec();
 
         let (left_min, left_max) = (10, 15);
         // this should work since we allow multipleicities of indexes in the row tree

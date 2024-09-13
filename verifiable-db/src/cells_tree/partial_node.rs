@@ -167,7 +167,11 @@ mod tests {
         .to_vec();
 
         let test_circuit = TestPartialNodeCircuit {
-            c: PartialNodeCircuit { identifier, value },
+            c: Cell {
+                identifier,
+                value,
+                is_multiplier: false,
+            },
             child_pi,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
