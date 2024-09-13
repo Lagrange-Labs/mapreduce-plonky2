@@ -303,8 +303,8 @@ impl_branch_circuits!(BranchCircuits, 2, 9, 16);
 impl_branch_circuits!(TestBranchCircuits, 1, 4, 9);
 
 /// Number of circuits in the set
-/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping
-const MAPPING_CIRCUIT_SET_SIZE: usize = 6;
+/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 merge
+const MAPPING_CIRCUIT_SET_SIZE: usize = 7;
 
 impl PublicParameters {
     /// Generates the circuit parameters for the MPT circuits.
