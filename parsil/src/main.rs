@@ -74,6 +74,28 @@ enum Command {
         #[arg(long)]
         to_keys: bool,
     },
+    /// Inspect the pipeline the query will go through during its life.
+    Lifecycle {
+        #[arg]
+        /// The request as registered by the user
+        request: String,
+
+        #[arg(short = 'm', long, default_value = "MIN_BLOCK")]
+        /// The name of the min. block placeholder
+        min_block: String,
+
+        #[arg(short = 'M', long, default_value = "MAX_BLOCK")]
+        /// The name of the max. block placeholder
+        min_block: String,
+
+        #[arg(short = 'P')]
+        /// The placeholders to considerate, in the `name=value` format.
+        placeholders: Vec<String>,
+
+        #[arg(short = 'D', long)]
+        /// The JSON file describing the vTable
+        description: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -156,6 +178,12 @@ fn main() -> Result<()> {
             println!("{}", r.0.unwrap_or("nothing".into()));
             println!("{}", r.1.unwrap_or("nothing".into()));
         }
+        Command::Execute {
+            request,
+            min_block,
+            min_block,
+            placeholders,
+        } => todo!(),
     }
 
     Ok(())
