@@ -21,9 +21,15 @@ pub(crate) trait AsTable: std::fmt::Debug {
 impl<T: Default + Eq + std::hash::Hash + std::fmt::Debug> AsTable for RowPayload<T> {
     fn pretty_payload(&self) -> String {
         let mut builder = Builder::default();
-        builder.push_record(vec!["var.", "value"]);
+        builder.push_record(vec!["sec. ind.", "var.", "value", "proved at"]);
+        let sec_ind = self.secondary_index_column;
         for (k, v) in self.cells.iter().sorted_by_key(|(k, _)| k.to_owned()) {
-            builder.push_record(vec![k.to_string(), format!("0x{:x}", v.value)])
+            builder.push_record(vec![
+                if *k == sec_ind { "*" } else { "" }.into(),
+                k.to_string(),
+                format!("0x{:x}", v.value),
+                format!("{:?}", v.primary),
+            ])
         }
         let mut table = builder.build();
         table.with(Style::sharp());
@@ -235,7 +241,8 @@ impl<
             self.headline().await;
             writeln!(
                 self.tty,
-                "[c]ontext - goto {}ey/{}arent/{}eft/{}ight - travel to {}poch - view as {}able - {}uit",
+                "{}ontext - goto {}ey/{}arent/{}eft/{}ight - travel to {}poch - view as {}able - {}uit",
+                "[c]".yellow().bold(),
                 "[k]".yellow().bold(),
                 "[p]".yellow().bold(),
                 "[l]".yellow().bold(),

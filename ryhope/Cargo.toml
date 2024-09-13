@@ -7,10 +7,6 @@ edition = "2021"
 name = "ryhope"
 path = "src/lib.rs"
 
-[[bin]]
-name = "ryhope"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
 hex.workspace = true
