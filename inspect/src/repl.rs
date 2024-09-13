@@ -5,7 +5,7 @@ use colored::Colorize;
 use dialoguer::{console, theme::ColorfulTheme, FuzzySelect, Input};
 use ryhope::{
     storage::{FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage},
-    tree::{MutableTree, TreeTopology},
+    tree::{MutableTree, PrintableTree, TreeTopology},
     Epoch, MerkleTreeKvDb, NodePayload,
 };
 use tabled::{builder::Builder, settings::Style};
@@ -22,7 +22,7 @@ pub(crate) trait PayloadFormatter<V: std::fmt::Debug> {
 }
 
 pub(crate) struct Repl<
-    T: TreeTopology + MutableTree,
+    T: TreeTopology + MutableTree + PrintableTree,
     V: NodePayload + Send + Sync,
     S: TransactionalStorage
         + TreeStorage<T>
@@ -39,7 +39,7 @@ pub(crate) struct Repl<
     payload_fmt: F,
 }
 impl<
-        T: TreeTopology + MutableTree,
+        T: TreeTopology + MutableTree + PrintableTree,
         V: NodePayload + Send + Sync,
         S: TransactionalStorage
             + TreeStorage<T>
@@ -80,18 +80,22 @@ impl<
         .unwrap();
     }
 
-    async fn goto(&mut self) -> Result<()> {
+    async fn select_key(&self) -> Option<T::Key> {
         let keys = self.db.keys_at(self.current_epoch).await;
         let keys_str = keys.iter().map(|k| format!("{:?}", k)).collect::<Vec<_>>();
 
-        if let Some(selection) = FuzzySelect::with_theme(&ColorfulTheme::default())
+        FuzzySelect::with_theme(&ColorfulTheme::default())
             .with_prompt(format!("{} validate", "[enter]".yellow().bold()))
             .default(0)
             .items(&keys_str)
             .interact_opt()
             .unwrap()
-        {
-            self.current_key = keys[selection].to_owned();
+            .map(|i| keys[i].clone())
+    }
+
+    async fn goto(&mut self) -> Result<()> {
+        if let Some(new_key) = self.select_key().await {
+            self.current_key = new_key;
         }
         Ok(())
     }
@@ -237,6 +241,48 @@ impl<
         Ok(())
     }
 
+    async fn view_tree(&mut self) -> Result<()> {
+        loop {
+            writeln!(
+                self.tty,
+                "from: {}urrent - {}oot - {}ey - {}uit",
+                "[c]".yellow().bold(),
+                "[r]".yellow().bold(),
+                "[k]".yellow().bold(),
+                "[q]".red().bold(),
+            )
+            .unwrap();
+
+            if let Err(e) = match self.tty.read_char().unwrap() {
+                c @ ('c' | 'r' | 'k') => {
+                    if let Some(root) = match c {
+                        'c' => Some(self.current_key.clone()),
+                        'r' => self.db.root_at(self.current_epoch).await,
+                        'k' => self.select_key().await,
+                        _ => unreachable!(),
+                    } {
+                        write!(
+                            self.tty,
+                            "\n{}",
+                            self.db
+                                .tree()
+                                .subtree_to_string(&self.db.view_at(self.current_epoch), &root)
+                                .await
+                        )
+                        .unwrap();
+                    } else {
+                        write!(self.tty, "Empty tree").unwrap();
+                    }
+                    return Ok(());
+                }
+                'q' => return Ok(()),
+                _ => Ok(()),
+            } {
+                write!(self.tty, "{}", e.to_string().red()).unwrap();
+            }
+        }
+    }
+
     fn settings(&mut self) -> Result<()> {
         loop {
             writeln!(
@@ -263,7 +309,7 @@ impl<
             self.headline().await;
             writeln!(
                 self.tty,
-                "{}ontext - goto {}ey/{}arent/{}eft/{}ight - travel to {}poch - view as {}able - {}ettings - {}uit",
+                "{}ontext - goto {}ey/{}arent/{}eft/{}ight - travel to {}poch - view as {}able/{}ree - {}ettings - {}uit",
                 "[c]".yellow().bold(),
                 "[k]".yellow().bold(),
                 "[p]".yellow().bold(),
@@ -271,6 +317,7 @@ impl<
                 "[r]".yellow().bold(),
                 "[e]".yellow().bold(),
                 "[t]".yellow().bold(),
+                "[T]".yellow().bold(),
                 "[s]".yellow().bold(),
                 "[q]".red().bold(),
             )?;
@@ -282,6 +329,7 @@ impl<
                 'e' => self.travel().await,
                 'c' => self.context().await,
                 't' => self.view_table().await,
+                'T' => self.view_tree().await,
                 's' => self.settings(),
                 'q' => return Ok(()),
                 _ => Ok(()),
