@@ -213,7 +213,7 @@ impl NodeInfo {
         )
     }
 }
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 /// enum to specify whether a node is the left or right child of another node
 pub enum ChildPosition {
     Left,

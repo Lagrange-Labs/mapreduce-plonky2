@@ -8,10 +8,12 @@ use itertools::Itertools;
 use mp2_common::{
     hash::hash_maybe_first,
     poseidon::empty_poseidon_hash,
+    serialization::{
+        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+    },
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{Fieldable, SelectHashBuilder, ToTargets},
     D, F,
-    serialization::{serialize_array, serialize_long_array, deserialize_array, deserialize_long_array},
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
@@ -128,19 +130,19 @@ where
     num_real_nodes: usize,
 }
 
-impl<const MAX_DEPTH: usize> Default for MerklePathGadget<MAX_DEPTH> 
+impl<const MAX_DEPTH: usize> Default for MerklePathGadget<MAX_DEPTH>
 where
     [(); MAX_DEPTH - 1]:,
 {
     fn default() -> Self {
-        Self { 
-            is_left_child: [Default::default(); MAX_DEPTH-1], 
-            sibling_hash: [Default::default(); MAX_DEPTH-1], 
-            node_min: [Default::default(); MAX_DEPTH-1], 
-            node_max: [Default::default(); MAX_DEPTH-1], 
-            node_value: [Default::default(); MAX_DEPTH-1], 
-            embedded_tree_hash: [Default::default(); MAX_DEPTH-1], 
-            num_real_nodes: Default::default(), 
+        Self {
+            is_left_child: [Default::default(); MAX_DEPTH - 1],
+            sibling_hash: [Default::default(); MAX_DEPTH - 1],
+            node_min: [Default::default(); MAX_DEPTH - 1],
+            node_max: [Default::default(); MAX_DEPTH - 1],
+            node_value: [Default::default(); MAX_DEPTH - 1],
+            embedded_tree_hash: [Default::default(); MAX_DEPTH - 1],
+            num_real_nodes: Default::default(),
         }
     }
 }
@@ -179,12 +181,16 @@ where
             node_value[i] = node.value;
         });
 
-        let sibling_hash = array::from_fn(|i| 
-            siblings.get(i).and_then(
-                |sibling|
-                    sibling.clone().and_then(|node| Some(node.compute_node_hash(index_id.to_field())))
-            ).unwrap_or(*empty_poseidon_hash())
-        );
+        let sibling_hash = array::from_fn(|i| {
+            siblings
+                .get(i)
+                .and_then(|sibling| {
+                    sibling
+                        .clone()
+                        .and_then(|node| Some(node.compute_node_hash(index_id.to_field())))
+                })
+                .unwrap_or(*empty_poseidon_hash())
+        });
 
         Ok(Self {
             is_left_child,

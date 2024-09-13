@@ -71,7 +71,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // we need to clone data if we fix by put variants inside a `Box`
 pub enum CircuitInput<
     const MAX_NUM_COLUMNS: usize,

@@ -1,17 +1,27 @@
 //! Check the placeholder identifiers and values with the specified `final_placeholder_hash`,
 //! compute and return the `num_placeholders` and the `placeholder_ids_hash`.
 
-use crate::query::computational_hash_ids::PlaceholderIdentifier;
+use crate::query::{
+    aggregation::QueryBounds,
+    computational_hash_ids::PlaceholderIdentifier,
+    universal_circuit::{
+        universal_circuit_inputs::{PlaceholderId, Placeholders},
+        universal_query_circuit::QueryBound,
+    },
+};
 use alloy::primitives::U256;
+use anyhow::{ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     poseidon::{empty_poseidon_hash, H},
+    serialization::{
+        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+    },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{SelectHashBuilder, ToFields, ToTargets},
+    utils::{FromFields, SelectHashBuilder, ToFields, ToTargets},
     F,
-    serialization::{serialize_array, serialize_long_array, deserialize_array, deserialize_long_array}
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
@@ -22,7 +32,10 @@ use plonky2::{
     plonk::config::Hasher,
 };
 use serde::{Deserialize, Serialize};
-use std::{array, iter::once};
+use std::{
+    array,
+    iter::{once, repeat},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// Data structure representing a placeholder target to be checked in the `check_placeholders` gadget
@@ -92,56 +105,148 @@ pub(crate) struct CheckPlaceholderWires<const PH: usize, const PP: usize> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct CheckPlaceholderGadget<const PH: usize, const PP: usize> {
-        /// Real number of the valid placeholders
-        pub(crate) num_placeholders: usize,
-        /// Array of the placeholder identifiers that can be employed in the query:
-        /// - The first 4 items are expected to be constant identifiers of the query
-        ///   bounds `MIN_I1, MAX_I1` and  `MIN_I2, MAX_I2`
-        /// - The following `num_placeholders - 4` values are expected to be the
-        ///   identifiers of the placeholders employed in the query
-        /// - The remaining `PH - num_placeholders` items are expected to be the
-        ///   same as `placeholders_ids[0]`
-        #[serde(
-            serialize_with = "serialize_long_array",
-            deserialize_with = "deserialize_long_array"
-        )]
-        pub(crate) placeholder_ids: [F; PH],
-        /// Array of the placeholder values that can be employed in the query:
-        /// - The first 4 values are expected to be the bounds `MIN_I1, MAX_I1` and
-        ///   `MIN_I2, MAX_I2` found in the query for the primary and secondary
-        ///   indexed columns
-        /// - The following `num_placeholders - 4` values are expected to be the
-        ///   values for the placeholders employed in the query
-        /// - The remaining `PH - num_placeholders` values are expected to be the
-        ///   same as `placeholder_values[0]`
-        #[serde(
-            serialize_with = "serialize_long_array",
-            deserialize_with = "deserialize_long_array"
-        )]
-        pub(crate) placeholder_values: [U256; PH],
-        /// Placeholders data to be provided to `check_placeholder` gadget to
-        /// check that placeholders employed in universal query circuit matches
-        /// with the `placeholder_values` exposed as public input by this proof
-        #[serde(
-            serialize_with = "serialize_long_array",
-            deserialize_with = "deserialize_long_array"
-        )]
-        pub(crate) to_be_checked_placeholders: [CheckedPlaceholder; PP],
-        /// Placeholders data related to the placeholders employed in the
-        /// universal query circuit to hash the query bounds for the secondary
-        /// index; they are provided as well to `check_placeholder` gadget to
-        /// check the correctness of the placeholders employed for query bounds
-        pub(crate) secondary_query_bound_placeholders:
-            [CheckedPlaceholder; NUM_SECONDARY_INDEX_PLACEHOLDERS],
+    /// Real number of the valid placeholders
+    pub(crate) num_placeholders: usize,
+    /// Array of the placeholder identifiers that can be employed in the query:
+    /// - The first 4 items are expected to be constant identifiers of the query
+    ///   bounds `MIN_I1, MAX_I1` and  `MIN_I2, MAX_I2`
+    /// - The following `num_placeholders - 4` values are expected to be the
+    ///   identifiers of the placeholders employed in the query
+    /// - The remaining `PH - num_placeholders` items are expected to be the
+    ///   same as `placeholders_ids[0]`
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    pub(crate) placeholder_ids: [F; PH],
+    /// Array of the placeholder values that can be employed in the query:
+    /// - The first 4 values are expected to be the bounds `MIN_I1, MAX_I1` and
+    ///   `MIN_I2, MAX_I2` found in the query for the primary and secondary
+    ///   indexed columns
+    /// - The following `num_placeholders - 4` values are expected to be the
+    ///   values for the placeholders employed in the query
+    /// - The remaining `PH - num_placeholders` values are expected to be the
+    ///   same as `placeholder_values[0]`
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    pub(crate) placeholder_values: [U256; PH],
+    /// Placeholders data to be provided to `check_placeholder` gadget to
+    /// check that placeholders employed in universal query circuit matches
+    /// with the `placeholder_values` exposed as public input by this proof
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    pub(crate) to_be_checked_placeholders: [CheckedPlaceholder; PP],
+    /// Placeholders data related to the placeholders employed in the
+    /// universal query circuit to hash the query bounds for the secondary
+    /// index; they are provided as well to `check_placeholder` gadget to
+    /// check the correctness of the placeholders employed for query bounds
+    pub(crate) secondary_query_bound_placeholders:
+        [CheckedPlaceholder; NUM_SECONDARY_INDEX_PLACEHOLDERS],
 }
 
 /// Number of placeholders being hashed to include query bounds in the placeholder hash
 pub(crate) const NUM_SECONDARY_INDEX_PLACEHOLDERS: usize = 4;
 
 impl<const PH: usize, const PP: usize> CheckPlaceholderGadget<PH, PP> {
+    pub(crate) fn new(
+        query_bounds: &QueryBounds,
+        placeholders: &Placeholders,
+        placeholder_hash_ids: [PlaceholderId; PP],
+    ) -> Result<Self> {
+        let num_placeholders = placeholders.len();
+        ensure!(
+            num_placeholders <= PH,
+            "number of placeholders provided is more than the maximum number of placeholders"
+        );
+        // get placeholder ids from `placeholders` in the order expected by the circuit
+        let placeholder_ids = placeholders.ids();
+        let (padded_placeholder_ids, padded_placeholder_values): (Vec<F>, Vec<_>) = placeholder_ids
+            .iter()
+            .map(|id| (*id, placeholders.get(id).unwrap()))
+            // pad placeholder ids and values with the first items in the arrays, as expected by the circuit
+            .chain(repeat((
+                PlaceholderIdentifier::MinQueryOnIdx1,
+                placeholders
+                    .get(&PlaceholderIdentifier::MinQueryOnIdx1)
+                    .unwrap(),
+            )))
+            .take(PH)
+            .map(|(id, value)| {
+                let id: F = id.to_field();
+                (id, value)
+            })
+            .unzip();
+        let compute_checked_placeholder_for_id = |placeholder_id: PlaceholderIdentifier| {
+            let value = placeholders.get(&placeholder_id)?;
+            // locate placeholder with id `placeholder_id` in `padded_placeholder_ids`
+            let pos = padded_placeholder_ids
+                .iter()
+                .find_position(|&&id| id == placeholder_id.to_field());
+            ensure!(
+                pos.is_some(),
+                "placeholder with id {:?} not found in padded placeholder ids",
+                placeholder_id
+            );
+            // sanity check: `padded_placeholder_values[pos] = value`
+            assert_eq!(
+                padded_placeholder_values[pos.unwrap().0],
+                value,
+                "placehoder values doesn't match for id {:?}",
+                placeholder_id
+            );
+            Ok(CheckedPlaceholder {
+                id: placeholder_id.to_field(),
+                value,
+                pos: pos.unwrap().0.to_field(),
+            })
+        };
+        let to_be_checked_placeholders = placeholder_hash_ids
+            .into_iter()
+            .map(|placeholder_id| compute_checked_placeholder_for_id(placeholder_id))
+            .collect::<Result<Vec<_>>>()?;
+        // compute placeholders data to be hashed for secondary query bounds
+        let min_query_secondary = QueryBound::new_secondary_index_bound(
+            &placeholders,
+            &query_bounds.min_query_secondary(),
+        )
+        .unwrap();
+        let max_query_secondary = QueryBound::new_secondary_index_bound(
+            &placeholders,
+            &query_bounds.max_query_secondary(),
+        )
+        .unwrap();
+        let secondary_query_bound_placeholders = [min_query_secondary, max_query_secondary]
+            .into_iter()
+            .flat_map(|query_bound| {
+                [
+                    compute_checked_placeholder_for_id(PlaceholderId::from_fields(&[query_bound
+                        .operation
+                        .placeholder_ids[0]])),
+                    compute_checked_placeholder_for_id(PlaceholderId::from_fields(&[query_bound
+                        .operation
+                        .placeholder_ids[1]])),
+                ]
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Self {
+            num_placeholders,
+            placeholder_ids: padded_placeholder_ids.try_into().unwrap(),
+            placeholder_values: padded_placeholder_values.try_into().unwrap(),
+            to_be_checked_placeholders: to_be_checked_placeholders.try_into().unwrap(),
+            secondary_query_bound_placeholders: secondary_query_bound_placeholders
+                .try_into()
+                .unwrap(),
+        })
+    }
+
     pub(crate) fn build(
         b: &mut CBuilder,
-        final_placeholder_hash: &HashOutTarget
+        final_placeholder_hash: &HashOutTarget,
     ) -> CheckPlaceholderWires<PH, PP> {
         let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
         let placeholder_ids = b.add_virtual_target_arr();
@@ -152,13 +257,13 @@ impl<const PH: usize, const PP: usize> CheckPlaceholderGadget<PH, PP> {
         let secondary_query_bound_placeholders =
             array::from_fn(|_| CheckedPlaceholderTarget::new(b));
         let (num_placeholders, placeholder_id_hash) = check_placeholders(
-            b, 
-            &is_placeholder_valid, 
-            &placeholder_ids, 
-            &placeholder_values, 
-            &to_be_checked_placeholders, 
-            &secondary_query_bound_placeholders, 
-            final_placeholder_hash
+            b,
+            &is_placeholder_valid,
+            &placeholder_ids,
+            &placeholder_values,
+            &to_be_checked_placeholders,
+            &secondary_query_bound_placeholders,
+            final_placeholder_hash,
         );
 
         CheckPlaceholderWires::<PH, PP> {
@@ -386,14 +491,17 @@ mod tests {
             let exp_num_placeholders = b.add_virtual_target();
 
             // Invoke the `check_placeholders` function.
-            let check_placeholder_wires = CheckPlaceholderGadget::build(
-                b,
-                &final_placeholder_hash,
-            );
+            let check_placeholder_wires = CheckPlaceholderGadget::build(b, &final_placeholder_hash);
 
             // Check the returned `num_placeholders` and `placeholder_ids_hash`.
-            b.connect(check_placeholder_wires.num_placeholders, exp_num_placeholders);
-            b.connect_hashes(check_placeholder_wires.placeholder_id_hash, exp_placeholder_ids_hash);
+            b.connect(
+                check_placeholder_wires.num_placeholders,
+                exp_num_placeholders,
+            );
+            b.connect_hashes(
+                check_placeholder_wires.placeholder_id_hash,
+                exp_placeholder_ids_hash,
+            );
 
             Self::Wires {
                 input_wires: check_placeholder_wires.input_wires,

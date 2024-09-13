@@ -1062,7 +1062,7 @@ where
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Inputs for the 2 variant of universal query circuit
 pub enum UniversalCircuitInput<
     const MAX_NUM_COLUMNS: usize,

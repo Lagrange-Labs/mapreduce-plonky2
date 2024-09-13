@@ -49,7 +49,8 @@ use std::array;
 
 use super::{
     placeholders_check::{
-        CheckPlaceholderGadget, CheckPlaceholderInputWires, CheckedPlaceholder, CheckedPlaceholderTarget, NUM_SECONDARY_INDEX_PLACEHOLDERS
+        CheckPlaceholderGadget, CheckPlaceholderInputWires, CheckedPlaceholder,
+        CheckedPlaceholderTarget, NUM_SECONDARY_INDEX_PLACEHOLDERS,
     },
     NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
 };
@@ -65,7 +66,7 @@ pub struct RevelationWithoutResultsTreeWires<
     const PH: usize,
     const PP: usize,
 > {
-    check_placeholder: CheckPlaceholderInputWires<PH, PP>
+    check_placeholder: CheckPlaceholderInputWires<PH, PP>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -143,9 +144,8 @@ where
         let final_placeholder_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
         // Check the placeholder data.
-        let check_placeholder_wires = CheckPlaceholderGadget::<PH, PP>::build(
-            b, &final_placeholder_hash
-        );
+        let check_placeholder_wires =
+            CheckPlaceholderGadget::<PH, PP>::build(b, &final_placeholder_hash);
 
         // Check that the tree employed to build the queries is the same as the
         // tree constructed in pre-processing.
@@ -166,7 +166,9 @@ where
             .collect();
         let computational_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        let placeholder_values_slice = check_placeholder_wires.input_wires.placeholder_values
+        let placeholder_values_slice = check_placeholder_wires
+            .input_wires
+            .placeholder_values
             .iter()
             .flat_map(ToTargets::to_targets)
             .collect_vec();
@@ -209,7 +211,7 @@ where
         self.check_placeholder.assign(pw, &wires.check_placeholder);
     }
 }
-
+#[derive(Clone, Debug)]
 pub struct CircuitBuilderParams {
     pub(crate) query_circuit_set: RecursiveCircuits<F, C, D>,
     pub(crate) preprocessing_circuit_set: RecursiveCircuits<F, C, D>,
@@ -450,12 +452,17 @@ mod tests {
         // Number of placeholders
         assert_eq!(
             pi.num_placeholders(),
-            test_placeholders.check_placeholder_inputs.num_placeholders.to_field()
+            test_placeholders
+                .check_placeholder_inputs
+                .num_placeholders
+                .to_field()
         );
         // Placeholder values
         assert_eq!(
             pi.placeholder_values(),
-            test_placeholders.check_placeholder_inputs.placeholder_values
+            test_placeholders
+                .check_placeholder_inputs
+                .placeholder_values
         );
         // Entry count
         assert_eq!(pi.entry_count(), entry_count);

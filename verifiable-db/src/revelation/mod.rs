@@ -6,8 +6,8 @@ use mp2_common::F;
 pub mod api;
 pub(crate) mod placeholders_check;
 mod public_inputs;
-mod revelation_without_results_tree;
 mod revelation_unproven_offset;
+mod revelation_without_results_tree;
 
 pub use public_inputs::PublicInputs;
 
@@ -35,7 +35,8 @@ pub(crate) mod tests {
     use mp2_common::{array::ToField, poseidon::H, utils::ToFields, F};
     use mp2_test::utils::gen_random_u256;
     use placeholders_check::{
-        placeholder_ids_hash, CheckPlaceholderGadget, CheckedPlaceholder, NUM_SECONDARY_INDEX_PLACEHOLDERS
+        placeholder_ids_hash, CheckPlaceholderGadget, CheckedPlaceholder,
+        NUM_SECONDARY_INDEX_PLACEHOLDERS,
     };
     use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
