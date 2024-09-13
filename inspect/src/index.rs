@@ -5,10 +5,7 @@ use std::collections::HashMap;
 use dialoguer::MultiSelect;
 use itertools::Itertools;
 use mp2_v1::indexing::{row::RowPayload, ColumnID};
-use tabled::{
-    builder::Builder,
-    settings::{themes::ColumnNames, Style},
-};
+use tabled::{builder::Builder, settings::Style};
 
 use crate::repl::PayloadFormatter;
 
@@ -61,6 +58,31 @@ impl RowPayloadFormatter {
             display: Default::default(),
             column_names: Default::default(),
         }
+    }
+
+    pub fn from_string(input: &str) -> Result<Self> {
+        let mut column_names = HashMap::new();
+        for ss in input.split(',') {
+            let mut s = ss.split('=');
+            let column_id = s
+                .next()
+                .ok_or_else(|| anyhow!("`{ss}`: column ID not found"))
+                .and_then(|x| {
+                    x.parse::<ColumnID>()
+                        .map_err(|e| anyhow!("`{ss}`: not a column ID: {e}"))
+                })?;
+
+            let column_name = s
+                .next()
+                .ok_or_else(|| anyhow!("`{ss}`: column name not found"))?;
+
+            column_names.insert(column_id, column_name.to_string());
+        }
+
+        Ok(Self {
+            display: Default::default(),
+            column_names,
+        })
     }
 }
 

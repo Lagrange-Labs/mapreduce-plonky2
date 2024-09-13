@@ -1,5 +1,5 @@
 use anyhow::*;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use index::RowPayloadFormatter;
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
@@ -45,9 +45,18 @@ struct Args {
     /// The table storing the tree
     db_table: String,
 
-    #[arg(short='t', long="tree", value_parser=["sbbst", "scapegoat"])]
+    #[command(subcommand)]
     /// The type of tree to load from the database
-    tree_type: String,
+    tree_type: TreeReader,
+}
+
+#[derive(Subcommand)]
+enum TreeReader {
+    IndexTree {
+        #[arg(short = 'C', long)]
+        /// A comma-separed list of `id=name` pairs mapping columns IDs to user-facing names
+        column_names: Option<String>,
+    },
 }
 
 type K = Vec<u8>;
@@ -92,6 +101,15 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    let mut repl = Repl::new(tree_db, RowPayloadFormatter::new()).await?;
-    repl.run().await
+    match args.tree_type {
+        TreeReader::IndexTree { column_names } => {
+            let payload_fmt = if let Some(columns_name) = column_names.as_ref() {
+                RowPayloadFormatter::from_string(columns_name)?
+            } else {
+                RowPayloadFormatter::new()
+            };
+            let mut repl = Repl::new(tree_db, payload_fmt).await?;
+            repl.run().await
+        }
+    }
 }
