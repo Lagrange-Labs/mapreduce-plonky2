@@ -28,35 +28,35 @@ struct MergeTableWires {
 }
 
 impl MergeTable {
-    pub(crate) fn build<'a>(
+    pub fn build<'a>(
         b: &mut CBuilder,
         table_a: PublicInputs<'a, Target>,
         table_b: PublicInputs<'a, Target>,
     ) -> MergeTableWires {
         let is_table_a_multiplier = b.add_virtual_bool_target_safe();
-        /// combine the value digest together
+        // combine the value digest together
         let input_a = table_a.values_digest_target();
         let input_b = table_b.values_digest_target();
         let multiplier = b.select_curve_point(is_table_a_multiplier, input_a, input_b);
         let base = b.select_curve_point(is_table_a_multiplier, input_b, input_a);
         let new_dv = circuit_hashed_scalar_mul(b, multiplier.to_targets(), base);
 
-        /// combine the table metadata hashes together
+        // combine the table metadata hashes together
         let input_a = table_a.metadata_digest_target();
         let input_b = table_b.metadata_digest_target();
         // here we simply add the metadata digests, since we don't really need to differentiate in
         // the metadata who is the multiplier or not.
         let new_md = b.curve_add(input_a, input_b);
 
-        /// Check both proofs share the same MPT proofs
-        /// NOTE: this enforce both variables are from the same contract. If we remove this
-        /// check this opens the door to merging different variables from different contracts.
+        // Check both proofs share the same MPT proofs
+        // NOTE: this enforce both variables are from the same contract. If we remove this
+        // check this opens the door to merging different variables from different contracts.
         table_a
             .root_hash_target()
             .enforce_equal(b, &table_b.root_hash_target());
 
-        /// Enforce that both MPT keys have their pointer at -1, i.e. we are only merging such
-        /// proofs at the ROOT of the MPT
+        // Enforce that both MPT keys have their pointer at -1, i.e. we are only merging such
+        // proofs at the ROOT of the MPT
         let minus_one = b.constant(F::NEG_ONE);
         b.connect(table_a.mpt_key().pointer, minus_one);
         b.connect(table_b.mpt_key().pointer, minus_one);

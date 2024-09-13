@@ -303,7 +303,7 @@ pub mod test {
             .collect::<Vec<_>>();
         let hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&inputs);
         assert_eq!(hash, pi.root_hash_hashout());
-        // final_digest = HashToInt(mul_digest) * D(ind_digest)
+        // final_digest = HashToInt(mul_digest) * D(ind_digest) + row_proof.digest()
         let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&cells_pi_struct);
         let ind_final = map_to_curve_point(&row_ind.to_fields());
         let res = field_hashed_scalar_mul(row_mul.to_fields(), ind_final);

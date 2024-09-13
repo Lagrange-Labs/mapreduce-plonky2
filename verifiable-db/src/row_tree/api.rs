@@ -273,7 +273,7 @@ mod test {
 
     use super::*;
     use mp2_common::{
-        group_hashing::map_to_curve_point,
+        group_hashing::{field_hashed_scalar_mul, map_to_curve_point},
         poseidon::{empty_poseidon_hash, H},
         utils::ToFields,
         F,
@@ -426,13 +426,13 @@ mod test {
                 .collect::<Vec<_>>();
             let hash = H::hash_no_pad(&inputs);
             assert_eq!(hash, pi.root_hash_hashout());
-            // child_proof.DR + D(cells_proof.DC + D(index_id || index_value)) as DR
-            let inner = map_to_curve_point(&tuple.to_fields());
-            let cells_point = weierstrass_to_point(&p.cells_pi().individual_digest_point());
-            let inner2 = inner + cells_point;
-            let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
-            let child_d = weierstrass_to_point(&child_pi.rows_digest_field());
-            let res = child_d + outer;
+
+            // final_digest = HashToInt(mul_digest) * D(ind_digest) + row_proof.digest()
+            let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&p.cells_pi());
+            let ind_final = map_to_curve_point(&row_ind.to_fields());
+            let res = field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
+            // then adding with the rest of the rows digest, the other nodes
+            let res = res + weierstrass_to_point(&child_pi.rows_digest_field());
             assert_eq!(res.to_weierstrass(), pi.rows_digest_field());
         }
         Ok(vec![])
@@ -477,15 +477,15 @@ mod test {
             assert_eq!(pi.root_hash_hashout(), exp_hash);
 
             {
-                // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
-                let inner = map_to_curve_point(&tuple.to_fields());
-                let cells_point = weierstrass_to_point(&p.cells_pi().individual_digest_point());
-                let inner2 = inner + cells_point;
-                let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
-                let left_d = weierstrass_to_point(&left_pi.rows_digest_field());
-                let right_d = weierstrass_to_point(&right_pi.rows_digest_field());
-                let result = left_d + right_d + outer;
-                assert_eq!(pi.rows_digest_field(), result.to_weierstrass());
+                // final_digest = HashToInt(mul_digest) * D(ind_digest) + p1.digest() + p2.digest()
+                let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&p.cells_pi());
+                let ind_final = map_to_curve_point(&row_ind.to_fields());
+                let row_digest = field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
+
+                let p1dr = weierstrass_to_point(&left_pi.rows_digest_field());
+                let p2dr = weierstrass_to_point(&right_pi.rows_digest_field());
+                let result_digest = p1dr + p2dr + row_digest;
+                assert_eq!(result_digest.to_weierstrass(), pi.rows_digest_field());
             }
         }
         Ok(proof)
@@ -526,12 +526,11 @@ mod test {
             assert_eq!(pi.root_hash_hashout(), exp_hash);
         }
         {
-            // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
-            let cells_point = weierstrass_to_point(&cells_pi.individual_digest_point());
-            let inner = map_to_curve_point(&tuple.to_fields());
-            let inner2 = inner + cells_point;
-            let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
-            assert_eq!(outer.to_weierstrass(), pi.rows_digest_field());
+            // final_digest = HashToInt(mul_digest) * D(ind_digest)
+            let (ind_final, mul_final) = tuple.split_and_accumulate_digest(&cells_pi);
+            let ind_final = map_to_curve_point(&ind_final.to_fields());
+            let result = field_hashed_scalar_mul(mul_final.to_fields(), ind_final);
+            assert_eq!(result.to_weierstrass(), pi.rows_digest_field());
         }
         Ok(proof)
     }
