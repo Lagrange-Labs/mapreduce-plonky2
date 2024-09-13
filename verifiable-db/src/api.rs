@@ -200,6 +200,8 @@ where
 
 #[derive(Serialize, Deserialize)]
 pub struct QueryParameters<
+    const ROW_TREE_MAX_DEPTH: usize,
+    const INDEX_TREE_MAX_DEPTH: usize,
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
     const MAX_NUM_RESULT_OPS: usize,
@@ -211,6 +213,9 @@ pub struct QueryParameters<
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
     [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
+    [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
 {
     query_params: QueryParams<
         MAX_NUM_COLUMNS,
@@ -219,6 +224,11 @@ pub struct QueryParameters<
         MAX_NUM_ITEMS_PER_OUTPUT,
     >,
     revelation_params: RevelationParams<
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
         MAX_NUM_OUTPUTS,
         MAX_NUM_ITEMS_PER_OUTPUT,
         MAX_NUM_PLACEHOLDERS,
@@ -230,6 +240,8 @@ pub struct QueryParameters<
 
 #[derive(Serialize, Deserialize)]
 pub enum QueryCircuitInput<
+    const ROW_TREE_MAX_DEPTH: usize,
+    const INDEX_TREE_MAX_DEPTH: usize,
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
     const MAX_NUM_RESULT_OPS: usize,
@@ -238,6 +250,9 @@ pub enum QueryCircuitInput<
     const MAX_NUM_PLACEHOLDERS: usize,
 > where
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
+    [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
 {
     Query(
         query::api::CircuitInput<
@@ -249,6 +264,11 @@ pub enum QueryCircuitInput<
     ),
     Revelation(
         revelation::api::CircuitInput<
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
             MAX_NUM_OUTPUTS,
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
@@ -258,6 +278,8 @@ pub enum QueryCircuitInput<
 }
 
 impl<
+        const ROW_TREE_MAX_DEPTH: usize,
+        const INDEX_TREE_MAX_DEPTH: usize,
         const MAX_NUM_COLUMNS: usize,
         const MAX_NUM_PREDICATE_OPS: usize,
         const MAX_NUM_RESULT_OPS: usize,
@@ -266,6 +288,8 @@ impl<
         const MAX_NUM_PLACEHOLDERS: usize,
     >
     QueryParameters<
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
         MAX_NUM_COLUMNS,
         MAX_NUM_PREDICATE_OPS,
         MAX_NUM_RESULT_OPS,
@@ -280,6 +304,9 @@ where
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
     [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
+    [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
 {
     /// Build `QueryParameters` from serialized `ParamsInfo` of `PublicParamaters`
     pub fn build_params(preprocessing_params_info: &[u8]) -> Result<Self> {
@@ -304,6 +331,8 @@ where
     pub fn generate_proof(
         &self,
         input: QueryCircuitInput<
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
@@ -315,9 +344,11 @@ where
         match input {
             QueryCircuitInput::Query(input) => self.query_params.generate_proof(input),
             QueryCircuitInput::Revelation(input) => {
-                let proof = self
-                    .revelation_params
-                    .generate_proof(input, self.query_params.get_circuit_set())?;
+                let proof = self.revelation_params.generate_proof(
+                    input,
+                    self.query_params.get_circuit_set(),
+                    Some(&self.query_params),
+                )?;
                 self.wrap_circuit.generate_proof(
                     self.revelation_params.get_circuit_set(),
                     &ProofWithVK::deserialize(&proof)?,
