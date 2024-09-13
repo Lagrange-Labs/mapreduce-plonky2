@@ -1,7 +1,8 @@
 //! Module handling the leaf node inside a cells tree
 
-use super::public_inputs::PublicInputs;
+use super::{public_inputs::PublicInputs, Cell, CellWire};
 use alloy::primitives::U256;
+use derive_more::{From, Into};
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::empty_poseidon_hash,
@@ -23,23 +24,11 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LeafWires {
-    identifier: Target,
-    value: UInt256Target,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    is_multiplier: BoolTarget,
-}
+#[derive(Clone, Debug, Serialize, Deserialize, From, Into)]
+pub struct LeafWires(CellWire);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LeafCircuit {
-    /// The same identifier derived from the MPT extraction
-    pub(crate) identifier: F,
-    /// Uint256 value
-    pub(crate) value: U256,
-    /// Multiplier
-    pub(crate) is_multiplier: bool,
-}
+#[derive(Clone, Debug, Serialize, Deserialize, From, Into)]
+pub struct LeafCircuit(Cell);
 
 impl LeafCircuit {
     fn build(b: &mut CBuilder) -> LeafWires {
@@ -70,18 +59,17 @@ impl LeafCircuit {
         // Register the public inputs.
         PublicInputs::new(&h, &digest_ind, &digest_mul).register(b);
 
-        LeafWires {
+        CellWire {
             identifier,
             value,
             is_multiplier,
         }
+        .into()
     }
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
-        pw.set_target(wires.identifier, self.identifier);
-        pw.set_u256_target(&wires.value, self.value);
-        pw.set_bool_target(&wires.is_multiplier, self.is_multiplier)
+        self.assign(pw, wires);
     }
 }
 

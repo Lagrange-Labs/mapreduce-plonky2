@@ -6,8 +6,8 @@ use super::{
     leaf::{LeafCircuit, LeafWires},
     partial_node::{PartialNodeCircuit, PartialNodeWires},
     public_inputs::PublicInputs,
+    Cell,
 };
-use crate::api::CellNode;
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::array;
 
 type LeafInput = LeafCircuit;
-type ChildInput = ProofInputSerialized<CellNode>;
+type ChildInput = ProofInputSerialized<Cell>;
 
 /// CircuitInput is a wrapper around the different specialized circuits that can
 /// be used to prove a node recursively.
@@ -37,27 +37,73 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     /// Create a circuit input for proving a leaf node.
+    /// It is not considered a multiplier column. Please use `leaf_multiplier` for registering a
+    /// multiplier column.
     pub fn leaf(identifier: u64, value: U256) -> Self {
-        CircuitInput::Leaf(LeafCircuit {
+        CircuitInput::Leaf(Cell {
             identifier: F::from_canonical_u64(identifier),
             value,
+            is_multiplier: false,
+        })
+    }
+    /// Create a circuit input for proving a leaf node whose value is considered as a multiplier
+    /// depending on the boolean value.
+    /// i.e. it means it's one of the repeated value amongst all the rows
+    pub fn leaf_multiplier(identifier: u64, value: U256, is_multiplier: bool) -> Self {
+        CircuitInput::Leaf(Cell {
+            identifier: F::from_canonical_u64(identifier),
+            value,
+            is_multiplier,
         })
     }
 
     /// Create a circuit input for proving a full node of 2 children.
+    /// It is not considered a multiplier column. Please use `leaf_multiplier` for registering a
+    /// multiplier column.
     pub fn full(identifier: u64, value: U256, child_proofs: [Vec<u8>; 2]) -> Self {
         CircuitInput::FullNode(new_child_input(
             F::from_canonical_u64(identifier),
             value,
+            false,
             child_proofs.to_vec(),
         ))
     }
 
+    /// Create a circuit input for proving a full node of 2 children.
+    pub fn full_multiplier(
+        identifier: u64,
+        value: U256,
+        is_multiplier: bool,
+        child_proofs: [Vec<u8>; 2],
+    ) -> Self {
+        CircuitInput::FullNode(new_child_input(
+            F::from_canonical_u64(identifier),
+            value,
+            is_multiplier,
+            child_proofs.to_vec(),
+        ))
+    }
     /// Create a circuit input for proving a partial node of 1 child.
+    /// It is not considered a multiplier column. Please use `leaf_multiplier` for registering a
+    /// multiplier column.
     pub fn partial(identifier: u64, value: U256, child_proof: Vec<u8>) -> Self {
         CircuitInput::PartialNode(new_child_input(
             F::from_canonical_u64(identifier),
             value,
+            false,
+            vec![child_proof],
+        ))
+    }
+    pub fn partial_multiplier(
+        identifier: u64,
+        value: U256,
+        is_multiplier: bool,
+        child_proof: Vec<u8>,
+    ) -> Self {
+        CircuitInput::PartialNode(new_child_input(
+            F::from_canonical_u64(identifier),
+            value,
+            is_multiplier,
             vec![child_proof],
         ))
     }
@@ -67,10 +113,15 @@ impl CircuitInput {
 fn new_child_input(
     identifier: F,
     value: U256,
+    is_multiplier: bool,
     serialized_child_proofs: Vec<Vec<u8>>,
 ) -> ChildInput {
     ChildInput {
-        input: CellNode { identifier, value },
+        input: Cell {
+            identifier,
+            value,
+            is_multiplier,
+        },
         serialized_child_proofs,
     }
 }
@@ -156,10 +207,7 @@ impl PublicParameters {
                     &self.full_node,
                     child_pis.try_into().unwrap(),
                     array::from_fn(|i| &child_vks[i]),
-                    FullNodeCircuit {
-                        identifier: node.input.identifier,
-                        value: node.input.value,
-                    },
+                    node.input.into(),
                 )?;
                 (proof, self.full_node.get_verifier_data().clone())
             }
@@ -175,10 +223,7 @@ impl PublicParameters {
                     &self.partial_node,
                     [child_proof],
                     [&child_vk],
-                    PartialNodeCircuit {
-                        identifier: node.input.identifier,
-                        value: node.input.value,
-                    },
+                    node.input.into(),
                 )?;
                 (proof, self.partial_node.get_verifier_data().clone())
             }

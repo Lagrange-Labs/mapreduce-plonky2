@@ -1,7 +1,13 @@
-use derive_more::{Deref, From};
+use derive_more::{Deref, From, Into};
 use mp2_common::{
-    default_config, group_hashing::CircuitBuilderGroupHashing, poseidon::H, proof::ProofWithVK,
-    public_inputs::PublicInputCommon, u256::CircuitBuilderU256, utils::ToTargets, C, D, F,
+    default_config,
+    group_hashing::{scalar_mul, CircuitBuilderGroupHashing},
+    poseidon::H,
+    proof::ProofWithVK,
+    public_inputs::PublicInputCommon,
+    u256::CircuitBuilderU256,
+    utils::ToTargets,
+    C, D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -17,17 +23,17 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 use std::array::from_fn as create_array;
 
-use crate::cells_tree;
+use crate::cells_tree::{self, accumulate_proof_digest, decide_digest_section, Cell, CellWire};
 
-use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
+use super::public_inputs::PublicInputs;
 // Arity not strictly needed now but may be an easy way to increase performance
 // easily down the line with less recursion. Best to provide code which is easily
 // amenable to a different arity rather than hardcoding binary tree only
-#[derive(Clone, Debug, From, Deref)]
-pub struct FullNodeCircuit(IndexTuple);
+#[derive(Clone, Debug, From, Into)]
+pub struct FullNodeCircuit(Cell);
 
-#[derive(Clone, Serialize, Deserialize, From, Deref)]
-pub(crate) struct FullNodeWires(IndexTupleWire);
+#[derive(Clone, Serialize, Deserialize, From, Into)]
+pub(crate) struct FullNodeWires(CellWire);
 
 impl FullNodeCircuit {
     pub(crate) fn build(
@@ -39,15 +45,13 @@ impl FullNodeCircuit {
         let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
         let min_child = PublicInputs::from_slice(left_pi);
         let max_child = PublicInputs::from_slice(right_pi);
-        let tuple = IndexTupleWire::new(b);
+        let tuple = CellWire::new(b);
         let node_min = min_child.min_value();
         let node_max = max_child.max_value();
         // enforcing BST property
         let _true = b._true();
-        let left_comparison =
-            b.is_less_or_equal_than_u256(&min_child.max_value(), &tuple.index_value);
-        let right_comparison =
-            b.is_less_or_equal_than_u256(&tuple.index_value, &max_child.min_value());
+        let left_comparison = b.is_less_or_equal_than_u256(&min_child.max_value(), &tuple.value);
+        let right_comparison = b.is_less_or_equal_than_u256(&tuple.value, &max_child.min_value());
         b.connect(left_comparison.target, _true.target);
         b.connect(right_comparison.target, _true.target);
 
@@ -162,7 +166,7 @@ pub(crate) mod test {
 
     use crate::{
         cells_tree,
-        row_tree::{public_inputs::PublicInputs, IndexTuple},
+        row_tree::{public_inputs::PublicInputs, Cell},
     };
 
     use super::{FullNodeCircuit, FullNodeWires};
@@ -224,7 +228,7 @@ pub(crate) mod test {
         let (right_min, right_max) = (18, 30);
         let value = U256::from(18); // 15 < 18 < 23
         let identifier = F::rand();
-        let tuple = IndexTuple::new(identifier, value);
+        let tuple = Cell::new(identifier, value);
         let node_circuit = FullNodeCircuit::from(tuple.clone());
         let left_pi = generate_random_pi(left_min, left_max);
         let right_pi = generate_random_pi(right_min, right_max);
@@ -250,7 +254,7 @@ pub(crate) mod test {
             .chain(right_hash.to_fields().iter())
             .chain(left_pis.min_value_u256().to_fields().iter())
             .chain(right_pis.max_value_u256().to_fields().iter())
-            .chain(IndexTuple::new(identifier, value).to_fields().iter())
+            .chain(Cell::new(identifier, value).to_fields().iter())
             .chain(cells_hash.iter())
             .cloned()
             .collect::<Vec<_>>();

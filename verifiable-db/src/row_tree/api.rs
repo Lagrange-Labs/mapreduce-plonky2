@@ -8,11 +8,13 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::cells_tree::Cell;
+
 use super::{
     full_node::{self, FullNodeCircuit},
     leaf::{self, LeafCircuit},
     partial_node::{self, PartialNodeCircuit},
-    IndexTuple, PublicInputs,
+    PublicInputs,
 };
 
 /// Parameters holding the circuits for the row tree creation
@@ -179,12 +181,21 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     pub fn leaf(identifier: u64, value: U256, cells_proof: Vec<u8>) -> Result<Self> {
-        let circuit = LeafCircuit::new(IndexTuple::new(F::from_canonical_u64(identifier), value));
+        Self::leaf_multiplier(identifier, value, false, cells_proof)
+    }
+    pub fn leaf_multiplier(
+        identifier: u64,
+        value: U256,
+        is_multiplier: bool,
+        cells_proof: Vec<u8>,
+    ) -> Result<Self> {
+        let circuit = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         Ok(CircuitInput::Leaf {
             witness: circuit,
             cells_proof,
         })
     }
+
     pub fn full(
         identifier: u64,
         value: U256,
@@ -192,8 +203,24 @@ impl CircuitInput {
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let circuit =
-            FullNodeCircuit::from(IndexTuple::new(F::from_canonical_u64(identifier), value));
+        Self::full_multiplier(
+            identifier,
+            value,
+            false,
+            left_proof,
+            right_proof,
+            cells_proof,
+        )
+    }
+    pub fn full_multiplier(
+        identifier: u64,
+        value: U256,
+        is_multiplier: bool,
+        left_proof: Vec<u8>,
+        right_proof: Vec<u8>,
+        cells_proof: Vec<u8>,
+    ) -> Result<Self> {
+        let circuit = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         Ok(CircuitInput::Full {
             witness: circuit,
             left_proof,
@@ -208,7 +235,24 @@ impl CircuitInput {
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let tuple = IndexTuple::new(F::from_canonical_u64(identifier), value);
+        Self::partial_multiplier(
+            identifier,
+            value,
+            false,
+            is_child_left,
+            child_proof,
+            cells_proof,
+        )
+    }
+    pub fn partial_multiplier(
+        identifier: u64,
+        value: U256,
+        is_multiplier: bool,
+        is_child_left: bool,
+        child_proof: Vec<u8>,
+        cells_proof: Vec<u8>,
+    ) -> Result<Self> {
+        let tuple = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         let witness = PartialNodeCircuit::new(tuple, is_child_left);
         Ok(CircuitInput::Partial {
             witness,
@@ -255,10 +299,10 @@ mod test {
         // to save on test time
         cells_proof: ProofWithPublicInputs<F, C, D>,
         cells_vk: VerifierOnlyCircuitData<C, D>,
-        leaf1: IndexTuple,
-        leaf2: IndexTuple,
-        full: IndexTuple,
-        partial: IndexTuple,
+        leaf1: Cell,
+        leaf2: Cell,
+        full: Cell,
+        partial: Cell,
     }
 
     impl TestParams {
@@ -287,10 +331,10 @@ mod test {
                 params,
                 cells_proof: cells_proof[0].clone(),
                 cells_vk,
-                leaf1: IndexTuple::new(identifier, v1),
-                leaf2: IndexTuple::new(identifier, v2),
-                full: IndexTuple::new(identifier, v_full),
-                partial: IndexTuple::new(identifier, v_partial),
+                leaf1: Cell::new(identifier, v1),
+                leaf2: Cell::new(identifier, v2),
+                full: Cell::new(identifier, v_full),
+                partial: Cell::new(identifier, v_partial),
             })
         }
 
@@ -305,7 +349,8 @@ mod test {
             // generate cells tree input and fake proof
             let cells_hash = HashOut::rand().to_fields();
             let cells_digest = Point::rand().to_weierstrass().to_fields();
-            let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest).to_vec();
+            let cells_pi =
+                cells_tree::PublicInputs::new(&cells_hash, &cells_digest, Point::NEUTRAL).to_vec();
             cells_pi
         }
     }
@@ -330,7 +375,7 @@ mod test {
 
     fn generate_partial_proof(
         p: &TestParams,
-        tuple: IndexTuple,
+        tuple: Cell,
         is_left: bool,
         child_proof_buff: Vec<u8>,
     ) -> Result<Vec<u8>> {
@@ -339,11 +384,11 @@ mod test {
         let child_min = child_pi.min_value_u256();
         let child_max = child_pi.max_value_u256();
 
-        partial_safety_check(child_min, child_max, tuple.index_value, is_left);
+        partial_safety_check(child_min, child_max, tuple.value, is_left);
 
         let input = CircuitInput::partial(
-            tuple.index_identifier.to_canonical_u64(),
-            tuple.index_value,
+            tuple.identifier.to_canonical_u64(),
+            tuple.value,
             is_left,
             child_proof_buff.clone(),
             p.cells_proof_vk().serialize()?,
@@ -357,8 +402,8 @@ mod test {
             // node_min = left ? child_proof.min : index_value
             // node_max = left ? index_value : child_proof.max
             let (node_min, node_max) = match is_left {
-                true => (pi.min_value_u256(), tuple.index_value),
-                false => (tuple.index_value, pi.max_value_u256()),
+                true => (pi.min_value_u256(), tuple.value),
+                false => (tuple.value, pi.max_value_u256()),
             };
 
             let child_hash = child_pi.root_hash_hashout();
@@ -392,8 +437,8 @@ mod test {
     fn generate_full_proof(p: &TestParams, child_proof: [Vec<u8>; 2]) -> Result<Vec<u8>> {
         let tuple = p.full.clone();
         let input = CircuitInput::full(
-            tuple.index_identifier.to_canonical_u64(),
-            tuple.index_value,
+            tuple.identifier.to_canonical_u64(),
+            tuple.value,
             child_proof[0].to_vec(),
             child_proof[1].to_vec(),
             p.cells_proof_vk().serialize()?,
@@ -402,8 +447,8 @@ mod test {
         let left_pi = PublicInputs::from_slice(&left_proof.proof.public_inputs);
         let right_proof = ProofWithVK::deserialize(&child_proof[1])?;
         let right_pi = PublicInputs::from_slice(&right_proof.proof.public_inputs);
-        assert!(left_pi.max_value_u256() < tuple.index_value);
-        assert!(tuple.index_value < right_pi.min_value_u256());
+        assert!(left_pi.max_value_u256() < tuple.value);
+        assert!(tuple.value < right_pi.min_value_u256());
         let proof = p
             .params
             .generate_proof(input, p.cells_test.get_recursive_circuit_set().clone())?;
@@ -442,12 +487,12 @@ mod test {
         Ok(proof)
     }
 
-    fn generate_leaf_proof(p: &TestParams, tuple: &IndexTuple) -> Result<Vec<u8>> {
+    fn generate_leaf_proof(p: &TestParams, tuple: &Cell) -> Result<Vec<u8>> {
         let cells_pi = p.cells_pi();
         //  generate row leaf proof
         let input = CircuitInput::leaf(
-            tuple.index_identifier.to_canonical_u64(),
-            tuple.index_value,
+            tuple.identifier.to_canonical_u64(),
+            tuple.value,
             p.cells_proof_vk().serialize()?,
         )?;
 
@@ -467,8 +512,8 @@ mod test {
                 .to_fields()
                 .iter()
                 .chain(empty_hash.to_fields().iter())
-                .chain(tuple.index_value.to_fields().iter())
-                .chain(tuple.index_value.to_fields().iter())
+                .chain(tuple.value.to_fields().iter())
+                .chain(tuple.value.to_fields().iter())
                 .chain(tuple.to_fields().iter())
                 .chain(cells_pi.h_raw().iter())
                 .cloned()

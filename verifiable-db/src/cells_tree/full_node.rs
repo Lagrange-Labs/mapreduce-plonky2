@@ -1,8 +1,11 @@
 //! Module handling the intermediate node with 2 children inside a cells tree
 
-use super::{accumulate_proof_digest, decide_digest_section, public_inputs::PublicInputs};
+use super::{
+    accumulate_proof_digest, decide_digest_section, public_inputs::PublicInputs, Cell, CellWire,
+};
 use alloy::primitives::U256;
 use anyhow::Result;
+use derive_more::{Deref, From};
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     public_inputs::PublicInputCommon,
@@ -22,23 +25,11 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::{array, iter};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FullNodeWires {
-    identifier: Target,
-    value: UInt256Target,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    is_multiplier: BoolTarget,
-}
+#[derive(Clone, Debug, Serialize, Deserialize, Into, From)]
+pub struct FullNodeWires(CellWire);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FullNodeCircuit {
-    /// The identifier of the column
-    pub(crate) identifier: F,
-    /// Value of the column
-    pub(crate) value: U256,
-    /// Multiplier
-    pub(crate) is_multiplier: bool,
-}
+#[derive(Clone, Debug, Serialize, Deserialize, From, Into)]
+pub struct FullNodeCircuit(Cell);
 
 impl FullNodeCircuit {
     pub fn build(b: &mut CBuilder, child_proofs: [PublicInputs<Target>; 2]) -> FullNodeWires {
@@ -70,17 +61,17 @@ impl FullNodeCircuit {
         // Register the public inputs.
         PublicInputs::new(&h, &digest_ind, digest_mult).register(b);
 
-        FullNodeWires {
+        CellWire {
             identifier,
             value,
             is_multiplier,
         }
+        .into()
     }
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &FullNodeWires) {
-        pw.set_target(wires.identifier, self.identifier);
-        pw.set_u256_target(&wires.value, self.value);
+        self.assign(pw, wires);
     }
 }
 

@@ -29,25 +29,26 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cells_tree;
+use crate::cells_tree::{self, accumulate_proof_digest, decide_digest_section, Cell, CellWire};
+use derive_more::{From, Into};
 
-use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
+use super::public_inputs::PublicInputs;
 
 #[derive(Clone, Debug)]
 pub struct PartialNodeCircuit {
-    pub(crate) tuple: IndexTuple,
+    pub(crate) tuple: Cell,
     pub(crate) is_child_at_left: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PartialNodeWires {
-    tuple: IndexTupleWire,
+    tuple: CellWire,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_child_at_left: BoolTarget,
 }
 
 impl PartialNodeCircuit {
-    pub(crate) fn new(tuple: IndexTuple, is_child_at_left: bool) -> Self {
+    pub(crate) fn new(tuple: Cell, is_child_at_left: bool) -> Self {
         Self {
             tuple,
             is_child_at_left,
@@ -59,21 +60,21 @@ impl PartialNodeCircuit {
         cells_pi: &[Target],
     ) -> PartialNodeWires {
         let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
-        let tuple = IndexTupleWire::new(b);
+        let tuple = CellWire::new(b);
         // bool target range checked in poseidon gate
         let is_child_at_left = b.add_virtual_bool_target_unsafe();
         let child_pi = PublicInputs::from_slice(child_pi);
         // max_left = left ? child_proof.max : index_value
         // min_right = left ? index_value : child_proof.min
-        let max_left = b.select_u256(is_child_at_left, &child_pi.max_value(), &tuple.index_value);
-        let min_right = b.select_u256(is_child_at_left, &tuple.index_value, &child_pi.min_value());
+        let max_left = b.select_u256(is_child_at_left, &child_pi.max_value(), &tuple.value);
+        let min_right = b.select_u256(is_child_at_left, &tuple.value, &child_pi.min_value());
         let bst_enforced = b.is_less_or_equal_than_u256(&max_left, &min_right);
         let _true = b._true();
         b.connect(bst_enforced.target, _true.target);
         // node_min = left ? child_proof.min : index_value
         // node_max = left ? index_value : child_proof.max
-        let node_min = b.select_u256(is_child_at_left, &child_pi.min_value(), &tuple.index_value);
-        let node_max = b.select_u256(is_child_at_left, &tuple.index_value, &child_pi.max_value());
+        let node_min = b.select_u256(is_child_at_left, &child_pi.min_value(), &tuple.value);
+        let node_max = b.select_u256(is_child_at_left, &tuple.value, &child_pi.max_value());
 
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
         // left_hash = left ? child_proof.H : H("")
@@ -200,7 +201,7 @@ pub mod test {
         cells_tree,
         row_tree::{
             full_node::test::generate_random_pi, partial_node::PartialNodeCircuit,
-            public_inputs::PublicInputs, IndexTuple,
+            public_inputs::PublicInputs, Cell,
         },
     };
 
@@ -255,12 +256,12 @@ pub mod test {
     }
 
     fn partial_node_circuit(child_at_left: bool) {
-        let tuple = IndexTuple::new(F::rand(), U256::from(18));
+        let tuple = Cell::new(F::rand(), U256::from(18));
         let (child_min, child_max) = match child_at_left {
             true => (U256::from(10), U256::from(15)),
             false => (U256::from(20), U256::from(25)),
         };
-        partial_safety_check(child_min, child_max, tuple.index_value, child_at_left);
+        partial_safety_check(child_min, child_max, tuple.value, child_at_left);
         let node_circuit = PartialNodeCircuit::new(tuple.clone(), child_at_left);
         let child_pi = generate_random_pi(child_min.to(), child_max.to());
         let cells_point = Point::rand();
@@ -277,8 +278,8 @@ pub mod test {
         // node_min = left ? child_proof.min : index_value
         // node_max = left ? index_value : child_proof.max
         let (node_min, node_max) = match child_at_left {
-            true => (pi.min_value_u256(), tuple.index_value),
-            false => (tuple.index_value, pi.max_value_u256()),
+            true => (pi.min_value_u256(), tuple.value),
+            false => (tuple.value, pi.max_value_u256()),
         };
         // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
         let child_hash = PublicInputs::from_slice(&child_pi).root_hash_hashout();

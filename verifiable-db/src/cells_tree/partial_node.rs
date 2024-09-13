@@ -1,8 +1,11 @@
 //! Module handling the intermediate node with 1 child inside a cells tree
 
-use super::{accumulate_proof_digest, decide_digest_section, public_inputs::PublicInputs};
+use super::{
+    accumulate_proof_digest, decide_digest_section, public_inputs::PublicInputs, Cell, CellWire,
+};
 use alloy::primitives::U256;
 use anyhow::Result;
+use derive_more::{From, Into};
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::empty_poseidon_hash,
@@ -24,24 +27,11 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PartialNodeWires {
-    identifier: Target,
-    value: UInt256Target,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    is_multiplier: BoolTarget,
-}
+#[derive(Clone, Debug, Serialize, Deserialize, From, Into)]
+pub struct PartialNodeWires(CellWire);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PartialNodeCircuit {
-    /// The same identifier derived from the MPT extraction
-    pub(crate) identifier: F,
-    /// Uint256 value
-    pub(crate) value: U256,
-    /// Multiplier means that the digest goes into the multiplier public input, otherwise goes as
-    /// usual in the individual digest (status quo)
-    pub(crate) is_multiplier: bool,
-}
+#[derive(Clone, Debug, Serialize, Deserialize, From, Into)]
+pub struct PartialNodeCircuit(Cell);
 
 impl PartialNodeCircuit {
     pub fn build(b: &mut CBuilder, child_proof: PublicInputs<Target>) -> PartialNodeWires {
@@ -75,18 +65,17 @@ impl PartialNodeCircuit {
         // Register the public inputs.
         PublicInputs::new(&h, &digest_ind, digest_mult).register(b);
 
-        PartialNodeWires {
+        CellWire {
             identifier,
             value,
             is_multiplier,
         }
+        .into()
     }
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &PartialNodeWires) {
-        pw.set_target(wires.identifier, self.identifier);
-        pw.set_u256_target(&wires.value, self.value);
-        pw.set_bool_target(wires.is_multiplier, self.is_multiplier);
+        self.assign(pw, wires);
     }
 }
 

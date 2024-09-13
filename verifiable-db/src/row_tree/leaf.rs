@@ -1,3 +1,4 @@
+use derive_more::{From, Into};
 use mp2_common::{
     default_config,
     group_hashing::{scalar_mul, CircuitBuilderGroupHashing},
@@ -20,24 +21,23 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cells_tree::{self, accumulate_proof_digest, decide_digest_section};
+use crate::cells_tree::{self, accumulate_proof_digest, decide_digest_section, Cell, CellWire};
 
-use super::{public_inputs::PublicInputs, IndexTuple, IndexTupleWire};
-use derive_more::{Constructor, Deref, From};
+use super::public_inputs::PublicInputs;
 
 // new type to implement the circuit logic on each differently
 // deref to access directly the same members - read only so it's ok
-#[derive(Clone, Debug, Deref, From, Constructor)]
-pub struct LeafCircuit(IndexTuple);
+#[derive(Clone, Debug, Deref, From, Into)]
+pub struct LeafCircuit(Cell);
 
-#[derive(Clone, Serialize, Deserialize, Deref, From)]
-pub(crate) struct LeafWires(IndexTupleWire);
+#[derive(Clone, Serialize, Deserialize, From, Into)]
+pub(crate) struct LeafWires(CellWire);
 
 impl LeafCircuit {
     pub(crate) fn build(b: &mut CircuitBuilder<F, D>, cells_pis: &[Target]) -> LeafWires {
         let cells_pis = cells_tree::PublicInputs::from_slice(cells_pis);
         // D(index_id||pack_u32(index_value)
-        let tuple = IndexTupleWire::new(b);
+        let tuple = CellWire::new(b);
         let d1 = tuple.digest(b);
         let (digest_ind, digest_mult) = decide_digest_section(b, d1, tuple.is_multiplier);
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
@@ -53,14 +53,14 @@ impl LeafCircuit {
             .to_targets()
             .iter()
             .chain(empty_hash.to_targets().iter())
-            .chain(tuple.index_value.to_targets().iter())
-            .chain(tuple.index_value.to_targets().iter())
+            .chain(tuple.value.to_targets().iter())
+            .chain(tuple.value.to_targets().iter())
             .chain(tuple.to_targets().iter())
             .chain(cells_pis.node_hash().to_targets().iter())
             .cloned()
             .collect::<Vec<_>>();
         let row_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
-        let value_fields = tuple.index_value.to_targets();
+        let value_fields = tuple.value.to_targets();
         PublicInputs::new(
             &row_hash.elements,
             &final_digest,
@@ -147,7 +147,7 @@ mod test {
 
     use crate::{
         cells_tree,
-        row_tree::{public_inputs::PublicInputs, IndexTuple},
+        row_tree::{public_inputs::PublicInputs, Cell},
     };
 
     use super::{LeafCircuit, LeafWires};
@@ -177,7 +177,7 @@ mod test {
         let mut rng = thread_rng();
         let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let identifier = F::rand();
-        let tuple = IndexTuple::new(identifier, value);
+        let tuple = Cell::new(identifier, value);
         let circuit = LeafCircuit::from(tuple.clone());
         let cells_point = Point::rand();
         let cells_digest = cells_point.to_weierstrass().to_fields();
@@ -193,8 +193,8 @@ mod test {
             .to_fields()
             .iter()
             .chain(empty_hash.to_fields().iter())
-            .chain(tuple.index_value.to_fields().iter())
-            .chain(tuple.index_value.to_fields().iter())
+            .chain(tuple.value.to_fields().iter())
+            .chain(tuple.value.to_fields().iter())
             .chain(tuple.to_fields().iter())
             .chain(cells_hash.iter())
             .cloned()
