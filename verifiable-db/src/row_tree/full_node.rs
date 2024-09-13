@@ -1,4 +1,4 @@
-use derive_more::{Deref, From, Into};
+use derive_more::{From, Into};
 use mp2_common::{
     default_config,
     group_hashing::{circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
@@ -23,9 +23,7 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 use std::array::from_fn as create_array;
 
-use crate::cells_tree::{
-    self, circuit_accumulate_proof_digest, circuit_decide_digest_section, Cell, CellWire,
-};
+use crate::cells_tree::{self, Cell, CellWire};
 
 use super::public_inputs::PublicInputs;
 // Arity not strictly needed now but may be an easy way to increase performance
@@ -71,18 +69,12 @@ impl FullNodeCircuit {
             .collect::<Vec<_>>();
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        // compute the digest of the cell
-        let cell_digest = tuple.digest(b);
-        // then decide if it's for indidivual or multiplier cell
-        let (digest_ind, digest_mult) =
-            circuit_decide_digest_section(b, cell_digest, tuple.is_multiplier);
-        // final_digest = HashToInt(mul_digest) * D(ind_digest)
-        let (digest_ind, digest_mult) =
-            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &cells_pi);
+        // final_digest = HashToInt(mul_digest) * D(ind_digest) + left.digest() + right.digest()
+        let (digest_ind, digest_mul) = tuple.split_and_accumulate_digest(b, &cells_pi);
         let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
-        let row_digest = circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind);
+        let row_digest = circuit_hashed_scalar_mul(b, digest_mul.to_targets(), digest_ind);
 
-        let row_digest = b.map_to_curve_point(&row_digest.to_targets());
+        // add this row digest with the rest
         let final_digest = b.curve_add(min_child.rows_digest(), max_child.rows_digest());
         let final_digest = b.curve_add(final_digest, row_digest);
         PublicInputs::new(
@@ -153,7 +145,12 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
 pub(crate) mod test {
 
     use alloy::primitives::U256;
-    use mp2_common::{group_hashing::map_to_curve_point, poseidon::H, utils::ToFields, C, D, F};
+    use mp2_common::{
+        group_hashing::{field_hashed_scalar_mul, map_to_curve_point},
+        poseidon::H,
+        utils::ToFields,
+        C, D, F,
+    };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::weierstrass_to_point,
@@ -219,12 +216,14 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn full_circuit() {
+    fn row_tree_full_circuit() {
         let cells_point = Point::rand();
-        let cells_digest = cells_point.to_weierstrass().to_fields();
+        let ind_cell_digest = cells_point.to_weierstrass().to_fields();
+        let mul_cell_digest = Point::NEUTRAL.to_fields();
         let cells_hash = HashOut::rand().to_fields();
-        let neutral = Point::NEUTRAL.to_fields();
-        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest, &neutral).to_vec();
+        let cells_pi_struct =
+            cells_tree::PublicInputs::new(&cells_hash, &ind_cell_digest, &mul_cell_digest);
+        let cells_pi = cells_pi_struct.to_vec();
 
         let (left_min, left_max) = (10, 15);
         // this should work since we allow multipleicities of indexes in the row tree
@@ -264,13 +263,14 @@ pub(crate) mod test {
         let hash = H::hash_no_pad(&inputs);
         assert_eq!(hash, pi.root_hash_hashout());
 
-        // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
-        let inner = map_to_curve_point(&tuple.to_fields());
-        let inner2 = inner + cells_point;
-        let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
+        // final_digest = HashToInt(mul_digest) * D(ind_digest) + p1.digest() + p2.digest()
+        let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&cells_pi_struct);
+        let ind_final = map_to_curve_point(&row_ind.to_fields());
+        let row_digest = field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
+
         let p1dr = weierstrass_to_point(&PublicInputs::from_slice(&left_pi).rows_digest_field());
         let p2dr = weierstrass_to_point(&PublicInputs::from_slice(&right_pi).rows_digest_field());
-        let result_digest = p1dr + p2dr + outer;
+        let result_digest = p1dr + p2dr + row_digest;
         assert_eq!(result_digest.to_weierstrass(), pi.rows_digest_field());
     }
 }
