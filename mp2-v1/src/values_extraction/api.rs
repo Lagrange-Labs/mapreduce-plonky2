@@ -5,6 +5,7 @@ use super::{
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
+    merge::{MergeTable, MergeTableWires},
     public_inputs::PublicInputs,
 };
 use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
@@ -34,6 +35,12 @@ type LeafSingleWire = LeafSingleWires<MAX_LEAF_NODE_LEN>;
 type LeafMappingWire = LeafMappingWires<MAX_LEAF_NODE_LEN>;
 type ExtensionInput = ProofInputSerialized<InputNode>;
 type BranchInput = ProofInputSerialized<InputNode>;
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MergeTableInput {
+    is_table_a_multiplier: bool,
+    table_a_root_proof: Vec<u8>,
+    table_b_root_proof: Vec<u8>,
+}
 
 const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 
@@ -46,9 +53,27 @@ pub enum CircuitInput {
     Extension(ExtensionInput),
     BranchSingle(BranchInput),
     BranchMapping(BranchInput),
+    MergeTable(MergeTableInput),
 }
 
 impl CircuitInput {
+    /// Create a circuit input for merging two tables. The proofs must be the root proof,i.e. the
+    /// ones at the root of the MPT storage.
+    /// The boolean flag indicates if table a should be considered the outer table, meaning all the
+    /// content of table A (the content extracted by this proof) is gonna be associated to each row
+    /// of table B.
+    pub fn new_merge_input(
+        table_a_root_proof: Vec<u8>,
+        table_b_root_proof: Vec<u8>,
+        is_table_a_multiplier: bool,
+    ) -> Self {
+        Self::MergeTable(MergeTableInput {
+            table_a_root_proof,
+            table_b_root_proof,
+            is_table_a_multiplier,
+        })
+    }
+
     /// Create a circuit input for proving a leaf MPT node of single variable.
     pub fn new_single_variable_leaf(node: Vec<u8>, slot: u8, column_id: u64) -> Self {
         CircuitInput::LeafSingle(LeafSingleCircuit {
@@ -108,6 +133,7 @@ pub struct PublicParameters {
     leaf_single: CircuitWithUniversalVerifier<F, C, D, 0, LeafSingleWire>,
     leaf_mapping: CircuitWithUniversalVerifier<F, C, D, 0, LeafMappingWire>,
     extension: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionNodeWires>,
+    merge: CircuitWithUniversalVerifier<F, C, D, 2, MergeTableWires>,
     #[cfg(not(test))]
     branches: BranchCircuits,
     #[cfg(test)]
@@ -311,10 +337,14 @@ impl PublicParameters {
         let branches = BranchCircuits::new(&circuit_builder);
         #[cfg(test)]
         let branches = TestBranchCircuits::new(&circuit_builder);
+
+        debug!("Building merge circuits");
+        let merge = circuit_builder.build_circuit::<C, 2, MergeTableWires>(());
         let mut circuits_set = vec![
             leaf_single.get_verifier_data().circuit_digest,
             leaf_mapping.get_verifier_data().circuit_digest,
             extension.get_verifier_data().circuit_digest,
+            merge.get_verifier_data().circuit_digest,
         ];
         circuits_set.extend(branches.circuit_set());
         assert_eq!(circuits_set.len(), MAPPING_CIRCUIT_SET_SIZE);
@@ -324,6 +354,7 @@ impl PublicParameters {
             leaf_mapping,
             extension,
             branches,
+            merge,
             #[cfg(not(test))]
             set: RecursiveCircuits::new_from_circuit_digests(circuits_set),
             #[cfg(test)]
@@ -340,6 +371,20 @@ impl PublicParameters {
             CircuitInput::LeafMapping(leaf) => set
                 .generate_proof(&self.leaf_mapping, [], [], leaf)
                 .map(|p| (p, self.leaf_mapping.get_verifier_data().clone()).into()),
+            CircuitInput::MergeTable(input) => {
+                let table_a = ProofWithVK::deserialize(&input.table_a_root_proof)?;
+                let table_b = ProofWithVK::deserialize(&input.table_b_root_proof)?;
+                let circuit = MergeTable {
+                    is_table_a_multiplier: input.is_table_a_multiplier,
+                };
+                set.generate_proof(
+                    &self.merge,
+                    [table_a.proof, table_b.proof],
+                    [&table_a.vk, &table_b.vk],
+                    circuit,
+                )
+                .map(|p| (p, self.merge.get_verifier_data().clone()).into())
+            }
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
                 let (child_proof, child_vk) = child_proofs

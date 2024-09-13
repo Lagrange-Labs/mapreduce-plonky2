@@ -3,9 +3,9 @@ use mp2_common::{
     group_hashing::{circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    types::CBuilder,
+    types::{CBuilder, GFp},
     utils::{ToFields, ToTargets},
-    F,
+    D, F,
 };
 use plonky2::{
     field::types::Field,
@@ -13,8 +13,10 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
+    plonk::proof::ProofWithPublicInputsTarget,
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 /// This merge table circuit is responsible for computing the right digest of the values and
@@ -25,10 +27,10 @@ use serde::{Deserialize, Serialize};
 /// can only aggregate 2 singletons table together and can only aggregate once.
 #[derive(Clone, Debug)]
 pub struct MergeTable {
-    is_table_a_multiplier: bool,
+    pub(crate) is_table_a_multiplier: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct MergeTableWires {
     #[serde(deserialize_with = "deserialize", serialize_with = "serialize")]
     is_table_a_multiplier: BoolTarget,
@@ -82,6 +84,34 @@ impl MergeTable {
     }
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &MergeTableWires) {
         pw.set_bool_target(wires.is_table_a_multiplier, self.is_table_a_multiplier);
+    }
+}
+
+/// Num of children = 2 - always two proofs to merge
+impl CircuitLogicWires<GFp, D, 2> for MergeTableWires {
+    type CircuitBuilderParams = ();
+
+    type Inputs = MergeTable;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CBuilder,
+        verified_proofs: [&ProofWithPublicInputsTarget<D>; 2],
+        _builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        let table_a = PublicInputs::new(&verified_proofs[0].public_inputs);
+        let table_b = PublicInputs::new(&verified_proofs[0].public_inputs);
+        MergeTable::build(builder, table_a, table_b)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GFp>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, &self);
+        Ok(())
     }
 }
 

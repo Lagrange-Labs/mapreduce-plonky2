@@ -428,6 +428,10 @@ pub fn run_circuit<
     u: U,
 ) -> ProofWithPublicInputs<F, C, D> {
     let setup = setup_circuit::<F, D, C, U>();
+    println!(
+        "setup.verifierdata hash {:?}",
+        setup.2.verifier_only.circuit_digest
+    );
 
     prove_circuit(&setup, &u)
 }
