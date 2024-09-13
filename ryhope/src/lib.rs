@@ -43,6 +43,10 @@ pub trait NodePayload: Debug + Sized + Serialize + for<'a> Deserialize<'a> {
     /// Return true if the payload has been modified and must be updated in the
     /// storage, false otherwise.
     fn aggregate<I: Iterator<Item = Option<Self>>>(&mut self, _children: I) {}
+
+    fn view(&self) -> String {
+        format!("{self:?}")
+    }
 }
 
 impl NodePayload for serde_json::Value {

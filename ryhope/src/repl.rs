@@ -8,6 +8,7 @@ use ryhope::{
     tree::{MutableTree, TreeTopology},
     Epoch, MerkleTreeKvDb, NodePayload,
 };
+use tabled::{builder::Builder, settings::Style};
 
 pub(crate) struct Repl<
     T: TreeTopology + MutableTree,
@@ -185,17 +186,31 @@ impl<
         Ok(())
     }
 
+    async fn view_table(&mut self) -> Result<()> {
+        let mut builder = Builder::default();
+        builder.push_record(vec!["key", "payload"]);
+        for k in self.db.keys_at(self.current_epoch).await {
+            let payload = self.db.fetch_at(&k, self.current_epoch).await;
+            builder.push_record(vec![format!("{:?}", k), payload.view()]);
+        }
+        let mut table = builder.build();
+        table.with(Style::sharp());
+        write!(self.tty, "{}", table).unwrap();
+        Ok(())
+    }
+
     pub async fn run(&mut self) -> Result<()> {
         loop {
             self.headline().await;
             writeln!(
                 self.tty,
-                "[c]ontext - goto {}ey/{}arent/{}eft/{}ight - travel to {}poch - {}uit",
+                "[c]ontext - goto {}ey/{}arent/{}eft/{}ight - travel to {}poch - view as {}able - {}uit",
                 "[k]".yellow().bold(),
                 "[p]".yellow().bold(),
                 "[l]".yellow().bold(),
                 "[r]".yellow().bold(),
                 "[e]".yellow().bold(),
+                "[t]".yellow().bold(),
                 "[q]".red().bold(),
             )?;
             if let Err(e) = match self.tty.read_char().unwrap() {
@@ -205,6 +220,7 @@ impl<
                 'r' => self.goto_right().await,
                 'e' => self.travel().await,
                 'c' => self.context().await,
+                't' => self.view_table().await,
                 'q' => return Ok(()),
                 _ => Ok(()),
             } {

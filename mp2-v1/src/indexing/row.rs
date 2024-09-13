@@ -3,6 +3,7 @@ use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{Deref, From};
 use hashbrown::HashMap;
+use itertools::Itertools;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     types::HashOutput,
@@ -292,6 +293,14 @@ impl<
                 .unwrap_or(empty_poseidon_hash().to_bytes().try_into().unwrap())),
         );
         self.hash = HashOutput(H::hash_no_pad(&to_hash).to_bytes().try_into().unwrap());
+    }
+
+    fn view(&self) -> String {
+        let mut r = String::new();
+        for (k, v) in self.cells.iter().sorted_by_key(|(k, _)| k.to_owned()) {
+            r.push_str(&format!("{k}: {v:?} "));
+        }
+        r
     }
 }
 
