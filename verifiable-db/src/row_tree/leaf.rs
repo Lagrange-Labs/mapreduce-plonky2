@@ -20,9 +20,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cells_tree::{
-    self, circuit_accumulate_proof_digest, circuit_decide_digest_section, Cell, CellWire,
-};
+use crate::cells_tree::{self, circuit_accumulate_proof_digest, Cell, CellWire};
 
 use super::public_inputs::PublicInputs;
 
@@ -39,11 +37,9 @@ impl LeafCircuit {
         let cells_pis = cells_tree::PublicInputs::from_slice(cells_pis);
         // D(index_id||pack_u32(index_value)
         let tuple = CellWire::new(b);
-        let d1 = tuple.digest(b);
-        // set the right digest depending on the multiplier
-        let (digest_ind, digest_mult) = circuit_decide_digest_section(b, d1, tuple.is_multiplier);
-        let (digest_ind, digest_mult) =
-            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &cells_pis);
+        // set the right digest depending on the multiplier and accumulate the ones from the public
+        // inputs of the cell root proof
+        let (digest_ind, digest_mult) = tuple.split_and_accumulate_digest(b, &cells_pis);
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
         // NOTE This additional digest is necessary since the individual digest is supposed to be a
         // full row, that is how it is extracted from MPT
@@ -135,7 +131,7 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 #[cfg(test)]
 mod test {
 
-    use alloy::{dyn_abi::parser::utils::identifier, primitives::U256};
+    use alloy::primitives::U256;
     use mp2_common::{
         group_hashing::{field_hashed_scalar_mul, map_to_curve_point},
         poseidon::empty_poseidon_hash,
@@ -186,10 +182,8 @@ mod test {
         let identifier = F::rand();
         let is_row_multiplier = false;
         let row_cell = Cell::new(identifier, value, is_row_multiplier);
-        let (ind_row_digest, mul_row_digest) =
-            field_decide_digest_section(row_cell.digest(), is_row_multiplier);
-        let tuple = Cell::new(identifier, value, is_row_multiplier);
-        let circuit = LeafCircuit::from(tuple.clone());
+        let circuit = LeafCircuit::from(row_cell.clone());
+        let tuple = row_cell.clone();
 
         let ind_cells_digest = Point::rand().to_fields();
         // TODO: test with other than neutral
@@ -217,8 +211,7 @@ mod test {
         let row_hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&inputs);
         assert_eq!(row_hash, pi.root_hash_hashout());
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
-        let (ind_final, mul_final) =
-            field_accumulate_proof_digest(ind_row_digest, mul_row_digest, &cells_pi_struct);
+        let (ind_final, mul_final) = row_cell.split_and_accumulate_digest(&cells_pi_struct);
         let ind_final = map_to_curve_point(&ind_final.to_fields());
         let result = field_hashed_scalar_mul(mul_final.to_fields(), ind_final);
         assert_eq!(result.to_weierstrass(), pi.rows_digest_field())

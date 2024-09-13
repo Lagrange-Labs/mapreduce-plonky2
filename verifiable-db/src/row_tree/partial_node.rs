@@ -32,7 +32,6 @@ use serde::{Deserialize, Serialize};
 use crate::cells_tree::{
     self, circuit_accumulate_proof_digest, circuit_decide_digest_section, Cell, CellWire,
 };
-use derive_more::{From, Into};
 
 use super::public_inputs::PublicInputs;
 
@@ -103,11 +102,7 @@ impl PartialNodeCircuit {
         );
 
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
-        let inner = tuple.digest(b);
-        let (digest_ind, digest_mult) =
-            circuit_decide_digest_section(b, inner, tuple.is_multiplier);
-        let (digest_ind, digest_mult) =
-            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &cells_pi);
+        let (digest_ind, digest_mult) = tuple.split_and_accumulate_digest(b, &cells_pi);
         let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
         let row_digest = circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind);
 
@@ -182,7 +177,10 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursivePartialWires {
 #[cfg(test)]
 pub mod test {
     use mp2_common::{
-        group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::ToFields, CHasher,
+        group_hashing::{field_hashed_scalar_mul, map_to_curve_point},
+        poseidon::empty_poseidon_hash,
+        utils::ToFields,
+        CHasher,
     };
     use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::curve::Point;
@@ -259,7 +257,8 @@ pub mod test {
     }
 
     fn partial_node_circuit(child_at_left: bool) {
-        let tuple = Cell::new(F::rand(), U256::from(18), false);
+        let is_multiplier = false;
+        let tuple = Cell::new(F::rand(), U256::from(18), is_multiplier);
         let (child_min, child_max) = match child_at_left {
             true => (U256::from(10), U256::from(15)),
             false => (U256::from(20), U256::from(25)),
@@ -268,10 +267,12 @@ pub mod test {
         let node_circuit = PartialNodeCircuit::new(tuple.clone(), child_at_left);
         let child_pi = generate_random_pi(child_min.to(), child_max.to());
         let cells_point = Point::rand();
-        let cells_digest = cells_point.to_weierstrass().to_fields();
+        let ind_cell_digest = cells_point.to_weierstrass().to_fields();
         let cells_hash = HashOut::rand().to_fields();
-        let neutral = Point::NEUTRAL.to_fields();
-        let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest, &neutral).to_vec();
+        let mul_cell_digest = Point::NEUTRAL.to_fields();
+        let cells_pi_struct =
+            cells_tree::PublicInputs::new(&cells_hash, &ind_cell_digest, &mul_cell_digest);
+        let cells_pi = cells_pi_struct.to_vec();
         let test_circuit = TestPartialNodeCircuit {
             circuit: node_circuit,
             cells_pi: cells_pi.clone(),
@@ -302,12 +303,13 @@ pub mod test {
             .collect::<Vec<_>>();
         let hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&inputs);
         assert_eq!(hash, pi.root_hash_hashout());
-        // child_proof.DR + D(cells_proof.DC + D(index_id || index_value)) as DR
-        let inner = map_to_curve_point(&tuple.to_fields());
-        let inner2 = inner + cells_point;
-        let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
+        // final_digest = HashToInt(mul_digest) * D(ind_digest)
+        let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&cells_pi_struct);
+        let ind_final = map_to_curve_point(&row_ind.to_fields());
+        let res = field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
+        // then adding with the rest of the rows digest, the other nodes
         let res =
-            weierstrass_to_point(&PublicInputs::from_slice(&child_pi).rows_digest_field()) + outer;
+            res + weierstrass_to_point(&PublicInputs::from_slice(&child_pi).rows_digest_field());
         assert_eq!(res.to_weierstrass(), pi.rows_digest_field());
     }
 }

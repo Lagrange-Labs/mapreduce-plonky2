@@ -53,6 +53,14 @@ impl Cell {
     pub(crate) fn digest(&self) -> Point {
         map_to_curve_point(&self.to_fields())
     }
+    pub(crate) fn split_digest(&self) -> (Point, Point) {
+        let digest = self.digest();
+        field_decide_digest_section(digest, self.is_multiplier)
+    }
+    pub(crate) fn split_and_accumulate_digest(&self, pis: &PublicInputs<F>) -> (Point, Point) {
+        let (ind, mul) = self.split_digest();
+        field_accumulate_proof_digest(ind, mul, pis)
+    }
 }
 
 impl ToFields<F> for Cell {
@@ -83,6 +91,18 @@ impl CellWire {
     }
     pub(crate) fn digest(&self, b: &mut CircuitBuilder<F, D>) -> CurveTarget {
         b.map_to_curve_point(&self.to_targets())
+    }
+    pub(crate) fn split_digest(&self, c: &mut CBuilder) -> (CurveTarget, CurveTarget) {
+        let d = self.digest(c);
+        circuit_decide_digest_section(c, d, self.is_multiplier)
+    }
+    pub(crate) fn split_and_accumulate_digest(
+        &self,
+        c: &mut CBuilder,
+        pis: &PublicInputs<Target>,
+    ) -> (CurveTarget, CurveTarget) {
+        let (ind, mul) = self.split_digest(c);
+        circuit_accumulate_proof_digest(c, ind, mul, pis)
     }
 }
 
