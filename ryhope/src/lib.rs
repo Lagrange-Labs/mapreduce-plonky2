@@ -328,22 +328,25 @@ impl<
             + MetaOperations<T, V>,
     > MerkleTreeKvDb<T, V, S>
 {
-    pub async fn wide_update_trees(
+    pub async fn wide_update_trees_at(
         &self,
+        at: Epoch,
         keys_query: &S::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<Vec<UpdateTree<T::Key>>> {
         self.storage
-            .wide_update_trees(&self.tree, keys_query, bounds)
+            .wide_update_trees(at, &self.tree, keys_query, bounds)
             .await
     }
+
     pub async fn wide_lineage_between(
         &self,
+        at: Epoch,
         keys_query: &S::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<WideLineage<T::Key, V>> {
         self.storage
-            .wide_lineage_between(&self.tree, keys_query, bounds)
+            .wide_lineage_between(at, &self.tree, keys_query, bounds)
             .await
     }
 }
