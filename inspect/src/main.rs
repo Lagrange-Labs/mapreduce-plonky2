@@ -1,5 +1,6 @@
 use anyhow::*;
 use clap::Parser;
+use index::RowPayloadFormatter;
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
     row::{RowPayload, RowTree},
@@ -12,6 +13,7 @@ use ryhope::{
 };
 use serde::Serialize;
 
+mod index;
 mod repl;
 
 type MerkleRowTree = MerkleTreeKvDb<
@@ -90,6 +92,6 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    let mut repl = Repl::new(tree_db).await?;
+    let mut repl = Repl::new(tree_db, RowPayloadFormatter::new()).await?;
     repl.run().await
 }

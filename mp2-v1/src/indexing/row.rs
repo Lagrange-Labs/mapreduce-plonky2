@@ -3,7 +3,6 @@ use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{Deref, From};
 use hashbrown::HashMap;
-use itertools::Itertools;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     types::HashOutput,

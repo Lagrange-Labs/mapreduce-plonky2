@@ -3,8 +3,6 @@ use std::io::Write;
 use anyhow::*;
 use colored::Colorize;
 use dialoguer::{console, theme::ColorfulTheme, FuzzySelect, Input};
-use itertools::Itertools;
-use mp2_v1::indexing::row::RowPayload;
 use ryhope::{
     storage::{FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage},
     tree::{MutableTree, TreeTopology},
@@ -12,58 +10,47 @@ use ryhope::{
 };
 use tabled::{builder::Builder, settings::Style};
 
-pub(crate) trait AsTable: std::fmt::Debug {
-    fn pretty_payload(&self) -> String {
-        format!("{self:?}")
+pub(crate) trait PayloadFormatter<V: std::fmt::Debug> {
+    fn pretty_payload(&self, payload: &V) -> String {
+        format!("{payload:?}")
     }
-}
 
-impl<T: Default + Eq + std::hash::Hash + std::fmt::Debug> AsTable for RowPayload<T> {
-    fn pretty_payload(&self) -> String {
-        let mut builder = Builder::default();
-        builder.push_record(vec!["sec. ind.", "var.", "value", "proved at"]);
-        let sec_ind = self.secondary_index_column;
-        for (k, v) in self.cells.iter().sorted_by_key(|(k, _)| k.to_owned()) {
-            builder.push_record(vec![
-                if *k == sec_ind { "*" } else { "" }.into(),
-                k.to_string(),
-                format!("0x{:x}", v.value),
-                format!("{:?}", v.primary),
-            ])
-        }
-        let mut table = builder.build();
-        table.with(Style::sharp());
-        table.to_string()
+    fn settings(&mut self, tty: &mut console::Term) -> Result<()> {
+        write!(tty, "no settings for payload formatter").unwrap();
+        Ok(())
     }
 }
 
 pub(crate) struct Repl<
     T: TreeTopology + MutableTree,
-    V: NodePayload + AsTable + Send + Sync,
+    V: NodePayload + Send + Sync,
     S: TransactionalStorage
         + TreeStorage<T>
         + PayloadStorage<T::Key, V>
         + FromSettings<T::State>
         + Send
         + Sync,
+    F: PayloadFormatter<V>,
 > {
     current_key: T::Key,
     current_epoch: Epoch,
     db: MerkleTreeKvDb<T, V, S>,
     tty: console::Term,
+    payload_fmt: F,
 }
 impl<
         T: TreeTopology + MutableTree,
-        V: NodePayload + Send + Sync + AsTable,
+        V: NodePayload + Send + Sync,
         S: TransactionalStorage
             + TreeStorage<T>
             + PayloadStorage<T::Key, V>
             + FromSettings<T::State>
             + Send
             + Sync,
-    > Repl<T, V, S>
+        F: PayloadFormatter<V>,
+    > Repl<T, V, S, F>
 {
-    pub async fn new(db: MerkleTreeKvDb<T, V, S>) -> Result<Self> {
+    pub async fn new(db: MerkleTreeKvDb<T, V, S>, payload_fmt: F) -> Result<Self> {
         let current_key = db.root().await.ok_or(anyhow!("tree is empty"))?;
         let current_epoch = db.current_epoch();
 
@@ -72,13 +59,14 @@ impl<
             current_epoch,
             db,
             tty: console::Term::stdout(),
+            payload_fmt,
         })
     }
 
     async fn headline(&mut self) {
         writeln!(
             self.tty,
-            "\ncurrent key: {} - epoch: {} - {} nodes",
+            "\n\ncurrent key: {} - epoch: {} - {} nodes",
             format!("{:?}", self.current_key).blue(),
             self.current_epoch.to_string().blue(),
             self.db
@@ -97,7 +85,7 @@ impl<
         let keys_str = keys.iter().map(|k| format!("{:?}", k)).collect::<Vec<_>>();
 
         if let Some(selection) = FuzzySelect::with_theme(&ColorfulTheme::default())
-            .with_prompt("Go to")
+            .with_prompt(format!("{} validate", "[enter]".yellow().bold()))
             .default(0)
             .items(&keys_str)
             .interact_opt()
@@ -186,10 +174,12 @@ impl<
                 self.tty,
                 "{}\n{}",
                 "Payload:".white().bold(),
-                self.db
-                    .fetch_at(&self.current_key, self.current_epoch)
-                    .await
-                    .pretty_payload()
+                self.payload_fmt.pretty_payload(
+                    &self
+                        .db
+                        .fetch_at(&self.current_key, self.current_epoch)
+                        .await
+                )
             )
             .unwrap();
 
@@ -200,10 +190,8 @@ impl<
                     self.tty,
                     "{}\n{}",
                     "Payload:".white().bold(),
-                    self.db
-                        .fetch_at(left, self.current_epoch)
-                        .await
-                        .pretty_payload()
+                    self.payload_fmt
+                        .pretty_payload(&self.db.fetch_at(left, self.current_epoch).await)
                 )
                 .unwrap();
             }
@@ -215,10 +203,8 @@ impl<
                     self.tty,
                     "{}\n{}",
                     "Payload:".white().bold(),
-                    self.db
-                        .fetch_at(right, self.current_epoch)
-                        .await
-                        .pretty_payload()
+                    self.payload_fmt
+                        .pretty_payload(&self.db.fetch_at(right, self.current_epoch).await)
                 )
                 .unwrap();
             }
@@ -234,10 +220,16 @@ impl<
 
     async fn view_table(&mut self) -> Result<()> {
         let mut builder = Builder::default();
-        builder.push_record(vec!["key", "payload"]);
+        builder.push_record(vec![
+            "key".magenta().bold().to_string(),
+            "payload".magenta().bold().to_string(),
+        ]);
         for k in self.db.keys_at(self.current_epoch).await {
             let payload = self.db.fetch_at(&k, self.current_epoch).await;
-            builder.push_record(vec![format!("{:?}", k), payload.pretty_payload()]);
+            builder.push_record(vec![
+                format!("{:?}", k),
+                self.payload_fmt.pretty_payload(&payload),
+            ]);
         }
         let mut table = builder.build();
         table.with(Style::blank());
@@ -245,12 +237,33 @@ impl<
         Ok(())
     }
 
+    fn settings(&mut self) -> Result<()> {
+        loop {
+            writeln!(
+                self.tty,
+                "\n{} {}ayload view - {}uit",
+                "Settings".white().bold(),
+                "[p]".yellow().bold(),
+                "[q]".yellow().bold(),
+            )
+            .unwrap();
+
+            if let Err(e) = match self.tty.read_char().unwrap() {
+                'p' => self.payload_fmt.settings(&mut self.tty),
+                'q' => return Ok(()),
+                _ => Ok(()),
+            } {
+                write!(self.tty, "{}", e.to_string().red()).unwrap();
+            }
+        }
+    }
+
     pub async fn run(&mut self) -> Result<()> {
         loop {
             self.headline().await;
             writeln!(
                 self.tty,
-                "{}ontext - goto {}ey/{}arent/{}eft/{}ight - travel to {}poch - view as {}able - {}uit",
+                "{}ontext - goto {}ey/{}arent/{}eft/{}ight - travel to {}poch - view as {}able - {}ettings - {}uit",
                 "[c]".yellow().bold(),
                 "[k]".yellow().bold(),
                 "[p]".yellow().bold(),
@@ -258,6 +271,7 @@ impl<
                 "[r]".yellow().bold(),
                 "[e]".yellow().bold(),
                 "[t]".yellow().bold(),
+                "[s]".yellow().bold(),
                 "[q]".red().bold(),
             )?;
             if let Err(e) = match self.tty.read_char().unwrap() {
@@ -268,6 +282,7 @@ impl<
                 'e' => self.travel().await,
                 'c' => self.context().await,
                 't' => self.view_table().await,
+                's' => self.settings(),
                 'q' => return Ok(()),
                 _ => Ok(()),
             } {
