@@ -96,8 +96,12 @@ pub const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
 pub const MAX_NUM_PLACEHOLDERS: usize = 10;
 pub const MAX_NUM_COLUMNS: usize = 20;
 pub const MAX_NUM_PREDICATE_OPS: usize = 20;
+pub const ROW_TREE_MAX_DEPTH: usize = 10;
+pub const INDEX_TREE_MAX_DEPTH: usize = 15;
 
 pub type GlobalCircuitInput = verifiable_db::api::QueryCircuitInput<
+    ROW_TREE_MAX_DEPTH,
+    INDEX_TREE_MAX_DEPTH,
     MAX_NUM_COLUMNS,
     MAX_NUM_PREDICATE_OPS,
     MAX_NUM_RESULT_OPS,
@@ -114,6 +118,11 @@ pub type QueryCircuitInput = verifiable_db::query::api::CircuitInput<
 >;
 
 pub type RevelationCircuitInput = verifiable_db::revelation::api::CircuitInput<
+    ROW_TREE_MAX_DEPTH,
+    INDEX_TREE_MAX_DEPTH,
+    MAX_NUM_COLUMNS,
+    MAX_NUM_PREDICATE_OPS,
+    MAX_NUM_RESULT_OPS,
     MAX_NUM_OUTPUTS,
     MAX_NUM_ITEMS_PER_OUTPUT,
     MAX_NUM_PLACEHOLDERS,
