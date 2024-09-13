@@ -1,5 +1,9 @@
 use anyhow::*;
 use clap::Parser;
+use mp2_v1::indexing::{
+    block::BlockPrimaryIndex,
+    row::{RowPayload, RowTree},
+};
 use repl::Repl;
 use ryhope::{
     storage::pgsql::{PgsqlStorage, SqlServerConnection, SqlStorageSettings, ToFromBytea},
@@ -9,6 +13,12 @@ use ryhope::{
 use serde::Serialize;
 
 mod repl;
+
+type MerkleRowTree = MerkleTreeKvDb<
+    RowTree,
+    RowPayload<BlockPrimaryIndex>,
+    PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>,
+>;
 
 #[derive(Parser)]
 #[command()]
@@ -38,12 +48,12 @@ struct Args {
     tree_type: String,
 }
 
-type K = String;
+type K = Vec<u8>;
 type Tree = scapegoat::Tree<K>;
 type V = serde_json::Value;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Hash, Debug)]
-#[serde(from = "Vec<u8>")]
+// #[serde(from = "Vec<u8>")]
 struct Key {
     k: Vec<u8>,
 }
@@ -71,7 +81,7 @@ async fn main() -> Result<()> {
             .unwrap_or_default()
     );
 
-    let tree_db = MerkleTreeKvDb::<Tree, V, PgsqlStorage<Tree, V>>::new(
+    let tree_db = MerkleRowTree::new(
         InitSettings::MustExist,
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_uri),

@@ -52,6 +52,16 @@ impl ToFromBytea for String {
     }
 }
 
+impl ToFromBytea for Vec<u8> {
+    fn to_bytea(&self) -> Vec<u8> {
+        self.clone()
+    }
+
+    fn from_bytea(bytes: Vec<u8>) -> Self {
+        bytes
+    }
+}
+
 impl ToFromBytea for i64 {
     fn to_bytea(&self) -> Vec<u8> {
         self.to_be_bytes().to_vec()

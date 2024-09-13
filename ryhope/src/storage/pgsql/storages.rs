@@ -731,15 +731,15 @@ where
                 &[&epoch],
             )
             .await
-            .map(|row| row.get::<_, Json<T>>(0).0)
+            .and_then(|row| row.try_get::<_, Json<T>>(0))
+            .map(|x| x.0)
             .with_context(|| {
                 anyhow!(
                     "failed to fetch state from `{}_meta` at epoch `{}`",
                     self.table,
                     epoch
                 )
-            })
-            .unwrap()
+            }).unwrap()
     }
 
     async fn store(&mut self, t: T) {

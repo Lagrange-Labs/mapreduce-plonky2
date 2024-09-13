@@ -3,6 +3,8 @@ use std::io::Write;
 use anyhow::*;
 use colored::Colorize;
 use dialoguer::{console, theme::ColorfulTheme, FuzzySelect, Input};
+use itertools::Itertools;
+use mp2_v1::indexing::row::RowPayload;
 use ryhope::{
     storage::{FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage},
     tree::{MutableTree, TreeTopology},
@@ -10,9 +12,28 @@ use ryhope::{
 };
 use tabled::{builder::Builder, settings::Style};
 
+pub(crate) trait AsTable: std::fmt::Debug {
+    fn pretty_payload(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+impl<T: Default + Eq + std::hash::Hash + std::fmt::Debug> AsTable for RowPayload<T> {
+    fn pretty_payload(&self) -> String {
+        let mut builder = Builder::default();
+        builder.push_record(vec!["var.", "value"]);
+        for (k, v) in self.cells.iter().sorted_by_key(|(k, _)| k.to_owned()) {
+            builder.push_record(vec![k.to_string(), format!("0x{:x}", v.value)])
+        }
+        let mut table = builder.build();
+        table.with(Style::sharp());
+        table.to_string()
+    }
+}
+
 pub(crate) struct Repl<
     T: TreeTopology + MutableTree,
-    V: NodePayload + Send + Sync,
+    V: NodePayload + AsTable + Send + Sync,
     S: TransactionalStorage
         + TreeStorage<T>
         + PayloadStorage<T::Key, V>
@@ -27,7 +48,7 @@ pub(crate) struct Repl<
 }
 impl<
         T: TreeTopology + MutableTree,
-        V: NodePayload + Send + Sync,
+        V: NodePayload + Send + Sync + AsTable,
         S: TransactionalStorage
             + TreeStorage<T>
             + PayloadStorage<T::Key, V>
@@ -144,35 +165,45 @@ impl<
             .node_context_at(&self.current_key, self.current_epoch)
             .await
         {
-            writeln!(self.tty, "===== Current node:").unwrap();
-            writeln!(self.tty, "    key: {:?}", self.current_key).unwrap();
+            writeln!(self.tty, "{}", "=== Current Node ===".magenta().bold()).unwrap();
+            writeln!(self.tty, "{}{:?}", "Key: ".white().bold(), self.current_key).unwrap();
             writeln!(
                 self.tty,
-                "    payload: {:?}",
+                "{}\n{}",
+                "Payload:".white().bold(),
                 self.db
                     .fetch_at(&self.current_key, self.current_epoch)
                     .await
+                    .pretty_payload()
             )
             .unwrap();
 
             if let Some(left) = context.left.as_ref() {
-                writeln!(self.tty, "===== Left child:").unwrap();
-                writeln!(self.tty, "    key: {:?}", left).unwrap();
+                writeln!(self.tty, "{}", "=== Left child ===".magenta().bold()).unwrap();
+                writeln!(self.tty, "{}{:?}", "Key: ".white().bold(), left).unwrap();
                 writeln!(
                     self.tty,
-                    "    payload: {:?}",
-                    self.db.fetch_at(left, self.current_epoch).await
+                    "{}\n{}",
+                    "Payload:".white().bold(),
+                    self.db
+                        .fetch_at(left, self.current_epoch)
+                        .await
+                        .pretty_payload()
                 )
                 .unwrap();
             }
 
             if let Some(right) = context.right.as_ref() {
-                writeln!(self.tty, "===== Right child:").unwrap();
-                writeln!(self.tty, "    key: {:?}", right).unwrap();
+                writeln!(self.tty, "{}", "=== Right child ===".magenta().bold()).unwrap();
+                writeln!(self.tty, "{}{:?}", "Key: ".white().bold(), right).unwrap();
                 writeln!(
                     self.tty,
-                    "    payload: {:?}",
-                    self.db.fetch_at(right, self.current_epoch).await
+                    "{}\n{}",
+                    "Payload:".white().bold(),
+                    self.db
+                        .fetch_at(right, self.current_epoch)
+                        .await
+                        .pretty_payload()
                 )
                 .unwrap();
             }
@@ -191,10 +222,10 @@ impl<
         builder.push_record(vec!["key", "payload"]);
         for k in self.db.keys_at(self.current_epoch).await {
             let payload = self.db.fetch_at(&k, self.current_epoch).await;
-            builder.push_record(vec![format!("{:?}", k), payload.view()]);
+            builder.push_record(vec![format!("{:?}", k), payload.pretty_payload()]);
         }
         let mut table = builder.build();
-        table.with(Style::sharp());
+        table.with(Style::blank());
         write!(self.tty, "{}", table).unwrap();
         Ok(())
     }

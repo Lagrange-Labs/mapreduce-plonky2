@@ -294,14 +294,6 @@ impl<
         );
         self.hash = HashOutput(H::hash_no_pad(&to_hash).to_bytes().try_into().unwrap());
     }
-
-    fn view(&self) -> String {
-        let mut r = String::new();
-        for (k, v) in self.cells.iter().sorted_by_key(|(k, _)| k.to_owned()) {
-            r.push_str(&format!("{k}: {v:?} "));
-        }
-        r
-    }
 }
 
 impl ToNonce for usize {

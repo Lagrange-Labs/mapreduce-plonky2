@@ -3287,6 +3287,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "inspect"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bb8",
+ "bb8-postgres",
+ "clap",
+ "colored",
+ "dialoguer",
+ "hex",
+ "itertools 0.12.1",
+ "mp2_v1",
+ "postgres-types",
+ "ryhope",
+ "serde",
+ "serde_json",
+ "tabled",
+ "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
 name = "instant"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5227,10 +5249,7 @@ dependencies = [
  "anyhow",
  "bb8",
  "bb8-postgres",
- "clap",
- "colored",
  "delegate",
- "dialoguer",
  "futures",
  "hex",
  "itertools 0.12.1",
@@ -5239,7 +5258,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha256",
- "tabled",
  "tokio",
  "tokio-postgres",
  "tracing",
