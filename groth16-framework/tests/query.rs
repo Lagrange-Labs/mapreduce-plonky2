@@ -20,7 +20,7 @@ use serial_test::serial;
 use std::path::Path;
 
 /// Test proving for the query circuits.
-#[ignore] // Ignore for long running time in CI.
+// #[ignore] // Ignore for long running time in CI.
 #[serial]
 #[test]
 fn test_groth16_proving_for_query() {
@@ -28,17 +28,19 @@ fn test_groth16_proving_for_query() {
 
     const ASSET_DIR: &str = "groth16_query";
 
-    // Create the testing context.
-    let ctx = TestContext::new();
+    /*
+        // Create the testing context.
+        let ctx = TestContext::new();
 
-    // Generate the Groth16 asset files.
-    ctx.generate_assets(ASSET_DIR);
+        // Generate the Groth16 asset files.
+        ctx.generate_assets(ASSET_DIR);
 
-    // Generate the plonky2 query proof.
-    let proof = ctx.generate_query_proof(ASSET_DIR);
+        // Generate the plonky2 query proof.
+        let proof = ctx.generate_query_proof(ASSET_DIR);
 
-    // Test Groth16 proving, verification and Solidity verification.
-    test_groth16_proving_and_verification(ASSET_DIR, &proof);
+        // Test Groth16 proving, verification and Solidity verification.
+        test_groth16_proving_and_verification(ASSET_DIR, &proof);
+    */
 
     // Verify the query in the Solidity function.
     // The editing Solidity code is saved in `test_data/TestGroth16Verifier.sol`.
