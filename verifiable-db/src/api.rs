@@ -345,14 +345,16 @@ mod tests {
     const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
     const MAX_NUM_PLACEHOLDERS: usize = 10;
 
+    // This is only used for testing on local.
+    #[ignore]
     #[test]
     fn test_local_proof_verification() {
         const QUERY_PARAMS_FILE_PATH: &str = "test_data/query_params.bin";
         const QUERY_PROOF_FILE_PATH: &str = "test_data/revelation";
 
+        // Load the query parameters.
         let file = File::open(QUERY_PARAMS_FILE_PATH).unwrap();
         let reader = BufReader::new(file);
-
         let query_params: QueryParameters<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
@@ -362,6 +364,7 @@ mod tests {
             MAX_NUM_PLACEHOLDERS,
         > = bincode::deserialize_from(reader).unwrap();
 
+        // Load the query proof.
         let file = File::open(QUERY_PROOF_FILE_PATH).unwrap();
         let reader = BufReader::new(file);
         let proof: ProofWithPublicInputs<F, WrapC, D> = bincode::deserialize_from(reader).unwrap();
@@ -371,7 +374,5 @@ mod tests {
             .circuit_data()
             .verify(proof)
             .unwrap();
-
-        println!("Finish verification");
     }
 }

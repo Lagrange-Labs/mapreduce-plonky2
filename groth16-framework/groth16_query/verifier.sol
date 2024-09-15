@@ -1,3 +1,4 @@
+
 // SPDX-License-Identifier: MIT
 
 pragma solidity ^0.8.0;
@@ -9,7 +10,7 @@ pragma solidity ^0.8.0;
 /// to compress proofs.
 /// @notice See <https://2π.com/23/bn254-compression> for further explanation.
 contract Verifier {
-
+    
     /// Some of the provided public input values are larger than the field modulus.
     /// @dev Public input elements are not automatically reduced, as this is can be
     /// a dangerous source of bugs.
