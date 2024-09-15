@@ -132,6 +132,9 @@ async fn query_mapping(
     //// cook query with custom placeholders
     let query_info = cook_query_secondary_index_placeholder(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    let query_info = cook_query_secondary_index_nonexisting_placeholder(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+
     // cook query filtering over a secondary index value not valid in all the blocks
     let query_info = cook_query_non_matching_entries_some_blocks(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
@@ -321,9 +324,9 @@ async fn prove_query(
             .await?;
         // since we only analyze the index tree for one epoch
         assert_eq!(big_index_cache.keys_by_epochs().len(), 1);
-        /// This is ok because the cache only have the block that are in the range so the
-        /// filter_check is gonna return the same thing
-        /// TOOD: @franklin is that correct ?
+        // This is ok because the cache only have the block that are in the range so the
+        // filter_check is gonna return the same thing
+        // TOOD: @franklin is that correct ?
         let up = big_index_cache
             // this is the epoch we choose how to prove
             .update_tree_for(current_epoch as Epoch)
@@ -1081,6 +1084,46 @@ async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
     Ok(QueryCooking {
         min_block: min as BlockPrimaryIndex,
         max_block: max as BlockPrimaryIndex,
+        query: query_str,
+        placeholders,
+    })
+}
+
+async fn cook_query_secondary_index_nonexisting_placeholder(table: &Table) -> Result<QueryCooking> {
+    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
+    let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
+    info!(
+        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
+        min_block, max_block, key_value
+    );
+    // now we can fetch the key that we want
+    let key_column = table.columns.secondary.name.clone();
+    // Assuming this is mapping with only two columns !
+    let value_column = &table.columns.rest[0].name;
+    let table_name = &table.public_name;
+
+    let filtering_value = *BASE_VALUE + U256::from(5);
+
+    let random_value = U256::from(1234567890);
+    let placeholders = Placeholders::from((
+        vec![
+            (PlaceholderId::Generic(1), random_value),
+            (PlaceholderId::Generic(2), filtering_value),
+        ],
+        U256::from(min_block),
+        U256::from(max_block),
+    ));
+
+    let query_str = format!(
+        "SELECT AVG({value_column})
+                FROM {table_name}
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
+                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
+                AND {key_column} = $1 AND {value_column} >= $2;"
+    );
+    Ok(QueryCooking {
+        min_block: min_block as BlockPrimaryIndex,
+        max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
     })
