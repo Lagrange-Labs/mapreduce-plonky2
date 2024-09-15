@@ -83,8 +83,8 @@ opt-level = 3
 # Reference: https://doc.rust-lang.org/cargo/reference/profiles.html#release
 # Proving is a bottleneck, enable agressive optimizations.
 # Reference: https://nnethercote.github.io/perf-book/build-configuration.html#codegen-units
-codegen-units = 1
-lto = "fat"
+# codegen-units = 1
+# lto = "fat"
 
 [patch.crates-io]
 plonky2 = { git = "https://github.com/Lagrange-Labs/plonky2", branch = "upstream" }

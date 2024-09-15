@@ -41,7 +41,6 @@ fn test_groth16_proving_for_query() {
         // Test Groth16 proving, verification and Solidity verification.
         test_groth16_proving_and_verification(ASSET_DIR, &proof);
     */
-
     // Verify the query in the Solidity function.
     // The editing Solidity code is saved in `test_data/TestGroth16Verifier.sol`.
     // TODO: In practice, the separate `Groth16VerifierExtensions.sol` and
