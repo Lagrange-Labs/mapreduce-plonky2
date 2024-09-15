@@ -1,7 +1,7 @@
 use derive_more::{From, Into};
 use mp2_common::{
     default_config,
-    group_hashing::{circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
+    group_hashing::{cond_circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     poseidon::H,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -72,7 +72,7 @@ impl FullNodeCircuit {
         // final_digest = HashToInt(mul_digest) * D(ind_digest) + left.digest() + right.digest()
         let (digest_ind, digest_mul) = tuple.split_and_accumulate_digest(b, &cells_pi);
         let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
-        let row_digest = circuit_hashed_scalar_mul(b, digest_mul.to_targets(), digest_ind);
+        let row_digest = cond_circuit_hashed_scalar_mul(b, digest_mul.to_targets(), digest_ind);
 
         // add this row digest with the rest
         let final_digest = b.curve_add(min_child.rows_digest(), max_child.rows_digest());
@@ -146,7 +146,7 @@ pub(crate) mod test {
 
     use alloy::primitives::U256;
     use mp2_common::{
-        group_hashing::{field_hashed_scalar_mul, map_to_curve_point},
+        group_hashing::{cond_field_hashed_scalar_mul, map_to_curve_point},
         poseidon::H,
         utils::ToFields,
         C, D, F,
@@ -266,7 +266,7 @@ pub(crate) mod test {
         // final_digest = HashToInt(mul_digest) * D(ind_digest) + p1.digest() + p2.digest()
         let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&cells_pi_struct);
         let ind_final = map_to_curve_point(&row_ind.to_fields());
-        let row_digest = field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
+        let row_digest = cond_field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
 
         let p1dr = weierstrass_to_point(&PublicInputs::from_slice(&left_pi).rows_digest_field());
         let p2dr = weierstrass_to_point(&PublicInputs::from_slice(&right_pi).rows_digest_field());

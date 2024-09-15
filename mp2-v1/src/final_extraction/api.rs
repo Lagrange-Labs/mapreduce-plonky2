@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     base_circuit::BaseCircuitInput, lengthed_circuit::LengthedRecursiveWires,
-    simple_circuit::SimpleCircuitRecursiveWires, BaseCircuitProofInputs, LengthedCircuit,
-    PublicInputs, SimpleCircuit,
+    merge::MergeTableWires, simple_circuit::SimpleCircuitRecursiveWires, BaseCircuitProofInputs,
+    LengthedCircuit, PublicInputs, SimpleCircuit,
 };
 
 use anyhow::Result;
@@ -43,6 +43,7 @@ impl FinalExtractionBuilderParams {
 pub struct PublicParameters {
     simple: CircuitWithUniversalVerifier<F, C, D, 0, SimpleCircuitRecursiveWires>,
     lengthed: CircuitWithUniversalVerifier<F, C, D, 0, LengthedRecursiveWires>,
+    //merge: CircuitWithUniversalVerifier<F, C, D, 2, MergeTableWires>,
     circuit_set: RecursiveCircuits<F, C, D>,
 }
 
@@ -143,9 +144,33 @@ pub struct LengthedCircuitInput {
 pub enum CircuitInput {
     Simple(SimpleCircuitInput),
     Lengthed(LengthedCircuitInput),
+    MergeTable(MergeTableInput),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MergeTableInput {
+    is_table_a_multiplier: bool,
+    table_a_root_proof: Vec<u8>,
+    table_b_root_proof: Vec<u8>,
 }
 
 impl CircuitInput {
+    /// Create a circuit input for merging two tables. The proofs must be the root proof,i.e. the
+    /// ones at the root of the MPT storage.
+    /// The boolean flag indicates if table a should be considered the outer table, meaning all the
+    /// content of table A (the content extracted by this proof) is gonna be associated to each row
+    /// of table B.
+    //pub fn new_merge_input(
+    //    table_a_root_proof: Vec<u8>,
+    //    table_b_root_proof: Vec<u8>,
+    //    is_table_a_multiplier: bool,
+    //) -> Self {
+    //    Self::MergeTable(MergeTableInput {
+    //        table_a_root_proof,
+    //        table_b_root_proof,
+    //        is_table_a_multiplier,
+    //    })
+    //}
     /// Instantiate inputs for simple variables circuit. Coumpound must be set to true
     /// if the proof is for extracting values for a variable type with dynamic length (like a mapping)
     /// but that does not require a length_proof (maybe because there is no way to get the length

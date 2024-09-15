@@ -20,29 +20,17 @@ use crate::values_extraction;
 
 use super::{
     api::{FinalExtractionBuilderParams, NUM_IO},
-    base_circuit,
-    base_circuit::{BaseCircuitProofInputs, BaseCircuitProofWires},
-    PublicInputs,
+    base_circuit::{self, BaseCircuitProofInputs, BaseCircuitProofWires},
+    PublicInputs, TableDimension, TableDimensionWire,
 };
 
 /// This circuit contains the logic to prove the final extraction of a simple
 /// variable (like uint256) or a mapping without an associated length slot.
 #[derive(Clone, Debug)]
-pub struct SimpleCircuit {
-    /// Set to true for types that
-    /// * have multiple entries (like an mapping, unlike a single uin256 for example)
-    /// * don't need or have an associated length slot to combine with
-    /// It happens contracts don't have a length slot associated with the mapping
-    /// like ERC20 and thus there is no proof circuits have looked at _all_ the entries
-    /// due to limitations on EVM (there is no mapping.len()).
-    compound_type: bool,
-}
+pub struct SimpleCircuit(TableDimension);
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct SimpleWires {
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    compound: BoolTarget,
-}
+pub struct SimpleWires(TableDimensionWire);
 
 impl SimpleCircuit {
     fn build(
@@ -54,10 +42,9 @@ impl SimpleCircuit {
         let base_wires = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, value_pi);
 
         let value_pi = values_extraction::PublicInputs::<Target>::new(value_pi);
-        let dv = value_pi.values_digest_target().to_targets();
-        let single_variable = b.map_to_curve_point(&dv);
-        let compound = b.add_virtual_bool_target_safe();
-        let final_dv = b.curve_select(compound, value_pi.values_digest_target(), single_variable);
+        let dv = value_pi.values_digest_target();
+        let dimension: TableDimensionWire = b.add_virtual_bool_target_safe().into();
+        let final_dv = dimension.conditional_digest(b, dv);
         PublicInputs::new(
             &base_wires.bh,
             &base_wires.prev_bh,
@@ -66,11 +53,11 @@ impl SimpleCircuit {
             &base_wires.bn.to_targets(),
         )
         .register_args(b);
-        SimpleWires { compound }
+        SimpleWires(dimension)
     }
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &SimpleWires) {
-        pw.set_bool_target(wires.compound, self.compound_type);
+        self.0.assign_wire(pw, &wires.0);
     }
 }
 
@@ -86,10 +73,8 @@ pub struct SimpleCircuitInput {
 }
 
 impl SimpleCircuitInput {
-    pub(crate) fn new(base: BaseCircuitProofInputs, compound: bool) -> Self {
-        let simple = SimpleCircuit {
-            compound_type: compound,
-        };
+    pub(crate) fn new(base: BaseCircuitProofInputs, dimension: TableDimension) -> Self {
+        let simple = dimension.into();
         Self { base, simple }
     }
 }
@@ -165,20 +150,16 @@ mod test {
         let pis = ProofsPi::random();
         let test_circuit = TestSimpleCircuit {
             pis: pis.clone(),
-            circuit: SimpleCircuit {
-                compound_type: true,
-            },
+            circuit: TableDimension::Compound.into(),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        pis.check_proof_public_inputs(&proof, true, None);
+        pis.check_proof_public_inputs(&proof, TableDimension::Compound, None);
 
         let test_circuit = TestSimpleCircuit {
             pis: pis.clone(),
-            circuit: SimpleCircuit {
-                compound_type: false,
-            },
+            circuit: TableDimension::Single,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        pis.check_proof_public_inputs(&proof, false, None);
+        pis.check_proof_public_inputs(&proof, TableDimension::Compound, None);
     }
 }

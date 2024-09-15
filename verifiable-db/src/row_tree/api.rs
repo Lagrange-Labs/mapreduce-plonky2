@@ -273,7 +273,7 @@ mod test {
 
     use super::*;
     use mp2_common::{
-        group_hashing::{field_hashed_scalar_mul, map_to_curve_point},
+        group_hashing::{cond_field_hashed_scalar_mul, map_to_curve_point},
         poseidon::{empty_poseidon_hash, H},
         utils::ToFields,
         F,
@@ -430,7 +430,7 @@ mod test {
             // final_digest = HashToInt(mul_digest) * D(ind_digest) + row_proof.digest()
             let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&p.cells_pi());
             let ind_final = map_to_curve_point(&row_ind.to_fields());
-            let res = field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
+            let res = cond_field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
             // then adding with the rest of the rows digest, the other nodes
             let res = res + weierstrass_to_point(&child_pi.rows_digest_field());
             assert_eq!(res.to_weierstrass(), pi.rows_digest_field());
@@ -480,7 +480,7 @@ mod test {
                 // final_digest = HashToInt(mul_digest) * D(ind_digest) + p1.digest() + p2.digest()
                 let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&p.cells_pi());
                 let ind_final = map_to_curve_point(&row_ind.to_fields());
-                let row_digest = field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
+                let row_digest = cond_field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
 
                 let p1dr = weierstrass_to_point(&left_pi.rows_digest_field());
                 let p2dr = weierstrass_to_point(&right_pi.rows_digest_field());
@@ -529,7 +529,7 @@ mod test {
             // final_digest = HashToInt(mul_digest) * D(ind_digest)
             let (ind_final, mul_final) = tuple.split_and_accumulate_digest(&cells_pi);
             let ind_final = map_to_curve_point(&ind_final.to_fields());
-            let result = field_hashed_scalar_mul(mul_final.to_fields(), ind_final);
+            let result = cond_field_hashed_scalar_mul(mul_final.to_fields(), ind_final);
             assert_eq!(result.to_weierstrass(), pi.rows_digest_field());
         }
         Ok(proof)

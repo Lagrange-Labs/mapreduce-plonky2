@@ -194,19 +194,41 @@ pub fn weierstrass_to_point(w: &WeierstrassPoint) -> Point {
 /// scalar multiplication
 pub fn circuit_hashed_scalar_mul(
     b: &mut CircuitBuilder<F, D>,
-    inputs: Vec<Target>,
+    multiplier: CurveTarget,
     base: CurveTarget,
 ) -> CurveTarget {
-    let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
+    let hash = b.hash_n_to_hash_no_pad::<CHasher>(multiplier.to_targets());
     let int = hash_to_int_target(b, hash);
     let scalar = b.biguint_to_nonnative(&int);
     b.curve_scalar_mul(base, &scalar)
 }
+/// Common function to compute the digest of the block tree which uses a special format using
+/// scalar multiplication
+/// NOTE: if the multiplier is NEUTRAL, then it only returns the base. This is to accomodate both a
+/// "merged" table digest and a "singleton" table digest.
+pub fn cond_circuit_hashed_scalar_mul(
+    b: &mut CircuitBuilder<F, D>,
+    multiplier: CurveTarget,
+    base: CurveTarget,
+) -> CurveTarget {
+    let res_mul = circuit_hashed_scalar_mul(b, multiplier, base);
+    let neutral = b.curve_zero();
+    let is_base_case = b.curve_eq(neutral, multiplier);
+    b.curve_select(is_base_case, base, res_mul)
+}
 
-/// Common function to compute a scalar multiplication in the format of HashToInt(inputs) * base
 pub fn field_hashed_scalar_mul(inputs: Vec<F>, base: Point) -> Point {
     let hash = H::hash_no_pad(&inputs);
     let int = hash_to_int_value(hash);
     let scalar = Scalar::from_noncanonical_biguint(int);
     base * scalar
+}
+/// Common function to compute a scalar multiplication in the format of HashToInt(inputs) * base
+/// NOTE: if the multiplier is NEUTRAL, then it only returns the base. This is to accomodate both a
+/// "merged" table digest and a "singleton" table digest.
+pub fn cond_field_hashed_scalar_mul(mul: Point, base: Point) -> Point {
+    match mul.equals(Point::NEUTRAL) {
+        true => base,
+        false => field_hashed_scalar_mul(mul.to_fields(), base),
+    }
 }

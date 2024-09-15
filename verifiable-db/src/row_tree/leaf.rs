@@ -1,7 +1,7 @@
 use derive_more::{From, Into};
 use mp2_common::{
     default_config,
-    group_hashing::{circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
+    group_hashing::{cond_circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -45,7 +45,7 @@ impl LeafCircuit {
         // full row, that is how it is extracted from MPT
         let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
         let final_digest =
-            circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind).to_targets();
+            cond_circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind).to_targets();
         // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
         // in our case, min == max == index_value
         // left_child_hash == right_child_hash == empty_hash since there is not children
@@ -133,7 +133,7 @@ mod test {
 
     use alloy::primitives::U256;
     use mp2_common::{
-        group_hashing::{field_hashed_scalar_mul, map_to_curve_point},
+        group_hashing::{cond_field_hashed_scalar_mul, map_to_curve_point},
         poseidon::empty_poseidon_hash,
         utils::ToFields,
         CHasher, C, D, F,
@@ -213,7 +213,7 @@ mod test {
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
         let (ind_final, mul_final) = row_cell.split_and_accumulate_digest(&cells_pi_struct);
         let ind_final = map_to_curve_point(&ind_final.to_fields());
-        let result = field_hashed_scalar_mul(mul_final.to_fields(), ind_final);
+        let result = cond_field_hashed_scalar_mul(mul_final.to_fields(), ind_final);
         assert_eq!(result.to_weierstrass(), pi.rows_digest_field())
     }
 }

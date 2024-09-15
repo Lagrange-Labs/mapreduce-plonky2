@@ -23,6 +23,7 @@ use recursion_framework::framework::{
     RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
 };
 use serde::{Deserialize, Serialize};
+use std::array::from_fn as create_array;
 
 use crate::{block_extraction, contract_extraction, values_extraction};
 
@@ -36,35 +37,46 @@ use anyhow::Result;
 pub struct BaseCircuit {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BaseWires {
+pub struct BaseWires<const N: usize> {
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    pub(crate) dm: CurveTarget,
+    pub(crate) dm: [CurveTarget; N],
     pub(crate) bh: [Target; PACKED_HASH_LEN],
     pub(crate) prev_bh: [Target; PACKED_HASH_LEN],
     pub(crate) bn: UInt256Target,
 }
 
 impl BaseCircuit {
-    pub(crate) fn build(
+    pub(crate) fn build<const N: usize>(
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         block_pi: &[Target],
         contract_pi: &[Target],
-        value_pi: &[Target],
+        value_pis: [&[Target]; N],
     ) -> BaseWires {
         // TODO: homogeinize the public inputs structs
         let block_pi =
             block_extraction::public_inputs::PublicInputs::<Target>::from_slice(block_pi);
-        let value_pi = values_extraction::PublicInputs::<Target>::new(value_pi);
+        let value_pis =
+            create_array(|i| values_extraction::PublicInputs::<Target>::new(value_pis[i]));
+
         let contract_pi = contract_extraction::PublicInputs::<Target>::from_slice(contract_pi);
 
         let minus_one = b.constant(GoldilocksField::NEG_ONE);
-        b.connect(value_pi.mpt_key().pointer, minus_one);
+        for value_pi in values_pi.iter() {
+            b.connect(value_pi.mpt_key().pointer, minus_one);
+        }
         b.connect(contract_pi.mpt_key().pointer, minus_one);
 
-        let metadata = b.add_curve_point(&[
-            value_pi.metadata_digest_target(),
-            contract_pi.metadata_digest(),
-        ]);
+        let metadatas = values_pi
+            .iter()
+            .map(|value_pi| {
+                b.add_curve_point(&[
+                    value_pi.metadata_digest_target(),
+                    contract_pi.metadata_digest(),
+                ])
+            })
+            .collect()
+            .try_into()
+            .unwrap();
 
         // enforce contract_pi.storage_root == value_pi.storage_root
         contract_pi
@@ -107,22 +119,22 @@ pub(crate) const BLOCK_SET_NUM_IO: usize =
     block_extraction::public_inputs::PublicInputs::<F>::TOTAL_LEN;
 
 #[derive(Clone, Debug)]
-pub struct BaseCircuitInput {
+pub struct BaseCircuitInput<const N: usize> {
     block_proof: ProofWithPublicInputs<F, C, D>,
     contract_proof: ProofWithVK,
-    value_proof: ProofWithVK,
+    value_proofs: [ProofWithVK; N],
 }
 
-impl BaseCircuitInput {
+impl<const N: usize> BaseCircuitInput<N> {
     pub(super) fn new(
         block_proof: Vec<u8>,
         contract_proof: Vec<u8>,
-        value_proof: Vec<u8>,
+        value_proofs: [Vec<u8>; N],
     ) -> Result<Self> {
         Ok(Self {
             block_proof: deserialize_proof(&block_proof)?,
             contract_proof: ProofWithVK::deserialize(&contract_proof)?,
-            value_proof: ProofWithVK::deserialize(&value_proof)?,
+            value_proofs: create_array(|i| ProofWithVK::deserialize(&value_proofs[i]))?,
         })
     }
 }
@@ -205,7 +217,10 @@ impl BaseCircuitProofWires {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use crate::{final_extraction::PublicInputs, length_extraction};
+    use crate::{
+        final_extraction::{PublicInputs, TableDimension},
+        length_extraction,
+    };
 
     use super::*;
     use alloy::primitives::U256;
@@ -296,6 +311,30 @@ pub(crate) mod test {
     }
 
     impl ProofsPi {
+        /// Returns the same blocks and contract pi but with a new values pi that share the same
+        /// contract and block information, i.e. the base circuit checks pass with both values for
+        /// the same contract and block pis
+        /// Essentially, the value pi returned contains a different value and metadata digest, the
+        /// rest is the same
+        pub(crate) fn generate_new_random_value(&self) -> ProofsPi {
+            let original = values_extraction::PublicInputs::new(&self.values_pi);
+            let (k, t) = original.mpt_key_info();
+            let new_value_digest = Point::rand();
+            let new_metadata_digest = Point::rand();
+            let new_values_pi = new_extraction_public_inputs(
+                &original.root_hash(),
+                &k,
+                t,
+                &new_value_digest.to_weierstrass(),
+                &new_metadata_digest.to_weierstrass(),
+                original.n(),
+            );
+            Self {
+                blocks_pi: self.blocks_pi,
+                contract_pi: self.contract_pi,
+                values_pi: new_values_pi,
+            }
+        }
         pub(crate) fn contract_inputs(&self) -> contract_extraction::PublicInputs<F> {
             contract_extraction::PublicInputs::from_slice(&self.contract_pi)
         }
@@ -326,7 +365,7 @@ pub(crate) mod test {
         pub(crate) fn check_proof_public_inputs(
             &self,
             proof: &ProofWithPublicInputs<F, C, D>,
-            compound_type: bool,
+            dimension: TableDimension,
             length_dm: Option<WeierstrassPoint>,
         ) {
             let proof_pis = PublicInputs::from_slice(&proof.public_inputs);

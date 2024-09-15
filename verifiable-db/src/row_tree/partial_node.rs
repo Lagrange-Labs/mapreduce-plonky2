@@ -2,7 +2,7 @@ use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 
 use mp2_common::{
     default_config,
-    group_hashing::{circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
+    group_hashing::{cond_circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     hash::hash_maybe_first,
     poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
@@ -104,7 +104,7 @@ impl PartialNodeCircuit {
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
         let (digest_ind, digest_mult) = tuple.split_and_accumulate_digest(b, &cells_pi);
         let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
-        let row_digest = circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind);
+        let row_digest = cond_circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind);
 
         let final_digest = b.curve_add(child_pi.rows_digest(), row_digest);
         PublicInputs::new(
@@ -177,7 +177,7 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursivePartialWires {
 #[cfg(test)]
 pub mod test {
     use mp2_common::{
-        group_hashing::{field_hashed_scalar_mul, map_to_curve_point},
+        group_hashing::{cond_field_hashed_scalar_mul, map_to_curve_point},
         poseidon::empty_poseidon_hash,
         utils::ToFields,
         CHasher,
@@ -306,7 +306,7 @@ pub mod test {
         // final_digest = HashToInt(mul_digest) * D(ind_digest) + row_proof.digest()
         let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&cells_pi_struct);
         let ind_final = map_to_curve_point(&row_ind.to_fields());
-        let res = field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
+        let res = cond_field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
         // then adding with the rest of the rows digest, the other nodes
         let res =
             res + weierstrass_to_point(&PublicInputs::from_slice(&child_pi).rows_digest_field());
