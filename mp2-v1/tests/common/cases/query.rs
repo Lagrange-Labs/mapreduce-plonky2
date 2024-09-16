@@ -284,7 +284,7 @@ async fn prove_query(
                 query.max_block
             );
         } as BlockPrimaryIndex;
-        prove_non_existence_index(&mut planner,  to_be_proven_node).await?;
+        prove_non_existence_index(&mut planner, to_be_proven_node).await?;
         // we get the lineage of the node that proves the non existence of the index nodes
         // required for the query. We specify the epoch at which we want to get this lineage as
         // of the current epoch.
@@ -373,7 +373,7 @@ async fn prove_revelation(
     let query_proof = {
         let root_key = table.index.root_at(tree_epoch).await.unwrap();
         let proof_key = ProofKey::QueryAggregateIndex((
-            query.query.clone(), 
+            query.query.clone(),
             query.placeholders.placeholder_values(),
             root_key,
         ));
@@ -550,7 +550,13 @@ where
             _ => panic!("stg's wrong in the tree"),
         };
         let child_proof = info
-            .load_proof(cctx, &query_id, primary, &child_key, placeholder_values.clone())
+            .load_proof(
+                cctx,
+                &query_id,
+                primary,
+                &child_key,
+                placeholder_values.clone(),
+            )
             .expect("key should already been proven");
         (pos, child_proof)
     };
@@ -574,7 +580,7 @@ where
             .await;
         if node_ctx.is_leaf() && info.is_row_tree() {
             // NOTE: if it is a leaf of the row tree, then there is no need to prove anything,
-            // since we're not "aggregating" any from below. For the index tree however, we 
+            // since we're not "aggregating" any from below. For the index tree however, we
             // need to always generate an aggregate proof. Therefore, in this test, we just copy the
             // proof to the expected aggregation location and move on. Note that we need to
             // save the proof only if the current row is satisfying the query: indeed, if
@@ -591,7 +597,7 @@ where
                     embedded_proof?.unwrap(),
                 )?;
             }
-            
+
             end_iteration(&mut proven_nodes)?;
             continue;
         }
@@ -724,7 +730,14 @@ where
         let proof = planner
             .ctx
             .run_query_proof(name, GlobalCircuitInput::Query(input))?;
-        info.save_proof(planner.ctx, &query_id, primary, &k, placeholder_values.clone(),proof)?;
+        info.save_proof(
+            planner.ctx,
+            &query_id,
+            primary,
+            &k,
+            placeholder_values.clone(),
+            proof,
+        )?;
         info!("query proof DONE for {primary} -> {k:?} ");
         end_iteration(&mut proven_nodes)?;
     }
@@ -876,9 +889,9 @@ async fn prove_non_existence_index<'a>(
     )
     .await;
     let proof_key = ProofKey::QueryAggregateIndex((
-        planner.query.query.clone(), 
-        planner.query.placeholders.placeholder_values(), 
-        primary
+        planner.query.query.clone(),
+        planner.query.placeholders.placeholder_values(),
+        primary,
     ));
     info!("Non-existence circuit proof RUNNING for {current_epoch} -> {primary} ");
     let proof = generate_non_existence_proof(
@@ -1063,10 +1076,10 @@ pub async fn prove_single_row<T: TreeInfo<RowTreeKey, RowPayload<BlockPrimaryInd
     .expect("unable to create universal query circuit inputs");
     // 3. run proof if not ran already
     let proof_key = ProofKey::QueryUniversal((
-        query.query.clone(), 
+        query.query.clone(),
         query.placeholders.placeholder_values(),
-        primary, 
-        row_key.clone()
+        primary,
+        row_key.clone(),
     ));
     let proof = {
         info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");

@@ -90,7 +90,12 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>> {
         // TODO export that in single function
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), placeholder_values, primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -104,7 +109,12 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         proof: Vec<u8>,
     ) -> Result<()> {
         // TODO export that in single function
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), placeholder_values, primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -176,7 +186,12 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         key: &RowTreeKey,
         placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>> {
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), placeholder_values, primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -189,7 +204,12 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()> {
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), placeholder_values, primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.store_proof(proof_key, proof)
     }
 
