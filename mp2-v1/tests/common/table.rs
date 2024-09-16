@@ -116,7 +116,7 @@ async fn new_db_pool(db_url: &str) -> Result<DBPool> {
 }
 pub struct Table {
     pub(crate) genesis_block: BlockPrimaryIndex,
-    pub(crate) name: TableID,
+    pub(crate) public_name: TableID,
     pub(crate) columns: TableColumns,
     // NOTE: there is no cell tree because it's small and can be reconstructed
     // on the fly very quickly. Otherwise, we would need to store one cell tree per row
@@ -136,12 +136,12 @@ fn index_table_name(name: &str) -> String {
 }
 
 impl Table {
-    pub async fn load(table_name: String, columns: TableColumns) -> Result<Self> {
+    pub async fn load(public_name: String, columns: TableColumns) -> Result<Self> {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         let row_tree = MerkleRowTree::new(
             InitSettings::MustExist,
             SqlStorageSettings {
-                table: row_table_name(&table_name),
+                table: row_table_name(&public_name),
                 source: SqlServerConnection::NewConnection(db_url.clone()),
             },
         )
@@ -151,7 +151,7 @@ impl Table {
             InitSettings::MustExist,
             SqlStorageSettings {
                 source: SqlServerConnection::NewConnection(db_url.clone()),
-                table: index_table_name(&table_name),
+                table: index_table_name(&public_name),
             },
         )
         .await
@@ -163,25 +163,25 @@ impl Table {
             db_pool: new_db_pool(&db_url).await?,
             columns,
             genesis_block: genesis as BlockPrimaryIndex,
-            name: table_name,
+            public_name,
             row: row_tree,
             index: index_tree,
         })
     }
 
     pub fn row_table_name(&self) -> String {
-        row_table_name(&self.name)
+        row_table_name(&self.public_name)
     }
 
-    pub async fn new(genesis_block: u64, table_name: String, columns: TableColumns) -> Self {
+    pub async fn new(genesis_block: u64, root_table_name: String, columns: TableColumns) -> Self {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         let db_settings_index = SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url.clone()),
-            table: index_table_name(&table_name),
+            table: index_table_name(&root_table_name),
         };
         let db_settings_row = SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url.clone()),
-            table: row_table_name(&table_name),
+            table: row_table_name(&root_table_name),
         };
 
         let row_tree = ryhope::new_row_tree(
@@ -203,7 +203,7 @@ impl Table {
                 .expect("unable to create db pool"),
             columns,
             genesis_block: genesis_block as BlockPrimaryIndex,
-            name: table_name,
+            public_name: root_table_name,
             row: row_tree,
             index: index_tree,
         }
@@ -562,7 +562,7 @@ impl Table {
         Ok(ZkTable {
             // NOTE : we always look data in the row table
             zktable_name: self.row_table_name(),
-            user_facing_name: self.name.clone(),
+            user_facing_name: self.public_name.clone(),
             columns: zk_columns,
         })
     }
@@ -600,9 +600,9 @@ impl ContextProvider for Table {
 impl ContextProvider for &Table {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         ensure!(
-            self.name == table_name,
+            self.public_name == table_name,
             "names differ table {} vs requested {}",
-            self.name,
+            self.row_table_name(),
             table_name
         );
         self.to_zktable()

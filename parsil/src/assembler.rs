@@ -9,7 +9,6 @@
 use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
-use mp2_common::{array::ToField, F};
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
     BinaryOperator, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Query, Select,
@@ -298,19 +297,19 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     /// the input expression has already been checked for correctness for use as
     /// a SID bound, which means that it resolves correctly, that its depth is
     /// less than two, and that it is static.
-    fn expression_to_boundary(&mut self, expr: &Expr) -> QueryBoundSource {
+    fn expression_to_boundary(&mut self, expr: &Expr) -> Result<QueryBoundSource> {
         // A SID can only be bound by only one BasicOperation, that must not be
         // stored along the query operations. Therefore we use an immediate
         // storage, whose length will later down checked to be less than two.
         let mut store = StorageTarget::Immediate(Vec::new());
 
-        // Compile the voundary expression into this storage...
+        // Compile the boundary expression into this storage...
         let wire = self.compile(expr, &mut store).unwrap();
         if let StorageTarget::Immediate(ops) = store {
-            assert!(ops.len() <= 1);
+            ensure!(ops.len() <= 1, "{expr} is not a valid boundary expression");
 
             // ...then convert the resulting Wire into a QueryBoundSource
-            match wire {
+            Ok(match wire {
                 Symbol::Expression(e) => match e {
                     Wire::BasicOperation(id) => {
                         // Safety check
@@ -324,7 +323,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     _ => unreachable!(),
                 },
                 _ => unreachable!(),
-            }
+            })
         } else {
             unreachable!();
         }
@@ -338,6 +337,22 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     ///   - sid >[=] <placeholder>
     ///   - sid = <placeholder>
     fn maybe_set_secondary_index_boundary(&mut self, expr: &Expr) -> Result<()> {
+        fn plus_one(expr: &Expr) -> Expr {
+            Expr::BinaryOp {
+                left: Box::new(expr.clone()),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expr::Value(Value::Number("1".into(), false))),
+            }
+        }
+
+        fn minus_one(expr: &Expr) -> Expr {
+            Expr::BinaryOp {
+                left: Box::new(expr.clone()),
+                op: BinaryOperator::Minus,
+                right: Box::new(Expr::Value(Value::Number("1".into(), false))),
+            }
+        }
+
         if let Expr::BinaryOp { left, op, right } = expr {
             if self.is_secondary_index(left)?
                 // SID can only be computed from constants and placeholders
@@ -345,10 +360,16 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 // SID can only be defined by up to one level of BasicOperation
                 && self.depth(right) <= 1
             {
-                let bound = Some(self.expression_to_boundary(right));
                 match op {
                     // $sid > x
                     BinaryOperator::Gt | BinaryOperator::GtEq => {
+                        let right = if *op == BinaryOperator::Gt {
+                            &plus_one(right)
+                        } else {
+                            right
+                        };
+                        let bound = Some(self.expression_to_boundary(&right)?);
+
                         if self.secondary_index_bounds.low.is_some() {
                             // impossible to say which is higher between two
                             // conflicting low bounds
@@ -359,6 +380,13 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     }
                     // $sid < x
                     BinaryOperator::Lt | BinaryOperator::LtEq => {
+                        let right = if *op == BinaryOperator::Lt {
+                            &minus_one(right)
+                        } else {
+                            right
+                        };
+                        let bound = Some(self.expression_to_boundary(&right)?);
+
                         if self.secondary_index_bounds.high.is_some() {
                             // impossible to say which is lower between two
                             // conflicting high bounds
@@ -369,6 +397,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     }
                     // $sid = x
                     BinaryOperator::Eq => {
+                        let bound = Some(self.expression_to_boundary(right)?);
                         if self.secondary_index_bounds.low.is_some()
                             && self.secondary_index_bounds.high.is_some()
                         {
@@ -382,10 +411,16 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     _ => {}
                 }
             } else if self.is_secondary_index(right)? && self.is_expr_static(left)? {
-                let bound = Some(self.expression_to_boundary(left));
                 match op {
                     // x > $sid
                     BinaryOperator::Gt | BinaryOperator::GtEq => {
+                        let left = if *op == BinaryOperator::Gt {
+                            &minus_one(left)
+                        } else {
+                            left
+                        };
+                        let bound = Some(self.expression_to_boundary(left)?);
+
                         if self.secondary_index_bounds.high.is_some() {
                             self.secondary_index_bounds.high = None;
                         } else {
@@ -394,6 +429,13 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     }
                     // x < $sid
                     BinaryOperator::Lt | BinaryOperator::LtEq => {
+                        let left = if *op == BinaryOperator::Lt {
+                            &plus_one(left)
+                        } else {
+                            left
+                        };
+                        let bound = Some(self.expression_to_boundary(left)?);
+
                         if self.secondary_index_bounds.low.is_some() {
                             // impossible to say which is lower between two
                             // conflicting high bounds
@@ -404,6 +446,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     }
                     // x = $sid
                     BinaryOperator::Eq => {
+                        let bound = Some(self.expression_to_boundary(left)?);
                         if self.secondary_index_bounds.low.is_some()
                             && self.secondary_index_bounds.high.is_some()
                         {
@@ -448,7 +491,10 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     /// `storage_target` determines whether the circuit ojects should be stored
     /// in the SELECT-specific or the WHERE-specific storage target.
     fn compile(&mut self, expr: &Expr, storage_target: &mut StorageTarget) -> Result<Symbol<Wire>> {
-        match expr {
+        let mut expr = expr.clone();
+        crate::utils::const_reduce(&mut expr);
+
+        match &expr {
             Expr::Value(v) => Ok(Symbol::Expression(match v {
                 Value::Number(x, _) => self.new_constant(x.parse().unwrap()),
                 Value::SingleQuotedString(s) => self.new_constant(str_to_u256(s)?),
@@ -552,7 +598,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     unreachable!()
                 }
             }
-            _ => unreachable!(),
+            _ => unreachable!("trying to compile `{expr}`"),
         }
     }
 
@@ -689,6 +735,7 @@ trait BuildableBounds: Sized {
 
 /// Similar to [`QueryBounds`], but only containing the static expressions
 /// defining the query bounds, without any reference to runtime values.
+#[derive(Debug)]
 pub struct StaticQueryBounds {
     pub min_query_secondary: Option<QueryBoundSource>,
     pub max_query_secondary: Option<QueryBoundSource>,

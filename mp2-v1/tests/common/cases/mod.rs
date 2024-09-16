@@ -189,7 +189,7 @@ pub(crate) struct TestCase {
 impl TestCase {
     pub fn table_info(&self) -> TableInfo {
         TableInfo {
-            table_name: self.table.name.clone(),
+            public_name: self.table.public_name.clone(),
             chain_id: self.chain_id,
             columns: self.table.columns.clone(),
             contract_address: self.contract_address,

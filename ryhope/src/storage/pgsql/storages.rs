@@ -12,6 +12,7 @@ use crate::{
 use anyhow::*;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
+use itertools::Itertools;
 use postgres_types::Json;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -123,6 +124,49 @@ where
                 1 => Ok(Some(rows[0].get::<_, Json<V>>(0).0)),
                 _ => bail!("internal coherency error: {:?}", rows),
             })
+        }
+    }
+
+    /// Return the value associated to the given key at the given epoch.
+    fn fetch_many_payload_at<I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
+        db: DBPool,
+        table: &str,
+        data: I,
+    ) -> impl std::future::Future<Output = Result<Vec<Option<(Epoch, Self::Key, V)>>>> + std::marker::Send
+    {
+        async move {
+            let data = data.into_iter().collect::<Vec<_>>();
+            let connection = db.get().await.unwrap();
+            let immediate_table = data
+                .iter()
+                .map(|(epoch, key)| {
+                    format!(
+                        "({epoch}::BIGINT, '\\x{}'::BYTEA)",
+                        hex::encode(key.to_bytea())
+                    )
+                })
+                .join(", ");
+            Ok(connection
+            .query(
+                &dbg!(format!(
+                   "SELECT batch.key, batch.epoch, {table}.{PAYLOAD} FROM
+                     (VALUES {}) AS batch (epoch, key)
+                     LEFT JOIN {table} ON
+                     batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
+                   immediate_table
+               )),
+                &[],
+            )
+               .await
+               .context("while fetching payload from database")?
+               .iter()
+               .map(|row| {
+                   let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
+                   let epoch = row.get::<_, Epoch>(1);
+                   let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
+                   v.map(|v| (epoch, k, v))
+               })
+               .collect())
         }
     }
 
@@ -929,6 +973,16 @@ where
             }
         }
     }
+
+    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
+        &self,
+        _data: I,
+    ) -> impl Future<Output = Result<Vec<Option<(Epoch, T::Key, T::Node)>>>> + Send
+    where
+        <I as IntoIterator>::IntoIter: Send,
+    {
+        async move { unimplemented!("should never be used") }
+    }
 }
 impl<T, V> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
 where
@@ -1038,6 +1092,19 @@ where
                 T::fetch_payload_at(db, &table, k, epoch).await.unwrap()
             }
         }
+    }
+
+    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
+        &self,
+        data: I,
+    ) -> impl Future<Output = Result<Vec<Option<(Epoch, T::Key, V)>>>> + Send
+    where
+        <I as IntoIterator>::IntoIter: Send,
+    {
+        trace!("[{self}] fetching many keys",);
+        let db = self.wrapped.lock().unwrap().db.clone();
+        let table = self.wrapped.lock().unwrap().table.to_owned();
+        async move { T::fetch_many_payload_at(db, &table, data).await }
     }
 }
 impl<T, V> EpochKvStorage<T::Key, V> for PayloadProjection<T, V>

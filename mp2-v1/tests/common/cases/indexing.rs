@@ -414,7 +414,7 @@ impl TestCase {
         info!("Generated final BLOCK tree proofs for block {current_block}");
         let _ = ctx
             .prove_ivc(
-                &self.table.name,
+                &self.table.public_name,
                 bn,
                 &self.table.index,
                 expected_metadata_hash,
@@ -480,7 +480,7 @@ impl TestCase {
             }
         };
 
-        let table_id = &self.table.name.clone();
+        let table_id = &self.table.public_name.clone();
         let chain_id = ctx.rpc.get_chain_id().await?;
         // we construct the proof key for both mappings and single variable in the same way since
         // it is derived from the table id which should be different for any tables we create.

@@ -1,6 +1,8 @@
 use alloy::primitives::U256;
 use anyhow::*;
-use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
+use sqlparser::ast::{
+    BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Query, UnaryOperator, Value,
+};
 use std::str::FromStr;
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
 
@@ -157,6 +159,134 @@ pub fn str_to_u256(s: &str) -> Result<U256> {
     U256::from_str(&s).map_err(|e| anyhow!("{s}: invalid U256: {e}"))
 }
 
+fn val_to_expr(x: U256) -> Expr {
+    if let Result::Ok(x_int) = TryInto::<i32>::try_into(x) {
+        Expr::Value(Value::Number(x_int.to_string(), false))
+    } else {
+        Expr::Value(Value::SingleQuotedString(format!("0x{x:x}")))
+    }
+}
+
+/// Reduce all the parts of an expression that can be computed at compile-time.
+pub(crate) fn const_reduce(expr: &mut Expr) {
+    #[allow(non_snake_case)]
+    let ONE = U256::from_str_radix("1", 2).unwrap();
+    const ZERO: U256 = U256::ZERO;
+
+    match expr {
+        Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {}
+        Expr::BinaryOp { left, op, right } => {
+            let const_left = const_eval(left).ok();
+            let const_right = const_eval(right).ok();
+            match (const_left, const_right) {
+                (None, None) => {
+                    const_reduce(left);
+                    const_reduce(right);
+                }
+                (None, Some(new_right)) => {
+                    const_reduce(left);
+                    *right = Box::new(val_to_expr(new_right));
+                }
+                (Some(new_left), None) => {
+                    const_reduce(right);
+                    *left = Box::new(val_to_expr(new_left));
+                }
+                (Some(new_left), Some(new_right)) => {
+                    *expr = val_to_expr(match op {
+                        BinaryOperator::Plus => new_left + new_right,
+                        BinaryOperator::Minus => new_left - new_right,
+                        BinaryOperator::Multiply => new_left * new_right,
+                        BinaryOperator::Divide => new_left / new_right,
+                        BinaryOperator::Modulo => new_left % new_right,
+                        BinaryOperator::Gt => {
+                            if new_left > new_right {
+                                ONE
+                            } else {
+                                ZERO
+                            }
+                        }
+                        BinaryOperator::Lt => {
+                            if new_left < new_right {
+                                ONE
+                            } else {
+                                ZERO
+                            }
+                        }
+                        BinaryOperator::GtEq => {
+                            if new_left >= new_right {
+                                ONE
+                            } else {
+                                ZERO
+                            }
+                        }
+                        BinaryOperator::LtEq => {
+                            if new_left <= new_right {
+                                ONE
+                            } else {
+                                ZERO
+                            }
+                        }
+                        BinaryOperator::Eq => {
+                            if new_left == new_right {
+                                ONE
+                            } else {
+                                ZERO
+                            }
+                        }
+                        BinaryOperator::NotEq => {
+                            if new_left != new_right {
+                                ONE
+                            } else {
+                                ZERO
+                            }
+                        }
+                        BinaryOperator::And => {
+                            if !new_left.is_zero() && !new_right.is_zero() {
+                                ONE
+                            } else {
+                                ZERO
+                            }
+                        }
+                        BinaryOperator::Or => {
+                            if !new_left.is_zero() || !new_right.is_zero() {
+                                ONE
+                            } else {
+                                ZERO
+                            }
+                        }
+                        BinaryOperator::Xor => {
+                            if !new_left.is_zero() ^ !new_right.is_zero() {
+                                ONE
+                            } else {
+                                ZERO
+                            }
+                        }
+                        _ => unreachable!(),
+                    })
+                }
+            }
+        }
+        Expr::UnaryOp { op, expr } => {
+            if let Some(new_e) = const_eval(expr).ok() {
+                match op {
+                    UnaryOperator::Plus => *expr = Box::new(val_to_expr(new_e)),
+                    UnaryOperator::Not => {
+                        *expr = Box::new(val_to_expr(if new_e.is_zero() { ONE } else { ZERO }));
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                const_reduce(expr);
+            }
+        }
+        Expr::Nested(e) => {
+            const_reduce(e);
+        }
+        Expr::Value(_) => {}
+        _ => {}
+    }
+}
+
 /// If it is static, evaluate an expression and return its value.
 ///
 /// NOTE: this will be used (i) in optimization and (ii) when boundaries
@@ -167,8 +297,7 @@ fn const_eval(expr: &Expr) -> Result<U256> {
     const ZERO: U256 = U256::ZERO;
 
     match expr {
-        Expr::Identifier(_) => todo!(),
-        Expr::CompoundIdentifier(_) => todo!(),
+        Expr::Identifier(_) | Expr::CompoundIdentifier(_) => bail!("Unable to resolve {}", expr),
         Expr::BinaryOp { left, op, right } => {
             let left = const_eval(left)?;
             let right = const_eval(right)?;
@@ -262,7 +391,7 @@ fn const_eval(expr: &Expr) -> Result<U256> {
         Expr::Value(value) => match value {
             Value::Number(s, _) | Value::SingleQuotedString(s) => str_to_u256(s),
             Value::Boolean(b) => Ok(if *b { ONE } else { ZERO }),
-            Value::Placeholder(_) => todo!(),
+            Value::Placeholder(_) => bail!("{expr}: non-const expression"),
             _ => unreachable!(),
         },
         _ => bail!("`{expr}`: non-const expression"),

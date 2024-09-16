@@ -990,6 +990,84 @@ async fn grouped_txs() -> Result<()> {
 
     Ok(())
 }
+#[tokio::test]
+async fn fetch_many() {
+    type K = String;
+    type V = usize;
+    type Tree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<Tree, V>;
+
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
+        SqlStorageSettings {
+            source: SqlServerConnection::NewConnection(db_url()),
+            table: "many".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    const TEXT1: &str = "au solstice ete comme palais alcine ciel embrasera chateau versailles plus rien restera tu peux lacher bontemps toute sa cohorte que personne ne sorte deja temps";
+
+    const TEXT2: &str = "car je defie astre roi toutes planetes agencer doit titres tetes esope mots allument mon brulot grenouilles jupiter";
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT1.split(' ').enumerate() {
+                s.store(word.to_string(), i.try_into().unwrap()).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT2.split(' ').enumerate() {
+                s.store(word.to_string(), i.try_into().unwrap()).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    let many = s
+        .try_fetch_many_at([
+            // OK
+            (1i64, "restera".to_string()),
+            // OK
+            (2i64, "restera".to_string()),
+            // non-existing epoch
+            (4i64, "restera".to_string()),
+            // does not exist yet
+            (1i64, "car".to_string()),
+            // OK
+            (2i64, "car".to_string()),
+            // non-existing key
+            (1i64, "meumeu".to_string()),
+        ])
+        .await
+        .unwrap()
+        .into_iter()
+        .collect::<HashSet<_>>();
+
+    // using sets here, for PgSQL does not guarantee ordering
+    assert_eq!(
+        many,
+        [
+            Some((1, "restera".to_string(), 12)),
+            Some((2, "restera".to_string(), 12)),
+            None,
+            Some((2, "car".to_string(), 0)),
+            None,
+            None
+        ]
+        .into_iter()
+        .collect::<HashSet<_>>()
+    )
+}
 
 #[tokio::test]
 async fn wide_update_trees() {
@@ -1045,7 +1123,7 @@ SELECT {KEY}, generate_series(GREATEST(1, {VALID_FROM}), LEAST(2, {VALID_UNTIL})
 FROM wide
 WHERE {KEY} = ANY(ARRAY['\\x72657374657261'::bytea,'\\x706c7573'::bytea, '\\x636172']) AND NOT ({VALID_FROM} > 2 OR {VALID_UNTIL} < 1)");
 
-    let trees = s.wide_update_trees(&query, (1, 2)).await.unwrap();
+    let trees = s.wide_update_trees_at(2, &query, (1, 2)).await.unwrap();
     for t in trees.iter() {
         println!("{}:", t.epoch());
         t.print();

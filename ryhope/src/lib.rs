@@ -132,6 +132,7 @@ impl<
     pub async fn storage_state(&self) -> <T as TreeTopology>::State {
         self.storage.state().fetch().await
     }
+
     /// Compute a bottom-up-aggregated value on the payload of the nodes,
     /// recursively from the leaves up to the root node.
     async fn aggregate(&mut self, mut plan: UpdatePlan<T::Key>) -> Result<()> {
@@ -175,20 +176,13 @@ impl<
     pub async fn root(&self) -> Option<T::Key> {
         self.tree.root(&self.storage).await
     }
+
+    /// Return the key mapped to the root of the Merkle tree at the given epoch.
     pub async fn root_at(&self, epoch: Epoch) -> Option<T::Key> {
         self.tree.root(&self.storage.view_at(epoch)).await
     }
 
-    pub async fn root_data_at(&self, epoch: Epoch) -> Option<V> {
-        if let Some(root) = self.tree.root(&self.storage.view_at(epoch)).await {
-            let root = self.storage.data().fetch_at(&root, epoch).await;
-            Some(root)
-        } else {
-            None
-        }
-    }
-
-    /// Return the current root hash of the Merkle tree.
+    /// Return the current payload of the Merkle tree root.
     pub async fn root_data(&self) -> Option<V> {
         if let Some(root) = self.tree.root(&self.storage).await {
             let root = self.storage.data().fetch(&root).await;
@@ -198,10 +192,11 @@ impl<
         }
     }
 
-    /// Return the current root hash of the Merkle tree at the given epoch.
-    pub async fn root_hash_at(&self, epoch: Epoch) -> Option<V> {
+    /// Return the payload of the Merkle tree root at the given epoch.
+    pub async fn root_data_at(&self, epoch: Epoch) -> Option<V> {
         if let Some(root) = self.tree.root(&self.storage.view_at(epoch)).await {
-            Some(self.storage.data().fetch_at(&root, epoch).await)
+            let root = self.storage.data().fetch_at(&root, epoch).await;
+            Some(root)
         } else {
             None
         }
@@ -311,6 +306,16 @@ impl<
             Some(ut)
         }
     }
+
+    pub async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
+        &self,
+        data: I,
+    ) -> Result<Vec<Option<(Epoch, T::Key, V)>>>
+    where
+        <I as IntoIterator>::IntoIter: Send,
+    {
+        self.storage.data().try_fetch_many_at(data).await
+    }
 }
 
 impl<
@@ -323,22 +328,25 @@ impl<
             + MetaOperations<T, V>,
     > MerkleTreeKvDb<T, V, S>
 {
-    pub async fn wide_update_trees(
+    pub async fn wide_update_trees_at(
         &self,
+        at: Epoch,
         keys_query: &S::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<Vec<UpdateTree<T::Key>>> {
         self.storage
-            .wide_update_trees(&self.tree, keys_query, bounds)
+            .wide_update_trees(at, &self.tree, keys_query, bounds)
             .await
     }
+
     pub async fn wide_lineage_between(
         &self,
+        at: Epoch,
         keys_query: &S::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<WideLineage<T::Key, V>> {
         self.storage
-            .wide_lineage_between(&self.tree, keys_query, bounds)
+            .wide_lineage_between(at, &self.tree, keys_query, bounds)
             .await
     }
 }
@@ -372,6 +380,15 @@ impl<
         self.storage.data().try_fetch_at(k, epoch).await
     }
 
+    async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
+        &self,
+        data: I,
+    ) -> Result<Vec<Option<(Epoch, T::Key, V)>>>
+    where
+        <I as IntoIterator>::IntoIter: Send,
+    {
+        self.storage.data().try_fetch_many_at(data).await
+    }
     async fn size(&self) -> usize {
         self.storage.data().size().await
     }
