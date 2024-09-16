@@ -24,6 +24,10 @@ fn must_accept() -> Result<()> {
     };
 
     for q in [
+        "SELECT foo FROM table2",
+        "SELECT foo FROM table2 WHERE bar < 3",
+        "SELECT foo, * FROM table2",
+        "SELECT AVG(foo) FROM table2 WHERE block BETWEEN 43 and 68",
         // "SELECT 25",
         "SELECT AVG(foo), MIN(bar) FROM table2 WHERE block = 3",
         // "SELECT '0x1122334455667788990011223344556677889900112233445566778899001122'",
@@ -31,6 +35,10 @@ fn must_accept() -> Result<()> {
         // "SELECT '1234567'",
         // "SELECT '0b01001'",
         // "SELECT '0o1234567'",
+        "SELECT foo, bar FROM table2 WHERE block = 3",
+        "SELECT foo FROM table2 WHERE block IN (1, 2, 4)",
+        "SELECT bar FROM table2 WHERE NOT block BETWEEN 12 AND 15",
+        "SELECT a, c FROM table2 AS tt (a, b, c)",
     ] {
         parse_and_validate(q, &settings)?;
     }
@@ -45,10 +53,9 @@ fn must_reject() {
     };
 
     for q in [
-        "SELECT foo, bar FROM table2 WHERE block = 3",
-        "SELECT foo FROM table2 WHERE block IN (1, 2, 4)",
-        "SELECT bar FROM table2 WHERE NOT block BETWEEN 12 AND 15",
-        "SELECT a, c FROM table2 AS tt (a, b, c)",
+        // No ORDER BY
+        "SELECT foo, bar FROM table2 ORDER BY bar",
+        "SELECT foo, bar FROM table2 ORDER BY foo, bar",
         // Mixing aggregates and scalars
         "SELECT q, MIN(r) FROM pipo WHERE block = 3",
         // Bitwise operators unsupported
@@ -80,25 +87,6 @@ fn must_reject() {
     ] {
         assert!(dbg!(parse_and_validate(q, &settings)).is_err())
     }
-}
-
-#[test]
-fn must_resolve() -> Result<()> {
-    let settings = ParsilSettings {
-        context: FileContextProvider::from_file("tests/context.json")?,
-        placeholders: PlaceholderSettings::with_freestanding(3),
-    };
-    for q in [
-        // "SELECT foo FROM table2",
-        // "SELECT foo FROM table2 WHERE bar < 3",
-        // "SELECT foo, * FROM table2",
-        "SELECT AVG(foo) FROM table2 WHERE block BETWEEN 43 and 68",
-        // "SELECT foo, bar FROM table2 ORDER BY bar",
-        // "SELECT foo, bar FROM table2 ORDER BY foo, bar",
-    ] {
-        parse_and_validate(q, &settings)?;
-    }
-    Ok(())
 }
 
 #[test]
@@ -136,7 +124,6 @@ fn test_serde_circuit_pis() {
 }
 
 #[test]
-#[ignore = "wait for non-aggregation SELECT to come back"]
 fn isolation() {
     fn isolated_to_string(q: &str, lo_sec: bool, hi_sec: bool) -> String {
         let settings = ParsilSettings {
