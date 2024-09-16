@@ -14,24 +14,21 @@ use std::{
 use crate::common::{
     cases::{
         indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
-        planner::{IndexInfo, RowInfo},
+        planner::{IndexInfo, QueryPlanner, RowInfo, TreeInfo}, query::{QueryCooking, SqlReturn, SqlType},
     },
     index_tree::MerkleIndexTree,
-    proof_storage::{ProofKey, QueryID},
+    proof_storage::{ProofKey, ProofStorage, QueryID},
     rowtree::MerkleRowTree,
-    table::{self, TableColumns},
+    table::{self, Table, TableColumns},
     TableInfo,
+    TableSourceSlot
 };
 
-use super::{
-    super::{context::TestContext, proof_storage::ProofStorage, table::Table},
-    planner::{QueryPlanner, TreeInfo},
-};
+use crate::context::TestContext;
 use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::{bail, ensure, Context, Result};
 use futures::{stream, FutureExt, StreamExt};
 
-use super::TableSourceSlot;
 use itertools::Itertools;
 use log::*;
 use mp2_common::{
@@ -89,15 +86,7 @@ use verifiable_db::{
     revelation::PublicInputs,
 };
 
-pub const MAX_NUM_RESULT_OPS: usize = 20;
-pub const MAX_NUM_RESULTS: usize = 10;
-pub const MAX_NUM_OUTPUTS: usize = 3;
-pub const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
-pub const MAX_NUM_PLACEHOLDERS: usize = 10;
-pub const MAX_NUM_COLUMNS: usize = 20;
-pub const MAX_NUM_PREDICATE_OPS: usize = 20;
-pub const ROW_TREE_MAX_DEPTH: usize = 10;
-pub const INDEX_TREE_MAX_DEPTH: usize = 15;
+use super::{query_setup, INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH};
 
 pub type GlobalCircuitInput = verifiable_db::api::QueryCircuitInput<
     ROW_TREE_MAX_DEPTH,
@@ -177,39 +166,8 @@ async fn test_query_mapping(
         placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
     };
 
-    info!("QUERY on the testcase: {}", query_info.query);
-    let mut parsed = parse_and_validate(&query_info.query, &settings)?;
-    println!("QUERY table columns -> {:?}", table.columns.to_zkcolumns());
-    info!(
-        "BOUNDS found on query: min {}, max {} - table.genesis_block {}",
-        query_info.min_block, query_info.max_block, table.genesis_block
-    );
-
-    // the query to use to actually get the outputs expected
-    let mut exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
-    let query_params = exec_query.convert_placeholders(&query_info.placeholders);
-    let res = table
-        .execute_row_query(
-            &exec_query
-                .normalize_placeholder_names()
-                .to_pgsql_string_with_placeholder(),
-            &query_params,
-        )
-        .await?;
-    let res = if is_empty_result(&res, SqlType::Numeric) {
-        vec![] // empty results, but Postgres still return 1 row
-    } else {
-        res
-    };
-    info!(
-        "Found {} results from query {}",
-        res.len(),
-        exec_query.query.to_display()
-    );
-    print_vec_sql_rows(&res, SqlType::Numeric);
-
-    let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)
-        .context("while assembling PIs")?;
+    let setup_info = query_setup(&settings, ctx, table, &query_info).await?;
+    
 
     let big_row_cache = table
         .row
@@ -217,7 +175,7 @@ async fn test_query_mapping(
             &core_keys_for_row_tree(
                 &query_info.query,
                 &settings,
-                &pis.bounds,
+                &setup_info.pis.bounds,
                 &query_info.placeholders,
             )?,
             (query_info.min_block as Epoch, query_info.max_block as Epoch),
@@ -228,10 +186,10 @@ async fn test_query_mapping(
         ctx,
         table,
         query_info,
-        parsed,
+        setup_info.parsed,
         &settings,
         &big_row_cache,
-        res,
+        setup_info.res,
         table_hash.clone(),
     )
     .await
@@ -1073,14 +1031,6 @@ pub async fn prove_single_row<T: TreeInfo<RowTreeKey, RowPayload<BlockPrimaryInd
     Ok(proof)
 }
 
-#[derive(Clone, Debug)]
-pub struct QueryCooking {
-    pub(crate) query: String,
-    pub(crate) placeholders: Placeholders,
-    pub(crate) min_block: BlockPrimaryIndex,
-    pub(crate) max_block: BlockPrimaryIndex,
-}
-
 type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
 
 async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
@@ -1466,54 +1416,4 @@ async fn check_correct_cells_tree(
         "cells root hash not the same when given to circuit"
     );
     Ok(())
-}
-
-pub enum SqlType {
-    Numeric,
-}
-
-impl SqlType {
-    pub fn extract(&self, row: &PsqlRow, idx: usize) -> Option<SqlReturn> {
-        match self {
-            SqlType::Numeric => row
-                .get::<_, Option<U256>>(idx)
-                .map(|num| SqlReturn::Numeric(num)),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum SqlReturn {
-    Numeric(U256),
-}
-
-fn is_empty_result(rows: &[PsqlRow], types: SqlType) -> bool {
-    if rows.len() == 0 {
-        return true;
-    }
-    let columns = rows.first().as_ref().unwrap().columns();
-    if columns.len() == 0 {
-        return true;
-    }
-    for row in rows {
-        if types.extract(row, 0).is_none() {
-            return true;
-        }
-    }
-    false
-}
-
-fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {
-    if rows.len() == 0 {
-        println!("no rows returned");
-        return;
-    }
-    let columns = rows.first().as_ref().unwrap().columns();
-    println!(
-        "{:?}",
-        columns.iter().map(|c| c.name().to_string()).join(" | ")
-    );
-    for row in rows {
-        println!("{:?}", types.extract(row, 0));
-    }
 }

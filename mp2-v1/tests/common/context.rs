@@ -274,7 +274,7 @@ impl TestContext {
     pub fn run_query_proof(
         &self,
         name: &str,
-        input: cases::query::GlobalCircuitInput,
+        input: cases::query::aggregated_queries::GlobalCircuitInput,
     ) -> Result<Vec<u8>> {
         self.b.bench(name, || {
             self.query_params.as_ref().unwrap().generate_proof(input)
