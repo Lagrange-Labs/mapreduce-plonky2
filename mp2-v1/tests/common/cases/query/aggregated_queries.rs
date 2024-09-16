@@ -1,14 +1,10 @@
 use plonky2::{
     field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
 };
-use rand::distributions::uniform::SampleRange;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
-    future::Future,
     hash::Hash,
-    marker::PhantomData,
-    thread::current,
 };
 
 use crate::common::{
@@ -17,16 +13,16 @@ use crate::common::{
         planner::{IndexInfo, QueryPlanner, RowInfo, TreeInfo}, query::{QueryCooking, SqlReturn, SqlType},
     },
     index_tree::MerkleIndexTree,
-    proof_storage::{ProofKey, ProofStorage, QueryID},
     rowtree::MerkleRowTree,
     table::{self, Table, TableColumns},
+    proof_storage::{ProofKey, ProofStorage},
     TableInfo,
     TableSourceSlot
 };
 
 use crate::context::TestContext;
-use alloy::{primitives::U256, rpc::types::Block};
-use anyhow::{bail, ensure, Context, Result};
+use alloy::primitives::U256;
+use anyhow::{bail, Context, Result};
 use futures::{stream, FutureExt, StreamExt};
 
 use itertools::Itertools;
@@ -41,18 +37,16 @@ use mp2_v1::{
     api::MetadataHash,
     indexing::{
         self,
-        block::{BlockPrimaryIndex, BlockTree, BlockTreeKey},
+        block::BlockPrimaryIndex,
         cell::MerkleCell,
-        index::IndexNode,
-        row::{Row, RowPayload, RowTree, RowTreeKey},
+        row::{Row, RowPayload, RowTreeKey},
         LagrangeNode,
     },
     values_extraction::identifier_block_column,
 };
 use parsil::{
-    assembler::{CircuitPis, DynamicCircuitPis, StaticCircuitPis},
+    assembler::{DynamicCircuitPis, StaticCircuitPis},
     bracketer::bracket_secondary_index,
-    executor::TranslatedQuery,
     parse_and_validate,
     queries::{core_keys_for_index_tree, core_keys_for_row_tree},
     ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
@@ -62,22 +56,17 @@ use ryhope::{
     storage::{
         pgsql::ToFromBytea,
         updatetree::{Next, UpdateTree},
-        EpochKvStorage, FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage,
-        TreeStorage, TreeTransactionalStorage, WideLineage,
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage, WideLineage,
     },
-    tree::{MutableTree, NodeContext, TreeTopology},
-    Epoch, MerkleTreeKvDb, NodePayload,
+    tree::NodeContext,
+    Epoch, NodePayload,
 };
 use sqlparser::ast::Query;
 use tokio_postgres::Row as PsqlRow;
 use verifiable_db::{
     ivc::PublicInputs as IndexingPIS,
     query::{
-        self,
-        aggregation::{
-            ChildPosition, NodeInfo, QueryBoundSource, QueryBounds, QueryHashNonExistenceCircuits,
-            SubProof,
-        },
+        aggregation::{ChildPosition, NodeInfo, QueryHashNonExistenceCircuits, SubProof},
         computational_hash_ids::{ColumnIDs, Identifiers},
         universal_circuit::universal_circuit_inputs::{
             ColumnCell, PlaceholderId, Placeholders, RowCells,
@@ -172,6 +161,7 @@ async fn test_query_mapping(
     let big_row_cache = table
         .row
         .wide_lineage_between(
+            table.row.current_epoch(),
             &core_keys_for_row_tree(
                 &query_info.query,
                 &settings,
@@ -237,7 +227,7 @@ async fn prove_query(
     // some nodes or not
     let initial_epoch = table.index.initial_epoch() as BlockPrimaryIndex;
     let current_epoch = table.index.current_epoch() as BlockPrimaryIndex;
-    let block_range = (query.min_block.max(initial_epoch + 1)..=query.max_block.min(current_epoch));
+    let block_range = query.min_block.max(initial_epoch + 1)..=query.max_block.min(current_epoch);
     info!(
         "found {} blocks in range: {:?}",
         block_range.clone().count(),
@@ -292,6 +282,7 @@ async fn prove_query(
             // The bounds here means between which versions of the tree should we look. For index tree,
             // we only look at _one_ version of the tree.
             .wide_lineage_between(
+                current_epoch as Epoch,
                 &index_query,
                 (current_epoch as Epoch, current_epoch as Epoch),
             )
@@ -861,7 +852,7 @@ pub async fn prove_non_existence_row<'a>(
 ) -> Result<()> {
     let row_tree = &planner.table.row;
     let (query_for_min, query_for_max) = bracket_secondary_index(
-        &planner.table.row_table_name(),
+        &planner.table.public_name,
         &planner.settings,
         primary as Epoch,
         &planner.pis.bounds,
@@ -1037,8 +1028,8 @@ async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
     let max = table.row.current_epoch();
     let min = max - 1;
 
-    let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.name.clone();
+    let value_column = &table.columns.rest[0].name;
+    let table_name = &table.public_name;
     let placeholders = Placeholders::new_empty(U256::from(min), U256::from(max));
 
     let query_str = format!(
@@ -1068,8 +1059,8 @@ async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCo
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
-    let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.name.clone();
+    let value_column = &table.columns.rest[0].name;
+    let table_name = &table.public_name;
 
     let filtering_value = *BASE_VALUE + U256::from(5);
 
@@ -1109,8 +1100,8 @@ async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
-    let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.name.clone();
+    let value_column = &table.columns.rest[0].name;
+    let table_name = &table.public_name;
     let max_block = min_block + 1;
     // primary_min_placeholder = ".."
     // primary_max_placeholder = ".."
@@ -1182,7 +1173,7 @@ async fn cook_query_partial_block_range(table: &Table) -> Result<QueryCooking> {
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
     let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.row_table_name();
+    let table_name = &table.public_name;
     let initial_epoch = table.row.initial_epoch();
     // choose a min query bound smaller than initial epoch
     let min_block = initial_epoch - 1;
@@ -1205,14 +1196,13 @@ async fn cook_query_partial_block_range(table: &Table) -> Result<QueryCooking> {
 
 async fn cook_query_no_matching_entries(table: &Table) -> Result<QueryCooking> {
     let initial_epoch = table.row.initial_epoch();
-    let last_epoch = table.row.current_epoch();
     // choose query bounds outside of the range [initial_epoch, last_epoch]
     let min_block = 0;
     let max_block = initial_epoch - 1;
     // now we can fetch the key that we want
     // Assuming this is mapping with only two columns !
-    let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.row_table_name();
+    let value_column = &table.columns.rest[0].name;
+    let table_name = &table.public_name;
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
 
     let query_str = format!(
@@ -1240,10 +1230,10 @@ async fn cook_query_non_matching_entries_some_blocks(table: &Table) -> Result<Qu
         min_block, max_block, key_value
     );
     // now we can fetch the key that we want
-    let key_column = table.columns.secondary.name.clone();
+    let key_column = &table.columns.secondary.name;
     // Assuming this is mapping with only two columns !
-    let value_column = table.columns.rest[0].name.clone();
-    let table_name = table.row_table_name();
+    let value_column = &table.columns.rest[0].name;
+    let table_name = &table.public_name;
     // in this query we set query bounds on block numbers to the widest range, so that we
     // are sure that there are blocks where the chosen key is not alive
     let min_block = table.row.initial_epoch() + 1;

@@ -475,6 +475,7 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
     /// by the union of all the paths-to-the-root for the given keys.
     async fn wide_lineage_between(
         &self,
+        at: Epoch,
         t: &T,
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
@@ -482,11 +483,12 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
 
     async fn wide_update_trees(
         &self,
+        at: Epoch,
         t: &T,
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<Vec<UpdateTree<T::Key>>> {
-        let wide_lineage = self.wide_lineage_between(t, keys, bounds).await?;
+        let wide_lineage = self.wide_lineage_between(at, t, keys, bounds).await?;
         let mut r = Vec::new();
         for (epoch, nodes) in wide_lineage.epoch_lineages.iter() {
             if let Some(root) = t.root(&self.view_at(*epoch)).await {

@@ -111,7 +111,8 @@ async fn integrated_querying() -> Result<()> {
     info!("Building querying params");
     ctx.build_params(ParamsType::Query).unwrap();
     info!("Params built");
-    let table = Table::load(table_info.table_name.clone(), table_info.columns.clone()).await?;
+    let table = Table::load(table_info.public_name.clone(), table_info.columns.clone()).await?;
+    dbg!(&table.public_name);
     test_query(&mut ctx, table, table_info).await?;
     Ok(())
 }

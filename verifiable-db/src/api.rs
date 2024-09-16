@@ -361,3 +361,53 @@ where
         &self.wrap_circuit.circuit_data
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plonky2::plonk::proof::ProofWithPublicInputs;
+    use std::{fs::File, io::BufReader};
+
+    // Constants associating with test data.
+    const MAX_NUM_COLUMNS: usize = 20;
+    const MAX_NUM_PREDICATE_OPS: usize = 20;
+    const MAX_NUM_RESULT_OPS: usize = 20;
+    const MAX_NUM_OUTPUTS: usize = 3;
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
+    const MAX_NUM_PLACEHOLDERS: usize = 10;
+    const ROW_TREE_MAX_DEPTH: usize = 10;
+    const INDEX_TREE_MAX_DEPTH: usize = 15;
+
+    // This is only used for testing on local.
+    #[ignore]
+    #[test]
+    fn test_local_proof_verification() {
+        const QUERY_PARAMS_FILE_PATH: &str = "test_data/query_params.bin";
+        const QUERY_PROOF_FILE_PATH: &str = "test_data/revelation";
+
+        // Load the query parameters.
+        let file = File::open(QUERY_PARAMS_FILE_PATH).unwrap();
+        let reader = BufReader::new(file);
+        let query_params: QueryParameters<
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_OUTPUTS,
+            MAX_NUM_ITEMS_PER_OUTPUT,
+            MAX_NUM_PLACEHOLDERS,
+        > = bincode::deserialize_from(reader).unwrap();
+
+        // Load the query proof.
+        let file = File::open(QUERY_PROOF_FILE_PATH).unwrap();
+        let reader = BufReader::new(file);
+        let proof: ProofWithPublicInputs<F, WrapC, D> = bincode::deserialize_from(reader).unwrap();
+
+        query_params
+            .wrap_circuit
+            .circuit_data()
+            .verify(proof)
+            .unwrap();
+    }
+}

@@ -47,7 +47,7 @@ impl TestContext {
             true => new_row_key.clone(),
             false => previous_row.k.clone(),
         };
-        let table_id = &table.name;
+        let table_id = &table.public_name;
         // Store the proofs here for the tests; will probably be done in S3 for
         // prod.
         let mut workplan = ut.into_workplan();
@@ -222,7 +222,7 @@ impl TestContext {
         // We need to (a) move the proofs to the new (new_row_key, primary) identifier
         // then (b) update all the impacted cells to also have this new information about the new
         // primary index
-        self.move_cells_proof_to_new_row(&table.name.clone(), primary, &cells_update)
+        self.move_cells_proof_to_new_row(&table.public_name.clone(), primary, &cells_update)
             .await
             .expect("unable to move cells tree proof:");
         // set the primary index for all cells that are in the update plan to the new primary
@@ -285,7 +285,7 @@ impl TestContext {
             .await;
         let root_proof_key = CellProofIdentifier {
             primary,
-            table: table.name.clone(),
+            table: table.public_name.clone(),
             secondary: cells_update.new_row_key,
             tree_key: root_key,
         };
