@@ -300,6 +300,28 @@ impl<
         Ok(())
     }
 
+    async fn tree_operations(&mut self) -> Result<()> {
+        if let Some(choice) = menu(&mut self.tty, "from", &[('l', "ineage")]) {
+            match choice {
+                'l' => {
+                    if let Some(key) = self.select_key().await {
+                        let ascendance = self
+                            .db
+                            .tree()
+                            .lineage(&key, &self.db.view_at(self.current_epoch))
+                            .await;
+                        println!("{key:?} -> {:?}", ascendance);
+
+                        println!()
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(())
+    }
+
     fn settings(&mut self) -> Result<()> {
         if let Some(choice) = menu(&mut self.tty, "settings", &[('p', "ayload view")]) {
             if let Err(e) = match choice {
@@ -318,7 +340,7 @@ impl<
             self.headline().await;
             writeln!(
                 self.tty,
-                "{}ontext - goto {}ey/{}arent/{}eft/{}ight - travel to {}poch - view as {}able/{}ree - {}ettings - {}uit",
+                "{}ontext - goto {}ey/{}arent/{}eft/{}ight - travel to {}poch - view as {}able/{}ree - {}perations - {}ettings - {}uit",
                 "[c]".yellow().bold(),
                 "[k]".yellow().bold(),
                 "[p]".yellow().bold(),
@@ -327,6 +349,7 @@ impl<
                 "[e]".yellow().bold(),
                 "[t]".yellow().bold(),
                 "[T]".yellow().bold(),
+                "[o]".yellow().bold(),
                 "[s]".yellow().bold(),
                 "[q]".red().bold(),
             )?;
@@ -339,6 +362,7 @@ impl<
                 'c' => self.context().await,
                 't' => self.view_table().await,
                 'T' => self.view_tree().await,
+                'o' => self.tree_operations().await,
                 's' => self.settings(),
                 'q' => return Ok(()),
                 _ => Ok(()),
