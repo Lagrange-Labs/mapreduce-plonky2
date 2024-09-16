@@ -148,13 +148,13 @@ where
                 .join(", ");
             Ok(connection
             .query(
-                &dbg!(format!(
+                &format!(
                    "SELECT batch.key, batch.epoch, {table}.{PAYLOAD} FROM
                      (VALUES {}) AS batch (epoch, key)
                      LEFT JOIN {table} ON
                      batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
                    immediate_table
-               )),
+               ),
                 &[],
             )
                .await
@@ -286,7 +286,7 @@ where
             "SELECT
                {KEY}, generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS epoch, {PAYLOAD}
              FROM {table}
-             WHERE {VALID_FROM} <= $1 AND $2 <= {VALID_UNTIL} AND {KEY} = ANY($3)",
+             WHERE NOT ({VALID_FROM} > $2 OR {VALID_UNTIL} < $1) AND {KEY} = ANY($3)",
         );
         let rows = db
             .get()
