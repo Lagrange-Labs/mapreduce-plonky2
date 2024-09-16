@@ -393,6 +393,10 @@ impl ResultStructure {
             output_variant: Output::NoAggregation,
         }
     }
+
+    pub fn query_variant(&self) -> Output {
+        self.output_variant
+    }
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]

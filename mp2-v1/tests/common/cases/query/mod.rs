@@ -1,14 +1,17 @@
+use aggregated_queries::{cook_query_between_blocks, cook_query_no_matching_entries, cook_query_non_matching_entries_some_blocks, cook_query_partial_block_range, cook_query_secondary_index_placeholder, cook_query_unique_secondary_index, prove_query as prove_aggregation_query};
 use alloy::primitives::U256;
 use anyhow::{Context, Result};
 use itertools::Itertools;
 use log::info;
-use mp2_v1::indexing::block::BlockPrimaryIndex;
-use parsil::{assembler::DynamicCircuitPis, parse_and_validate, ParsilSettings};
-use sqlparser::ast::Query;
+use mp2_v1::{api::MetadataHash, indexing::block::BlockPrimaryIndex};
+use parsil::{parse_and_validate, ParsilSettings, PlaceholderSettings};
+use simple_select_queries::{cook_query_with_matching_rows, prove_query as prove_no_aggregation_query};
 use tokio_postgres::Row as PsqlRow;
-use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
+use verifiable_db::query::{computational_hash_ids::Output, universal_circuit::universal_circuit_inputs::Placeholders};
 
-use crate::common::{table::Table, TestContext};
+use crate::common::{table::Table, TableInfo, TestContext};
+
+use super::TableSourceSlot;
 
 pub mod aggregated_queries;
 pub mod simple_select_queries;
@@ -30,22 +33,59 @@ pub struct QueryCooking {
     pub(crate) placeholders: Placeholders,
     pub(crate) min_block: BlockPrimaryIndex,
     pub(crate) max_block: BlockPrimaryIndex,
-}
-#[derive(Debug)]
-/// Data structure containing all the data about the query computed
-/// during the initial processing of the query
-pub struct QuerySetup {
-    parsed: Query,
-    res: Vec<PsqlRow>,
-    pis: DynamicCircuitPis,
+    pub(crate) limit: Option<u64>,
+    pub(crate) offset: Option<u64>,
 }
 
-pub(crate) async fn query_setup(
-    settings: &ParsilSettings<&Table>,
+pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
+    match &t.source {
+        TableSourceSlot::Mapping(_) => query_mapping(ctx, &table, t.metadata_hash()).await?,
+        _ => unimplemented!("yet"),
+    }
+    Ok(())
+}
+
+async fn query_mapping(
     ctx: &mut TestContext,
     table: &Table,
-    query_info: &QueryCooking,
-) -> Result<QuerySetup> {
+    table_hash: MetadataHash,
+) -> Result<()> {
+    let query_info = cook_query_between_blocks(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+
+    let query_info = cook_query_unique_secondary_index(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    //// cook query with custom placeholders
+    let query_info = cook_query_secondary_index_placeholder(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // cook query filtering over a secondary index value not valid in all the blocks
+    let query_info = cook_query_non_matching_entries_some_blocks(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // cook query with no valid blocks
+    let query_info = cook_query_no_matching_entries(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // cook query with block query range partially overlapping with blocks in the DB
+    let query_info = cook_query_partial_block_range(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // cook simple no aggregation query with matching rows
+    let query_info = cook_query_with_matching_rows(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    Ok(())
+} 
+
+/// Run a test query on the mapping table such as created during the indexing phase
+async fn test_query_mapping(
+    ctx: &mut TestContext,
+    table: &Table,
+    query_info: QueryCooking,
+    table_hash: &MetadataHash,
+) -> Result<()> {
+    let settings = ParsilSettings {
+        context: table,
+        placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
+    };
+
+
     info!("QUERY on the testcase: {}", query_info.query);
     let mut parsed = parse_and_validate(&query_info.query, &settings)?;
     println!("QUERY table columns -> {:?}", table.columns.to_zkcolumns());
@@ -80,13 +120,10 @@ pub(crate) async fn query_setup(
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query_info.placeholders)
         .context("while assembling PIs")?;
 
-    Ok(
-        QuerySetup {
-            parsed,
-            res,
-            pis,
-        }
-    )
+    match pis.result.query_variant() {
+        Output::Aggregation => prove_aggregation_query(ctx, table, query_info, parsed, &settings, res, table_hash.clone(), pis).await,
+        Output::NoAggregation => prove_no_aggregation_query(ctx, table, query_info, &table_hash).await,
+    }
 }
 
 pub enum SqlType {
