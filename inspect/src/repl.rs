@@ -5,7 +5,10 @@ use colored::Colorize;
 use dialoguer::{console, theme::ColorfulTheme, FuzzySelect, Input};
 use itertools::Itertools;
 use ryhope::{
-    storage::{FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage},
+    storage::{
+        FromSettings, MetaOperations, PayloadStorage, RoEpochKvStorage, TransactionalStorage,
+        TreeStorage,
+    },
     tree::{MutableTree, PrintableTree, TreeTopology},
     Epoch, MerkleTreeKvDb, NodePayload,
 };
@@ -49,6 +52,7 @@ pub(crate) struct Repl<
         + TreeStorage<T>
         + PayloadStorage<T::Key, V>
         + FromSettings<T::State>
+        + MetaOperations<T, V>
         + Send
         + Sync,
     F: PayloadFormatter<V>,
@@ -66,6 +70,7 @@ impl<
             + TreeStorage<T>
             + PayloadStorage<T::Key, V>
             + FromSettings<T::State>
+            + MetaOperations<T, V>
             + Send
             + Sync,
         F: PayloadFormatter<V>,
@@ -101,6 +106,26 @@ impl<
         .unwrap();
     }
 
+    pub fn set_epoch(&mut self, epoch: Epoch) -> Result<()> {
+        if epoch < self.db.initial_epoch() {
+            bail!(
+                "epoch `{}` is older than initial epoch `{}`",
+                epoch,
+                self.db.initial_epoch()
+            );
+        }
+        if epoch > self.db.current_epoch() {
+            bail!(
+                "epoch `{}` is newer than latest epoch `{}`",
+                epoch,
+                self.db.current_epoch()
+            );
+        }
+
+        self.current_epoch = epoch;
+        return Ok(());
+    }
+
     async fn select_key(&self) -> Option<T::Key> {
         let keys = self.db.keys_at(self.current_epoch).await;
         let keys_str = keys.iter().map(|k| format!("{:?}", k)).collect::<Vec<_>>();
@@ -125,23 +150,7 @@ impl<
         loop {
             let epoch: Epoch = Input::new().with_prompt("target epoch:").interact_text()?;
 
-            if epoch < self.db.initial_epoch() {
-                bail!(
-                    "epoch `{}` is older than initial epoch `{}`",
-                    epoch,
-                    self.db.initial_epoch()
-                );
-            }
-            if epoch > self.db.current_epoch() {
-                bail!(
-                    "epoch `{}` is newer than latest epoch `{}`",
-                    epoch,
-                    self.db.current_epoch()
-                );
-            }
-
-            self.current_epoch = epoch;
-            return Ok(());
+            self.set_epoch(epoch)?;
         }
     }
 

@@ -5,7 +5,7 @@ use repl::Repl;
 use rows::{RowDb, RowPayloadFormatter};
 use ryhope::{
     storage::pgsql::{SqlServerConnection, SqlStorageSettings, ToFromBytea},
-    InitSettings,
+    Epoch, InitSettings,
 };
 use serde::Serialize;
 
@@ -23,6 +23,10 @@ struct Args {
     #[arg(short = 'T', long)]
     /// The table storing the tree
     db_table: String,
+
+    #[arg(short = 'E', long = "at")]
+    /// If set, try to view the tree at this epoch
+    epoch: Option<Epoch>,
 
     #[command(subcommand)]
     /// The type of tree to load from the database
@@ -86,6 +90,9 @@ async fn main() -> Result<()> {
             };
 
             let mut repl = Repl::new(tree_db, payload_fmt).await?;
+            if let Some(epoch) = args.epoch {
+                repl.set_epoch(epoch)?;
+            }
             repl.run().await
         }
         TreeReader::IndexTree => {
@@ -101,6 +108,9 @@ async fn main() -> Result<()> {
             let payload_fmt = IndexPayloadFormatter::default();
 
             let mut repl = Repl::new(tree_db, payload_fmt).await?;
+            if let Some(epoch) = args.epoch {
+                repl.set_epoch(epoch)?;
+            }
             repl.run().await
         }
     }
