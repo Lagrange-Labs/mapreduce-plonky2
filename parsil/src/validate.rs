@@ -385,6 +385,10 @@ impl<'a, C: ContextProvider> AstVisitor for SqlValidator<'a, C> {
             q.fetch.is_none(),
             ValidationError::NonStandardSql("FETCH".into())
         );
+        ensure!(
+            q.order_by.is_none(),
+            ValidationError::UnsupportedFeature("ORDER BY".into())
+        );
         Ok(())
     }
 }
