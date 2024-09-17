@@ -5,7 +5,6 @@ use super::{
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
-    merge::{MergeTable, MergeTableWires},
     public_inputs::PublicInputs,
 };
 use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
@@ -312,13 +311,10 @@ impl PublicParameters {
         #[cfg(test)]
         let branches = TestBranchCircuits::new(&circuit_builder);
 
-        debug!("Building merge circuits");
-        let merge = circuit_builder.build_circuit::<C, 2, MergeTableWires>(());
         let mut circuits_set = vec![
             leaf_single.get_verifier_data().circuit_digest,
             leaf_mapping.get_verifier_data().circuit_digest,
             extension.get_verifier_data().circuit_digest,
-            merge.get_verifier_data().circuit_digest,
         ];
         circuits_set.extend(branches.circuit_set());
         assert_eq!(circuits_set.len(), MAPPING_CIRCUIT_SET_SIZE);

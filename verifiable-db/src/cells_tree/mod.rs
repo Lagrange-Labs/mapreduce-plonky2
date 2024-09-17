@@ -11,7 +11,8 @@ use alloy::primitives::U256;
 pub use api::{build_circuits_params, extract_hash_from_proof, CircuitInput, PublicParameters};
 use derive_more::Constructor;
 use mp2_common::{
-    group_hashing::{map_to_curve_point, weierstrass_to_point, CircuitBuilderGroupHashing},
+    digest::{Digest, SplitDigestPoint, SplitDigestTarget},
+    group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
     serialization::{deserialize, serialize},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
@@ -26,10 +27,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::{
-    curve::curve::Point,
-    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
-};
+use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 pub use public_inputs::PublicInputs;
 
 /// A cell represents a column || value tuple. it can be given in the cells tree or as the
@@ -50,16 +48,19 @@ impl Cell {
         pw.set_target(wires.identifier, self.identifier);
         pw.set_bool_target(wires.is_multiplier, self.is_multiplier);
     }
-    pub(crate) fn digest(&self) -> Point {
+    pub(crate) fn digest(&self) -> Digest {
         map_to_curve_point(&self.to_fields())
     }
-    pub(crate) fn split_digest(&self) -> (Point, Point) {
+    pub(crate) fn split_digest(&self) -> SplitDigestPoint {
         let digest = self.digest();
-        field_decide_digest_section(digest, self.is_multiplier)
+        SplitDigestPoint::from_single_digest_point(digest, self.is_multiplier)
     }
-    pub(crate) fn split_and_accumulate_digest(&self, pis: &PublicInputs<F>) -> (Point, Point) {
-        let (ind, mul) = self.split_digest();
-        field_accumulate_proof_digest(ind, mul, pis)
+    pub(crate) fn split_and_accumulate_digest(
+        &self,
+        child_digest: SplitDigestPoint,
+    ) -> SplitDigestPoint {
+        let sd = self.split_digest();
+        sd.accumulate_with_proof(&child_digest)
     }
 }
 
@@ -89,20 +90,25 @@ impl CellWire {
             is_multiplier: b.add_virtual_bool_target_safe(),
         }
     }
+    /// Returns the digest of the cell
     pub(crate) fn digest(&self, b: &mut CircuitBuilder<F, D>) -> CurveTarget {
         b.map_to_curve_point(&self.to_targets())
     }
-    pub(crate) fn split_digest(&self, c: &mut CBuilder) -> (CurveTarget, CurveTarget) {
+    /// Returns the different digest, multiplier or individual
+    pub(crate) fn split_digest(&self, c: &mut CBuilder) -> SplitDigestTarget {
         let d = self.digest(c);
-        circuit_decide_digest_section(c, d, self.is_multiplier)
+        SplitDigestTarget::from_single_digest_target(c, d, self.is_multiplier)
     }
+    /// Returns the split digest from this cell added with the one from the proof.
+    /// NOTE: it calls agains split_digest, so call that first if you need the individual
+    /// SplitDigestTarget
     pub(crate) fn split_and_accumulate_digest(
         &self,
         c: &mut CBuilder,
-        pis: &PublicInputs<Target>,
-    ) -> (CurveTarget, CurveTarget) {
-        let (ind, mul) = self.split_digest(c);
-        circuit_accumulate_proof_digest(c, ind, mul, pis)
+        child_digest: SplitDigestTarget,
+    ) -> SplitDigestTarget {
+        let sd = self.split_digest(c);
+        sd.accumulate(c, &child_digest)
     }
 }
 
@@ -114,50 +120,4 @@ impl ToTargets for CellWire {
             .chain(self.value.to_targets())
             .collect::<Vec<_>>()
     }
-}
-/// Returns the individual and multiplier digest
-pub(crate) fn circuit_decide_digest_section(
-    c: &mut CBuilder,
-    digest: CurveTarget,
-    is_multiplier: BoolTarget,
-) -> (CurveTarget, CurveTarget) {
-    let zero_curve = c.curve_zero();
-    let digest_ind = c.curve_select(is_multiplier, zero_curve, digest);
-    let digest_mult = c.curve_select(is_multiplier, digest, zero_curve);
-    (digest_ind, digest_mult)
-}
-/// aggregate the digest of the child proof in the right digest
-/// Returns the individual and multiplier digest
-pub(crate) fn circuit_accumulate_proof_digest(
-    c: &mut CBuilder,
-    ind: CurveTarget,
-    mul: CurveTarget,
-    child_proof: &PublicInputs<Target>,
-) -> (CurveTarget, CurveTarget) {
-    let child_digest_ind = child_proof.individual_digest_target();
-    let digest_ind = c.add_curve_point(&[child_digest_ind, ind]);
-    let child_digest_mult = child_proof.multiplier_digest_target();
-    let digest_mul = c.add_curve_point(&[child_digest_mult, mul]);
-    (digest_ind, digest_mul)
-}
-
-/// Returns the individual and multiplier digest
-pub(crate) fn field_decide_digest_section(digest: Point, is_multiplier: bool) -> (Point, Point) {
-    match is_multiplier {
-        true => (Point::NEUTRAL, digest),
-        false => (digest, Point::NEUTRAL),
-    }
-}
-
-pub(crate) fn field_accumulate_proof_digest(
-    ind: Point,
-    mul: Point,
-    child_proof: &PublicInputs<F>,
-) -> (Point, Point) {
-    let child_digest_ind = child_proof.individual_digest_point();
-    let child_digest_mult = child_proof.multiplier_digest_point();
-    (
-        weierstrass_to_point(&child_digest_ind) + ind,
-        weierstrass_to_point(&child_digest_mult) + mul,
-    )
 }

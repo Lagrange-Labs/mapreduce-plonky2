@@ -1,9 +1,6 @@
 //! Module handling the intermediate node with 2 children inside a cells tree
 
-use super::{
-    circuit_accumulate_proof_digest, circuit_decide_digest_section, public_inputs::PublicInputs,
-    Cell, CellWire,
-};
+use super::{public_inputs::PublicInputs, Cell, CellWire};
 use anyhow::Result;
 use derive_more::{From, Into};
 use mp2_common::{
@@ -26,9 +23,7 @@ pub struct FullNodeCircuit(Cell);
 
 impl FullNodeCircuit {
     pub fn build(b: &mut CBuilder, child_proofs: [PublicInputs<Target>; 2]) -> FullNodeWires {
-        let identifier = b.add_virtual_target();
-        let value = b.add_virtual_u256();
-        let is_multiplier = b.add_virtual_bool_target_safe();
+        let cell = CellWire::new(b);
 
         // h = Poseidon(p1.H || p2.H || identifier || value)
         let [p1_hash, p2_hash] = [0, 1].map(|i| child_proofs[i].node_hash());
@@ -37,29 +32,25 @@ impl FullNodeCircuit {
             .iter()
             .cloned()
             .chain(p2_hash.elements)
-            .chain(iter::once(identifier))
-            .chain(value.to_targets())
+            .chain(iter::once(cell.identifier))
+            .chain(cell.value.to_targets())
             .collect();
         let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
         // digest_cell = p1.digest_cell + p2.digest_cell + D(identifier || value)
-        let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
-        let dc = b.map_to_curve_point(&inputs);
-        let (digest_ind, digest_mult) = circuit_decide_digest_section(b, dc, is_multiplier);
-        let (digest_ind, digest_mult) =
-            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &child_proofs[0]);
-        let (digest_ind, digest_mult) =
-            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &child_proofs[1]);
+        let split_digest = cell.split_digest(b);
+        let split_digest = split_digest.accumulate(b, &child_proofs[0].split_digest_target());
+        let split_digest = split_digest.accumulate(b, &child_proofs[1].split_digest_target());
 
         // Register the public inputs.
-        PublicInputs::new(&h, &digest_ind.to_targets(), &digest_mult.to_targets()).register(b);
+        PublicInputs::new(
+            &h,
+            &split_digest.individual.to_targets(),
+            &split_digest.multiplier.to_targets(),
+        )
+        .register(b);
 
-        CellWire {
-            identifier,
-            value,
-            is_multiplier,
-        }
-        .into()
+        cell.into()
     }
 
     /// Assign the wires.

@@ -1,18 +1,14 @@
+use derive_more::{From, Into};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing,
+    digest::{TableDimension, TableDimensionWire},
     public_inputs::PublicInputCommon,
-    serialization::{deserialize, serialize},
     utils::ToTargets,
     D, F,
 };
 use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
@@ -21,12 +17,12 @@ use crate::values_extraction;
 use super::{
     api::{FinalExtractionBuilderParams, NUM_IO},
     base_circuit::{self, BaseCircuitProofInputs, BaseCircuitProofWires},
-    PublicInputs, TableDimension, TableDimensionWire,
+    PublicInputs,
 };
 
 /// This circuit contains the logic to prove the final extraction of a simple
 /// variable (like uint256) or a mapping without an associated length slot.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, From, Into)]
 pub struct SimpleCircuit(TableDimension);
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -39,17 +35,19 @@ impl SimpleCircuit {
         contract_pi: &[Target],
         value_pi: &[Target],
     ) -> SimpleWires {
-        let base_wires = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, value_pi);
+        // only one value proof to verify for this circuit
+        let base_wires = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, vec![value_pi]);
 
         let value_pi = values_extraction::PublicInputs::<Target>::new(value_pi);
         let dv = value_pi.values_digest_target();
+        // Compute the final value digest depending on the table dimension
         let dimension: TableDimensionWire = b.add_virtual_bool_target_safe().into();
-        let final_dv = dimension.conditional_digest(b, dv);
+        let final_dv = dimension.conditional_row_digest(b, dv);
         PublicInputs::new(
             &base_wires.bh,
             &base_wires.prev_bh,
             &final_dv.to_targets(),
-            &base_wires.dm.to_targets(),
+            &base_wires.dm[0].to_targets(),
             &base_wires.bn.to_targets(),
         )
         .register_args(b);
@@ -63,6 +61,7 @@ impl SimpleCircuit {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct SimpleCircuitRecursiveWires {
+    /// NOTE: assumed to be containing a single value inside, in the vec.
     base: BaseCircuitProofWires,
     simple_wires: SimpleWires,
 }
@@ -74,8 +73,10 @@ pub struct SimpleCircuitInput {
 
 impl SimpleCircuitInput {
     pub(crate) fn new(base: BaseCircuitProofInputs, dimension: TableDimension) -> Self {
-        let simple = dimension.into();
-        Self { base, simple }
+        Self {
+            base,
+            simple: dimension.into(),
+        }
     }
 }
 
@@ -91,7 +92,8 @@ impl CircuitLogicWires<F, D, 0> for SimpleCircuitRecursiveWires {
         _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let base = BaseCircuitProofInputs::build(builder, &builder_parameters);
+        // only one proof to verify for this simple circuit
+        let base = BaseCircuitProofInputs::build(builder, &builder_parameters, 1);
         let wires = SimpleCircuit::build(
             builder,
             base.get_block_public_inputs(),
@@ -157,7 +159,7 @@ mod test {
 
         let test_circuit = TestSimpleCircuit {
             pis: pis.clone(),
-            circuit: TableDimension::Single,
+            circuit: TableDimension::Single.into(),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         pis.check_proof_public_inputs(&proof, TableDimension::Compound, None);

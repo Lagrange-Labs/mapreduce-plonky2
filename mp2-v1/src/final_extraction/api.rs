@@ -1,15 +1,26 @@
-use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
+use mp2_common::{
+    default_config,
+    digest::TableDimension,
+    proof::ProofWithVK,
+    serialization::{
+        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+    },
+    C, D, F,
+};
 use plonky2::{iop::target::Target, plonk::circuit_data::VerifierCircuitData};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
 };
+
 use serde::{Deserialize, Serialize};
 
 use super::{
-    base_circuit::BaseCircuitInput, lengthed_circuit::LengthedRecursiveWires,
-    merge::MergeTableWires, simple_circuit::SimpleCircuitRecursiveWires, BaseCircuitProofInputs,
-    LengthedCircuit, PublicInputs, SimpleCircuit,
+    base_circuit::BaseCircuitInput,
+    lengthed_circuit::LengthedRecursiveWires,
+    merge::{MergeTable, MergeTableRecursiveWires},
+    simple_circuit::SimpleCircuitRecursiveWires,
+    BaseCircuitProofInputs, LengthedCircuit, PublicInputs, SimpleCircuit,
 };
 
 use anyhow::Result;
@@ -43,7 +54,7 @@ impl FinalExtractionBuilderParams {
 pub struct PublicParameters {
     simple: CircuitWithUniversalVerifier<F, C, D, 0, SimpleCircuitRecursiveWires>,
     lengthed: CircuitWithUniversalVerifier<F, C, D, 0, LengthedRecursiveWires>,
-    //merge: CircuitWithUniversalVerifier<F, C, D, 2, MergeTableWires>,
+    merge: CircuitWithUniversalVerifier<F, C, D, 0, MergeTableRecursiveWires>,
     circuit_set: RecursiveCircuits<F, C, D>,
 }
 
@@ -68,11 +79,13 @@ impl PublicParameters {
             length_circuit_set,
         );
         let simple = builder.build_circuit(builder_params.clone());
-        let lengthed = builder.build_circuit(builder_params);
+        let lengthed = builder.build_circuit(builder_params.clone());
+        let merge = builder.build_circuit(builder_params);
 
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&simple),
             prepare_recursive_circuit_for_circuit_set(&lengthed),
+            prepare_recursive_circuit_for_circuit_set(&merge),
         ];
 
         let circuit_set = RecursiveCircuits::new(circuits);
@@ -80,8 +93,26 @@ impl PublicParameters {
         Self {
             simple,
             lengthed,
+            merge,
             circuit_set,
         }
+    }
+
+    pub(crate) fn generate_merge_proof(
+        &self,
+        input: MergeTableInput,
+        contract_circuit_set: &RecursiveCircuits<F, C, D>,
+        value_circuit_set: &RecursiveCircuits<F, C, D>,
+    ) -> Result<Vec<u8>> {
+        let merge_input = MergeTable {
+            is_table_a_multiplier: input.is_table_a_multiplier,
+            dimension_a: input.table_a_dimension,
+            dimension_b: input.table_b_dimension,
+        };
+        let recursive_inputs = MergeCircuitInput {
+            base
+        }
+        Ok(vec![])
     }
 
     pub(crate) fn generate_simple_proof(
@@ -96,7 +127,7 @@ impl PublicParameters {
                 contract_circuit_set.clone(),
                 value_circuit_set.clone(),
             ),
-            input.compound,
+            input.dimension,
         );
         let proof = self
             .circuit_set
@@ -133,7 +164,7 @@ impl PublicParameters {
 
 pub struct SimpleCircuitInput {
     base: BaseCircuitInput,
-    compound: bool,
+    dimension: TableDimension,
 }
 
 pub struct LengthedCircuitInput {
@@ -150,27 +181,33 @@ pub enum CircuitInput {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MergeTableInput {
     is_table_a_multiplier: bool,
+    table_a_dimension: TableDimension,
+    table_b_dimension: TableDimension,
     table_a_root_proof: Vec<u8>,
     table_b_root_proof: Vec<u8>,
 }
 
 impl CircuitInput {
-    /// Create a circuit input for merging two tables. The proofs must be the root proof,i.e. the
-    /// ones at the root of the MPT storage.
-    /// The boolean flag indicates if table a should be considered the outer table, meaning all the
-    /// content of table A (the content extracted by this proof) is gonna be associated to each row
-    /// of table B.
-    //pub fn new_merge_input(
-    //    table_a_root_proof: Vec<u8>,
-    //    table_b_root_proof: Vec<u8>,
-    //    is_table_a_multiplier: bool,
-    //) -> Self {
-    //    Self::MergeTable(MergeTableInput {
-    //        table_a_root_proof,
-    //        table_b_root_proof,
-    //        is_table_a_multiplier,
-    //    })
-    //}
+    /// Create a circuit input for merging  single table and a mapping table together.
+    /// Both tables should belong to the same contract.
+    /// This is a specialized API that uses a more general API underneath. Allowing more types of
+    /// merging can be opened up on the API on a case by case basis.
+    /// Table A MUST be a single table and table B MUST be a mapping table.
+    pub fn new_merge_single_and_mapping(
+        block_proof: Vec<u8>,
+        contract_proof: Vec<u8>,
+        single_table_proof: Vec<u8>,
+        mapping_table_proof: Vec<u8>,
+    ) -> Self {
+        let base = BaseCircuitInput::new(block_proof, contract_proof, vec![single_table_proof,mapping_table_proof])?;
+        Self::MergeTable(MergeTableInput {
+            table_a_root_proof,
+            table_b_root_proof,
+            is_table_a_multiplier: true,
+            table_a_dimension: TableDimension::Single,
+            table_b_dimension: TableDimension::Compound,
+        })
+    }
     /// Instantiate inputs for simple variables circuit. Coumpound must be set to true
     /// if the proof is for extracting values for a variable type with dynamic length (like a mapping)
     /// but that does not require a length_proof (maybe because there is no way to get the length
@@ -179,10 +216,10 @@ impl CircuitInput {
         block_proof: Vec<u8>,
         contract_proof: Vec<u8>,
         value_proof: Vec<u8>,
-        compound: bool,
+        dimension: TableDimension,
     ) -> Result<Self> {
-        let base = BaseCircuitInput::new(block_proof, contract_proof, value_proof)?;
-        Ok(Self::Simple(SimpleCircuitInput { base, compound }))
+        let base = BaseCircuitInput::new(block_proof, contract_proof, vec![value_proof])?;
+        Ok(Self::Simple(SimpleCircuitInput { base, dimension }))
     }
     /// Instantiate inputs for circuit dealing with compound types with a length slot
     pub fn new_lengthed_input(
@@ -191,7 +228,7 @@ impl CircuitInput {
         value_proof: Vec<u8>,
         length_proof: Vec<u8>,
     ) -> Result<Self> {
-        let base = BaseCircuitInput::new(block_proof, contract_proof, value_proof)?;
+        let base = BaseCircuitInput::new(block_proof, contract_proof, vec![value_proof])?;
         let length_proof = ProofWithVK::deserialize(&length_proof)?;
         Ok(Self::Lengthed(LengthedCircuitInput { base, length_proof }))
     }
@@ -200,6 +237,7 @@ impl CircuitInput {
 #[cfg(test)]
 mod tests {
     use mp2_common::{
+        digest::TableDimension,
         proof::{serialize_proof, ProofWithVK},
         C, D, F,
     };
@@ -259,12 +297,12 @@ mod tests {
         )
             .into();
         // test generation of proof for simple circuit for both compound and simple types
-        for compound in [false, true] {
+        for dimension in [TableDimension::Single, TableDimension::Compound] {
             let circuit_input = CircuitInput::new_simple_input(
                 serialize_proof(&block_proof).unwrap(),
                 contract_proof.serialize().unwrap(),
                 value_proof.serialize().unwrap(),
-                compound,
+                dimension,
             )
             .unwrap();
 
@@ -281,7 +319,7 @@ mod tests {
                     .unwrap(),
             )
             .unwrap();
-            proof_pis.check_proof_public_inputs(proof.proof(), compound, None);
+            proof_pis.check_proof_public_inputs(proof.proof(), dimension, None);
         }
         // test proof generation for types with length circuit
         let length_proof: ProofWithVK = (
@@ -310,6 +348,6 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        proof_pis.check_proof_public_inputs(proof.proof(), true, Some(len_dm));
+        proof_pis.check_proof_public_inputs(proof.proof(), TableDimension::Compound, Some(len_dm));
     }
 }

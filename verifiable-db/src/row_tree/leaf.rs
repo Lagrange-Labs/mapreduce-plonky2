@@ -20,7 +20,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cells_tree::{self, circuit_accumulate_proof_digest, Cell, CellWire};
+use crate::cells_tree::{self, Cell, CellWire};
 
 use super::public_inputs::PublicInputs;
 
@@ -39,13 +39,12 @@ impl LeafCircuit {
         let tuple = CellWire::new(b);
         // set the right digest depending on the multiplier and accumulate the ones from the public
         // inputs of the cell root proof
-        let (digest_ind, digest_mult) = tuple.split_and_accumulate_digest(b, &cells_pis);
+        let split_digest = tuple.split_and_accumulate_digest(b, cells_pis.split_digest_target());
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
         // NOTE This additional digest is necessary since the individual digest is supposed to be a
         // full row, that is how it is extracted from MPT
-        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
-        let final_digest =
-            cond_circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind).to_targets();
+        let final_digest = split_digest.cond_combine_to_row_digest(b);
+
         // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
         // in our case, min == max == index_value
         // left_child_hash == right_child_hash == empty_hash since there is not children
@@ -64,7 +63,7 @@ impl LeafCircuit {
         let value_fields = tuple.value.to_targets();
         PublicInputs::new(
             &row_hash.elements,
-            &final_digest,
+            &final_digest.to_targets(),
             &value_fields,
             &value_fields,
         )
@@ -149,7 +148,7 @@ mod test {
     use rand::{thread_rng, Rng};
 
     use crate::{
-        cells_tree::{self, field_accumulate_proof_digest, field_decide_digest_section, Cell},
+        cells_tree::{self, Cell},
         row_tree::public_inputs::PublicInputs,
     };
 
@@ -211,9 +210,9 @@ mod test {
         let row_hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&inputs);
         assert_eq!(row_hash, pi.root_hash_hashout());
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
-        let (ind_final, mul_final) = row_cell.split_and_accumulate_digest(&cells_pi_struct);
-        let ind_final = map_to_curve_point(&ind_final.to_fields());
-        let result = cond_field_hashed_scalar_mul(mul_final.to_fields(), ind_final);
+        let split_digest =
+            row_cell.split_and_accumulate_digest(cells_pi_struct.split_digest_point());
+        let result = split_digest.cond_combine_to_row_digest();
         assert_eq!(result.to_weierstrass(), pi.rows_digest_field())
     }
 }

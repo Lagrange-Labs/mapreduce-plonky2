@@ -70,9 +70,8 @@ impl FullNodeCircuit {
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
         // final_digest = HashToInt(mul_digest) * D(ind_digest) + left.digest() + right.digest()
-        let (digest_ind, digest_mul) = tuple.split_and_accumulate_digest(b, &cells_pi);
-        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
-        let row_digest = cond_circuit_hashed_scalar_mul(b, digest_mul.to_targets(), digest_ind);
+        let split_digest = tuple.split_and_accumulate_digest(b, cells_pi.split_digest_target());
+        let row_digest = split_digest.cond_combine_to_row_digest(b);
 
         // add this row digest with the rest
         let final_digest = b.curve_add(min_child.rows_digest(), max_child.rows_digest());
@@ -264,9 +263,8 @@ pub(crate) mod test {
         assert_eq!(hash, pi.root_hash_hashout());
 
         // final_digest = HashToInt(mul_digest) * D(ind_digest) + p1.digest() + p2.digest()
-        let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&cells_pi_struct);
-        let ind_final = map_to_curve_point(&row_ind.to_fields());
-        let row_digest = cond_field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
+        let split_digest = tuple.split_and_accumulate_digest(cells_pi_struct.split_digest_point());
+        let row_digest = split_digest.cond_combine_to_row_digest();
 
         let p1dr = weierstrass_to_point(&PublicInputs::from_slice(&left_pi).rows_digest_field());
         let p2dr = weierstrass_to_point(&PublicInputs::from_slice(&right_pi).rows_digest_field());

@@ -1,9 +1,6 @@
 //! Module handling the intermediate node with 1 child inside a cells tree
 
-use super::{
-    circuit_accumulate_proof_digest, circuit_decide_digest_section, public_inputs::PublicInputs,
-    Cell, CellWire,
-};
+use super::{public_inputs::PublicInputs, Cell, CellWire};
 use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{From, Into};
@@ -36,9 +33,7 @@ pub struct PartialNodeCircuit(Cell);
 
 impl PartialNodeCircuit {
     pub fn build(b: &mut CBuilder, child_proof: PublicInputs<Target>) -> PartialNodeWires {
-        let identifier = b.add_virtual_target();
-        let value = b.add_virtual_u256();
-        let is_multiplier = b.add_virtual_bool_target_safe();
+        let cell = CellWire::new(b);
 
         // h = Poseidon(p.H || Poseidon("") || identifier || value)
         let child_hash = child_proof.node_hash();
@@ -49,29 +44,24 @@ impl PartialNodeCircuit {
             .iter()
             .cloned()
             .chain(empty_hash.elements)
-            .chain(iter::once(identifier))
-            .chain(value.to_targets())
+            .chain(iter::once(cell.identifier))
+            .chain(cell.value.to_targets())
             .collect();
         let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
-        // digest_cell = p.digest_cell + D(identifier || value)
-        let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
-        let dc = b.map_to_curve_point(&inputs);
-        let (digest_ind, digest_mult) = circuit_decide_digest_section(b, dc, is_multiplier);
-
         // aggregate the digest of the child proof in the right digest
-        let (digest_ind, digest_mul) =
-            circuit_accumulate_proof_digest(b, digest_ind, digest_mult, &child_proof);
+        // digest_cell = p.digest_cell + D(identifier || value)
+        let split_digest = cell.split_and_accumulate_digest(b, child_proof.split_digest_target());
 
         // Register the public inputs.
-        PublicInputs::new(&h, &digest_ind.to_targets(), &digest_mult.to_targets()).register(b);
+        PublicInputs::new(
+            &h,
+            &split_digest.individual.to_targets(),
+            &split_digest.multiplier.to_targets(),
+        )
+        .register(b);
 
-        CellWire {
-            identifier,
-            value,
-            is_multiplier,
-        }
-        .into()
+        cell.into()
     }
 
     /// Assign the wires.

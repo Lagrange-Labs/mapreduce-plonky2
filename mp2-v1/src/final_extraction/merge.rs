@@ -1,34 +1,25 @@
 use super::{
-    api::{FinalExtractionBuilderParams, MergeTableInput, NUM_IO},
+    api::{FinalExtractionBuilderParams, NUM_IO},
     base_circuit::{self, BaseCircuitProofWires},
-    public_inputs::PublicInputsArgs,
-    BaseCircuitProofInputs, PublicInputs, TableDimension, TableDimensionWire,
+    BaseCircuitProofInputs, PublicInputs,
 };
 use mp2_common::{
-    group_hashing::{
-        circuit_hashed_scalar_mul, cond_circuit_hashed_scalar_mul, CircuitBuilderGroupHashing,
-    },
-    public_inputs::PublicInputCommon,
+    digest::{SplitDigestTarget, TableDimension, TableDimensionWire},
     serialization::{deserialize, serialize},
-    types::{CBuilder, GFp},
-    utils::{SliceConnector, ToFields, ToTargets},
-    C, D, F,
+    types::CBuilder,
+    utils::{SliceConnector, ToTargets},
+    D, F,
 };
 use plonky2::{
-    field::types::Field,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
+    plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
-use recursion_framework::{
-    circuit_builder::CircuitLogicWires,
-    framework::{RecursiveCircuits, RecursiveCircuitsVerifierTarget},
-};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use sqlparser::ast::Table;
 use verifiable_db::extraction::ExtractionPI;
 
 /// This merge table circuit is responsible for computing the right digest of the values and
@@ -60,34 +51,38 @@ impl MergeTable {
         table_a: &[Target],
         table_b: &[Target],
     ) -> MergeTableWires {
-        /// First do the final extraction logic on both table
-        let base_wires_a = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, table_a);
-        let base_wires_b = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, table_a);
+        // First do the final extraction logic on both table, i.e. both tables are checked against
+        // the block and contract proofs to match for storage root trie and state root trie
+        let base_wires =
+            base_circuit::BaseCircuit::build(b, block_pi, contract_pi, vec![table_a, table_b]);
 
-        // Check both proofs share the same MPT proofs
-        // NOTE: this enforce both variables are from the same contract. If we remove this
-        // check this opens the door to merging different variables from different contracts.
         let table_a = super::PublicInputs::from_slice(table_a);
         let table_b = super::PublicInputs::from_slice(table_b);
-        b.connect_slice(&table_a.commitment(), &table_b.commitment());
 
-        let is_table_a_multiplier = b.add_virtual_bool_target_safe();
         // prepare the table digest if they're compound or not
-        let digest_a = table_a.value_set_digest();
-        let dimension_a: TableDimensionWire = b.add_virtual_bool_target_safe().into();
-        let input_a = dimension_a.conditional_digest(b, digest_a);
+        // At final extraction, if we're extracting a single type table, then we need to digest one
+        // more time the value proof digest. The value proof digest gives us SUM D(column) but at
+        // this stage we want D ( SUM D(column)).
+        // NOTE: in practice at first we only gonna have one table being the single table with a
+        // single row and the other one being a mapping. But this implementation should allow for
+        // mappings X mappings, or arrays X mappings etc.
+        let table_a_dimension = TableDimensionWire(b.add_virtual_bool_target_safe());
+        let table_b_dimension = TableDimensionWire(b.add_virtual_bool_target_safe());
+        let digest_a = table_a_dimension.conditional_row_digest(b, table_a.value_set_digest());
+        let digest_b = table_b_dimension.conditional_row_digest(b, table_b.value_set_digest());
 
-        let digest_b = table_b.value_set_digest();
-        let dimension_b: TableDimensionWire = b.add_virtual_bool_target_safe().into();
-        let input_b = dimension_b.conditional_digest(b, digest_b);
-
+        // Combine the two digest depending on which table is the multiplier
+        let is_table_a_multiplier = b.add_virtual_bool_target_safe();
+        let is_table_b_multiplier = b.not(is_table_a_multiplier);
+        let split_a =
+            SplitDigestTarget::from_single_digest_target(b, digest_a, is_table_a_multiplier);
+        let split_b =
+            SplitDigestTarget::from_single_digest_target(b, digest_b, is_table_b_multiplier);
         // combine the value digest together, splitting between the table that is on the outer side
         // (the multiplier) and the inner side (the "individual")
-        // TODO: put in common with verifiable-db
-        let multiplier = b.select_curve_point(is_table_a_multiplier, input_a, input_b);
-        let base = b.select_curve_point(is_table_a_multiplier, input_b, input_a);
-        // Since we are always merging two tables here, we don't need to use the conditional variant.
-        let new_dv = circuit_hashed_scalar_mul(b, multiplier.to_targets(), base);
+        // H(table_multiplier_digest) * table_individual_digest
+        let combined_split = split_a.accumulate(b, &split_b);
+        let new_dv = combined_split.combine_to_digest(b);
 
         // combine the table metadata hashes together
         // NOTE: this combine twice the contract address for example
@@ -98,17 +93,17 @@ impl MergeTable {
         let new_md = b.curve_add(input_a, input_b);
 
         PublicInputs::new(
-            &base_wires_a.bh,
-            &base_wires_a.prev_bh,
+            &base_wires.bh,
+            &base_wires.prev_bh,
             &new_dv.to_targets(),
             &new_md.to_targets(),
-            &base_wires_a.bn.to_targets(),
+            &base_wires.bn.to_targets(),
         )
         .register_args(b);
         MergeTableWires {
             is_table_a_multiplier,
-            dimension_a,
-            dimension_b,
+            dimension_a: table_a_dimension,
+            dimension_b: table_b_dimension,
         }
     }
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &MergeTableWires) {
@@ -118,42 +113,34 @@ impl MergeTable {
     }
 }
 
+/// The wires that are needed for the recursive framework, that concerns verifying  the input
+/// proofs
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct MergeTableRecursiveWires {
-    /// Wires containing the block, and contract information, as well as the table_a extraction
-    /// proof.
-    base_a: BaseCircuitProofWires,
-    /// table_b extraction proof. It will be verified against the same block and contract proof
-    /// contained in base_a.
-    value_b: RecursiveCircuitsVerifierTarget<D>,
+    /// Wires containing the block, and contract information,
+    /// It contains two value proofs, table a and table b
+    base: BaseCircuitProofWires,
     /// Wires information to merge properly the tables
-    merge_wires: MergeTableWires,
+    merge: MergeTableWires,
 }
 
+/// The full input to generate a merge proof including the proofs of contract block and value
+/// extraction
 pub struct MergeCircuitInput {
-    base_a: BaseCircuitProofInputs,
-    table_b: RecursiveCircuits<F, C, D>,
+    base: BaseCircuitProofInputs,
     merge: MergeTable,
 }
 
 impl MergeCircuitInput {
-    pub(crate) fn new(
-        base_a: BaseCircuitProofInputs,
-        table_b: RecursiveCircuits<F, C, D>,
-        merge: MergeTable,
-    ) -> Self {
-        Self {
-            base_a,
-            table_b,
-            merge,
-        }
+    pub(crate) fn new(base: BaseCircuitProofInputs, merge: MergeTable) -> Self {
+        Self { base, merge }
     }
 }
 
 impl CircuitLogicWires<F, D, 0> for MergeTableRecursiveWires {
     type CircuitBuilderParams = FinalExtractionBuilderParams;
 
-    type Inputs = MergeTableInput;
+    type Inputs = MergeCircuitInput;
 
     const NUM_PUBLIC_INPUTS: usize = NUM_IO;
 
@@ -162,56 +149,27 @@ impl CircuitLogicWires<F, D, 0> for MergeTableRecursiveWires {
         _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let base = BaseCircuitProofInputs::build(builder, &builder_parameters);
+        // value proof for table a and value proof for table b = 2
+        let base = BaseCircuitProofInputs::build(builder, &builder_parameters, 2);
         let wires = MergeTable::build(
             builder,
             base.get_block_public_inputs(),
             base.get_contract_public_inputs(),
-            base.get_value_public_inputs(),
+            base.get_value_public_inputs_at(0),
+            base.get_value_public_inputs_at(1),
         );
-        Self {
-            base,
-            simple_wires: wires,
-        }
+        Self { base, merge: wires }
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
         inputs.base.assign_proof_targets(pw, &self.base)?;
-        inputs.simple.assign(pw, &self.simple_wires);
-        Ok(())
-    }
-}
-/// Num of children = 2 - always two proofs to merge
-impl CircuitLogicWires<GFp, D, 2> for MergeTableWires {
-    type CircuitBuilderParams = ();
-
-    type Inputs = MergeTable;
-
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
-
-    fn circuit_logic(
-        builder: &mut CBuilder,
-        verified_proofs: [&ProofWithPublicInputsTarget<D>; 2],
-        _builder_parameters: Self::CircuitBuilderParams,
-    ) -> Self {
-        let table_a = PublicInputs::new(&verified_proofs[0].public_inputs);
-        let table_b = PublicInputs::new(&verified_proofs[1].public_inputs);
-        MergeTable::build(builder, table_a, table_b)
-    }
-
-    fn assign_input(
-        &self,
-        inputs: Self::Inputs,
-        pw: &mut PartialWitness<GFp>,
-    ) -> anyhow::Result<()> {
-        inputs.assign(pw, &self);
+        inputs.merge.assign(pw, &self.merge);
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::iter::once;
 
     use crate::values_extraction;
 
@@ -223,6 +181,7 @@ mod test {
         },
         keccak::PACKED_HASH_LEN,
         rlp::MAX_KEY_NIBBLE_LEN,
+        utils::ToFields,
         C, D, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
@@ -282,7 +241,7 @@ mod test {
         let pis_b = pis_a.generate_new_random_value();
         let table_a_multiplier = true;
         let test_circuit = TestMergeCircuit {
-            pis_a,
+            pis_a: pis_a.clone(),
             pis_b: pis_b.values_pi.clone(),
             circuit: MergeTable {
                 is_table_a_multiplier: table_a_multiplier,
@@ -304,10 +263,10 @@ mod test {
                 pis_a.value_inputs().values_digest(),
             ),
         };
-        let combined_digest = field_hashed_scalar_mul(scalar, wp(&base));
-        assert_eq!(combined_digest, wp(&pi.value_set_digest()));
+        let combined_digest = field_hashed_scalar_mul(scalar.to_fields(), wp(&base));
+        assert_eq!(combined_digest, wp(&pi.value_point()));
         let combined_metadata = wp(&pis_a.value_inputs().metadata_digest())
             + wp(&pis_b.value_inputs().metadata_digest());
-        assert_eq!(combined_metadata, wp(&pi.metadata_set_digest()));
+        assert_eq!(combined_metadata, wp(&pi.metadata_point()));
     }
 }

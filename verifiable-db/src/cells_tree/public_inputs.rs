@@ -1,5 +1,7 @@
 //! Public inputs for Cells Tree Construction circuits
 use mp2_common::{
+    digest::{SplitDigestPoint, SplitDigestTarget},
+    group_hashing::weierstrass_to_point,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, GFp, CURVE_TARGET_LEN},
     utils::{FromFields, FromTargets},
@@ -46,6 +48,12 @@ impl<'a> PublicInputs<'a, GFp> {
     pub fn multiplier_digest_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.mul)
     }
+    pub fn split_digest_point(&self) -> SplitDigestPoint {
+        SplitDigestPoint {
+            individual: weierstrass_to_point(&self.individual_digest_point()),
+            multiplier: weierstrass_to_point(&self.multiplier_digest_point()),
+        }
+    }
 }
 
 impl<'a> PublicInputs<'a, Target> {
@@ -62,6 +70,12 @@ impl<'a> PublicInputs<'a, Target> {
     /// Get the cells multiplier digest
     pub fn multiplier_digest_target(&self) -> CurveTarget {
         CurveTarget::from_targets(self.mul)
+    }
+    pub fn split_digest_target(&self) -> SplitDigestTarget {
+        SplitDigestTarget {
+            individual: self.individual_digest_target(),
+            multiplier: self.multiplier_digest_target(),
+        }
     }
 }
 

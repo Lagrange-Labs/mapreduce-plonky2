@@ -1,25 +1,15 @@
 //! Module handling the leaf node inside a cells tree
 
 use super::{public_inputs::PublicInputs, Cell, CellWire};
-use alloy::primitives::U256;
 use derive_more::{From, Into};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing,
-    poseidon::empty_poseidon_hash,
-    public_inputs::PublicInputCommon,
-    types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::ToTargets,
-    CHasher, D, F,
+    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, types::CBuilder,
+    utils::ToTargets, CHasher, D, F,
 };
 use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
@@ -32,9 +22,7 @@ pub struct LeafCircuit(Cell);
 
 impl LeafCircuit {
     fn build(b: &mut CBuilder) -> LeafWires {
-        let identifier = b.add_virtual_target();
-        let value = b.add_virtual_u256();
-        let is_multiplier = b.add_virtual_bool_target_safe();
+        let cell = CellWire::new(b);
 
         // h = Poseidon(Poseidon("") || Poseidon("") || identifier || value)
         let empty_hash = empty_poseidon_hash();
@@ -44,27 +32,23 @@ impl LeafCircuit {
             .iter()
             .cloned()
             .chain(empty_hash.elements)
-            .chain(iter::once(identifier))
-            .chain(value.to_targets())
+            .chain(iter::once(cell.identifier))
+            .chain(cell.value.to_targets())
             .collect();
         let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
         // digest_cell = D(identifier || value)
-        let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
-        let dc = b.map_to_curve_point(&inputs);
-        let zero = b.curve_zero();
-        let digest_mul = b.curve_select(is_multiplier, dc, zero).to_targets();
-        let digest_ind = b.curve_select(is_multiplier, zero, dc).to_targets();
+        let split_digest = cell.split_digest(b);
 
         // Register the public inputs.
-        PublicInputs::new(&h, &digest_ind, &digest_mul).register(b);
+        PublicInputs::new(
+            &h,
+            &split_digest.individual.to_targets(),
+            &split_digest.multiplier.to_targets(),
+        )
+        .register(b);
 
-        CellWire {
-            identifier,
-            value,
-            is_multiplier,
-        }
-        .into()
+        cell.into()
     }
 
     /// Assign the wires.
@@ -98,6 +82,7 @@ impl CircuitLogicWires<F, D, 0> for LeafWires {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::primitives::U256;
     use mp2_common::{
         group_hashing::map_to_curve_point,
         poseidon::H,

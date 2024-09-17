@@ -29,9 +29,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cells_tree::{
-    self, circuit_accumulate_proof_digest, circuit_decide_digest_section, Cell, CellWire,
-};
+use crate::cells_tree::{self, Cell, CellWire};
 
 use super::public_inputs::PublicInputs;
 
@@ -102,10 +100,10 @@ impl PartialNodeCircuit {
         );
 
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
-        let (digest_ind, digest_mult) = tuple.split_and_accumulate_digest(b, &cells_pi);
-        let digest_ind = b.map_to_curve_point(&digest_ind.to_targets());
-        let row_digest = cond_circuit_hashed_scalar_mul(b, digest_mult.to_targets(), digest_ind);
+        let split_digest = tuple.split_and_accumulate_digest(b, cells_pi.split_digest_target());
+        let row_digest = split_digest.cond_combine_to_row_digest(b);
 
+        //  and add the digest of the row other rows
         let final_digest = b.curve_add(child_pi.rows_digest(), row_digest);
         PublicInputs::new(
             &node_hash,
@@ -304,9 +302,8 @@ pub mod test {
         let hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&inputs);
         assert_eq!(hash, pi.root_hash_hashout());
         // final_digest = HashToInt(mul_digest) * D(ind_digest) + row_proof.digest()
-        let (row_ind, row_mul) = tuple.split_and_accumulate_digest(&cells_pi_struct);
-        let ind_final = map_to_curve_point(&row_ind.to_fields());
-        let res = cond_field_hashed_scalar_mul(row_mul.to_fields(), ind_final);
+        let split_digest = tuple.split_and_accumulate_digest(cells_pi_struct.split_digest_point());
+        let res = split_digest.cond_combine_to_row_digest();
         // then adding with the rest of the rows digest, the other nodes
         let res =
             res + weierstrass_to_point(&PublicInputs::from_slice(&child_pi).rows_digest_field());
