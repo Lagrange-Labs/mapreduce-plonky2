@@ -110,14 +110,16 @@ impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
                 let mut path = vec![k.clone()];
                 // ok to unwrap since we passed the filter, so that key must exist
                 // otherwise it's ryhope failure
-                let mut ctx = epoch_data.0.get(k).expect("lineage should get all keys");
+                let mut ctx = epoch_data.0.get(k).unwrap_or_else(|| panic!(
+                    "lineage should get all core keys, but {k:?} is missing"
+                ));
                 // go back up to there is no more parent anymore, i.e. the root
                 while ctx.parent.is_some() {
                     let parent_k = ctx.parent.as_ref().unwrap();
                     ctx = epoch_data
                         .0
                         .get(parent_k)
-                        .expect("lineage should get all keys");
+                        .unwrap_or_else(|| panic!("lineage should get all ascendant keys, but {parent_k:?} (for {k:?}) is missing"));
                     path.push(parent_k.clone());
                 }
                 // NOTE: these paths are *ascending*, whereas the update tree is

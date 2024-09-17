@@ -122,7 +122,7 @@ impl State {
             if inner_idx <= inner_max {
                 if let Some(lineage) = self.lineage_inner(&inner_idx) {
                     for n in lineage.into_full_path() {
-                        if n < inner_max {
+                        if n <= inner_max {
                             ascendance.insert(self.outer_idx(n));
                         }
                     }
