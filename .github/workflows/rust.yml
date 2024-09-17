@@ -10,7 +10,7 @@ name: Check, Test, and Format
 jobs:
   fmt:
     name: Rustfmt
-    runs-on: ['memory:128GB']
+    runs-on: ['nix-128g']
     steps:
       - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
       - uses: actions/checkout@v3
@@ -30,7 +30,7 @@ jobs:
 
   check:
     name: Check
-    runs-on: ['memory:128GB']
+    runs-on: ['nix-128g']
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v5
@@ -47,7 +47,7 @@ jobs:
 
   test:
     name: Test Suite
-    runs-on: ['memory:128GB']
+    runs-on: ['nix-128g']
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
