@@ -19,6 +19,28 @@ use itertools::Itertools;
 use serial_test::serial;
 use std::path::Path;
 
+/// Test Groth16 proof on local.
+/// For testing the Groth16 proof on local, need to make the following steps:
+/// - Copy the Groth16 proof to the path `groth16_query/full_proof.bin`.
+/// - If have the query info of input and output, could update
+///   `groth16_query/query_input.json` and `groth16_query/query_output.json`.
+/// - If have no query info, comment out `verifyQuery` in `processQuery`
+///   function of `test_data/TestGroth16Verifier.sol`.
+#[ignore] // Ignore for long running time in CI.
+#[test]
+fn test_local_groth16_proof() {
+    env_logger::init();
+
+    const ASSET_DIR: &str = "groth16_query";
+
+    // Verify the query in the Solidity function.
+    // The editing Solidity code is saved in `test_data/TestGroth16Verifier.sol`.
+    // TODO: In practice, the separate `Groth16VerifierExtensions.sol` and
+    // `verifier.sol` should be used, but the `revm` (Rust EVM) cannot support
+    // compilated contract deployment (as inheritance) for now.
+    verify_query_in_solidity(ASSET_DIR);
+}
+
 /// Test proving for the query circuits.
 #[ignore] // Ignore for long running time in CI.
 #[serial]
