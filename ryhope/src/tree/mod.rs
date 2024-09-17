@@ -170,5 +170,11 @@ impl<K> NodeContext<K> {
 }
 
 pub trait PrintableTree: TreeTopology {
-    async fn print<S: TreeStorage<Self>>(&self, s: &S);
+    async fn print<S: TreeStorage<Self>>(&self, s: &S) {
+        println!("{}", self.tree_to_string(s).await);
+    }
+
+    async fn tree_to_string<S: TreeStorage<Self>>(&self, s: &S) -> String;
+
+    async fn subtree_to_string<S: TreeStorage<Self>>(&self, s: &S, k: &Self::Key) -> String;
 }

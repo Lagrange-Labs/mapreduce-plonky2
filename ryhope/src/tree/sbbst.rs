@@ -496,7 +496,9 @@ impl MutableTree for Tree {
 }
 
 impl PrintableTree for Tree {
-    async fn print<S: TreeStorage<Tree>>(&self, s: &S) {
+    async fn tree_to_string<S: TreeStorage<Tree>>(&self, s: &S) -> String {
+        let mut r = String::new();
+
         let state = s.state().fetch().await;
         let max_layer = state.inner_root().0.trailing_zeros();
         for layer in (0..max_layer).rev() {
@@ -505,10 +507,16 @@ impl PrintableTree for Tree {
                 let maybe_left = rank * (1 << (layer + 1)) + (1 << layer);
                 if maybe_left <= state.inner_max().0 {
                     let n = InnerIdx(maybe_left);
-                    print!("{}{}", state.outer_idx(n), spacing);
+                    r.push_str(&format!("{}{}", state.outer_idx(n), spacing))
                 }
             }
-            println!()
+            r.push_str("\n");
         }
+
+        r
+    }
+
+    async fn subtree_to_string<S: TreeStorage<Self>>(&self, s: &S, k: &Self::Key) -> String {
+        self.tree_to_string(s).await
     }
 }
