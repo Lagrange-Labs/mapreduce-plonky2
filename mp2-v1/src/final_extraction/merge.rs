@@ -126,9 +126,9 @@ pub(crate) struct MergeTableRecursiveWires {
 
 /// The full input to generate a merge proof including the proofs of contract block and value
 /// extraction
-pub struct MergeCircuitInput {
-    base: BaseCircuitProofInputs,
-    merge: MergeTable,
+pub(crate) struct MergeCircuitInput {
+    pub(crate) base: BaseCircuitProofInputs,
+    pub(crate) merge: MergeTable,
 }
 
 impl MergeCircuitInput {

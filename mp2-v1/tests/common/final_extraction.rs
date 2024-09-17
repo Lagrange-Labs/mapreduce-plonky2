@@ -1,4 +1,4 @@
-use mp2_common::{proof::ProofWithVK, types::HashOutput, utils::ToFields};
+use mp2_common::{digest::TableDimension, proof::ProofWithVK, types::HashOutput, utils::ToFields};
 use mp2_v1::{
     api,
     final_extraction::{CircuitInput, PublicInputs},
@@ -13,7 +13,7 @@ impl TestContext {
         contract_proof: Vec<u8>,
         values_proof: Vec<u8>,
         block_proof: Vec<u8>,
-        compound_type: bool,
+        dimension: TableDimension,
         length_proof: Option<Vec<u8>>,
     ) -> Result<Vec<u8>> {
         let circuit_input = if let Some(length_proof) = length_proof {
@@ -24,7 +24,7 @@ impl TestContext {
                 length_proof,
             )
         } else {
-            CircuitInput::new_simple_input(block_proof, contract_proof, values_proof, compound_type)
+            CircuitInput::new_simple_input(block_proof, contract_proof, values_proof, dimension)
         }?;
         let params = self.params();
         let proof = self

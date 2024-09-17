@@ -128,6 +128,9 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                 final_extraction::CircuitInput::Simple(input) => params
                     .final_extraction
                     .generate_simple_proof(input, contract_circuit_set, value_circuit_set),
+                final_extraction::CircuitInput::MergeTable(input) => params
+                    .final_extraction
+                    .generate_merge_proof(input, contract_circuit_set, value_circuit_set),
                 final_extraction::CircuitInput::Lengthed(input) => {
                     let length_circuit_set = params.length_extraction.get_circuit_set();
                     params.final_extraction.generate_lengthed_proof(

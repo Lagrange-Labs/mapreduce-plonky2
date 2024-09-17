@@ -20,11 +20,15 @@ use super::{
     lengthed_circuit::LengthedRecursiveWires,
     merge::{MergeTable, MergeTableRecursiveWires},
     simple_circuit::SimpleCircuitRecursiveWires,
-    BaseCircuitProofInputs, LengthedCircuit, PublicInputs, SimpleCircuit,
+    BaseCircuitProofInputs, LengthedCircuit, MergeCircuit, PublicInputs, SimpleCircuit,
 };
 
 use anyhow::Result;
-
+pub enum CircuitInput {
+    Simple(SimpleCircuitInput),
+    Lengthed(LengthedCircuitInput),
+    MergeTable(MergeCircuitInput),
+}
 #[derive(Clone, Debug)]
 pub struct FinalExtractionBuilderParams {
     pub(crate) block_vk: VerifierCircuitData<F, C, D>,
@@ -100,19 +104,26 @@ impl PublicParameters {
 
     pub(crate) fn generate_merge_proof(
         &self,
-        input: MergeTableInput,
+        input: MergeCircuitInput,
         contract_circuit_set: &RecursiveCircuits<F, C, D>,
         value_circuit_set: &RecursiveCircuits<F, C, D>,
     ) -> Result<Vec<u8>> {
-        let merge_input = MergeTable {
+        let base = BaseCircuitProofInputs::new_from_proofs(
+            input.base,
+            contract_circuit_set.clone(),
+            value_circuit_set.clone(),
+        );
+
+        let merge = MergeTable {
             is_table_a_multiplier: input.is_table_a_multiplier,
             dimension_a: input.table_a_dimension,
             dimension_b: input.table_b_dimension,
         };
-        let recursive_inputs = MergeCircuitInput {
-            base
-        }
-        Ok(vec![])
+        let merge_inputs = MergeCircuit { base, merge };
+        let proof = self
+            .circuit_set
+            .generate_proof(&self.merge, [], [], merge_inputs)?;
+        ProofWithVK::serialize(&(proof, self.merge.circuit_data().verifier_only.clone()).into())
     }
 
     pub(crate) fn generate_simple_proof(
@@ -172,19 +183,11 @@ pub struct LengthedCircuitInput {
     length_proof: ProofWithVK,
 }
 
-pub enum CircuitInput {
-    Simple(SimpleCircuitInput),
-    Lengthed(LengthedCircuitInput),
-    MergeTable(MergeTableInput),
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct MergeTableInput {
+pub struct MergeCircuitInput {
+    base: BaseCircuitInput,
     is_table_a_multiplier: bool,
     table_a_dimension: TableDimension,
     table_b_dimension: TableDimension,
-    table_a_root_proof: Vec<u8>,
-    table_b_root_proof: Vec<u8>,
 }
 
 impl CircuitInput {
@@ -198,15 +201,18 @@ impl CircuitInput {
         contract_proof: Vec<u8>,
         single_table_proof: Vec<u8>,
         mapping_table_proof: Vec<u8>,
-    ) -> Self {
-        let base = BaseCircuitInput::new(block_proof, contract_proof, vec![single_table_proof,mapping_table_proof])?;
-        Self::MergeTable(MergeTableInput {
-            table_a_root_proof,
-            table_b_root_proof,
+    ) -> Result<Self> {
+        let base = BaseCircuitInput::new(
+            block_proof,
+            contract_proof,
+            vec![single_table_proof, mapping_table_proof],
+        )?;
+        Ok(Self::MergeTable(MergeCircuitInput {
+            base,
             is_table_a_multiplier: true,
             table_a_dimension: TableDimension::Single,
             table_b_dimension: TableDimension::Compound,
-        })
+        }))
     }
     /// Instantiate inputs for simple variables circuit. Coumpound must be set to true
     /// if the proof is for extracting values for a variable type with dynamic length (like a mapping)

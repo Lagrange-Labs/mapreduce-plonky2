@@ -43,6 +43,7 @@ use alloy::{
     providers::ProviderBuilder,
 };
 use mp2_common::{
+    digest::TableDimension,
     eth::{ProofQuery, StorageSlot},
     proof::ProofWithVK,
     types::HashOutput,
@@ -516,7 +517,12 @@ impl TestCase {
                 let metadata_hash =
                     metadata_hash(slot_input, &self.contract_address, chain_id, vec![]);
                 // it's a compoound value type of proof since we're not using the length
-                (mapping_root_proof, true, None, metadata_hash)
+                (
+                    mapping_root_proof,
+                    TableDimension::Compound,
+                    None,
+                    metadata_hash,
+                )
             }
             TableSourceSlot::SingleValues(ref args) => {
                 let single_value_proof = match ctx.storage.get_proof_exact(&proof_key) {
@@ -542,7 +548,12 @@ impl TestCase {
                 let metadata_hash =
                     metadata_hash(slot_input, &self.contract_address, chain_id, vec![]);
                 // we're just proving a single set of a value
-                (single_value_proof, false, None, metadata_hash)
+                (
+                    single_value_proof,
+                    TableDimension::Single,
+                    None,
+                    metadata_hash,
+                )
             }
         };
         // final extraction for single variables combining the different proofs generated before
