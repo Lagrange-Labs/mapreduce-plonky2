@@ -680,11 +680,69 @@ impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
     }
 }
 
+/// Executor to prepare a query that returns both the results of a user query
+/// and the matching rows, each identified by the pair (row_key, epoch)
+struct ExecutorWithKey<'a, C: ContextProvider> {
+    settings: &'a ParsilSettings<C>,
+}
+
+impl<'a, C: ContextProvider> ExecutorWithKey<'a, C> {
+    fn new(settings: &'a ParsilSettings<C>) -> Self {
+        Self { settings }
+    }
+}
+
+impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
+    type Error = anyhow::Error;
+
+    fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
+        let mut executor = Executor {
+            settings: &mut self.settings,
+        };
+        executor.post_expr(expr)
+    }
+
+    fn post_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
+        let mut key_fetcher = KeyFetcher {
+            settings: &mut self.settings,
+        };
+        key_fetcher.post_table_factor(table_factor)
+    }
+
+    fn post_select(&mut self, select: &mut Select) -> Result<()> {
+        // add KEY and EPOCH to existing `SelectItem`s
+        select.projection = vec![
+            &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
+            &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(EPOCH))),
+        ]
+        .into_iter()
+        .chain(&select.projection)
+        .cloned()
+        .collect();
+
+        Ok(())
+    }
+}
+
 pub fn generate_query_execution<C: ContextProvider>(
     query: &mut Query,
     settings: &ParsilSettings<C>,
 ) -> Result<TranslatedQuery> {
     let mut executor = Executor::new(settings)?;
+    let mut query_execution = query.clone();
+    query_execution.visit_mut(&mut executor)?;
+
+    TranslatedQuery::make(SafeQuery::ZkQuery(query_execution), settings)
+}
+
+/// Build a statement to be executed in order to fetch the matching rows for
+/// a query, each identified by a pair (row_key, epoch), altogether with the
+/// results of the query corresponding to each matching row
+pub fn generate_query_execution_with_keys<C: ContextProvider>(
+    query: &mut Query,
+    settings: &ParsilSettings<C>,
+) -> Result<TranslatedQuery> {
+    let mut executor = ExecutorWithKey::new(settings);
     let mut query_execution = query.clone();
     query_execution.visit_mut(&mut executor)?;
 

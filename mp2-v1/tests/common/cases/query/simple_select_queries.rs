@@ -10,8 +10,9 @@ use mp2_v1::{
     indexing::{block::BlockPrimaryIndex, row::RowTreeKey, LagrangeNode},
 };
 use parsil::{
-    assembler::DynamicCircuitPis, executor::generate_query_keys, ParsilSettings,
-    DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
+    assembler::DynamicCircuitPis,
+    executor::{generate_query_execution_with_keys, generate_query_keys},
+    ParsilSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{pgsql::ToFromBytea, RoEpochKvStorage},
@@ -54,7 +55,7 @@ pub(crate) async fn prove_query<'a>(
     planner: &mut QueryPlanner<'a>,
     results: Vec<PgSqlRow>,
 ) -> Result<()> {
-    let mut exec_query = generate_query_keys(&mut parsed, &planner.settings)?;
+    let mut exec_query = generate_query_execution_with_keys(&mut parsed, &planner.settings)?;
     let query_params = exec_query.convert_placeholders(&planner.query.placeholders);
     let res = planner
         .table
@@ -70,12 +71,24 @@ pub(crate) async fn prove_query<'a>(
         .map(|row| {
             let key = RowTreeKey::from_bytea(row.try_get::<_, &[u8]>(0)?.to_vec());
             let epoch = row.try_get::<_, Epoch>(1)?;
-            Ok((key, epoch))
+            // all the other items are query results
+            let result = (2..row.len())
+                .filter_map(|i| {
+                    SqlType::Numeric.extract(&row, i).map(|res| match res {
+                        SqlReturn::Numeric(uint) => uint,
+                    })
+                })
+                .collect_vec();
+            Ok((key, epoch, result))
         })
         .collect::<Result<Vec<_>>>()?;
     // compute input for each matching row
     let row_tree_info = RowInfo {
-        satisfiying_rows: matching_rows.iter().map(|(key, _)| key).cloned().collect(),
+        satisfiying_rows: matching_rows
+            .iter()
+            .map(|(key, _, _)| key)
+            .cloned()
+            .collect(),
         tree: &planner.table.row,
     };
     let index_tree_info = IndexInfo {
@@ -84,20 +97,20 @@ pub(crate) async fn prove_query<'a>(
     };
     let current_epoch = index_tree_info.tree.current_epoch();
     let mut matching_rows_input = vec![];
-    for ((key, epoch), res) in matching_rows.iter().zip(&results) {
+    for ((key, epoch, result), res) in matching_rows.into_iter().zip(&results) {
         let row_proof = prove_single_row(
             planner.ctx,
             &row_tree_info,
             &planner.columns,
-            *epoch as BlockPrimaryIndex,
-            key,
+            epoch as BlockPrimaryIndex,
+            &key,
             &planner.pis,
             &planner.query,
         )
         .await?;
-        let (row_node_info, _, _) = get_node_info(&row_tree_info, key, *epoch).await;
-        let (row_tree_path, row_tree_siblings) = get_path_info(key, &row_tree_info, *epoch).await?;
-        let index_node_key = *epoch as BlockPrimaryIndex;
+        let (row_node_info, _, _) = get_node_info(&row_tree_info, &key, epoch).await;
+        let (row_tree_path, row_tree_siblings) = get_path_info(&key, &row_tree_info, epoch).await?;
+        let index_node_key = epoch as BlockPrimaryIndex;
         let (index_node_info, _, _) =
             get_node_info(&index_tree_info, &index_node_key, current_epoch).await;
         let (index_tree_path, index_tree_siblings) =
@@ -110,13 +123,6 @@ pub(crate) async fn prove_query<'a>(
             index_tree_path,
             index_tree_siblings,
         );
-        let result = (0..res.len())
-            .filter_map(|i| {
-                SqlType::Numeric.extract(&res, i).map(|res| match res {
-                    SqlReturn::Numeric(uint) => uint,
-                })
-            })
-            .collect_vec();
         matching_rows_input.push(MatchingRow::new(row_proof, path, result));
     }
     // load the preprocessing proof at the same epoch
