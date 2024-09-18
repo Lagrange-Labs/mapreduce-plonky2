@@ -8,7 +8,7 @@ use mp2_common::{
     proof::ProofWithVK,
     serialization::{deserialize_long_array, serialize_long_array},
     types::HashOutput,
-    utils::ToFields,
+    utils::{Fieldable, ToFields},
     F,
 };
 use plonky2::{
@@ -196,6 +196,10 @@ impl NodeInfo {
             max,
             is_leaf: left_child_hash.is_none() && right_child_hash.is_none(),
         }
+    }
+
+    pub fn node_hash(&self, index_id: u64) -> HashOutput {
+        HashOutput::try_from(self.compute_node_hash(index_id.to_field()).to_bytes()).unwrap()
     }
 
     pub(crate) fn compute_node_hash(&self, index_id: F) -> HashOut<F> {

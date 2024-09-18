@@ -26,6 +26,7 @@ use ryhope::{
     Epoch, InitSettings,
 };
 use serde::{Deserialize, Serialize};
+use verifiable_db::query::computational_hash_ids::ColumnIDs;
 use std::{hash::Hash, iter::once};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql};
 
@@ -100,6 +101,20 @@ impl TableColumns {
             let id = self.column_id_of_cells_index(idx).unwrap();
             assert!(column.identifier == id);
         }
+    }
+}
+
+impl From<&TableColumns> for ColumnIDs {
+    fn from(columns: &TableColumns) -> Self {
+        ColumnIDs::new(
+            columns.primary.identifier,
+            columns.secondary.identifier,
+            columns
+                .non_indexed_columns()
+                .into_iter()
+                .map(|column| column.identifier)
+                .collect_vec(),
+        )
     }
 }
 

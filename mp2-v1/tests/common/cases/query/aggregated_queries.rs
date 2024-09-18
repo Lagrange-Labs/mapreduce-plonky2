@@ -35,16 +35,13 @@ use mp2_v1::{
     indexing::{
         self,
         block::BlockPrimaryIndex,
-        block::BlockPrimaryIndex,
         cell::MerkleCell,
-        row::{Row, RowPayload, RowTreeKey},
         row::{Row, RowPayload, RowTreeKey},
         LagrangeNode,
     },
     values_extraction::identifier_block_column,
 };
 use parsil::{
-    assembler::{DynamicCircuitPis, StaticCircuitPis},
     assembler::{DynamicCircuitPis, StaticCircuitPis},
     bracketer::bracket_secondary_index,
     queries::{core_keys_for_index_tree, core_keys_for_row_tree},
@@ -57,8 +54,6 @@ use ryhope::{
         updatetree::{Next, UpdateTree},
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
-    tree::NodeContext,
-    Epoch, NodePayload,
     tree::NodeContext,
     Epoch, NodePayload,
 };
@@ -76,37 +71,7 @@ use verifiable_db::{
     revelation::PublicInputs,
 };
 
-use super::{INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH};
-
-pub type GlobalCircuitInput = verifiable_db::api::QueryCircuitInput<
-    ROW_TREE_MAX_DEPTH,
-    INDEX_TREE_MAX_DEPTH,
-    MAX_NUM_COLUMNS,
-    MAX_NUM_PREDICATE_OPS,
-    MAX_NUM_RESULT_OPS,
-    MAX_NUM_OUTPUTS,
-    MAX_NUM_ITEMS_PER_OUTPUT,
-    MAX_NUM_PLACEHOLDERS,
->;
-
-pub type QueryCircuitInput = verifiable_db::query::api::CircuitInput<
-    MAX_NUM_COLUMNS,
-    MAX_NUM_PREDICATE_OPS,
-    MAX_NUM_RESULT_OPS,
-    MAX_NUM_ITEMS_PER_OUTPUT,
->;
-
-pub type RevelationCircuitInput = verifiable_db::revelation::api::CircuitInput<
-    ROW_TREE_MAX_DEPTH,
-    INDEX_TREE_MAX_DEPTH,
-    MAX_NUM_COLUMNS,
-    MAX_NUM_PREDICATE_OPS,
-    MAX_NUM_RESULT_OPS,
-    MAX_NUM_OUTPUTS,
-    MAX_NUM_ITEMS_PER_OUTPUT,
-    MAX_NUM_PLACEHOLDERS,
-    { QueryCircuitInput::num_placeholders_ids() },
->;
+use super::{GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH};
 
 pub type RevelationPublicInputs<'a> =
     PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
@@ -301,7 +266,7 @@ async fn prove_revelation(
     Ok(proof)
 }
 
-fn check_final_outputs(
+pub(crate) fn check_final_outputs(
     revelation_proof: Vec<u8>,
     ctx: &TestContext,
     table: &Table,
@@ -336,16 +301,7 @@ fn check_final_outputs(
         "metadata hash computed by circuit and offcircuit is not the same"
     );
 
-    let column_ids = ColumnIDs::new(
-        table.columns.primary.identifier,
-        table.columns.secondary.identifier,
-        table
-            .columns
-            .non_indexed_columns()
-            .into_iter()
-            .map(|column| column.identifier)
-            .collect_vec(),
-    );
+    let column_ids = ColumnIDs::from(&table.columns);
     let expected_computational_hash = Identifiers::computational_hash(
         &column_ids,
         &pis.predication_operations,
@@ -621,7 +577,7 @@ where
 
 // TODO: make it recursive with async - tentative in `fetch_child_info` but  it doesn't work,
 // recursion with async is weird.
-async fn get_node_info<K, V, T: TreeInfo<K, V>>(
+pub(crate) async fn get_node_info<K, V, T: TreeInfo<K, V>>(
     lookup: &T,
     k: &K,
     at: Epoch,

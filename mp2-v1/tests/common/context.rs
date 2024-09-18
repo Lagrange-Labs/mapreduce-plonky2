@@ -28,7 +28,7 @@ use super::{
         self,
         query::{
             INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
-            MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULTS, MAX_NUM_RESULT_OPS,
+            MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
             ROW_TREE_MAX_DEPTH,
         },
     },
@@ -129,7 +129,6 @@ impl ParamsType {
     pub fn build(&self, ctx: &mut TestContext, path: PathBuf) -> Result<()>
     where
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
-        [(); MAX_NUM_RESULTS - 1]:,
     {
         match self {
             ParamsType::Query => {
@@ -160,7 +159,6 @@ impl ParamsType {
     pub fn build_and_save(&self, path: PathBuf, ctx: &mut TestContext) -> Result<()>
     where
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
-        [(); MAX_NUM_RESULTS - 1]:,
     {
         self.build(ctx, path.clone())?;
         match self {
@@ -274,7 +272,7 @@ impl TestContext {
     pub fn run_query_proof(
         &self,
         name: &str,
-        input: cases::query::aggregated_queries::GlobalCircuitInput,
+        input: cases::query::GlobalCircuitInput,
     ) -> Result<Vec<u8>> {
         self.b.bench(name, || {
             self.query_params.as_ref().unwrap().generate_proof(input)
