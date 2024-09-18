@@ -88,7 +88,7 @@ async fn query_mapping(
     table: &Table,
     table_hash: MetadataHash,
 ) -> Result<()> {
-    /*let query_info = cook_query_between_blocks(table).await?;
+    let query_info = cook_query_between_blocks(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
 
     let query_info = cook_query_unique_secondary_index(table).await?;
@@ -104,7 +104,7 @@ async fn query_mapping(
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with block query range partially overlapping with blocks in the DB
     let query_info = cook_query_partial_block_range(table).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await?;*/
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook simple no aggregation query with matching rows
     let query_info = cook_query_with_matching_rows(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
