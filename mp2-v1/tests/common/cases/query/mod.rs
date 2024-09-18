@@ -1,13 +1,23 @@
-use aggregated_queries::{cook_query_between_blocks, cook_query_no_matching_entries, cook_query_non_matching_entries_some_blocks, cook_query_partial_block_range, cook_query_secondary_index_placeholder, cook_query_unique_secondary_index, prove_query as prove_aggregation_query};
+use aggregated_queries::{
+    cook_query_between_blocks, cook_query_no_matching_entries,
+    cook_query_non_matching_entries_some_blocks, cook_query_partial_block_range,
+    cook_query_secondary_index_placeholder, cook_query_unique_secondary_index,
+    prove_query as prove_aggregation_query,
+};
 use alloy::primitives::U256;
 use anyhow::{Context, Result};
 use itertools::Itertools;
 use log::info;
 use mp2_v1::{api::MetadataHash, indexing::block::BlockPrimaryIndex};
 use parsil::{parse_and_validate, ParsilSettings, PlaceholderSettings};
-use simple_select_queries::{cook_query_no_matching_rows, cook_query_too_big_offset, cook_query_with_matching_rows, cook_query_with_max_num_matching_rows, prove_query as prove_no_aggregation_query};
+use simple_select_queries::{
+    cook_query_no_matching_rows, cook_query_too_big_offset, cook_query_with_matching_rows,
+    cook_query_with_max_num_matching_rows, prove_query as prove_no_aggregation_query,
+};
 use tokio_postgres::Row as PsqlRow;
-use verifiable_db::query::{computational_hash_ids::Output, universal_circuit::universal_circuit_inputs::Placeholders};
+use verifiable_db::query::{
+    computational_hash_ids::Output, universal_circuit::universal_circuit_inputs::Placeholders,
+};
 
 use crate::common::{cases::planner::QueryPlanner, table::Table, TableInfo, TestContext};
 
@@ -15,7 +25,6 @@ use super::TableSourceSlot;
 
 pub mod aggregated_queries;
 pub mod simple_select_queries;
-
 
 pub const MAX_NUM_RESULT_OPS: usize = 20;
 pub const MAX_NUM_OUTPUTS: usize = 3;
@@ -105,9 +114,9 @@ async fn query_mapping(
     let query_info = cook_query_no_matching_rows(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     let query_info = cook_query_too_big_offset(table).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).git await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     Ok(())
-} 
+}
 
 /// Run a test query on the mapping table such as created during the indexing phase
 async fn test_query_mapping(
@@ -120,7 +129,6 @@ async fn test_query_mapping(
         context: table,
         placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
     };
-
 
     info!("QUERY on the testcase: {}", query_info.query);
     let mut parsed = parse_and_validate(&query_info.query, &settings)?;
@@ -166,8 +174,22 @@ async fn test_query_mapping(
     };
 
     match pis.result.query_variant() {
-        Output::Aggregation => prove_aggregation_query(ctx, table, query_info, parsed, &settings, res, table_hash.clone(), pis).await,
-        Output::NoAggregation => prove_no_aggregation_query(parsed, &table_hash, &mut planner, res).await,
+        Output::Aggregation => {
+            prove_aggregation_query(
+                ctx,
+                table,
+                query_info,
+                parsed,
+                &settings,
+                res,
+                table_hash.clone(),
+                pis,
+            )
+            .await
+        }
+        Output::NoAggregation => {
+            prove_no_aggregation_query(parsed, &table_hash, &mut planner, res).await
+        }
     }
 }
 
@@ -218,10 +240,12 @@ fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {
     );
     for row in rows {
         println!(
-            "{:?}", 
-            columns.iter().enumerate().map(|(i, _)| 
-                format!("{:?}", types.extract(row, i))
-            ).join(" | ")
+            "{:?}",
+            columns
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("{:?}", types.extract(row, i)))
+                .join(" | ")
         );
     }
 }

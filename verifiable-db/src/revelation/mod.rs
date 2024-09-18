@@ -9,7 +9,8 @@ mod public_inputs;
 mod revelation_unproven_offset;
 mod revelation_without_results_tree;
 
-pub use {public_inputs::PublicInputs, revelation_unproven_offset::RowPath};
+pub use public_inputs::PublicInputs;
+pub use revelation_unproven_offset::RowPath;
 
 // L: maximum number of results
 // S: maximum number of items in each result

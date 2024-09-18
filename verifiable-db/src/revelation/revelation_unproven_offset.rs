@@ -425,7 +425,6 @@ where
                 // membership proof for the current row; otherwise, we don't care
                 let root = b.select_hash(is_matching_row, &index_path_wires.root, &tree_hash);
                 b.connect_hashes(tree_hash, root);
-                
 
                 row_paths.push(row_path_wires.inputs);
                 index_paths.push(index_path_wires.inputs);

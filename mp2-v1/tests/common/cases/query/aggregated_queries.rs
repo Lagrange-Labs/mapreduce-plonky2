@@ -10,11 +10,12 @@ use std::{
 use crate::common::{
     cases::{
         indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
-        planner::{IndexInfo, QueryPlanner, RowInfo, TreeInfo}, query::{QueryCooking, SqlReturn, SqlType},
+        planner::{IndexInfo, QueryPlanner, RowInfo, TreeInfo},
+        query::{QueryCooking, SqlReturn, SqlType},
     },
+    proof_storage::{ProofKey, ProofStorage},
     rowtree::MerkleRowTree,
     table::{Table, TableColumns},
-    proof_storage::{ProofKey, ProofStorage},
 };
 
 use crate::context::TestContext;
@@ -45,8 +46,7 @@ use parsil::{
     assembler::{DynamicCircuitPis, StaticCircuitPis},
     bracketer::bracket_secondary_index,
     queries::{core_keys_for_index_tree, core_keys_for_row_tree},
-    ParsilSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
-    DEFAULT_MIN_BLOCK_PLACEHOLDER,
+    ParsilSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{
@@ -71,7 +71,11 @@ use verifiable_db::{
     revelation::PublicInputs,
 };
 
-use super::{GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH};
+use super::{
+    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, INDEX_TREE_MAX_DEPTH,
+    MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
+    MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH,
+};
 
 pub type RevelationPublicInputs<'a> =
     PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
@@ -91,12 +95,7 @@ pub(crate) async fn prove_query(
         .row
         .wide_lineage_between(
             table.row.current_epoch(),
-            &core_keys_for_row_tree(
-                &query.query,
-                &settings,
-                &pis.bounds,
-                &query.placeholders,
-            )?,
+            &core_keys_for_row_tree(&query.query, &settings, &pis.bounds, &query.placeholders)?,
             (query.min_block as Epoch, query.max_block as Epoch),
         )
         .await?;
@@ -1124,7 +1123,9 @@ pub(crate) async fn cook_query_no_matching_entries(table: &Table) -> Result<Quer
 
 /// Cook a query where there are no entries satisying the secondary query bounds only for some
 /// blocks of the primary index bounds (not for all the blocks)
-pub(crate) async fn cook_query_non_matching_entries_some_blocks(table: &Table) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_non_matching_entries_some_blocks(
+    table: &Table,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, true).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(

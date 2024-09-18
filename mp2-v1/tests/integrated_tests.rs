@@ -17,7 +17,10 @@ use anyhow::{Context, Result};
 use common::{
     cases::{
         indexing::{ChangeType, TreeFactory, UpdateType},
-        query::{GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, test_query, MAX_NUM_PLACEHOLDERS}
+        query::{
+            test_query, GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput,
+            MAX_NUM_PLACEHOLDERS,
+        },
     },
     context::{self, ParamsType, TestContextConfig},
     proof_storage::{ProofKV, DEFAULT_PROOF_STORE_FOLDER},

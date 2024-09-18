@@ -26,9 +26,9 @@ use ryhope::{
     Epoch, InitSettings,
 };
 use serde::{Deserialize, Serialize};
-use verifiable_db::query::computational_hash_ids::ColumnIDs;
 use std::{hash::Hash, iter::once};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql};
+use verifiable_db::query::computational_hash_ids::ColumnIDs;
 
 use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
 

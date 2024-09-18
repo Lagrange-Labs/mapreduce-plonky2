@@ -310,9 +310,8 @@ where
             None
         };
         let mut row_paths = array::from_fn(|_| RowPath::default());
-        let mut result_values = array::from_fn(|_| 
-            vec![U256::default(); results_structure.output_ids.len()]
-        );
+        let mut result_values =
+            array::from_fn(|_| vec![U256::default(); results_structure.output_ids.len()]);
         let row_proofs = matching_rows
             .iter()
             .enumerate()
