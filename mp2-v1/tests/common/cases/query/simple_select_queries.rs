@@ -97,7 +97,7 @@ pub(crate) async fn prove_query<'a>(
     };
     let current_epoch = index_tree_info.tree.current_epoch();
     let mut matching_rows_input = vec![];
-    for ((key, epoch, result), res) in matching_rows.into_iter().zip(&results) {
+    for (key, epoch, result) in matching_rows.into_iter() {
         let row_proof = prove_single_row(
             planner.ctx,
             &row_tree_info,
