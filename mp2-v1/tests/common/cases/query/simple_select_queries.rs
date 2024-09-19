@@ -149,6 +149,7 @@ pub(crate) async fn prove_query<'a>(
         &planner.pis.result,
         planner.query.limit.unwrap(),
         planner.query.offset.unwrap(),
+        false,
     )?;
     info!("Generating revelation proof");
     let final_proof = planner.ctx.run_query_proof(

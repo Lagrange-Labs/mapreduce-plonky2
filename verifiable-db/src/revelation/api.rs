@@ -1,4 +1,4 @@
-use std::{array, iter::repeat};
+use std::{array, cmp::Ordering, collections::BTreeSet, iter::repeat};
 
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
@@ -9,6 +9,7 @@ use mp2_common::{
     default_config,
     poseidon::H,
     proof::{deserialize_proof, ProofWithVK},
+    u256::is_less_than_or_equal_to_u256_arr,
     C, D, F,
 };
 use plonky2::{
@@ -57,7 +58,7 @@ use super::{
     },
     NUM_QUERY_IO, PI_LEN,
 };
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 /// Data structure employed to provide input data related to a matching row
 /// for the revelation circuit with unproven offset
 pub struct MatchingRow {
@@ -77,6 +78,53 @@ impl MatchingRow {
             path,
             result,
         }
+    }
+}
+
+impl PartialOrd for MatchingRow {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MatchingRow {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let (left, right) = match self.result.len().cmp(&other.result.len()) {
+            Ordering::Less => {
+                let target_len = other.result.len();
+                (
+                    self.result
+                        .iter()
+                        .chain(repeat(&U256::default()))
+                        .take(target_len)
+                        .cloned()
+                        .collect_vec(),
+                    other.result.clone(),
+                )
+            }
+            Ordering::Equal => (self.result.clone(), other.result.clone()),
+            Ordering::Greater => {
+                let target_len = self.result.len();
+                (
+                    self.result.clone(),
+                    other
+                        .result
+                        .iter()
+                        .chain(repeat(&U256::default()))
+                        .take(target_len)
+                        .cloned()
+                        .collect_vec(),
+                )
+            }
+        };
+        let (is_smaller, is_eq) = is_less_than_or_equal_to_u256_arr(&left, &right);
+        if is_smaller {
+            return Ordering::Less;
+        }
+        if is_eq {
+            return Ordering::Equal;
+        }
+        Ordering::Greater
     }
 }
 
@@ -275,6 +323,7 @@ where
     /// - `predicate_operations`: Operations employed in the query to compute the filtering predicate in the `WHERE` clause
     /// - `results_structure`: Data about the operations and items returned in the `SELECT` clause of the query
     /// - `limit, offset`: limit and offset values specified in the query
+    /// - `distinct`: Flag specifying whether the DISTINCT keyword was specified in the query
     pub fn new_revelation_unproven_offset(
         preprocessing_proof: Vec<u8>,
         matching_rows: Vec<MatchingRow>,
@@ -286,6 +335,7 @@ where
         results_structure: &ResultStructure,
         limit: u64,
         offset: u64,
+        distinct: bool,
     ) -> Result<Self>
     where
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
@@ -309,6 +359,8 @@ where
         } else {
             None
         };
+        // sort matching rows according to result values, which is needed to enforce DISTINCT
+        let matching_rows = matching_rows.into_iter().collect::<BTreeSet<_>>();
         let mut row_paths = array::from_fn(|_| RowPath::default());
         let mut result_values =
             array::from_fn(|_| vec![U256::default(); results_structure.output_ids.len()]);
@@ -334,6 +386,7 @@ where
             result_values,
             limit,
             offset,
+            distinct,
             placeholder_inputs,
         )?;
 

@@ -1812,6 +1812,7 @@ mod tests {
                 .iter()
                 .map(|id| id.to_canonical_u64())
                 .collect_vec(),
+            false,
         );
         let query_bounds = QueryBounds::new(
             &placeholders,

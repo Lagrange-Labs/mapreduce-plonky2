@@ -337,6 +337,7 @@ pub struct ResultStructure {
     pub output_items: Vec<OutputItem>,
     pub output_ids: Vec<F>,
     pub output_variant: Output,
+    pub distinct: Option<bool>,
 }
 
 impl ResultStructure {
@@ -378,6 +379,7 @@ impl ResultStructure {
                 .map(|id| id.to_field())
                 .collect_vec(),
             output_variant: Output::Aggregation,
+            distinct: None,
         }
     }
 
@@ -385,12 +387,14 @@ impl ResultStructure {
         result_operations: Vec<BasicOperation>,
         output_items: Vec<OutputItem>,
         output_ids: Vec<u64>,
+        distinct: bool,
     ) -> Self {
         Self {
             result_operations,
             output_items,
             output_ids: output_ids.into_iter().map(|id| id.to_field()).collect_vec(),
             output_variant: Output::NoAggregation,
+            distinct: Some(distinct),
         }
     }
 

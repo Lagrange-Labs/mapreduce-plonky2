@@ -53,7 +53,7 @@ use crate::{
     query::{
         aggregation::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
         api::{CircuitInput as QueryCircuitInput, Parameters},
-        computational_hash_ids::{AggregationOperation, ColumnIDs},
+        computational_hash_ids::{AggregationOperation, ColumnIDs, Identifiers, ResultIdentifier},
         merkle_path::{MerklePathGadget, MerklePathTargetInputs},
         public_inputs::PublicInputs as QueryProofPublicInputs,
         universal_circuit::{
@@ -159,6 +159,8 @@ pub(crate) struct RevelationWires<
     results: [UInt256Target; S * L],
     limit: Target,
     offset: Target,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    distinct: BoolTarget,
     check_placeholder_wires: CheckPlaceholderInputWires<PH, PP>,
 }
 
@@ -217,11 +219,13 @@ pub struct RevelationCircuit<
     results: [U256; S * L],
     limit: u64,
     offset: u64,
+    /// Boolean flag specifying whether DISTINCT keyword must be applied to results
+    distinct: bool,
     /// Input values employed by the `CheckPlaceholderGadget`
     check_placeholder_inputs: CheckPlaceholderGadget<PH, PP>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 /// Data structure containing all the information needed to verify the membership of
 /// a row in a tree representing a table
 pub struct RowPath {
@@ -290,6 +294,7 @@ where
         results: [Vec<U256>; L],
         limit: u64,
         offset: u64,
+        distinct: bool,
         placeholder_inputs: CheckPlaceholderGadget<PH, PP>,
     ) -> Result<Self> {
         let mut row_tree_paths = [MerklePathGadget::<ROW_TREE_MAX_DEPTH>::default(); L];
@@ -342,6 +347,7 @@ where
             results: results.try_into().unwrap(),
             limit,
             offset,
+            distinct,
             check_placeholder_inputs: placeholder_inputs,
         })
     }
@@ -358,6 +364,7 @@ where
             array::from_fn(|_| array::from_fn(|_| NodeInfoTarget::build(b)));
         let is_row_node_leaf = array::from_fn(|_| b.add_virtual_bool_target_safe());
         let is_item_included = array::from_fn(|_| b.add_virtual_bool_target_safe());
+        let distinct = b.add_virtual_bool_target_safe();
         let ids = b.add_virtual_target_arr();
         let results = b.add_virtual_u256_arr_unsafe(); // unsafe should be ok since they are matched against the order-agnostic digest
                                                        // computed by the universal query circuit
@@ -377,12 +384,20 @@ where
         let mut overflow = _false;
         let mut row_paths = vec![];
         let mut index_paths = vec![];
+        let mut max_result = None;
+        // Flag employed to enforce that the matching rows are all placed in the initial slots;
+        // this is a requirement to ensure that the check for DISTINCT is sound
+        let mut only_matching_rows = _true;
         row_proofs
             .into_iter()
             .enumerate()
             .for_each(|(i, row_proof)| {
                 let index_ids = row_proof.index_ids_target();
                 let is_matching_row = b.is_equal(row_proof.num_matching_rows_target(), one);
+                // ensure that once `is_matching_row = false`, then it will be false for all
+                // subsequent iterations
+                only_matching_rows = b.and(only_matching_rows, is_matching_row);
+                b.connect(only_matching_rows.target, is_matching_row.target);
                 let row_node_hash = {
                     // if the node storing the current row is a leaf node in rows tree, then
                     // the hash of such node is already computed by `row_proof`; otherwise,
@@ -437,6 +452,21 @@ where
                 let in_range = b.and(is_matching_row, in_range);
                 b.connect(in_range.target, is_matching_row.target);
 
+                // enforce DISTINCT only for actual results: we enforce the i-th actual result is strictly smaller
+                // than the (i+1)-th actual result
+                max_result = if let Some(res) = &max_result {
+                    let current_result: [UInt256Target; S] =
+                        get_result(i).to_vec().try_into().unwrap();
+                    let is_smaller = b.is_less_than_or_equal_to_u256_arr(res, &current_result).0;
+                    // flag specifying whether we must enforce DISTINCT for the current result or not
+                    let must_be_enforced = b.and(is_matching_row, distinct);
+                    let is_smaller = b.and(must_be_enforced, is_smaller);
+                    b.connect(is_smaller.target, must_be_enforced.target);
+                    Some(current_result)
+                } else {
+                    Some(get_result(i).to_vec().try_into().unwrap())
+                };
+
                 // Expose results for this row.
                 // First, we compute the digest of the results corresponding to this row, as computed in the universal
                 // query circuit, to check that the results correspond to the one computed by that circuit
@@ -487,6 +517,10 @@ where
             &max_query,
             &check_placeholder_wires.input_wires.placeholder_values[1],
         );
+
+        // Add the information about DISTINCT keyword being used or not to the computational hash
+        let computational_hash =
+            ResultIdentifier::result_id_hash_circuit(b, computational_hash, &distinct);
 
         // Add the hash of placeholder identifiers and pre-processing metadata
         // hash to the computational hash:
@@ -540,6 +574,7 @@ where
             results,
             limit,
             offset,
+            distinct,
             check_placeholder_wires: check_placeholder_wires.input_wires,
         }
     }
@@ -584,6 +619,7 @@ where
         pw.set_target_arr(&wires.ids, &self.ids);
         pw.set_target(wires.limit, self.limit.to_field());
         pw.set_target(wires.offset, self.offset.to_field());
+        pw.set_bool_target(wires.distinct, self.distinct);
         self.check_placeholder_inputs
             .assign(pw, &wires.check_placeholder_wires);
     }
@@ -787,7 +823,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::{array, iter::once};
+    use std::{array, cmp::Ordering, iter::once};
 
     use alloy::primitives::U256;
     use futures::{stream, StreamExt};
@@ -795,6 +831,7 @@ mod tests {
     use mp2_common::{
         group_hashing::map_to_curve_point,
         types::{HashOutput, CURVE_TARGET_LEN},
+        u256::is_less_than_or_equal_to_u256_arr,
         utils::{Fieldable, ToFields},
         C, D, F,
     };
@@ -900,8 +937,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_revelation_unproven_offset_circuit() {
+    // test function for this revelation circuit. If `distinct` is true, then the
+    // results are enforced to be distinct
+    async fn test_revelation_unproven_offset_circuit(distinct: bool) {
         const ROW_TREE_MAX_DEPTH: usize = 10;
         const INDEX_TREE_MAX_DEPTH: usize = 10;
         const L: usize = 5;
@@ -1125,8 +1163,19 @@ mod tests {
 
         // sample final results and set order-agnostic digests in row_pis proofs accordingly
         const NUM_ACTUAL_ITEMS_PER_OUTPUT: usize = 4;
-        let results: [[U256; NUM_ACTUAL_ITEMS_PER_OUTPUT]; L] =
+        let mut results: [[U256; NUM_ACTUAL_ITEMS_PER_OUTPUT]; L] =
             array::from_fn(|_| array::from_fn(|_| gen_random_u256(rng)));
+        // sort them to ensure that DISTINCT constraints are satisfied
+        results.sort_by(|a, b| {
+            let (is_smaller, is_eq) = is_less_than_or_equal_to_u256_arr(a, b);
+            if is_smaller {
+                return Ordering::Less;
+            }
+            if is_eq {
+                return Ordering::Equal;
+            }
+            Ordering::Greater
+        });
         // random ids of output items
         let ids: [F; NUM_ACTUAL_ITEMS_PER_OUTPUT] = F::rand_array();
 
@@ -1223,6 +1272,7 @@ mod tests {
                     results.map(|res| res.to_vec()),
                     0,
                     0,
+                    false,
                     test_placeholders.check_placeholder_inputs,
                 )
                 .unwrap(),
@@ -1231,5 +1281,15 @@ mod tests {
             };
 
         let proof = run_circuit::<F, D, C, _>(circuit);
+    }
+
+    #[tokio::test]
+    async fn test_revelation_unproven_offset_circuit_no_distinct() {
+        test_revelation_unproven_offset_circuit(false).await
+    }
+
+    #[tokio::test]
+    async fn test_revelation_unproven_offset_circuit_distinct() {
+        test_revelation_unproven_offset_circuit(true).await
     }
 }

@@ -150,6 +150,8 @@ pub(crate) struct Assembler<'a, C: ContextProvider> {
     /// cryptographic column ID.
     columns: Vec<u64>,
     secondary_index_bounds: Bounds,
+    /// Flag specifying whether DISTINCT keyword is employed in the query
+    distinct: bool,
 }
 impl<'a, C: ContextProvider> Assembler<'a, C> {
     /// Create a new empty [`Resolver`]
@@ -161,6 +163,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
             constants: Default::default(),
             columns: Vec::new(),
             secondary_index_bounds: Default::default(),
+            distinct: false,
         }
     }
 
@@ -657,6 +660,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     self.query_ops.ops.clone(),
                     root_scope.metadata().outputs.clone(),
                     vec![0; root_scope.metadata().outputs.len()],
+                    self.distinct,
                 )
             } else if root_scope
                 .metadata()
@@ -934,6 +938,7 @@ impl<'a, C: ContextProvider> AstVisitor for Assembler<'a, C> {
     }
 
     fn post_select(&mut self, select: &Select) -> Result<()> {
+        self.distinct = select.distinct.is_some();
         if let Some(where_clause) = select.selection.as_ref() {
             // As the expression are traversed depth-first, the top level
             // expression will mechnically find itself at the last position, as
