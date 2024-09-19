@@ -53,7 +53,7 @@ impl TestContext {
         let mut workplan = ut.into_workplan();
 
         while let Some(Next::Ready(wk)) = workplan.next() {
-            let k = &wk.k;
+            let k = wk.k();
             let (context, cell) = tree.fetch_with_context(&k).await;
 
             let proof = if context.is_leaf() {

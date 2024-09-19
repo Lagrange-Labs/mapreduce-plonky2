@@ -44,7 +44,7 @@ impl TestContext {
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(wk)) = workplan.next() {
-            let k = &wk.k;
+            let k = wk.k();
             let (context, node) = t.fetch_with_context(&k).await;
             let row_proof_key = RowProofIdentifier {
                 table: table_id.clone(),

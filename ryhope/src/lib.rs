@@ -152,7 +152,7 @@ where
         while let Some(Next::Ready(item)) = plan.next() {
             let c = self
                 .tree
-                .node_context(&item.k, &self.storage)
+                .node_context(item.k(), &self.storage)
                 .await
                 .unwrap();
             let mut child_data = vec![];
@@ -164,10 +164,13 @@ where
                 }
             }
 
-            let mut payload = self.storage.data().fetch(&item.k).await;
+            let mut payload = self.storage.data().fetch(item.k()).await;
             payload.aggregate(child_data.into_iter());
             plan.done(&item)?;
-            self.storage.data_mut().store(item.k, payload).await?
+            self.storage
+                .data_mut()
+                .store(item.k().to_owned(), payload)
+                .await?
         }
         Ok(())
     }

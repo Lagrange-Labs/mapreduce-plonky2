@@ -181,13 +181,14 @@ impl<K: Debug + Clone + Hash + Eq> UpdateTree<K> {
         let mut idx = HashMap::new();
         for old_node_i in self.descendants(new_root) {
             let i = nodes.len();
-            let k = self.node(old_node_i).k.to_owned();
+            let old_node = self.node(old_node_i);
+            let k = old_node.k.to_owned();
             idx.insert(self.node(old_node_i).k.clone(), i);
             nodes.push(UpdateTreeNode {
+                k,
                 parent: None,
                 children: BTreeSet::new(),
-                k,
-                is_path_end: true,
+                is_path_end: old_node.is_path_end,
             });
         }
 
@@ -211,7 +212,6 @@ impl<K: Debug + Clone + Hash + Eq> UpdateTree<K> {
                 .iter()
                 .map(|old_child_i| idx[&self.node(*old_child_i).k])
                 .collect();
-            nodes[new_node_i].is_path_end = nodes[new_node_i].children.is_empty();
         }
 
         UpdateTree {
@@ -363,12 +363,26 @@ pub enum Next<T: Clone> {
 
 /// The items that are produced by the [`WorkPlan`].
 #[derive(Clone, Serialize, Deserialize)]
-pub struct WorkplanItem<K: Clone + Hash + Eq + Debug> {
-    /// The key
-    pub k: K,
-    /// The subtree representing the batch contained in this item; it may
-    /// degenerate to a single element if the batch size was 1.
-    pub subtree: UpdateTree<K>,
+pub enum WorkplanItem<K: Clone + Hash + Eq + Debug> {
+    Subtree {
+        /// The key where the subtree is rooted in the global [`UpdateTree`].
+        k: K,
+        /// The subtree representing the batch contained in this item; it may
+        /// degenerate to a single element if the batch size was 1.
+        subtree: UpdateTree<K>,
+    },
+    Node {
+        /// The leaf key
+        k: K,
+        is_path_end: bool,
+    },
+}
+impl<K: Clone + Hash + Eq + Debug> WorkplanItem<K> {
+    pub fn k(&self) -> &K {
+        match self {
+            WorkplanItem::Subtree { k, .. } | WorkplanItem::Node { k, .. } => k,
+        }
+    }
 }
 
 /// An update plan to recompute all the hashes of the touched nodes stored in a
@@ -409,11 +423,11 @@ impl<T: Debug + Clone + Hash + Eq> UpdatePlan<T> {
         let i = *self
             .t
             .idx
-            .get(&item.k)
+            .get(&item.k())
             .ok_or_else(|| anyhow!("unknwown key"))?;
 
         // May happen when restarting a plan
-        self.anchors.retain(|k| *k != item.k);
+        self.anchors.retain(|k| k != item.k());
 
         // Root node is hardcoded to 0
         if i == 0 {
@@ -443,8 +457,11 @@ impl<T: Debug + Clone + Hash + Eq> UpdatePlan<T> {
     /// traversal of the tree.
     fn find_next_subtree(&mut self) -> Option<WorkplanItem<T>> {
         self.anchors.pop().map(|anchor| {
-            let spin_off_root = if self.batch_size == 1 {
-                self.t.idx[&anchor]
+            if self.batch_size == 1 {
+                WorkplanItem::Node {
+                    is_path_end: self.t.nodes[self.t.idx[&anchor]].is_path_end,
+                    k: anchor,
+                }
             } else {
                 // Move up the tree from the first anchor to the furthest
                 // ancestor satisfying the batch size.
@@ -466,12 +483,10 @@ impl<T: Debug + Clone + Hash + Eq> UpdatePlan<T> {
                     )
                 }
 
-                spin_off_root
-            };
-
-            WorkplanItem {
-                k: self.t.node(spin_off_root).k.clone(),
-                subtree: self.t.spin_off(spin_off_root),
+                WorkplanItem::Subtree {
+                    k: self.t.node(spin_off_root).k.clone(),
+                    subtree: self.t.spin_off(spin_off_root),
+                }
             }
         })
     }
@@ -493,9 +508,12 @@ impl<T: Debug + Clone + Hash + Eq> Iterator for UpdatePlan<T> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::{
-        storage::{memory::InMemory, updatetree::Next},
+        storage::{
+            memory::InMemory,
+            updatetree::{Next, WorkplanItem},
+        },
         tree::sbbst,
     };
 
@@ -524,7 +542,7 @@ mod test {
         loop {
             let mut done = vec![];
             while let Some(Next::Ready(k)) = workplan.next() {
-                println!("Doing {}", k.k);
+                println!("Doing {}", k.k());
                 done.push(k);
                 workplan.t.print();
             }
@@ -570,10 +588,18 @@ mod test {
             let mut count_done = 0;
 
             while let Some(Next::Ready(item)) = workplan.next() {
-                workplan.t.print();
-                item.subtree.print();
+                match &item {
+                    WorkplanItem::Subtree { subtree, .. } => {
+                        workplan.t.print();
+                        subtree.print();
+                        count_done += subtree.nodes.len();
+                    }
+                    WorkplanItem::Node { k, .. } => {
+                        println!("k = {k:?}");
+                        count_done += 1;
+                    }
+                }
                 workplan.done(&item).unwrap();
-                count_done += item.subtree.nodes.len();
             }
 
             assert_eq!(count_done, mt.nodes.len());
