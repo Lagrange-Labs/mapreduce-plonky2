@@ -5,6 +5,14 @@ pragma solidity ^0.8.0;
 import "./verifier.sol";
 
 contract Query is Verifier {
+    // Query errors
+    enum QueryError {
+        // No error
+        NoError,
+        // A computation overflow error during the query process
+        ComputationOverflow
+    }
+
     // Top 3 bits mask.
     uint256 constant TOP_THREE_BIT_MASK = ~(uint256(7) << 253);
 
@@ -57,9 +65,6 @@ contract Query is Verifier {
     uint32 constant PI_LEN =
         32 * (PI_REM_OFFSET - PI_OFFSET) + (REM_QUERY_OFFSET_POS + 1) * 4;
 
-    // A computation overflow error during the query process
-    error QueryComputationOverflow();
-
     // The query input struct passed into the processQuery function
     struct QueryInput {
         // Query limit parameter
@@ -84,6 +89,8 @@ contract Query is Verifier {
         uint256 totalMatchedRows;
         // Returned rows of the current cursor
         bytes[] rows;
+        // Query error, return NoError if none.
+        QueryError error;
     }
 
     // The processQuery function does the followings:
@@ -104,10 +111,10 @@ contract Query is Verifier {
         verifyPublicInputs(data, groth16Inputs);
 
         // 3. Ensure the items of public inputs equal as expected for query.
-        verifyQuery(data, query);
+        QueryError error = verifyQuery(data, query);
 
         // 4. Parse and return the query output.
-        return parseOutput(data);
+        return parseOutput(data, error);
     }
 
     // Parse the Groth16 proofs and inputs, do verification, and returns the Groth16 inputs.
@@ -182,7 +189,7 @@ contract Query is Verifier {
     function verifyQuery(
         bytes32[] calldata data,
         QueryInput memory query
-    ) internal pure {
+    ) internal pure returns (QueryError) {
         // Retrieve the last Uint256 of public inputs.
         bytes32 rem = data[PI_REM_OFFSET];
 
@@ -240,14 +247,16 @@ contract Query is Verifier {
 
         // Throw an error if overflow.
         uint32 overflow = uint32(bytes4(rem << (REM_OVERFLOW_POS * 32)));
-        if (overflow != 0) {
-            revert QueryComputationOverflow();
+        if (overflow == 0) {
+            return QueryError.NoError;
         }
+        return QueryError.ComputationOverflow;
     }
 
     // Parse the query output from the public inputs.
     function parseOutput(
-        bytes32[] calldata data
+        bytes32[] calldata data,
+        QueryError error
     ) internal pure returns (QueryOutput memory) {
         bytes32 rem = data[PI_REM_OFFSET];
 
@@ -278,7 +287,8 @@ contract Query is Verifier {
 
         QueryOutput memory output = QueryOutput({
             totalMatchedRows: totalMatchedRows,
-            rows: rows
+            rows: rows,
+            error: error
         });
 
         return output;

@@ -80,7 +80,7 @@ fn verify_query_in_solidity(asset_dir: &str) {
     let abi = JsonAbi::parse(["function processQuery( \
             bytes32[], \
             tuple(uint32, uint32, uint64, uint64, bytes32, bytes32, uint256[]) \
-        ) public view returns (tuple(uint256, bytes[]))"])
+        ) public view returns (tuple(uint256, bytes[], uint256))"])
     .unwrap();
     let contract = Interface::new(abi);
 
@@ -146,12 +146,18 @@ fn verify_query_in_solidity(asset_dir: &str) {
     if let DynSolValue::Tuple(mut output) = output.pop().unwrap() {
         assert_eq!(
             output.len(),
-            2,
-            "Query output must have `total_matched_rows` and `rows`."
+            3,
+            "Query output must have `total_matched_rows`, `rows` and `error`."
         );
+        let error = output.pop().unwrap();
         let rows = output.pop().unwrap();
         let total_matched_rows = output.pop().unwrap();
 
+        // Check the error.
+        assert_eq!(
+            error,
+            DynSolValue::Uint(U256::from(query_output.error), 256)
+        );
         // Check the total matched rows.
         assert_eq!(
             total_matched_rows,
