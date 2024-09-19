@@ -7,7 +7,7 @@ use futures::{
     FutureExt,
 };
 use itertools::Itertools;
-use log::debug;
+use log::{debug, info};
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
     cell::{self, Cell, CellTreeKey, MerkleCellTree},
@@ -451,6 +451,7 @@ impl Table {
             .map(|param| prepare_param(*param))
             .collect_vec();
         let connection = self.db_pool.get().await.unwrap();
+        info!("executing statement {query}");
         let res = connection
             .query(
                 query,

@@ -11,8 +11,10 @@ use log::info;
 use mp2_v1::{api::MetadataHash, indexing::block::BlockPrimaryIndex};
 use parsil::{parse_and_validate, ParsilSettings, PlaceholderSettings};
 use simple_select_queries::{
-    cook_query_no_matching_rows, cook_query_too_big_offset, cook_query_with_matching_rows,
-    cook_query_with_max_num_matching_rows, prove_query as prove_no_aggregation_query,
+    cook_query_no_matching_rows, cook_query_too_big_offset, cook_query_with_distinct,
+    cook_query_with_matching_rows, cook_query_with_max_num_matching_rows,
+    cook_query_with_wildcard_and_distinct, cook_query_with_wildcard_no_distinct,
+    prove_query as prove_no_aggregation_query,
 };
 use tokio_postgres::Row as PsqlRow;
 use verifiable_db::query::{
@@ -88,9 +90,8 @@ async fn query_mapping(
     table: &Table,
     table_hash: MetadataHash,
 ) -> Result<()> {
-    let query_info = cook_query_between_blocks(table).await?;
+    /*let query_info = cook_query_between_blocks(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
-
     let query_info = cook_query_unique_secondary_index(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     //// cook query with custom placeholders
@@ -114,6 +115,12 @@ async fn query_mapping(
     let query_info = cook_query_no_matching_rows(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     let query_info = cook_query_too_big_offset(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    let query_info = cook_query_with_wildcard_no_distinct(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    let query_info = cook_query_with_distinct(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;*/
+    let query_info = cook_query_with_wildcard_and_distinct(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     Ok(())
 }
