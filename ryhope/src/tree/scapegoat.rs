@@ -800,7 +800,7 @@ where
             s.nodes()
                 .try_fetch(root)
                 .await
-                .expect(&format!("Failed to fetch {:?}", root))
+                .unwrap_or_else(|| panic!("Failed to fetch {:?}", root))
                 .subtree_size
         } else {
             0

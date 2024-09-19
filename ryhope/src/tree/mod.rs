@@ -79,10 +79,8 @@ pub trait TreeTopology: Default + Send + Sync {
                 let current_depth = todo.1;
                 if current_depth <= depth {
                     if let Some(children) = self.children(&todo.0, s).await {
-                        for child in [children.0, children.1] {
-                            if let Some(child) = child {
-                                todos.push((child, current_depth + 1));
-                            }
+                        for child in [children.0, children.1].into_iter().flatten() {
+                            todos.push((child, current_depth + 1));
                         }
                     }
                     descendance.insert(todo.0);

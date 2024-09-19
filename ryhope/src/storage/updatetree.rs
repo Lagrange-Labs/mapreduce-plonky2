@@ -305,7 +305,7 @@ impl<K: Clone + Hash + Eq + Sync + Send + std::fmt::Debug> UpdateTree<K> {
                 panic!("duplicated key found");
             }
             self.nodes.push(UpdateTreeNode {
-                parent: parent_i.clone(),
+                parent: parent_i,
                 children: BTreeSet::new(),
                 k: current.clone(),
                 is_path_end: context.is_leaf(),
@@ -366,6 +366,8 @@ pub enum Next<T: Clone> {
 pub struct WorkplanItem<K: Clone + Hash + Eq + Debug> {
     /// The key
     pub k: K,
+    /// The subtree representing the batch contained in this item; it may
+    /// degenerate to a single element if the batch size was 1.
     pub subtree: UpdateTree<K>,
 }
 
@@ -500,6 +502,8 @@ mod test {
     use super::UpdateTree;
 
     #[test]
+    /// Test a 1-sized batch update tree, i.e. a leaf-first traversal of the
+    /// tree.
     fn mt_creation() {
         let paths = [
             vec![1, 3, 57, 9, 0],
@@ -537,6 +541,9 @@ mod test {
     }
 
     #[test]
+    /// Test the traversal of the plan for multiple batch sizes, including 0 and
+    /// a batch size larger than the tree itself (i.e. the whole tree is
+    /// consumed at once).
     fn mt_creation_staggered() {
         simple_logger::init().unwrap();
 
