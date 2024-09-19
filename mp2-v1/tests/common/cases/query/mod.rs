@@ -90,7 +90,7 @@ async fn query_mapping(
     table: &Table,
     table_hash: MetadataHash,
 ) -> Result<()> {
-    /*let query_info = cook_query_between_blocks(table).await?;
+    let query_info = cook_query_between_blocks(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     let query_info = cook_query_unique_secondary_index(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
@@ -119,7 +119,7 @@ async fn query_mapping(
     let query_info = cook_query_with_wildcard_no_distinct(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     let query_info = cook_query_with_distinct(table).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await?;*/
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     let query_info = cook_query_with_wildcard_and_distinct(table).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     Ok(())
