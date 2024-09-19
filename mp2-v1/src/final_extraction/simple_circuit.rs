@@ -162,6 +162,6 @@ mod test {
             circuit: TableDimension::Single.into(),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        pis.check_proof_public_inputs(&proof, TableDimension::Compound, None);
+        pis.check_proof_public_inputs(&proof, TableDimension::Single, None);
     }
 }

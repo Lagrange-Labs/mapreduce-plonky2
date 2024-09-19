@@ -27,7 +27,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
+use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 pub use public_inputs::PublicInputs;
 
 /// A cell represents a column || value tuple. it can be given in the cells tree or as the
@@ -60,7 +60,7 @@ impl Cell {
         child_digest: SplitDigestPoint,
     ) -> SplitDigestPoint {
         let sd = self.split_digest();
-        sd.accumulate_with_proof(&child_digest)
+        sd.accumulate(&child_digest)
     }
 }
 

@@ -202,6 +202,7 @@ pub fn circuit_hashed_scalar_mul(
     let scalar = b.biguint_to_nonnative(&int);
     b.curve_scalar_mul(base, &scalar)
 }
+
 /// Common function to compute the digest of the block tree which uses a special format using
 /// scalar multiplication
 /// NOTE: if the multiplier is NEUTRAL, then it only returns the base. This is to accomodate both a
@@ -221,7 +222,7 @@ pub fn field_hashed_scalar_mul(inputs: Vec<F>, base: Point) -> Point {
     let hash = H::hash_no_pad(&inputs);
     let int = hash_to_int_value(hash);
     let scalar = Scalar::from_noncanonical_biguint(int);
-    base * scalar
+    scalar * base
 }
 /// Common function to compute a scalar multiplication in the format of HashToInt(inputs) * base
 /// NOTE: if the multiplier is NEUTRAL, then it only returns the base. This is to accomodate both a
@@ -230,5 +231,74 @@ pub fn cond_field_hashed_scalar_mul(mul: Point, base: Point) -> Point {
     match mul.equals(Point::NEUTRAL) {
         true => base,
         false => field_hashed_scalar_mul(mul.to_fields(), base),
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use plonky2::{
+        field::types::Sample,
+        iop::{target::Target, witness::PartialWitness},
+    };
+    use plonky2_ecdsa::curve::curve_types::base_to_scalar;
+    use plonky2_ecgfp5::{
+        curve::curve::{Point, WeierstrassPoint},
+        gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget, PartialWitnessCurve},
+    };
+
+    use crate::{
+        digest::DigestTarget,
+        types::CBuilder,
+        utils::{FromFields, FromTargets, ToFields, ToTargets},
+        C, D, F,
+    };
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+
+    use super::{
+        circuit_hashed_scalar_mul, field_hashed_scalar_mul, weierstrass_to_point,
+        CircuitBuilderGroupHashing,
+    };
+
+    #[derive(Clone, Debug)]
+    struct TestScalarMul {
+        // point that we hash and move to biguint to scalar
+        scalar: Point,
+        base: Point,
+    }
+
+    struct TestScalarMulWires {
+        scalar: CurveTarget,
+        base: CurveTarget,
+    }
+
+    impl UserCircuit<F, D> for TestScalarMul {
+        type Wires = TestScalarMulWires;
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let p = b.add_virtual_curve_target();
+            let base = b.add_virtual_curve_target();
+            let result = circuit_hashed_scalar_mul(b, p, base);
+            b.register_curve_public_input(result);
+            TestScalarMulWires { scalar: p, base }
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_curve_target(wires.base, self.base.to_weierstrass());
+            pw.set_curve_target(wires.scalar, self.scalar.to_weierstrass());
+        }
+    }
+
+    #[test]
+    fn test_scalar_mul() {
+        let base = Point::rand();
+        let scalar = Point::rand();
+        let circuit = TestScalarMul { base, scalar };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        let exp = field_hashed_scalar_mul(scalar.to_fields(), base);
+        let f = WeierstrassPoint::from_fields(&proof.public_inputs);
+        let point = weierstrass_to_point(&f);
+        assert_eq!(exp, point);
     }
 }

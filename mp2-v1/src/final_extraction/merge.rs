@@ -1,3 +1,5 @@
+use crate::values_extraction;
+
 use super::{
     api::{FinalExtractionBuilderParams, NUM_IO},
     base_circuit::{self, BaseCircuitProofWires},
@@ -56,8 +58,8 @@ impl MergeTable {
         let base_wires =
             base_circuit::BaseCircuit::build(b, block_pi, contract_pi, vec![table_a, table_b]);
 
-        let table_a = super::PublicInputs::from_slice(table_a);
-        let table_b = super::PublicInputs::from_slice(table_b);
+        let table_a = values_extraction::PublicInputs::new(table_a);
+        let table_b = values_extraction::PublicInputs::new(table_b);
 
         // prepare the table digest if they're compound or not
         // At final extraction, if we're extracting a single type table, then we need to digest one
@@ -68,8 +70,8 @@ impl MergeTable {
         // mappings X mappings, or arrays X mappings etc.
         let table_a_dimension = TableDimensionWire(b.add_virtual_bool_target_safe());
         let table_b_dimension = TableDimensionWire(b.add_virtual_bool_target_safe());
-        let digest_a = table_a_dimension.conditional_row_digest(b, table_a.value_set_digest());
-        let digest_b = table_b_dimension.conditional_row_digest(b, table_b.value_set_digest());
+        let digest_a = table_a_dimension.conditional_row_digest(b, table_a.values_digest_target());
+        let digest_b = table_b_dimension.conditional_row_digest(b, table_b.values_digest_target());
 
         // Combine the two digest depending on which table is the multiplier
         let is_table_a_multiplier = b.add_virtual_bool_target_safe();
@@ -86,8 +88,8 @@ impl MergeTable {
 
         // combine the table metadata hashes together
         // NOTE: this combine twice the contract address for example
-        let input_a = table_a.metadata_set_digest();
-        let input_b = table_b.metadata_set_digest();
+        let input_a = table_a.metadata_digest_target();
+        let input_b = table_b.metadata_digest_target();
         // here we simply add the metadata digests, since we don't really need to differentiate in
         // the metadata who is the multiplier or not.
         let new_md = b.curve_add(input_a, input_b);
@@ -176,11 +178,8 @@ mod test {
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
     use mp2_common::{
-        group_hashing::{
-            cond_field_hashed_scalar_mul, field_hashed_scalar_mul, weierstrass_to_point as wp,
-        },
-        keccak::PACKED_HASH_LEN,
-        rlp::MAX_KEY_NIBBLE_LEN,
+        digest::SplitDigestPoint,
+        group_hashing::{field_hashed_scalar_mul, weierstrass_to_point as wp},
         utils::ToFields,
         C, D, F,
     };
@@ -189,7 +188,6 @@ mod test {
         field::types::Sample,
         iop::witness::{PartialWitness, WitnessWrite},
     };
-    use plonky2_ecgfp5::curve::curve::Point;
 
     use super::MergeTableWires;
 
@@ -236,35 +234,38 @@ mod test {
     }
 
     #[test]
-    fn test_merge_table() {
+    fn test_final_merge_circuit() {
         let pis_a = ProofsPi::random();
         let pis_b = pis_a.generate_new_random_value();
+        let table_a_dimension = TableDimension::Single;
+        let table_b_dimension = TableDimension::Compound;
+
         let table_a_multiplier = true;
         let test_circuit = TestMergeCircuit {
             pis_a: pis_a.clone(),
             pis_b: pis_b.values_pi.clone(),
             circuit: MergeTable {
                 is_table_a_multiplier: table_a_multiplier,
-                dimension_a: TableDimension::Single,
-                dimension_b: TableDimension::Compound,
+                dimension_a: table_a_dimension,
+                dimension_b: table_b_dimension,
             },
         };
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
 
-        let (scalar, base) = match table_a_multiplier {
-            true => (
-                pis_a.value_inputs().values_digest(),
-                pis_b.value_inputs().values_digest(),
-            ),
-            false => (
-                pis_b.value_inputs().values_digest(),
-                pis_a.value_inputs().values_digest(),
-            ),
-        };
-        let combined_digest = field_hashed_scalar_mul(scalar.to_fields(), wp(&base));
-        assert_eq!(combined_digest, wp(&pi.value_point()));
+        let table_a_digest =
+            table_a_dimension.conditional_row_digest(wp(&pis_a.value_inputs().values_digest()));
+        let table_b_digest =
+            table_b_dimension.conditional_row_digest(wp(&pis_b.value_inputs().values_digest()));
+        let split_a =
+            SplitDigestPoint::from_single_digest_point(table_a_digest, table_a_multiplier);
+        let split_b =
+            SplitDigestPoint::from_single_digest_point(table_b_digest, !table_a_multiplier);
+        let split_total = split_a.accumulate(&split_b);
+        let final_digest = split_total.combine_to_row_digest();
+        // testing...
+        assert_eq!(final_digest, wp(&pi.value_point()));
         let combined_metadata = wp(&pis_a.value_inputs().metadata_digest())
             + wp(&pis_b.value_inputs().metadata_digest());
         assert_eq!(combined_metadata, wp(&pi.metadata_point()));

@@ -1,6 +1,6 @@
 use crate::group_hashing::{
     circuit_hashed_scalar_mul, cond_circuit_hashed_scalar_mul, cond_field_hashed_scalar_mul,
-    map_to_curve_point,
+    field_hashed_scalar_mul, map_to_curve_point,
 };
 use crate::serialization::{deserialize, serialize};
 use crate::types::CBuilder;
@@ -45,6 +45,13 @@ impl TableDimension {
             TableDimension::Compound => pw.set_bool_target(wire.0, true),
         }
     }
+
+    pub fn conditional_row_digest(&self, digest: Digest) -> Digest {
+        match self {
+            TableDimension::Single => map_to_curve_point(&digest.to_fields()),
+            TableDimension::Compound => digest,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, From, Into, Eq, PartialEq)]
@@ -63,6 +70,9 @@ impl TableDimensionWire {
         // there is no need to apply digest one more time. On the other hand, if it is not
         // compounded, i.e. there is only a sum of cells digest, then we need to create the "row"
         // digest, thus applying the digest one more time.
+        //
+        // TableDimension::Single => false,
+        // TableDimension::Compound => true,
         c.curve_select(self.0, digest, single)
     }
 }
@@ -87,16 +97,19 @@ impl SplitDigestPoint {
             multiplier: mult,
         }
     }
-    pub fn accumulate_with_proof(&self, child_digest: &Self) -> Self {
+    pub fn accumulate(&self, other: &Self) -> Self {
         Self {
-            individual: child_digest.individual + self.individual,
-            multiplier: child_digest.multiplier + self.multiplier,
+            individual: other.individual + self.individual,
+            multiplier: other.multiplier + self.multiplier,
         }
     }
 
     pub fn cond_combine_to_row_digest(&self) -> Digest {
         let base = map_to_curve_point(&self.individual.to_fields());
         cond_field_hashed_scalar_mul(self.multiplier, base)
+    }
+    pub fn combine_to_row_digest(&self) -> Digest {
+        field_hashed_scalar_mul(self.multiplier.to_fields(), self.individual)
     }
 }
 
