@@ -98,7 +98,9 @@ pub struct MerkleTreeKvDb<
         + FromSettings<T::State>
         + Send
         + Sync,
-> {
+> where
+    T::Key: Debug,
+{
     /// The tree where the key hierarchy will be stored
     tree: T,
     /// The storage where to store the node associated data
@@ -113,6 +115,8 @@ impl<
         V: NodePayload + Send + Sync,
         S: TransactionalStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
     > MerkleTreeKvDb<T, V, S>
+where
+    T::Key: Debug,
 {
     /// Create a new `EpochTreeStorage` from the given parameters.
     ///
