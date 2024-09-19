@@ -1,7 +1,7 @@
 //! Utility structs and functions used for integration tests
 use alloy::primitives::Address;
 use anyhow::Result;
-use cases::TableSourceSlot;
+use cases::table_source::TableSource;
 use mp2_v1::api::{metadata_hash, MetadataHash, SlotInputs};
 use serde::{Deserialize, Serialize};
 use table::TableColumns;
@@ -25,7 +25,6 @@ mod values_extraction;
 use std::path::PathBuf;
 
 use anyhow::Context;
-pub(crate) use cases::TestCase;
 pub(crate) use context::TestContext;
 
 use mp2_common::{proof::ProofWithVK, types::HashOutput};
@@ -71,15 +70,15 @@ pub struct TableInfo {
     pub public_name: String,
     pub contract_address: Address,
     pub chain_id: u64,
-    pub source: TableSourceSlot,
+    pub source: TableSource,
 }
 
 impl TableInfo {
     pub fn metadata_hash(&self) -> MetadataHash {
         let slots = match &self.source {
-            TableSourceSlot::Mapping((mapping, _)) => SlotInputs::Mapping(mapping.slot),
+            TableSource::Mapping((mapping, _)) => SlotInputs::Mapping(mapping.slot),
             // mapping with length not tested right now
-            TableSourceSlot::SingleValues(args) => SlotInputs::Simple(args.slots.clone()),
+            TableSource::SingleValues(args) => SlotInputs::Simple(args.slots.clone()),
         };
         metadata_hash(slots, &self.contract_address, self.chain_id, vec![])
     }

@@ -33,7 +33,7 @@ pub use public_inputs::PublicInputs;
 /// A cell represents a column || value tuple. it can be given in the cells tree or as the
 /// secondary index value in the row tree.
 #[derive(Clone, Debug, Serialize, Deserialize, Constructor)]
-pub struct Cell {
+pub(crate) struct Cell {
     /// identifier of the column for the secondary index
     pub identifier: F,
     /// secondary index value

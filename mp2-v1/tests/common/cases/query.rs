@@ -26,7 +26,7 @@ use alloy::primitives::U256;
 use anyhow::{bail, Context, Result};
 use futures::{stream, FutureExt, StreamExt};
 
-use super::TableSourceSlot;
+use super::TableSource;
 use itertools::Itertools;
 use log::*;
 use mp2_common::{
@@ -113,7 +113,7 @@ pub type RevelationPublicInputs<'a> =
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
     match &t.source {
-        TableSourceSlot::Mapping(_) => query_mapping(ctx, &table, t.metadata_hash()).await?,
+        TableSource::Mapping(_) => query_mapping(ctx, &table, t.metadata_hash()).await?,
         _ => unimplemented!("yet"),
     }
     Ok(())

@@ -20,7 +20,11 @@ use crate::common::{
     bindings::simple::Simple::{self, MappingChange, MappingOperation},
     cases::{
         identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column, MappingIndex,
+        identifier_single_var_column,
+        table_source::{
+            LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs,
+            SingleValuesExtractionArgs, UniqueMappingEntry,
+        },
     },
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
@@ -28,13 +32,12 @@ use crate::common::{
         CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TreeRowUpdate,
         TreeUpdateType,
     },
-    TestContext,
+    TableInfo, TestContext,
 };
 
 use super::{
-    super::bindings::simple::Simple::SimpleInstance, ContractExtractionArgs, LengthExtractionArgs,
-    MappingValuesExtractionArgs, SingleValuesExtractionArgs, TableSourceSlot, TestCase,
-    UniqueMappingEntry,
+    super::bindings::simple::Simple::SimpleInstance, ContractExtractionArgs, TableIndexing,
+    TableSource,
 };
 use alloy::{
     contract::private::{Network, Provider, Transport},
@@ -77,7 +80,7 @@ pub enum TreeFactory {
     Load,
 }
 
-impl TestCase {
+impl TableIndexing {
     pub fn table(&self) -> &Table {
         &self.table
     }
@@ -98,7 +101,7 @@ impl TestCase {
         );
         let contract_address = contract.address();
 
-        let source = TableSourceSlot::SingleValues(SingleValuesExtractionArgs {
+        let source = TableSource::SingleValues(SingleValuesExtractionArgs {
             slots: SINGLE_SLOTS.to_vec(),
         });
 
@@ -198,7 +201,7 @@ impl TestCase {
             mapping_keys: vec![],
         };
 
-        let source = TableSourceSlot::Mapping((
+        let source = TableSource::Mapping((
             mapping_args,
             Some(LengthExtractionArgs {
                 slot: LENGTH_SLOT,
@@ -486,9 +489,9 @@ impl TestCase {
         // we construct the proof key for both mappings and single variable in the same way since
         // it is derived from the table id which should be different for any tables we create.
         let proof_key = ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));
-        let (value_proof, compound, length, metadata_hash) = match self.source {
+        let (value_proof, dimension, length, metadata_hash) = match self.source {
             // first lets do without length
-            TableSourceSlot::Mapping((ref mapping, _)) => {
+            TableSource::Mapping((ref mapping, _)) => {
                 let mapping_root_proof = match ctx.storage.get_proof_exact(&proof_key) {
                     Ok(p) => p,
                     Err(_) => {
@@ -524,7 +527,7 @@ impl TestCase {
                     metadata_hash,
                 )
             }
-            TableSourceSlot::SingleValues(ref args) => {
+            TableSource::SingleValues(ref args) => {
                 let single_value_proof = match ctx.storage.get_proof_exact(&proof_key) {
                     Ok(p) => p,
                     Err(_) => {
@@ -561,7 +564,7 @@ impl TestCase {
         // no need to generate it if it's already present
         if ctx.storage.get_proof_exact(&final_key).is_err() {
             let proof = ctx
-                .prove_final_extraction(contract_proof, value_proof, block_proof, compound, length)
+                .prove_final_extraction(contract_proof, value_proof, block_proof, dimension, length)
                 .await
                 .unwrap();
             ctx.storage
@@ -634,7 +637,7 @@ impl TestCase {
             // In the backend, we translate that in the "table world" to a deletion and an insertion.
             // Having such optimization could be done later on, need to properly evaluate the cost
             // of it.
-            TableSourceSlot::Mapping((ref mut mapping, _)) => {
+            TableSource::Mapping((ref mut mapping, _)) => {
                 //let idx = thread_rng().gen_range(0..mapping.mapping_keys.len());
                 //let idx = mapping.mapping_keys.len() - 1;
                 // easier to debug
@@ -748,7 +751,7 @@ impl TestCase {
                     chain_id,
                 )
             }
-            TableSourceSlot::SingleValues(_) => {
+            TableSource::SingleValues(_) => {
                 let old_table_values = self.current_table_row_values(ctx).await;
                 // we can take the first one since we're asking for single value and there is only
                 // one row
@@ -796,7 +799,7 @@ impl TestCase {
         ctx: &mut TestContext,
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         match self.source {
-            TableSourceSlot::Mapping((ref mut mapping, _)) => {
+            TableSource::Mapping((ref mut mapping, _)) => {
                 let index = mapping.index.clone();
                 let slot = mapping.slot;
                 let init_pair = (next_value(), next_address());
@@ -831,7 +834,7 @@ impl TestCase {
                     chain_id,
                 )
             }
-            TableSourceSlot::SingleValues(_) => {
+            TableSource::SingleValues(_) => {
                 let contract_update = SimpleSingleValue {
                     s1: true,
                     s2: U256::from(10),
@@ -868,8 +871,8 @@ impl TestCase {
         ctx: &mut TestContext,
     ) -> Vec<TableRowValues<BlockPrimaryIndex>> {
         match self.source {
-            TableSourceSlot::Mapping((_, _)) => unimplemented!("not use of it"),
-            TableSourceSlot::SingleValues(ref args) => {
+            TableSource::Mapping((_, _)) => unimplemented!("not use of it"),
+            TableSource::SingleValues(ref args) => {
                 let mut secondary_cell = None;
                 let mut rest_cells = Vec::new();
                 for slot in args.slots.iter() {
@@ -1298,4 +1301,16 @@ fn next_value() -> U256 {
     let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let bv: U256 = *BASE_VALUE;
     bv + U256::from(shift)
+}
+
+impl TableIndexing {
+    pub fn table_info(&self) -> TableInfo {
+        TableInfo {
+            public_name: self.table.public_name.clone(),
+            chain_id: self.chain_id,
+            columns: self.table.columns.clone(),
+            contract_address: self.contract_address,
+            source: self.source.clone(),
+        }
+    }
 }

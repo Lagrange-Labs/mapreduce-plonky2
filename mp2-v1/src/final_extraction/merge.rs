@@ -254,14 +254,18 @@ mod test {
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
 
+        // first compute the right digest for each table according to their dimension
         let table_a_digest =
             table_a_dimension.conditional_row_digest(wp(&pis_a.value_inputs().values_digest()));
         let table_b_digest =
             table_b_dimension.conditional_row_digest(wp(&pis_b.value_inputs().values_digest()));
+        // then do the splitting according to how we want to merge them (i.e. which is the
+        // multiplier)
         let split_a =
             SplitDigestPoint::from_single_digest_point(table_a_digest, table_a_multiplier);
         let split_b =
             SplitDigestPoint::from_single_digest_point(table_b_digest, !table_a_multiplier);
+        // then finally combined them into a single one
         let split_total = split_a.accumulate(&split_b);
         let final_digest = split_total.combine_to_row_digest();
         // testing...

@@ -21,11 +21,12 @@ use common::{
             test_query, GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput,
             MAX_NUM_PLACEHOLDERS,
         },
+        TableIndexing,
     },
     context::{self, ParamsType, TestContextConfig},
     proof_storage::{ProofKV, DEFAULT_PROOF_STORE_FOLDER},
     table::Table,
-    TableInfo, TestCase,
+    TableInfo,
 };
 use envconfig::Envconfig;
 use log::info;
@@ -79,14 +80,14 @@ async fn integrated_indexing() -> Result<()> {
     ctx.build_params(ParamsType::Indexing).unwrap();
 
     info!("Params built");
-    let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
+    let mut single = TableIndexing::single_value_test_case(&ctx, TreeFactory::New).await?;
     let changes = vec![
         ChangeType::Update(UpdateType::Rest),
         ChangeType::Silent,
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
     single.run(&mut ctx, changes.clone()).await?;
-    let mut mapping = TestCase::mapping_test_case(&ctx, TreeFactory::New).await?;
+    let mut mapping = TableIndexing::mapping_test_case(&ctx, TreeFactory::New).await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
