@@ -453,16 +453,23 @@ pub(crate) async fn cook_query_with_wildcard(
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
+    let value_column = &table.columns.rest[0].name;
     let table_name = &table.public_name;
 
-    let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
+    let added_placeholder = U256::from(42);
+
+    let placeholders = Placeholders::from((
+        vec![(PlaceholderId::Generic(1), added_placeholder)],
+        U256::from(min_block),
+        U256::from(max_block),
+    ));
 
     let limit = MAX_NUM_OUTPUTS;
     let offset = 0;
 
     let query_str = if distinct {
         format!(
-            "SELECT DISTINCT *
+            "SELECT DISTINCT *, {value_column} + $1
                     FROM {table_name}
                     WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                     AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
@@ -471,7 +478,7 @@ pub(crate) async fn cook_query_with_wildcard(
         )
     } else {
         format!(
-            "SELECT *
+            "SELECT *, {value_column} + $1
                     FROM {table_name}
                     WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                     AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}

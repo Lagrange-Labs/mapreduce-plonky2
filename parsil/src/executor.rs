@@ -710,6 +710,48 @@ impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
     }
 
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
+        let replace_wildcard = || {
+            // we expand the Wildcard by replacing it will all the columns of the original table
+            assert_eq!(select.from.len(), 1); // single table queries
+            let table = &select.from.first().unwrap().relation;
+            match table {
+                TableFactor::Derived {
+                    lateral,
+                    subquery,
+                    alias,
+                } => {
+                    subquery
+                        .as_ref()
+                        .body
+                        .as_ref()
+                        .as_select()
+                        .unwrap()
+                        .projection
+                        .iter()
+                        .filter_map(|item| {
+                            let expr = match item {
+                                SelectItem::ExprWithAlias { expr, alias } => {
+                                    Expr::Identifier(alias.clone())
+                                }
+                                SelectItem::UnnamedExpr(expr) => expr.clone(),
+                                _ => unreachable!(),
+                            };
+                            // we need to filter out KEY and EPOCH from the columns expanded by the Wildcard,
+                            // as these ones are the columns over which we need to apply DISTINCT
+                            match &expr {
+                                Expr::Identifier(ident)
+                                    if ident.value == EPOCH || ident.value == KEY =>
+                                {
+                                    None
+                                }
+                                _ => Some(expr),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                }
+                _ => unreachable!(), // post_table_factor makes `TableFactor::Derived`
+            }
+        };
         // need to:
         // 1. add KEY and EPOCH to existing `SelectItem`s
         // 2. Ensure that, if there is DISTINCT keyword in the original query,
@@ -725,70 +767,28 @@ impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
                         SelectItem::UnnamedExpr(expr) => vec![expr.clone()],
                         SelectItem::ExprWithAlias { expr, alias } => vec![expr.clone()], // we don't care about alias here
                         SelectItem::QualifiedWildcard(_, _) => unreachable!(),
-                        SelectItem::Wildcard(_) => {
-                            // we expand the Wildcard by replacing it will all the columns of the original table
-                            assert_eq!(select.from.len(), 1); // single table queries
-                            let table = &select.from.first().unwrap().relation;
-                            match table {
-                                TableFactor::Derived {
-                                    lateral,
-                                    subquery,
-                                    alias,
-                                } => {
-                                    subquery
-                                        .as_ref()
-                                        .body
-                                        .as_ref()
-                                        .as_select()
-                                        .unwrap()
-                                        .projection
-                                        .iter()
-                                        .filter_map(|item| {
-                                            let expr = match item {
-                                                SelectItem::ExprWithAlias { expr, alias } => {
-                                                    Expr::Identifier(alias.clone())
-                                                }
-                                                SelectItem::UnnamedExpr(expr) => expr.clone(),
-                                                _ => unreachable!(),
-                                            };
-                                            // we need to filter out KEY and EPOCH from the columns expanded by the Wildcard,
-                                            // as these ones are the columns over which we need to apply DISTINCT
-                                            match &expr {
-                                                Expr::Identifier(ident)
-                                                    if ident.value == EPOCH
-                                                        || ident.value == KEY =>
-                                                {
-                                                    None
-                                                }
-                                                _ => Some(expr),
-                                            }
-                                        })
-                                        .collect::<Vec<_>>()
-                                }
-                                _ => unreachable!(), // post_table_factor makes `TableFactor::Derived`
-                            }
-                        }
+                        SelectItem::Wildcard(_) => replace_wildcard(),
                     }
                 })
                 .collect::<Vec<_>>();
             *distinct = Distinct::On(items)
         }
-        // we add KEY and EPOCH to existing `SelectItem`s unless the query is `SELECT *`;
-        // in the original query is `SELECT *`, we don't need to do modify `SelectItem`s,
-        // as KEY and EPOCH will already be returned by `SELECT *`
-        if !select.projection.iter().all(|item| match item {
-            SelectItem::Wildcard(_) => true,
-            _ => false,
-        }) {
-            select.projection = vec![
-                &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
-                &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(EPOCH))),
-            ]
-            .into_iter()
-            .chain(&select.projection)
-            .cloned()
-            .collect();
-        }
+        // we add KEY and EPOCH to existing `SelectItem`s
+        select.projection = vec![
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(EPOCH))),
+        ]
+        .into_iter()
+        .chain(select.projection.iter().flat_map(|item| {
+            match item {
+                SelectItem::Wildcard(_) => replace_wildcard()
+                    .into_iter()
+                    .map(|expr| SelectItem::UnnamedExpr(expr))
+                    .collect(),
+                _ => vec![item.clone()],
+            }
+        }))
+        .collect();
 
         Ok(())
     }
