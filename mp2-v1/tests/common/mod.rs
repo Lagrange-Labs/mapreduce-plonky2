@@ -79,6 +79,7 @@ impl TableInfo {
             TableSource::Mapping((mapping, _)) => SlotInputs::Mapping(mapping.slot),
             // mapping with length not tested right now
             TableSource::SingleValues(args) => SlotInputs::Simple(args.slots.clone()),
+            TableSource::Merge(_) => unimplemented!("yet"),
         };
         metadata_hash(slots, &self.contract_address, self.chain_id, vec![])
     }

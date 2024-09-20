@@ -9,8 +9,9 @@ use std::{
 
 use crate::common::{
     cases::{
-        indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
+        indexing::BLOCK_COLUMN_NAME,
         planner::{IndexInfo, RowInfo},
+        table_source::BASE_VALUE,
     },
     proof_storage::ProofKey,
     rowtree::MerkleRowTree,

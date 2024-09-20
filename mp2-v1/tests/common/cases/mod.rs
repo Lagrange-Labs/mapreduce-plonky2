@@ -1,6 +1,7 @@
 //! Define test cases
 
 use alloy::primitives::{Address, U256};
+use contract::Contract;
 use indexing::TableRowValues;
 use log::debug;
 use mp2_common::eth::StorageSlot;
@@ -24,6 +25,7 @@ use super::{
     TableInfo,
 };
 
+pub mod contract;
 pub mod indexing;
 pub mod planner;
 pub mod query;
@@ -32,8 +34,7 @@ pub mod table_source;
 /// Test case definition
 pub(crate) struct TableIndexing {
     pub(crate) table: Table,
-    pub(crate) chain_id: u64,
-    pub(crate) contract_address: Address,
+    pub(crate) contract: Contract,
     pub(crate) contract_extraction: ContractExtractionArgs,
     pub(crate) source: TableSource,
 }
