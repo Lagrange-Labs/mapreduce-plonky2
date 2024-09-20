@@ -47,7 +47,7 @@ impl SimpleCircuit {
             &base_wires.bh,
             &base_wires.prev_bh,
             &final_dv.to_targets(),
-            &base_wires.dm[0].to_targets(),
+            &base_wires.dm.to_targets(),
             &base_wires.bn.to_targets(),
         )
         .register_args(b);

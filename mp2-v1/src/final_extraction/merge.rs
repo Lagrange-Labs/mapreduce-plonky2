@@ -86,19 +86,11 @@ impl MergeTable {
         let combined_split = split_a.accumulate(b, &split_b);
         let new_dv = combined_split.combine_to_digest(b);
 
-        // combine the table metadata hashes together
-        // NOTE: this combine twice the contract address for example
-        let input_a = table_a.metadata_digest_target();
-        let input_b = table_b.metadata_digest_target();
-        // here we simply add the metadata digests, since we don't really need to differentiate in
-        // the metadata who is the multiplier or not.
-        let new_md = b.curve_add(input_a, input_b);
-
         PublicInputs::new(
             &base_wires.bh,
             &base_wires.prev_bh,
             &new_dv.to_targets(),
-            &new_md.to_targets(),
+            &base_wires.dm.to_targets(),
             &base_wires.bn.to_targets(),
         )
         .register_args(b);
@@ -271,7 +263,8 @@ mod test {
         // testing...
         assert_eq!(final_digest, wp(&pi.value_point()));
         let combined_metadata = wp(&pis_a.value_inputs().metadata_digest())
-            + wp(&pis_b.value_inputs().metadata_digest());
+            + wp(&pis_b.value_inputs().metadata_digest())
+            + wp(&pis_a.contract_inputs().metadata_point());
         assert_eq!(combined_metadata, wp(&pi.metadata_point()));
     }
 }

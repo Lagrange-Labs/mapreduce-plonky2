@@ -41,8 +41,8 @@ pub struct BaseCircuit {}
 /// THe const generic represent how many value proof we want to verify in that step.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseWires {
-    #[serde(serialize_with = "serialize_vec", deserialize_with = "deserialize_vec")]
-    pub(crate) dm: Vec<CurveTarget>,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    pub(crate) dm: CurveTarget,
     pub(crate) bh: [Target; PACKED_HASH_LEN],
     pub(crate) prev_bh: [Target; PACKED_HASH_LEN],
     pub(crate) bn: UInt256Target,
@@ -77,24 +77,18 @@ impl BaseCircuit {
         }
         b.connect(contract_pi.mpt_key().pointer, minus_one);
 
-        let metadatas = value_pis
-            .iter()
-            .map(|value_pi| {
-                b.add_curve_point(&[
-                    value_pi.metadata_digest_target(),
-                    contract_pi.metadata_digest(),
-                ])
-            })
-            .collect_vec()
-            .try_into()
-            .unwrap();
+        let mut base_dm = value_pis[0].metadata_digest_target();
+        for vp in value_pis.iter().skip(1) {
+            base_dm = b.add_curve_point(&[base_dm, vp.metadata_digest_target()]);
+        }
+        let final_dm = b.add_curve_point(&[base_dm, contract_pi.metadata_digest()]);
 
         // enforce block_pi.state_root == contract_pi.state_root
         block_pi
             .state_root()
             .enforce_equal(b, &contract_pi.root_hash());
         BaseWires {
-            dm: metadatas,
+            dm: final_dm,
             bh: block_pi.block_hash_raw().try_into().unwrap(), // safe to unwrap as we give as input the slice of the expected length
             prev_bh: block_pi.prev_block_hash_raw().try_into().unwrap(), // safe to unwrap as we give as input the slice of the expected length
             bn: block_pi.block_number(),

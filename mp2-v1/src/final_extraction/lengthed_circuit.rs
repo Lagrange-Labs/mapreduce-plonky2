@@ -62,7 +62,7 @@ impl LengthedCircuit {
             .root_hash()
             .enforce_equal(b, &value_pi.root_hash_target());
         // 0 because there is only one value proof to verify
-        let final_dm = b.curve_add(base_wires.dm[0], len_pi.metadata_digest());
+        let final_dm = b.curve_add(base_wires.dm, len_pi.metadata_digest());
         PublicInputs::new(
             &base_wires.bh,
             &base_wires.prev_bh,

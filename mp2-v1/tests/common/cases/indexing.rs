@@ -771,26 +771,53 @@ pub enum UpdateType {
 pub struct TableRowValues<PrimaryIndex> {
     // cells without the secondary index
     pub current_cells: Vec<Cell>,
-    pub current_secondary: SecondaryIndexCell,
+    pub current_secondary: Option<SecondaryIndexCell>,
     pub primary: PrimaryIndex,
 }
 
 impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex> {
     // Compute the update from the current values and the new values
-    pub fn compute_update(&self, new: &Self) -> Vec<TableRowUpdate<PrimaryIndex>> {
+    pub fn compute_update(
+        &self,
+        new: &Self,
+        // It can be that this table doesn't have a secondary index by itself since it is being
+        // part of a "merged" table.
+        // NOTE: this is a hack and integrated test should probably be refactored in some part to
+        // avoid such hacks. Right now this is fine since we do single * mapping so the secondary
+        // key always is defined from the mapping.
+        default_secondary: Option<SecondaryIndexCell>,
+    ) -> Vec<TableRowUpdate<PrimaryIndex>> {
         // this is initialization
         if self == &Self::default() {
             let cells_update = CellsUpdate {
                 previous_row_key: RowTreeKey::default(),
-                new_row_key: (&new.current_secondary).into(),
+                new_row_key: (new
+                    .current_secondary
+                    .as_ref()
+                    .or_else(|| default_secondary.as_ref())
+                    .expect("no secondary index cell given"))
+                .into(),
                 updated_cells: new.current_cells.clone(),
                 primary: new.primary.clone(),
             };
             return vec![TableRowUpdate::Insertion(
                 cells_update,
-                new.current_secondary.clone(),
+                new.current_secondary
+                    .as_ref()
+                    .expect("compute_update should always get secondary cell")
+                    .clone(),
             )];
         }
+        let new_secondary = new
+            .current_secondary
+            .clone()
+            .or_else(|| default_secondary.clone())
+            .expect("can't get new secondary column value");
+        let previous_secondary = self
+            .current_secondary
+            .clone()
+            .or_else(|| default_secondary.clone())
+            .expect("can't get previous secondary column value");
 
         // the cells columns are fixed so we can compare
         assert!(self.current_cells.len() == new.current_cells.len());
@@ -814,26 +841,26 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex
         let cells_update = CellsUpdate {
             // Both keys may be the same if the secondary index value
             // did not change
-            new_row_key: (&new.current_secondary).into(),
-            previous_row_key: (&self.current_secondary).into(),
+            new_row_key: (&new_secondary).into(),
+            previous_row_key: (&previous_secondary).into(),
             updated_cells,
             primary: new.primary.clone(),
         };
 
         assert!(
-            self.current_secondary.cell().identifier() == new.current_secondary.cell().identifier(),
+            previous_secondary.cell().identifier() == new_secondary.cell().identifier(),
             "ids are different between updates?"
         );
         assert!(
-            self.current_secondary.rest() == new.current_secondary.rest(),
+            previous_secondary.rest() == new_secondary.rest(),
             "computing update from different row"
         );
-        match self.current_secondary.cell() != new.current_secondary.cell() {
+        match previous_secondary.cell() != new_secondary.cell() {
             true => vec![
                 // We first delete then insert a new row in the case of a secondary index value
                 // change
-                TableRowUpdate::Deletion((&self.current_secondary).into()),
-                TableRowUpdate::Insertion(cells_update, new.current_secondary.clone()),
+                TableRowUpdate::Deletion(previous_secondary.into()),
+                TableRowUpdate::Insertion(cells_update, new_secondary.clone()),
             ],
             // no update on the secondary index value
             false if !cells_update.updated_cells.is_empty() => {

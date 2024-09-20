@@ -187,23 +187,19 @@ pub fn merge_metadata_hash(
     table_a: SlotInputs,
     table_b: SlotInputs,
 ) -> MetadataHash {
-    let md_a = partial_metadata_from(table_a, &contract, chain_id, extra.clone());
-    let md_b = partial_metadata_from(table_b, &contract, chain_id, extra);
+    let md_a = value_metadata(table_a, &contract, chain_id, extra.clone());
+    let md_b = value_metadata(table_b, &contract, chain_id, extra);
     let combined = md_a + md_b;
+    let contract_digest = contract_metadata_digest(&contract);
     // the block id is only added at the index tree level, the rest is combined at the final
     // extraction level.
-    combine_digest_and_block(combined)
+    combine_digest_and_block(combined + contract_digest)
 }
 
 // NOTE: the block id is added at the end of the digest computation only once - this returns only
 // the part without the block id
-fn partial_metadata_from(
-    inputs: SlotInputs,
-    contract: &Address,
-    chain_id: u64,
-    extra: Vec<u8>,
-) -> Digest {
-    let digest = match inputs {
+fn value_metadata(inputs: SlotInputs, contract: &Address, chain_id: u64, extra: Vec<u8>) -> Digest {
+    match inputs {
         SlotInputs::Simple(slots) => slots.iter().fold(Point::NEUTRAL, |acc, &slot| {
             let id = identifier_single_var_column(slot, contract, chain_id, extra.clone());
             let digest = compute_leaf_single_metadata_digest(id, slot);
@@ -215,10 +211,7 @@ fn partial_metadata_from(
             let length_digest = length_metadata_digest(length_slot, mapping_slot);
             mapping_digest + length_digest
         }
-    };
-    // add contract digest
-    let contract_digest = contract_metadata_digest(contract);
-    contract_digest + digest
+    }
 }
 fn metadata_digest_mapping(address: &Address, chain_id: u64, extra: Vec<u8>, slot: u8) -> Digest {
     let key_id = identifier_for_mapping_key_column(slot, address, chain_id, extra.clone());
@@ -244,7 +237,9 @@ pub fn metadata_hash(
     extra: Vec<u8>,
 ) -> MetadataHash {
     // closure to compute the metadata digest associated to a mapping variable
-    let digest = partial_metadata_from(slot_input, contract_address, chain_id, extra);
+    let value_digest = value_metadata(slot_input, contract_address, chain_id, extra);
+    // add contract digest
+    let contract_digest = contract_metadata_digest(contract_address);
     // compute final hash
-    combine_digest_and_block(digest)
+    combine_digest_and_block(contract_digest + value_digest)
 }
