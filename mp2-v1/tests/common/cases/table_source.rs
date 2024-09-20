@@ -1,11 +1,16 @@
-use std::{assert_matches::assert_matches, str::FromStr, sync::atomic::AtomicU64};
+use std::{
+    assert_matches::assert_matches,
+    str::FromStr,
+    sync::atomic::{AtomicU64, AtomicUsize},
+};
 
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
     providers::Provider,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
+use futures::{future::BoxFuture, FutureExt};
 use log::{debug, info};
 use mp2_common::{
     digest::TableDimension,
@@ -14,7 +19,7 @@ use mp2_common::{
     types::HashOutput,
 };
 use mp2_v1::{
-    api::{metadata_hash, SlotInputs},
+    api::{merge_metadata_hash, metadata_hash, SlotInputs},
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
@@ -27,9 +32,11 @@ use mp2_v1::{
 };
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use verifiable_db::query::computational_hash_ids::Extraction;
 
 use crate::common::{
     cases::indexing::{MappingUpdate, SimpleSingleValue, TableRowValues},
+    final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
@@ -178,31 +185,14 @@ pub(crate) enum TableSource {
     Merge(MergeSource),
 }
 
-#[derive(Serialize, Deserialize, Debug, Hash, Clone, PartialEq, Eq)]
-pub struct MergeSource {
-    table_a: Box<TableSource>,
-    table_b: Box<TableSource>,
-    is_multiplier_a: bool,
-}
-
-impl MergeSource {
-    pub fn new(table_a: TableSource, table_b: TableSource, is_multiplier_a: bool) -> Self {
-        Self {
-            table_a: Box::new(table_a),
-            table_b: Box::new(table_b),
-            is_multiplier_a,
+impl TableSource {
+    pub fn slot_input(&self) -> SlotInputs {
+        match self {
+            TableSource::SingleValues(single) => SlotInputs::Simple(single.slots.clone()),
+            TableSource::Mapping((m, _)) => SlotInputs::Mapping(m.slot),
+            TableSource::Merge(_) => panic!("can't call slot inputs on merge table"),
         }
     }
-}
-
-pub struct ValueExtractionOutput {
-    pub(crate) value_proof: Vec<u8>,
-    pub(crate) table_dimension: TableDimension,
-    pub(crate) length_proof: Option<Vec<u8>>,
-    pub(crate) metadata_hash: HashOutput,
-}
-
-impl TableSource {
     pub fn slots(&self) -> Vec<u8> {
         match self {
             Self::SingleValues(s) => s.slots.clone(),
@@ -221,52 +211,66 @@ impl TableSource {
         }
     }
 
-    pub async fn init_contract_data(
-        &mut self,
-        ctx: &mut TestContext,
-        contract: &Contract,
-    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        match self {
-            TableSource::SingleValues(ref mut s) => s.init_contract_data(ctx, contract).await,
-            TableSource::Mapping((ref mut m, _)) => m.init_contract_data(ctx, contract).await,
-            TableSource::Merge(ref m) => unimplemented!("yet"),
+    pub fn init_contract_data<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+    ) -> BoxFuture<Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move {
+            match self {
+                TableSource::SingleValues(ref mut s) => s.init_contract_data(ctx, contract).await,
+                TableSource::Mapping((ref mut m, _)) => m.init_contract_data(ctx, contract).await,
+                TableSource::Merge(ref mut merge) => merge.init_contract_data(ctx, contract).await,
+            }
         }
+        .boxed()
     }
 
     pub async fn generate_extraction_proof(
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
-        proof_key: ProofKey,
-    ) -> Result<ValueExtractionOutput> {
+        value_key: ProofKey,
+    ) -> Result<(ExtractionProofInput, HashOutput)> {
         match self {
             // first lets do without length
             TableSource::Mapping((ref mapping, _)) => {
                 mapping
-                    .generate_extraction_proof(ctx, contract, proof_key)
+                    .generate_extraction_proof(ctx, contract, value_key)
                     .await
             }
             TableSource::SingleValues(ref args) => {
-                args.generate_extraction_proof(ctx, contract, proof_key)
+                args.generate_extraction_proof(ctx, contract, value_key)
                     .await
             }
-            TableSource::Merge(ref merge) => unimplemented!("yet"),
+            TableSource::Merge(ref merge) => {
+                merge
+                    .generate_extraction_proof(ctx, contract, value_key)
+                    .await
+            }
         }
     }
 
-    pub async fn random_contract_update(
-        &mut self,
-        ctx: &mut TestContext,
-        contract: &Contract,
+    pub fn random_contract_update<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
         c: ChangeType,
-    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        match self {
-            TableSource::Mapping((ref mut mapping, _)) => {
-                mapping.random_contract_update(ctx, contract, c).await
+    ) -> BoxFuture<Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move {
+            match self {
+                TableSource::Mapping((ref mut mapping, _)) => {
+                    mapping.random_contract_update(ctx, contract, c).await
+                }
+                TableSource::SingleValues(ref v) => {
+                    v.random_contract_update(ctx, contract, c).await
+                }
+                TableSource::Merge(ref mut merge) => {
+                    merge.random_contract_update(ctx, contract, c).await
+                }
             }
-            TableSource::SingleValues(ref v) => v.random_contract_update(ctx, contract, c).await,
-            TableSource::Merge(_) => unimplemented!("yet"),
         }
+        .boxed()
     }
 }
 
@@ -398,7 +402,7 @@ impl SingleValuesExtractionArgs {
         ctx: &mut TestContext,
         contract: &Contract,
         proof_key: ProofKey,
-    ) -> Result<ValueExtractionOutput> {
+    ) -> Result<(ExtractionProofInput, HashOutput)> {
         let chain_id = ctx.rpc.get_chain_id().await?;
 
         let single_value_proof = match ctx.storage.get_proof_exact(&proof_key) {
@@ -422,12 +426,12 @@ impl SingleValuesExtractionArgs {
         let slot_input = SlotInputs::Simple(self.slots.clone());
         let metadata_hash = metadata_hash(slot_input, &contract.address, chain_id, vec![]);
         // we're just proving a single set of a value
-        Ok(ValueExtractionOutput {
+        let input = ExtractionProofInput::Single(ExtractionTableProof {
+            dimension: TableDimension::Single,
             value_proof: single_value_proof,
-            table_dimension: TableDimension::Single,
             length_proof: None,
-            metadata_hash,
-        })
+        });
+        Ok((input, metadata_hash))
     }
 }
 
@@ -611,7 +615,7 @@ impl MappingValuesExtractionArgs {
         ctx: &mut TestContext,
         contract: &Contract,
         proof_key: ProofKey,
-    ) -> Result<ValueExtractionOutput> {
+    ) -> Result<(ExtractionProofInput, HashOutput)> {
         let chain_id = ctx.rpc.get_chain_id().await?;
         let mapping_root_proof = match ctx.storage.get_proof_exact(&proof_key) {
             Ok(p) => p,
@@ -639,13 +643,14 @@ impl MappingValuesExtractionArgs {
         let slot_input = SlotInputs::Mapping(self.slot);
         let metadata_hash = metadata_hash(slot_input, &contract.address, chain_id, vec![]);
         // it's a compoound value type of proof since we're not using the length
-        Ok(ValueExtractionOutput {
+        let input = ExtractionProofInput::Single(ExtractionTableProof {
+            dimension: TableDimension::Compound,
             value_proof: mapping_root_proof,
-            table_dimension: TableDimension::Compound,
             length_proof: None,
-            metadata_hash,
-        })
+        });
+        Ok((input, metadata_hash))
     }
+
     pub fn mapping_to_table_update(
         &self,
         block_number: BlockPrimaryIndex,
@@ -739,6 +744,97 @@ impl MappingValuesExtractionArgs {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Hash, Clone, PartialEq, Eq)]
+pub struct MergeSource {
+    // ASSUME table_a is single and table_b is mapping for now.
+    table_a: Box<TableSource>,
+    table_b: Box<TableSource>,
+    is_multiplier_a: bool,
+}
+
+impl MergeSource {
+    pub fn new(table_a: TableSource, table_b: TableSource, is_multiplier_a: bool) -> Self {
+        Self {
+            table_a: Box::new(table_a),
+            table_b: Box::new(table_b),
+            is_multiplier_a,
+        }
+    }
+    pub async fn init_contract_data(
+        &mut self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
+        // OK to call both sequentially since we only look a the block number after setting the
+        // initial data
+        let mut update_a = self.table_a.init_contract_data(ctx, contract).await;
+        let update_b = self.table_b.init_contract_data(ctx, contract).await;
+        update_a.extend(update_b);
+        update_a
+    }
+
+    pub async fn random_contract_update(
+        &mut self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        c: ChangeType,
+    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
+        // alternate between table a update or table b
+        // TODO: implement mixed update
+        match rotate() {
+            0 => self.table_a.random_contract_update(ctx, contract, c).await,
+            1 => self.table_b.random_contract_update(ctx, contract, c).await,
+            _ => panic!("bug in rotation"),
+        }
+    }
+
+    pub fn generate_extraction_proof<'a>(
+        &'a self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+        proof_key: ProofKey,
+    ) -> BoxFuture<Result<(ExtractionProofInput, HashOutput)>> {
+        async move {
+            let ProofKey::ValueExtraction((id, bn)) = proof_key else {
+                bail!("key wrong");
+            };
+            let id_a = id.clone() + "_a";
+            let id_b = id + "_b";
+            // generate the value extraction proof for the both table individually
+            let (extract_a, _) = self
+                .table_a
+                .generate_extraction_proof(ctx, contract, ProofKey::ValueExtraction((id_a, bn)))
+                .await?;
+            let ExtractionProofInput::Single(extract_a) = extract_a else {
+                bail!("can't merge non single tables")
+            };
+            let (extract_b, _) = self
+                .table_b
+                .generate_extraction_proof(ctx, contract, ProofKey::ValueExtraction((id_b, bn)))
+                .await?;
+            let ExtractionProofInput::Single(extract_b) = extract_b else {
+                bail!("can't merge non single tables")
+            };
+
+            // add the metadata hashes together - this is mostly for debugging
+            let md = merge_metadata_hash(
+                contract.address,
+                contract.chain_id,
+                vec![],
+                self.table_a.slot_input(),
+                self.table_b.slot_input(),
+            );
+            Ok((
+                ExtractionProofInput::Merge(MergeExtractionProof {
+                    single: extract_a,
+                    mapping: extract_b,
+                }),
+                md,
+            ))
+        }
+        .boxed()
+    }
+}
 /// Length extraction arguments (C.2)
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct LengthExtractionArgs {
@@ -756,6 +852,7 @@ pub(crate) struct ContractExtractionArgs {
 }
 
 static SHIFT: AtomicU64 = AtomicU64::new(0);
+static ROTATOR: AtomicUsize = AtomicUsize::new(0);
 
 use lazy_static::lazy_static;
 lazy_static! {
@@ -764,6 +861,10 @@ lazy_static! {
         Address::from_str("0xBA401cdAc1A3B6AEede21c9C4A483bE6c29F88C4").unwrap();
 }
 
+// can only be either 0 or 1
+pub fn rotate() -> usize {
+    ROTATOR.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 2
+}
 pub fn next_mapping_key() -> U256 {
     next_value()
 }

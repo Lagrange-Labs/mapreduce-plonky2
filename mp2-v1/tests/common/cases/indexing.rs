@@ -77,19 +77,13 @@ pub(crate) const BLOCK_COLUMN_NAME: &str = "block_number";
 pub(crate) const MAPPING_VALUE_COLUMN: &str = "map_value";
 pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
 
-pub enum TreeFactory {
-    New,
-    Load,
-}
-
 impl TableIndexing {
     pub fn table(&self) -> &Table {
         &self.table
     }
     pub(crate) async fn single_value_test_case(
-        ctx: &TestContext,
-        factory: TreeFactory,
-    ) -> Result<Self> {
+        ctx: &mut TestContext,
+    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -102,16 +96,19 @@ impl TableIndexing {
             contract.address()
         );
         let contract_address = contract.address();
+        let chain_id = ctx.rpc.get_chain_id().await.unwrap();
+        let contract = Contract {
+            address: *contract_address,
+            chain_id,
+        };
 
-        let source = TableSource::SingleValues(SingleValuesExtractionArgs {
+        let mut source = TableSource::SingleValues(SingleValuesExtractionArgs {
             index_slot: INDEX_SLOT,
             slots: SINGLE_SLOTS.to_vec(),
         });
+        let genesis_updates = source.init_contract_data(ctx, &contract).await;
 
-        // + 1 because we are going to deploy some update to contract in a transaction, which for
-        // Anvil means it's a new block
-        let indexing_genesis_block = ctx.block_number().await + 1;
-        let chain_id = ctx.rpc.get_chain_id().await.unwrap();
+        let indexing_genesis_block = ctx.block_number().await;
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their o
         // own way of defining their table.
@@ -148,26 +145,23 @@ impl TableIndexing {
                 })
                 .collect::<Vec<_>>(),
         };
-        let table = match factory {
-            TreeFactory::New => {
-                Table::new(indexing_genesis_block, "single_table".to_string(), columns).await
-            }
-            TreeFactory::Load => Table::load("single_table".to_string(), columns).await?,
-        };
-        Ok(Self {
-            source: source.clone(),
-            table,
-            contract: Contract {
-                address: *contract_address,
-                chain_id,
+        let table = Table::new(indexing_genesis_block, "single_table".to_string(), columns).await;
+        Ok((
+            Self {
+                source: source.clone(),
+                table,
+                contract,
+                contract_extraction: ContractExtractionArgs {
+                    slot: StorageSlot::Simple(CONTRACT_SLOT),
+                },
             },
-            contract_extraction: ContractExtractionArgs {
-                slot: StorageSlot::Simple(CONTRACT_SLOT),
-            },
-        })
+            genesis_updates,
+        ))
     }
 
-    pub(crate) async fn mapping_test_case(ctx: &TestContext, factory: TreeFactory) -> Result<Self> {
+    pub(crate) async fn mapping_test_case(
+        ctx: &mut TestContext,
+    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -181,11 +175,6 @@ impl TableIndexing {
         );
         let contract_address = contract.address();
         let chain_id = ctx.rpc.get_chain_id().await.unwrap();
-        // index genesis block is the first block where I start processing the data. it is one
-        // block more than the deploy block
-        // + 1 because we are going to deploy some update to contract in a transaction, which for
-        // Anvil means it's a new block
-        let index_genesis_block = ctx.block_number().await + 1;
         // to toggle off and on
         let value_as_index = true;
         let value_id =
@@ -206,14 +195,19 @@ impl TableIndexing {
             mapping_keys: vec![],
         };
 
-        let source = TableSource::Mapping((
+        let mut source = TableSource::Mapping((
             mapping_args,
             Some(LengthExtractionArgs {
                 slot: LENGTH_SLOT,
                 value: LENGTH_VALUE,
             }),
         ));
+        let contract = Contract {
+            address: *contract_address,
+            chain_id,
+        };
 
+        let table_row_updates = source.init_contract_data(ctx, &contract).await;
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their o
         // own way of defining their table.
@@ -245,38 +239,36 @@ impl TableIndexing {
             }],
         };
         debug!("MAPPING ZK COLUMNS -> {:?}", columns);
-        let table = match factory {
-            TreeFactory::New => {
-                Table::new(index_genesis_block, "mapping_table".to_string(), columns).await
-            }
-            TreeFactory::Load => Table::load("mapping_table".to_string(), columns).await?,
-        };
+        let index_genesis_block = ctx.block_number().await;
+        let table = Table::new(index_genesis_block, "mapping_table".to_string(), columns).await;
 
-        Ok(Self {
-            contract_extraction: ContractExtractionArgs {
-                slot: StorageSlot::Simple(CONTRACT_SLOT),
+        Ok((
+            Self {
+                contract_extraction: ContractExtractionArgs {
+                    slot: StorageSlot::Simple(CONTRACT_SLOT),
+                },
+                contract,
+                source,
+                table,
             },
-            contract: Contract {
-                address: *contract_address,
-                chain_id,
-            },
-            source,
-            table,
-        })
+            table_row_updates,
+        ))
     }
 
-    pub async fn run(&mut self, ctx: &mut TestContext, changes: Vec<ChangeType>) -> Result<()> {
+    pub async fn run(
+        &mut self,
+        ctx: &mut TestContext,
+        genesis_change: Vec<TableRowUpdate<BlockPrimaryIndex>>,
+        changes: Vec<ChangeType>,
+    ) -> Result<()> {
         // Call the contract function to set the test data.
-        // TODO: make it return an update for a full table, right now it's only for one row.
-        // to make when we deal with mappings
-        let table_row_updates = self.source.init_contract_data(ctx, &self.contract).await;
         log::info!("Applying initial updates to contract done");
         let bn = ctx.block_number().await as BlockPrimaryIndex;
 
         // we first run the initial preprocessing and db creation.
         let metadata_hash = self.run_mpt_preprocessing(ctx, bn).await?;
         // then we run the creation of our tree
-        self.run_lagrange_preprocessing(ctx, bn, table_row_updates, &metadata_hash)
+        self.run_lagrange_preprocessing(ctx, bn, genesis_change, &metadata_hash)
             .await?;
 
         log::info!("FIRST block {bn} finished proving. Moving on to update",);
@@ -497,24 +489,17 @@ impl TableIndexing {
         let table_id = &self.table.public_name.clone();
         // we construct the proof key for both mappings and single variable in the same way since
         // it is derived from the table id which should be different for any tables we create.
-        let proof_key = ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));
-
-        let extraction = self
-            .source
-            .generate_extraction_proof(ctx, &self.contract, proof_key)
-            .await?;
+        let value_key = ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));
         // final extraction for single variables combining the different proofs generated before
         let final_key = ProofKey::FinalExtraction((table_id.clone(), bn as BlockPrimaryIndex));
+        let (extraction, metadata_hash) = self
+            .source
+            .generate_extraction_proof(ctx, &self.contract, value_key)
+            .await?;
         // no need to generate it if it's already present
         if ctx.storage.get_proof_exact(&final_key).is_err() {
             let proof = ctx
-                .prove_final_extraction(
-                    contract_proof,
-                    extraction.value_proof,
-                    block_proof,
-                    extraction.table_dimension,
-                    extraction.length_proof,
-                )
+                .prove_final_extraction(contract_proof, block_proof, extraction)
                 .await
                 .unwrap();
             ctx.storage
@@ -523,7 +508,7 @@ impl TableIndexing {
             info!("Generated Final Extraction (C.5.1) proof for block {bn}");
         }
         info!("Generated ALL MPT preprocessing proofs for block {bn}");
-        Ok(extraction.metadata_hash)
+        Ok(metadata_hash)
     }
 }
 

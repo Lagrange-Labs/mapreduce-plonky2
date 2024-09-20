@@ -7,24 +7,54 @@ use mp2_v1::{
 use super::TestContext;
 use anyhow::Result;
 
+#[derive(Clone, Debug)]
+pub struct ExtractionTableProof {
+    pub value_proof: Vec<u8>,
+    pub dimension: TableDimension,
+    pub length_proof: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MergeExtractionProof {
+    // NOTE: Right now hardcoding for single and mapping but that can be generalized later easily.
+    pub single: ExtractionTableProof,
+    pub mapping: ExtractionTableProof,
+}
+
+pub enum ExtractionProofInput {
+    Single(ExtractionTableProof),
+    Merge(MergeExtractionProof),
+}
+
 impl TestContext {
     pub(crate) async fn prove_final_extraction(
         &self,
         contract_proof: Vec<u8>,
-        values_proof: Vec<u8>,
         block_proof: Vec<u8>,
-        dimension: TableDimension,
-        length_proof: Option<Vec<u8>>,
+        value_proofs: ExtractionProofInput,
     ) -> Result<Vec<u8>> {
-        let circuit_input = if let Some(length_proof) = length_proof {
-            CircuitInput::new_lengthed_input(
+        let circuit_input = match value_proofs {
+            ExtractionProofInput::Single(inputs) if inputs.length_proof.is_some() => {
+                CircuitInput::new_lengthed_input(
+                    block_proof,
+                    contract_proof,
+                    inputs.value_proof,
+                    inputs.length_proof.unwrap(),
+                )
+            }
+            ExtractionProofInput::Single(inputs) => CircuitInput::new_simple_input(
                 block_proof,
                 contract_proof,
-                values_proof,
-                length_proof,
-            )
-        } else {
-            CircuitInput::new_simple_input(block_proof, contract_proof, values_proof, dimension)
+                inputs.value_proof,
+                inputs.dimension,
+            ),
+            // NOTE hardcoded for single and mapping right now
+            ExtractionProofInput::Merge(inputs) => CircuitInput::new_merge_single_and_mapping(
+                block_proof,
+                contract_proof,
+                inputs.single.value_proof,
+                inputs.mapping.value_proof,
+            ),
         }?;
         let params = self.params();
         let proof = self

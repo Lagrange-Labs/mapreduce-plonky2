@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 
 use common::{
     cases::{
-        indexing::{ChangeType, TreeFactory, UpdateType},
+        indexing::{ChangeType, UpdateType},
         query::{
             test_query, GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput,
             MAX_NUM_PLACEHOLDERS,
@@ -80,14 +80,14 @@ async fn integrated_indexing() -> Result<()> {
     ctx.build_params(ParamsType::Indexing).unwrap();
 
     info!("Params built");
-    let mut single = TableIndexing::single_value_test_case(&ctx, TreeFactory::New).await?;
+    let (mut single, genesis) = TableIndexing::single_value_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Update(UpdateType::Rest),
         ChangeType::Silent,
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
-    single.run(&mut ctx, changes.clone()).await?;
-    let mut mapping = TableIndexing::mapping_test_case(&ctx, TreeFactory::New).await?;
+    single.run(&mut ctx, genesis, changes.clone()).await?;
+    let (mut mapping, genesis) = TableIndexing::mapping_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
@@ -95,7 +95,7 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Update(UpdateType::SecondaryIndex),
         ChangeType::Deletion,
     ];
-    mapping.run(&mut ctx, changes).await?;
+    mapping.run(&mut ctx, genesis, changes).await?;
     // save columns information and table information in JSON so querying test can pick up
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
     Ok(())

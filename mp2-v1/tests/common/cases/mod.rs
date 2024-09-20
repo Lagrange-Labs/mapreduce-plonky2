@@ -2,7 +2,7 @@
 
 use alloy::primitives::{Address, U256};
 use contract::Contract;
-use indexing::TableRowValues;
+use indexing::{TableRowUpdate, TableRowValues};
 use log::debug;
 use mp2_common::eth::StorageSlot;
 use mp2_v1::{
