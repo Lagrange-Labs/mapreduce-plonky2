@@ -51,6 +51,9 @@ pub struct TableColumn {
     pub name: String,
     pub identifier: ColumnID,
     pub index: IndexType,
+    /// multiplier means if this columns come from a "merged" table, then it either come from a
+    /// table a or table b. One of these table is the "multiplier" table, the other is not.
+    pub multiplier: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -71,6 +74,14 @@ impl TableColumns {
     }
     pub fn column_id_of_cells_index(&self, key: CellTreeKey) -> Option<ColumnID> {
         self.rest.get(key - 1).map(|tc| tc.identifier)
+    }
+    pub fn column_info(&self, identifier: ColumnIdentifier) -> TableColumn {
+        self.rest
+            .iter()
+            .chain(once(&self.secondary))
+            .find(|c| c.identifier == identifier)
+            .expect(&format!("can't find cell from identifier {}", identifier))
+            .clone()
     }
     // Returns the index of the column identifier in the index tree, ie. the order of columns  in
     // the cells tree

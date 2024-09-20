@@ -55,7 +55,7 @@ impl TestContext {
         while let Some(Next::Ready(wk)) = workplan.next() {
             let k = &wk.k;
             let (context, cell) = tree.fetch_with_context(&k).await;
-
+            let column = table.columns.column_info(cell.identifier());
             let proof = if context.is_leaf() {
                 debug!(
                     "MP2 Proving Cell Tree hash for id {:?} - value {:?} -> {:?}",
@@ -64,7 +64,11 @@ impl TestContext {
                     hex::encode(cell.hash.0)
                 );
                 let inputs = CircuitInput::CellsTree(
-                    verifiable_db::cells_tree::CircuitInput::leaf(cell.identifier(), cell.value()),
+                    verifiable_db::cells_tree::CircuitInput::leaf_multiplier(
+                        cell.identifier(),
+                        cell.value(),
+                        column.multiplier,
+                    ),
                 );
                 self.b.bench("indexing::cell_tree::leaf", || {
                     api::generate_proof(self.params(), inputs)
@@ -84,12 +88,14 @@ impl TestContext {
                     .storage
                     .get_proof_exact(&ProofKey::Cell(proof_key))
                     .expect("UT guarantees proving in order");
-                let inputs =
-                    CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::partial(
+                let inputs = CircuitInput::CellsTree(
+                    verifiable_db::cells_tree::CircuitInput::partial_multiplier(
                         cell.identifier(),
                         cell.value(),
+                        column.multiplier,
                         left_proof.clone(),
-                    ));
+                    ),
+                );
                 debug!(
                     "MP2 Proving Cell Tree PARTIAL for id {:?} - value {:?} -> {:?} --> LEFT CHILD HASH {:?}",
                     cell.identifier(),
@@ -137,12 +143,14 @@ impl TestContext {
                     hex::encode(cells_tree::extract_hash_from_proof(&right_proof).map(|c|c.to_bytes()).unwrap())
                 );
 
-                let inputs =
-                    CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::full(
+                let inputs = CircuitInput::CellsTree(
+                    verifiable_db::cells_tree::CircuitInput::full_multiplier(
                         cell.identifier(),
                         cell.value(),
+                        column.multiplier,
                         [left_proof, right_proof],
-                    ));
+                    ),
+                );
 
                 self.b.bench("indexing::cell_tree::full", || {
                     api::generate_proof(self.params(), inputs).context("while proving full node")

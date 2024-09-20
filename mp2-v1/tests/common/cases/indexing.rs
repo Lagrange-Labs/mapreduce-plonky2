@@ -4,7 +4,6 @@
 use anyhow::Result;
 use log::{debug, info};
 use mp2_v1::{
-    api::{metadata_hash, SlotInputs},
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
@@ -13,7 +12,6 @@ use mp2_v1::{
     },
     values_extraction::identifier_block_column,
 };
-use rand::{Rng, SeedableRng};
 use ryhope::storage::RoEpochKvStorage;
 
 use crate::common::{
@@ -23,7 +21,7 @@ use crate::common::{
         identifier_for_mapping_key_column, identifier_for_mapping_value_column,
         identifier_single_var_column,
         table_source::{
-            LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs,
+            LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs, MergeSource,
             SingleValuesExtractionArgs, UniqueMappingEntry, DEFAULT_ADDRESS,
         },
     },
@@ -37,23 +35,15 @@ use crate::common::{
 };
 
 use super::{
-    super::bindings::simple::Simple::SimpleInstance,
-    table_source::{next_address, next_value},
-    ContractExtractionArgs, TableIndexing, TableSource,
+    super::bindings::simple::Simple::SimpleInstance, ContractExtractionArgs, TableIndexing,
+    TableSource,
 };
 use alloy::{
     contract::private::{Network, Provider, Transport},
-    eips::BlockNumberOrTag,
     primitives::{Address, U256},
     providers::ProviderBuilder,
 };
-use mp2_common::{
-    digest::TableDimension,
-    eth::{ProofQuery, StorageSlot},
-    proof::ProofWithVK,
-    types::HashOutput,
-};
-use std::{assert_matches::assert_matches, str::FromStr, sync::atomic::AtomicU64};
+use mp2_common::{eth::StorageSlot, types::HashOutput};
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
@@ -81,6 +71,130 @@ impl TableIndexing {
     pub fn table(&self) -> &Table {
         &self.table
     }
+    pub(crate) async fn merge_table_test_case(
+        ctx: &mut TestContext,
+    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+        // Create a provider with the wallet for contract deployment and interaction.
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let contract = Simple::deploy(&provider).await.unwrap();
+        info!(
+            "Deployed Simple contract at address: {}",
+            contract.address()
+        );
+        let contract_address = contract.address();
+        let chain_id = ctx.rpc.get_chain_id().await.unwrap();
+        let contract = Contract {
+            address: *contract_address,
+            chain_id,
+        };
+        let source_a = TableSource::SingleValues(SingleValuesExtractionArgs {
+            // this test puts the mapping value as secondary index so there is no index for the
+            // single variable slots.
+            index_slot: None,
+            slots: SINGLE_SLOTS.to_vec(),
+        });
+        // to toggle off and on
+        let value_as_index = true;
+        let value_id =
+            identifier_for_mapping_value_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
+        let key_id =
+            identifier_for_mapping_key_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
+        let (index_identifier, mapping_index, cell_identifier) = match value_as_index {
+            true => (value_id, MappingIndex::Value(value_id), key_id),
+            false => (key_id, MappingIndex::Key(key_id), value_id),
+        };
+
+        let mapping_args = MappingValuesExtractionArgs {
+            slot: MAPPING_SLOT,
+            index: mapping_index,
+            // at the beginning there is no mapping key inserted
+            // NOTE: This array is a convenience to handle smart contract updates
+            // manually, but does not need to be stored explicitely by dist system.
+            mapping_keys: vec![],
+        };
+        let source_b = TableSource::Mapping((
+            mapping_args,
+            Some(LengthExtractionArgs {
+                slot: LENGTH_SLOT,
+                value: LENGTH_VALUE,
+            }),
+        ));
+        let mut source = TableSource::Merge(MergeSource::new(source_a, source_b, true));
+        let genesis_change = source.init_contract_data(ctx, &contract).await;
+        let single_columns = SINGLE_SLOTS
+            .iter()
+            .enumerate()
+            .filter_map(|(i, slot)| {
+                let identifier =
+                    identifier_single_var_column(*slot, contract_address, chain_id, vec![]);
+                Some(TableColumn {
+                    name: format!("column_{}", i),
+                    identifier,
+                    index: IndexType::None,
+                    // ALL single columns are "multiplier" since we do tableA * D(tableB), i.e. all
+                    // entries of table A are repeated for each entry of table B.
+                    multiplier: true,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mapping_column = vec![TableColumn {
+            name: if value_as_index {
+                MAPPING_KEY_COLUMN
+            } else {
+                MAPPING_VALUE_COLUMN
+            }
+            .to_string(),
+            identifier: cell_identifier,
+            index: IndexType::None,
+            // here is it important to specify false to mean that the entries of table B are
+            // not repeated.
+            multiplier: false,
+        }];
+        let all_columns = [single_columns.as_slice(), mapping_column.as_slice()].concat();
+        let columns = TableColumns {
+            primary: TableColumn {
+                name: BLOCK_COLUMN_NAME.to_string(),
+                identifier: identifier_block_column(),
+                index: IndexType::Primary,
+                // it doesn't matter for this one since block is "outside" of the table definition
+                // really, it is a special column we add
+                multiplier: true,
+            },
+            secondary: TableColumn {
+                name: if value_as_index {
+                    MAPPING_VALUE_COLUMN
+                } else {
+                    MAPPING_KEY_COLUMN
+                }
+                .to_string(),
+                identifier: index_identifier,
+                index: IndexType::Secondary,
+                // here is it important to specify false to mean that the entries of table B are
+                // not repeated.
+                multiplier: false,
+            },
+            rest: all_columns,
+        };
+
+        let indexing_genesis_block = ctx.block_number().await;
+        let table = Table::new(indexing_genesis_block, "merged_table".to_string(), columns).await;
+        Ok((
+            Self {
+                source: source.clone(),
+                table,
+                contract,
+                contract_extraction: ContractExtractionArgs {
+                    slot: StorageSlot::Simple(CONTRACT_SLOT),
+                },
+            },
+            genesis_change,
+        ))
+    }
+
     pub(crate) async fn single_value_test_case(
         ctx: &mut TestContext,
     ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
@@ -103,7 +217,7 @@ impl TableIndexing {
         };
 
         let mut source = TableSource::SingleValues(SingleValuesExtractionArgs {
-            index_slot: INDEX_SLOT,
+            index_slot: Some(INDEX_SLOT),
             slots: SINGLE_SLOTS.to_vec(),
         });
         let genesis_updates = source.init_contract_data(ctx, &contract).await;
@@ -117,6 +231,7 @@ impl TableIndexing {
                 name: BLOCK_COLUMN_NAME.to_string(),
                 identifier: identifier_block_column(),
                 index: IndexType::Primary,
+                multiplier: false,
             },
             secondary: TableColumn {
                 name: "column_value".to_string(),
@@ -127,6 +242,8 @@ impl TableIndexing {
                     vec![],
                 ),
                 index: IndexType::Secondary,
+                // here we put false always since these are not coming from a "merged" table
+                multiplier: false,
             },
             rest: SINGLE_SLOTS
                 .iter()
@@ -140,6 +257,8 @@ impl TableIndexing {
                             name: format!("column_{}", i),
                             identifier,
                             index: IndexType::None,
+                            // here we put false always since these are not coming from a "merged" table
+                            multiplier: false,
                         })
                     }
                 })
@@ -216,6 +335,7 @@ impl TableIndexing {
                 name: BLOCK_COLUMN_NAME.to_string(),
                 identifier: identifier_block_column(),
                 index: IndexType::Primary,
+                multiplier: false,
             },
             secondary: TableColumn {
                 name: if value_as_index {
@@ -226,6 +346,8 @@ impl TableIndexing {
                 .to_string(),
                 identifier: index_identifier,
                 index: IndexType::Secondary,
+                // here important to put false since these are not coming from any "merged" table
+                multiplier: false,
             },
             rest: vec![TableColumn {
                 name: if value_as_index {
@@ -236,6 +358,8 @@ impl TableIndexing {
                 .to_string(),
                 identifier: cell_identifier,
                 index: IndexType::None,
+                // here important to put false since these are not coming from any "merged" table
+                multiplier: false,
             }],
         };
         debug!("MAPPING ZK COLUMNS -> {:?}", columns);

@@ -279,7 +279,8 @@ impl TableSource {
 pub(crate) struct SingleValuesExtractionArgs {
     /// Simple slots
     pub(crate) slots: Vec<u8>,
-    pub(crate) index_slot: u8,
+    // in case of merge table, there might not be any index slot for single table
+    pub(crate) index_slot: Option<u8>,
 }
 
 impl SingleValuesExtractionArgs {
@@ -382,7 +383,9 @@ impl SingleValuesExtractionArgs {
                 .value;
             let cell = Cell::new(id, value);
             // make sure we separate the secondary cells and rest of the cells separately.
-            if *slot == self.index_slot {
+            if let Some(index) = self.index_slot
+                && index == *slot
+            {
                 // we put 0 since we know there are no other rows with that secondary value since we are dealing
                 // we single values, so only 1 row.
                 secondary_cell = Some(SecondaryIndexCell::new_from(cell, 0));
