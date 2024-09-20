@@ -41,6 +41,7 @@ use mp2_v1::{
         self,
         block::BlockPrimaryIndex,
         cell::MerkleCell,
+        index::IndexNode,
         row::{Row, RowPayload, RowTreeKey},
         LagrangeNode,
     },
@@ -233,6 +234,20 @@ async fn prove_query(
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
     let row_keys_per_epoch = row_cache.keys_by_epochs();
+    let value_cache: HashMap<_, _> = table
+        .row
+        .try_fetch_many_at(
+            row_keys_per_epoch
+                .iter()
+                .flat_map(|(epoch, keys)| keys.iter().map(|k| (*epoch, k.to_owned()))),
+        )
+        .await
+        .context("while fetching all (epoch, key, values)")?
+        .into_iter()
+        .flatten()
+        .map(|(epoch, k, v)| ((epoch, k), v))
+        .collect();
+
     let mut planner = QueryPlanner {
         ctx,
         query: query.clone(),
@@ -251,7 +266,14 @@ async fn prove_query(
             tree: &table.row,
             satisfiying_rows: keys,
         };
-        prove_query_on_tree(&mut planner, info, up, epoch as BlockPrimaryIndex).await?;
+        prove_query_on_tree(
+            &mut planner,
+            info,
+            up,
+            epoch as BlockPrimaryIndex,
+            &value_cache,
+        )
+        .await?;
     }
 
     // prove the index tree, on a single version. Both path can be taken depending if we do have
@@ -264,6 +286,7 @@ async fn prove_query(
         block_range.clone().count(),
         block_range
     );
+
     if block_range.is_empty() {
         info!("Running INDEX TREE proving for EMPTY query");
         // no valid blocks in the query range, so we need to choose a block to prove
@@ -301,6 +324,7 @@ async fn prove_query(
             info,
             up,
             table.index.current_epoch() as BlockPrimaryIndex,
+            &value_cache,
         )
         .await?;
     } else {
@@ -332,6 +356,7 @@ async fn prove_query(
             big_index_cache,
             up,
             table.index.current_epoch() as BlockPrimaryIndex,
+            &value_cache,
         )
         .await?;
     }
@@ -511,6 +536,7 @@ async fn prove_query_on_tree<'a, I, K, V>(
     info: I,
     update: UpdateTree<K>,
     primary: BlockPrimaryIndex,
+    cache: &HashMap<(Epoch, RowTreeKey), RowPayload<BlockPrimaryIndex>>,
 ) -> Result<Vec<u8>>
 where
     I: TreeInfo<K, V>,
@@ -556,12 +582,12 @@ where
         // since epoch starts at genesis now, we can directly give the value of the block
         // number as epoch number
         let (node_ctx, node_payload) = info
-            .fetch_ctx_and_payload_at(primary as Epoch, &k)
+            .fetch_ctx_and_payload_at(primary as TODO, &k)
             .await
             .expect("cache is not full");
         let is_satisfying_query = info.is_satisfying_query(&k);
         let embedded_proof = info
-            .load_or_prove_embedded(&mut planner, primary, &k, &node_payload)
+            .load_or_prove_embedded(&mut planner, primary, &k, &node_payload, cache)
             .await;
         if node_ctx.is_leaf() && info.is_row_tree() {
             // NOTE: if it is a leaf of the row tree, then there is no need to prove anything,
@@ -880,6 +906,7 @@ async fn prove_non_existence_index<'a>(
 pub async fn prove_non_existence_row<'a>(
     planner: &mut QueryPlanner<'a>,
     primary: BlockPrimaryIndex,
+    cache: &HashMap<(Epoch, RowTreeKey), RowPayload<BlockPrimaryIndex>>,
 ) -> Result<()> {
     let row_tree = &planner.table.row;
     let (query_for_min, query_for_max) = bracket_secondary_index(
@@ -937,7 +964,12 @@ pub async fn prove_non_existence_row<'a>(
             })
             .collect::<HashMap<_, _>>();
 
-        let value = row_tree.fetch_at(&row_key, primary_epoch).await.value();
+        let value = cache
+            .get(&(primary_epoch, row_key.clone()))
+            .ok_or_else(|| {
+                anyhow::anyhow!("epoch={primary_epoch}, key={row_key:?} not found in cache")
+            })?
+            .value();
         let mut current_node = &row_key;
         // NOTE: the `.rev()` to convert the lineage into an ascendance
         let mut ascendance = lineage.full_path().rev();
@@ -1008,7 +1040,7 @@ pub async fn prove_non_existence_row<'a>(
         columns: planner.columns.clone(),
         settings: &planner.settings,
     };
-    prove_query_on_tree(&mut planner, info, proving_tree, primary).await?;
+    prove_query_on_tree(&mut planner, info, proving_tree, primary, cache).await?;
 
     Ok(())
 }
