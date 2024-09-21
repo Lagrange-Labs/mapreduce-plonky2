@@ -7,20 +7,21 @@ use mp2_v1::{
 use super::TestContext;
 use anyhow::Result;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExtractionTableProof {
     pub value_proof: Vec<u8>,
     pub dimension: TableDimension,
     pub length_proof: Option<Vec<u8>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MergeExtractionProof {
     // NOTE: Right now hardcoding for single and mapping but that can be generalized later easily.
     pub single: ExtractionTableProof,
     pub mapping: ExtractionTableProof,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExtractionProofInput {
     Single(ExtractionTableProof),
     Merge(MergeExtractionProof),

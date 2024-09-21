@@ -24,7 +24,7 @@ pub type Digest = Point;
 /// multiple rows inside.
 /// When extracting single variables on one sweep, there is only a single row contained in the
 /// digest.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TableDimension {
     /// Set to Single for types that only generate a single row at a given block. For example, a
     /// uint256 or a bytes32 will only generate a single row per block.

@@ -922,18 +922,18 @@ impl MergeSource {
             let id_a = id.clone() + "_a";
             let id_b = id + "_b";
             // generate the value extraction proof for the both table individually
-            let (extract_a, _) = self
+            let (extract_single, _) = self
                 .single
                 .generate_extraction_proof(ctx, contract, ProofKey::ValueExtraction((id_a, bn)))
                 .await?;
-            let ExtractionProofInput::Single(extract_a) = extract_a else {
+            let ExtractionProofInput::Single(extract_a) = extract_single else {
                 bail!("can't merge non single tables")
             };
-            let (extract_b, _) = self
+            let (extract_mappping, _) = self
                 .mapping
                 .generate_extraction_proof(ctx, contract, ProofKey::ValueExtraction((id_b, bn)))
                 .await?;
-            let ExtractionProofInput::Single(extract_b) = extract_b else {
+            let ExtractionProofInput::Single(extract_b) = extract_mappping else {
                 bail!("can't merge non single tables")
             };
 
@@ -945,6 +945,7 @@ impl MergeSource {
                 TableSource::SingleValues(self.single.clone()).slot_input(),
                 TableSource::Mapping((self.mapping.clone(), None)).slot_input(),
             );
+            assert!(extract_a != extract_b);
             Ok((
                 ExtractionProofInput::Merge(MergeExtractionProof {
                     single: extract_a,
