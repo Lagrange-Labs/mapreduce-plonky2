@@ -10,7 +10,7 @@ use alloy::{
     providers::Provider,
 };
 use anyhow::{bail, Result};
-use futures::{future::BoxFuture, FutureExt};
+use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
 use log::{debug, info};
 use mp2_common::{
     digest::TableDimension,
@@ -32,7 +32,6 @@ use mp2_v1::{
 };
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
-use verifiable_db::query::computational_hash_ids::Extraction;
 
 use crate::common::{
     cases::indexing::{MappingUpdate, SimpleSingleValue, TableRowValues},
@@ -46,7 +45,6 @@ use crate::common::{
 use super::{
     contract::Contract,
     indexing::{ChangeType, TableRowUpdate, UpdateSimpleStorage, UpdateType},
-    TableIndexing,
 };
 
 /// The key,value such that the combination is unique. This can be turned into a RowTreeKey.
@@ -72,6 +70,9 @@ impl From<(U256, U256)> for UniqueMappingEntry {
 pub enum MappingIndex {
     Key(u64),
     Value(u64),
+    // This can happen if it is being part of a merge table and the secondary index is from the
+    // other table
+    None,
 }
 
 impl UniqueMappingEntry {
@@ -95,9 +96,7 @@ impl UniqueMappingEntry {
             updated_cells: row_value.current_cells,
             primary: block_number,
         };
-        let index_cell = row_value
-            .current_secondary
-            .expect("MAPPING should always have secondary index for now");
+        let index_cell = row_value.current_secondary.unwrap_or_default();
         (cells_update, index_cell)
     }
 
@@ -127,26 +126,30 @@ impl UniqueMappingEntry {
             vec![],
         ));
         let value_cell = self.to_cell(extract_key);
-        // then we look at which one is must be the secondary cell
-        let (secondary, rest) = match index {
+        // then we look at which one is must be the secondary cell, if any
+        let (secondary, rest_cells) = match index {
             MappingIndex::Key(_) => (
                 // by definition, mapping key is unique, so there is no need for a specific
                 // nonce for the tree in that case
                 SecondaryIndexCell::new_from(key_cell, U256::from(0)),
-                value_cell,
+                vec![value_cell],
             ),
             MappingIndex::Value(_) => {
                 // Here we take the tuple (value,key) as uniquely identifying a row in the
                 // table
-                (SecondaryIndexCell::new_from(value_cell, self.key), key_cell)
+                (
+                    SecondaryIndexCell::new_from(value_cell, self.key),
+                    vec![key_cell],
+                )
             }
+            MappingIndex::None => (Default::default(), vec![value_cell, key_cell]),
         };
         debug!(
             " --- MAPPING: to row: secondary index {:?}  -- cell {:?}",
-            secondary, rest
+            secondary, rest_cells
         );
         TableRowValues {
-            current_cells: vec![rest],
+            current_cells: rest_cells,
             current_secondary: Some(secondary),
             primary: block_number,
         }
@@ -158,6 +161,7 @@ impl UniqueMappingEntry {
         match index {
             MappingIndex::Key(id) => Cell::new(id, self.key),
             MappingIndex::Value(id) => Cell::new(id, self.value),
+            MappingIndex::None => panic!("this should never happen"),
         }
     }
 
@@ -173,6 +177,7 @@ impl UniqueMappingEntry {
                 value: self.value,
                 rest: self.key.to_nonce(),
             },
+            MappingIndex::None => RowTreeKey::default(),
         }
     }
 }
@@ -195,36 +200,15 @@ impl TableSource {
             TableSource::Merge(_) => panic!("can't call slot inputs on merge table"),
         }
     }
-    pub fn slots(&self) -> Vec<u8> {
-        match self {
-            Self::SingleValues(s) => s.slots.clone(),
-            Self::Mapping((mapping, len)) => {
-                let mut slots = vec![mapping.slot];
-                if let Some(l) = len {
-                    slots.push(l.slot);
-                }
-                slots
-            }
-            Self::Merge(m) => {
-                let mut a = m.table_a.slots();
-                a.extend(m.table_b.slots());
-                a
-            }
-        }
-    }
 
     pub fn init_contract_data<'a>(
         &'a mut self,
         ctx: &'a mut TestContext,
         contract: &'a Contract,
-        // Set to true only if merge table calls recursively this function
-        parent_secondary: Option<SecondaryIndexCell>,
     ) -> BoxFuture<Vec<TableRowUpdate<BlockPrimaryIndex>>> {
         async move {
             match self {
-                TableSource::SingleValues(ref mut s) => {
-                    s.init_contract_data(ctx, contract, parent_secondary).await
-                }
+                TableSource::SingleValues(ref mut s) => s.init_contract_data(ctx, contract).await,
                 TableSource::Mapping((ref mut m, _)) => m.init_contract_data(ctx, contract).await,
                 TableSource::Merge(ref mut merge) => merge.init_contract_data(ctx, contract).await,
             }
@@ -262,7 +246,6 @@ impl TableSource {
         ctx: &'a mut TestContext,
         contract: &'a Contract,
         c: ChangeType,
-        parent_secondary: Option<SecondaryIndexCell>,
     ) -> BoxFuture<Vec<TableRowUpdate<BlockPrimaryIndex>>> {
         async move {
             match self {
@@ -270,8 +253,7 @@ impl TableSource {
                     mapping.random_contract_update(ctx, contract, c).await
                 }
                 TableSource::SingleValues(ref v) => {
-                    v.random_contract_update(ctx, contract, c, parent_secondary)
-                        .await
+                    v.random_contract_update(ctx, contract, c).await
                 }
                 TableSource::Merge(ref mut merge) => {
                     merge.random_contract_update(ctx, contract, c).await
@@ -296,7 +278,6 @@ impl SingleValuesExtractionArgs {
         &mut self,
         ctx: &mut TestContext,
         contract: &Contract,
-        parent_secondary: Option<SecondaryIndexCell>,
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         let contract_update = SimpleSingleValue {
             s1: true,
@@ -317,7 +298,7 @@ impl SingleValuesExtractionArgs {
             new_table_values.len() == 1,
             "single variable case should only have one row"
         );
-        let update = old_table_values.compute_update(&new_table_values[0], parent_secondary);
+        let update = old_table_values.compute_update(&new_table_values[0]);
         assert!(update.len() == 1, "one row at a time");
         assert_matches!(
             update[0],
@@ -332,7 +313,6 @@ impl SingleValuesExtractionArgs {
         ctx: &mut TestContext,
         contract: &Contract,
         c: ChangeType,
-        parent_secondary: Option<SecondaryIndexCell>,
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         let old_table_values = self.current_table_row_values(ctx, contract).await;
         // we can take the first one since we're asking for single value and there is only
@@ -365,7 +345,7 @@ impl SingleValuesExtractionArgs {
             new_table_values.len() == 1,
             "there should be only a single row for single case"
         );
-        old_table_values.compute_update(&new_table_values[0], parent_secondary)
+        old_table_values.compute_update(&new_table_values[0])
     }
     // construct a row of the table from the actual value in the contract by fetching from MPT
     async fn current_table_row_values(
@@ -400,6 +380,8 @@ impl SingleValuesExtractionArgs {
                 // we single values, so only 1 row.
                 secondary_cell = Some(SecondaryIndexCell::new_from(cell, 0));
             } else {
+                // This is triggered for every cells that are not secondary index. If there is no
+                // secondary index, then all the values will end up there.
                 rest_cells.push(cell);
             }
         }
@@ -566,6 +548,13 @@ impl MappingValuesExtractionArgs {
                                     MappingUpdate::Insertion(new_key, current_value),
                                 ]
                             }
+                            MappingIndex::None => {
+                                // a random update of the mapping, we don't care which since it is
+                                // not impacting the secondary index of the table since the mapping
+                                // doesn't contain the column which is the secondary index, in case
+                                // of the merge table case.
+                                vec![MappingUpdate::Update(current_key, current_value, new_value)]
+                            }
                         }
                     }
                     UpdateType::SecondaryIndex => {
@@ -582,6 +571,11 @@ impl MappingValuesExtractionArgs {
                             MappingIndex::Value(_) => {
                                 // if the value changes, it's a simple update in mapping
                                 vec![MappingUpdate::Update(current_key, current_value, new_value)]
+                            }
+                            MappingIndex::None => {
+                                // empty vec since this table has no secondary index so it should
+                                // give no updates
+                                vec![]
                             }
                         }
                     }
@@ -709,7 +703,7 @@ impl MappingValuesExtractionArgs {
                         let previous_row_key = previous_entry.to_row_key(&index);
                         let new_entry = UniqueMappingEntry::new(mkey, mvalue);
 
-                        let (mut cells, secondary_index) = new_entry.to_update(
+                        let (mut cells, mut secondary_index) = new_entry.to_update(
                             block_number,
                             &index,
                             slot,
@@ -745,6 +739,9 @@ impl MappingValuesExtractionArgs {
                                 // * update with modification to cells tree (default)
                                 cells.updated_cells = vec![];
                             }
+                            MappingIndex::None => {
+                                secondary_index = Default::default();
+                            }
                         };
                         vec![
                             TableRowUpdate::Deletion(previous_row_key),
@@ -759,20 +756,18 @@ impl MappingValuesExtractionArgs {
 
 #[derive(Serialize, Deserialize, Debug, Hash, Clone, PartialEq, Eq)]
 pub struct MergeSource {
-    // ASSUME table_a is single and table_b is mapping for now.
-    table_a: Box<TableSource>,
-    table_b: Box<TableSource>,
-    is_multiplier_a: bool,
+    // NOTE: this is a hardcore assumption currently that  table_a is single and table_b is mapping for now
+    // Extending to full merge between any table is not far - it requires some quick changes in
+    // circuit but quite a lot of changes in integrated test.
+    single: SingleValuesExtractionArgs,
+    mapping: MappingValuesExtractionArgs,
 }
 
 impl MergeSource {
-    pub fn new(table_a: TableSource, table_b: TableSource, is_multiplier_a: bool) -> Self {
-        Self {
-            table_a: Box::new(table_a),
-            table_b: Box::new(table_b),
-            is_multiplier_a,
-        }
+    pub fn new(single: SingleValuesExtractionArgs, mapping: MappingValuesExtractionArgs) -> Self {
+        Self { single, mapping }
     }
+
     pub async fn init_contract_data(
         &mut self,
         ctx: &mut TestContext,
@@ -780,14 +775,54 @@ impl MergeSource {
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         // OK to call both sequentially since we only look a the block number after setting the
         // initial data
-        // TODO: right now this is hardcoding the fact table a is single and table b mapping with
-        // the secondary index coming from the mapping table so we can extract the secondary cell
-        // from the updates generated by table b.
-        // This probably requires a good rewrite to be fully generalizable.
-        let update_b = self.table_b.init_contract_data(ctx, contract, None).await;
-        let mut update_a = self.table_a.init_contract_data(ctx, contract).await;
-        update_a.extend(update_b);
-        update_a
+        let update_a = self.single.init_contract_data(ctx, contract).await;
+        let update_b = self.mapping.init_contract_data(ctx, contract).await;
+        // now we merge all the cells change from the single contract to the mapping contract
+        update_b
+            .into_iter()
+            .map(|ua| {
+                let refa = &ua;
+                // for each update from mapping, we "merge" all the updates from single, i.e. since
+                // single is the multiplier table
+                // NOTE: It assumes there is no secondary index on the single table right now.
+                // NOTE: there should be only one update per block for single table. Here we just try
+                // to make it a bit more general by saying each update of table a must be present for
+                // all updates of table b
+                update_a.iter().map(|ub| match (refa, ub) {
+                    // We start by a few impossible methods
+                    (_, TableRowUpdate::Deletion(_)) => panic!("no deletion on single table"),
+                    (TableRowUpdate::Update(_), TableRowUpdate::Insertion(_, _)) => {
+                        panic!("insertion on single only happens at genesis")
+                    }
+                    // WARNING: when a mapping row is deleted, it deletes the whole row even for single
+                    // values
+                    (TableRowUpdate::Deletion(ref d), _) => TableRowUpdate::Deletion(d.clone()),
+                    // Regular update on both 
+                    (TableRowUpdate::Update(ref update_a), TableRowUpdate::Update(update_b)) => {
+                        let mut update_a = update_a.clone();
+                        update_a.updated_cells.extend(update_b.updated_cells.iter().cloned());
+                        TableRowUpdate::Update(update_a)
+                    }
+                    // a new mapping entry and and update in the single variable
+                    (TableRowUpdate::Insertion(ref cells, sec), TableRowUpdate::Update(cellsb)) => {
+                        let mut cells = cells.clone();
+                        cells.updated_cells.extend(cellsb.updated_cells.iter().cloned());
+                        TableRowUpdate::Insertion(cells, sec.clone())
+                    }
+                    // new case for both - likely genesis state
+                    (
+                        TableRowUpdate::Insertion(ref cella, seca),
+                        TableRowUpdate::Insertion(cellb, secb),
+                    ) => {
+                        assert_eq!(*secb,SecondaryIndexCell::default(),"no secondary index on single supported at the moment in integrated test");
+                        let mut cella = cella.clone();
+                        cella.updated_cells.extend(cellb.updated_cells.iter().cloned());
+                        TableRowUpdate::Insertion(cella,seca.clone())
+                    }
+                }).collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect()
     }
 
     pub async fn random_contract_update(
@@ -799,8 +834,43 @@ impl MergeSource {
         // alternate between table a update or table b
         // TODO: implement mixed update
         match rotate() {
-            0 => self.table_a.random_contract_update(ctx, contract, c).await,
-            1 => self.table_b.random_contract_update(ctx, contract, c).await,
+            // mapping itself is good since it is the one containing the secondary index so need
+            // need to merge anything
+            1 => self.mapping.random_contract_update(ctx, contract, c).await,
+            // for single updates, we need to apply this update to all the mapping entries, that's
+            // the "multiplier" part.
+            0 => {
+                let single_updates = self.single.random_contract_update(ctx, contract, c).await;
+                let rsu = &single_updates;
+                let bn = ctx.block_number().await;
+                let mslot = self.mapping.slot as usize;
+                let address = &contract.address.clone();
+                // we fetch the value of all mapping entries, and
+                let mut all_updates = Vec::new();
+                for mk in &self.mapping.mapping_keys {
+                    let query = ProofQuery::new_mapping_slot(*address, mslot, mk.to_owned());
+                    let response = ctx
+                        .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
+                        .await;
+                    let current_value = response.storage_proof[0].value;
+                    let current_key = U256::from_be_slice(&mk);
+                    let entry = UniqueMappingEntry::new(&current_key, &current_value);
+                    all_updates.extend(rsu.iter().map(|s| {
+                        let TableRowUpdate::Update(su) = s else {
+                            panic!("can't have anything else than update for single table");
+                        };
+                        TableRowUpdate::Update(CellsUpdate {
+                            // the row key doesn't change since the mapping value doesn't change
+                            previous_row_key: entry.to_row_key(&self.mapping.index),
+                            new_row_key: entry.to_row_key(&self.mapping.index),
+                            // only insert the new cells from the single update
+                            updated_cells: su.updated_cells.clone(),
+                            primary: bn as BlockPrimaryIndex,
+                        })
+                    }));
+                }
+                all_updates
+            }
             _ => panic!("bug in rotation"),
         }
     }
@@ -819,14 +889,14 @@ impl MergeSource {
             let id_b = id + "_b";
             // generate the value extraction proof for the both table individually
             let (extract_a, _) = self
-                .table_a
+                .single
                 .generate_extraction_proof(ctx, contract, ProofKey::ValueExtraction((id_a, bn)))
                 .await?;
             let ExtractionProofInput::Single(extract_a) = extract_a else {
                 bail!("can't merge non single tables")
             };
             let (extract_b, _) = self
-                .table_b
+                .mapping
                 .generate_extraction_proof(ctx, contract, ProofKey::ValueExtraction((id_b, bn)))
                 .await?;
             let ExtractionProofInput::Single(extract_b) = extract_b else {
@@ -838,8 +908,8 @@ impl MergeSource {
                 contract.address,
                 contract.chain_id,
                 vec![],
-                self.table_a.slot_input(),
-                self.table_b.slot_input(),
+                TableSource::SingleValues(self.single.clone()).slot_input(),
+                TableSource::Mapping((self.mapping.clone(), None)).slot_input(),
             );
             Ok((
                 ExtractionProofInput::Merge(MergeExtractionProof {

@@ -91,12 +91,12 @@ impl TableIndexing {
             address: *contract_address,
             chain_id,
         };
-        let source_a = TableSource::SingleValues(SingleValuesExtractionArgs {
+        let single_source = SingleValuesExtractionArgs {
             // this test puts the mapping value as secondary index so there is no index for the
             // single variable slots.
             index_slot: None,
             slots: SINGLE_SLOTS.to_vec(),
-        });
+        };
         // to toggle off and on
         let value_as_index = true;
         let value_id =
@@ -108,7 +108,7 @@ impl TableIndexing {
             false => (key_id, MappingIndex::Key(key_id), value_id),
         };
 
-        let mapping_args = MappingValuesExtractionArgs {
+        let mapping_source = MappingValuesExtractionArgs {
             slot: MAPPING_SLOT,
             index: mapping_index,
             // at the beginning there is no mapping key inserted
@@ -116,14 +116,7 @@ impl TableIndexing {
             // manually, but does not need to be stored explicitely by dist system.
             mapping_keys: vec![],
         };
-        let source_b = TableSource::Mapping((
-            mapping_args,
-            Some(LengthExtractionArgs {
-                slot: LENGTH_SLOT,
-                value: LENGTH_VALUE,
-            }),
-        ));
-        let mut source = TableSource::Merge(MergeSource::new(source_a, source_b, true));
+        let mut source = TableSource::Merge(MergeSource::new(single_source, mapping_source));
         let genesis_change = source.init_contract_data(ctx, &contract).await;
         let single_columns = SINGLE_SLOTS
             .iter()
@@ -777,26 +770,16 @@ pub struct TableRowValues<PrimaryIndex> {
 
 impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex> {
     // Compute the update from the current values and the new values
-    pub fn compute_update(
-        &self,
-        new: &Self,
-        // It can be that this table doesn't have a secondary index by itself since it is being
-        // part of a "merged" table.
-        // NOTE: this is a hack and integrated test should probably be refactored in some part to
-        // avoid such hacks. Right now this is fine since we do single * mapping so the secondary
-        // key always is defined from the mapping.
-        default_secondary: Option<SecondaryIndexCell>,
-    ) -> Vec<TableRowUpdate<PrimaryIndex>> {
+    // NOTE: if the table doesn't have a secondary index, the table row update will have all row
+    // keys set to default. This must later be fixed before "sending" this to the update table
+    // logic. This only happens for merge table. After this call, the secondary index is then
+    // fixed.
+    pub fn compute_update(&self, new: &Self) -> Vec<TableRowUpdate<PrimaryIndex>> {
         // this is initialization
         if self == &Self::default() {
             let cells_update = CellsUpdate {
                 previous_row_key: RowTreeKey::default(),
-                new_row_key: (new
-                    .current_secondary
-                    .as_ref()
-                    .or_else(|| default_secondary.as_ref())
-                    .expect("no secondary index cell given"))
-                .into(),
+                new_row_key: (new.current_secondary.clone().unwrap_or_default()).into(),
                 updated_cells: new.current_cells.clone(),
                 primary: new.primary.clone(),
             };
@@ -808,16 +791,8 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex
                     .clone(),
             )];
         }
-        let new_secondary = new
-            .current_secondary
-            .clone()
-            .or_else(|| default_secondary.clone())
-            .expect("can't get new secondary column value");
-        let previous_secondary = self
-            .current_secondary
-            .clone()
-            .or_else(|| default_secondary.clone())
-            .expect("can't get previous secondary column value");
+        let new_secondary = new.current_secondary.clone().unwrap_or_default();
+        let previous_secondary = self.current_secondary.clone().unwrap_or_default();
 
         // the cells columns are fixed so we can compare
         assert!(self.current_cells.len() == new.current_cells.len());
