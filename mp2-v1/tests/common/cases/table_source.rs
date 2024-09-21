@@ -281,7 +281,7 @@ impl SingleValuesExtractionArgs {
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         let contract_update = SimpleSingleValue {
             s1: true,
-            s2: U256::from(10),
+            s2: U256::from(123),
             s3: "test".to_string(),
             s4: next_address(),
         };

@@ -93,7 +93,7 @@ impl TestContext {
             let value = row.secondary_index_value();
             let multiplier = table.columns.column_info(id).multiplier;
             // NOTE remove that when playing more with sec. index
-            assert!(multiplier, "secondary index should be multiplier");
+            assert!(!multiplier, "secondary index should be individual type");
             // find where the root cells proof has been stored. This comes from looking up the
             // column id, then searching for the cell info in the row payload about this
             // identifier. We now have the primary index for which the cells proof have been
