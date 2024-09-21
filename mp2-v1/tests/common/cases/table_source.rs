@@ -905,9 +905,38 @@ impl MergeSource {
                 }
                 all_updates
             }
-            // mapping itself is good since it is the one containing the secondary index so need
-            // need to merge anything
-            _ => self.mapping.random_contract_update(ctx, contract, c).await,
+            // For mappings, it is the same, we need to append all the single cells to the mapping
+            // cells for each new update
+            _ => {
+                let mapping_updates = self.mapping.random_contract_update(ctx, contract, c).await;
+                // get the current single cells by emulating as if it's the first time we see them
+                let single_values = self.single.current_table_row_values(ctx, contract).await;
+                // since we know there is only a single row for the single case...
+                let vec_update = TableRowValues::default().compute_update(&single_values[0]);
+                let TableRowUpdate::Insertion(single_cells, _) = vec_update[0].clone() else {
+                    panic!("can't re-create cells of single variable");
+                };
+                mapping_updates
+                    .into_iter()
+                    .map(|row_update| {
+                        match row_update {
+                            // nothing else to do for deletion
+                            TableRowUpdate::Deletion(k) => TableRowUpdate::Deletion(k),
+                            // NOTE: nothing else to do for update as well since we know the
+                            // update comes from the mapping, so single didn't change, so no need
+                            // to add anything.
+                            TableRowUpdate::Update(c) => TableRowUpdate::Update(c),
+                            // add the single cells to the new row
+                            TableRowUpdate::Insertion(mut cells, sec) => {
+                                cells
+                                    .updated_cells
+                                    .extend(single_cells.updated_cells.clone());
+                                TableRowUpdate::Insertion(cells, sec)
+                            }
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            }
         }
     }
 
