@@ -855,6 +855,8 @@ impl MergeSource {
                     let current_value = response.storage_proof[0].value;
                     let current_key = U256::from_be_slice(&mk);
                     let entry = UniqueMappingEntry::new(&current_key, &current_value);
+                    // create one update for each update of the first table (note again there
+                    // should be only one update since it's single var)
                     all_updates.extend(rsu.iter().map(|s| {
                         let TableRowUpdate::Update(su) = s else {
                             panic!("can't have anything else than update for single table");

@@ -785,10 +785,7 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex
             };
             return vec![TableRowUpdate::Insertion(
                 cells_update,
-                new.current_secondary
-                    .as_ref()
-                    .expect("compute_update should always get secondary cell")
-                    .clone(),
+                new.current_secondary.clone().unwrap_or_default(),
             )];
         }
         let new_secondary = new.current_secondary.clone().unwrap_or_default();
