@@ -399,12 +399,18 @@ impl SingleValuesExtractionArgs {
         proof_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
         let chain_id = ctx.rpc.get_chain_id().await?;
-
+        let ProofKey::ValueExtraction((id, bn)) = proof_key.clone() else {
+            bail!("invalid proof key");
+        };
         let single_value_proof = match ctx.storage.get_proof_exact(&proof_key) {
             Ok(p) => p,
             Err(_) => {
                 let single_values_proof = ctx
-                    .prove_single_values_extraction(&contract.address, &self.slots)
+                    .prove_single_values_extraction(
+                        &contract.address,
+                        BlockNumberOrTag::Number(bn as u64),
+                        &self.slots,
+                    )
                     .await;
                 ctx.storage
                     .store_proof(proof_key, single_values_proof.clone())?;

@@ -609,7 +609,10 @@ impl TableIndexing {
                 proof
             }
             Err(_) => {
-                let proof = ctx.prove_block_extraction().await.unwrap();
+                let proof = ctx
+                    .prove_block_extraction(bn as BlockPrimaryIndex)
+                    .await
+                    .unwrap();
                 ctx.storage.store_proof(block_proof_key, proof.clone())?;
                 info!(
                     "Generated Block Extraction (C.4) proof for block number {}",
