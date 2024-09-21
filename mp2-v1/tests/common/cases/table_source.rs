@@ -475,6 +475,7 @@ impl MappingValuesExtractionArgs {
         // NOTE: here is the same address but for different mapping key (10,11)
         let pair2 = (next_value(), init_pair.1);
         let init_state = [init_pair, pair2, (next_value(), next_address())];
+        let init_state = [init_pair];
         // saving the keys we are tracking in the mapping
         self.mapping_keys.extend(
             init_state
