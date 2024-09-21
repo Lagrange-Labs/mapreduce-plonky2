@@ -980,7 +980,7 @@ pub async fn prove_non_existence_row<'a>(
         let primary_epoch = primary as Epoch;
         let lineage = row_tree
             .tree()
-            .lineage(&row_key, &row_tree.at(primary_epoch))
+            .lineage(&row_key, &row_tree.view_at(primary_epoch))
             .await
             .unwrap();
 

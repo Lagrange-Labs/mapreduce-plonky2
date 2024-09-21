@@ -50,7 +50,7 @@ async fn _storage_in_memory(initial_epoch: Epoch) -> Result<()> {
 
     for i in initial_epoch + 1..initial_epoch + 6 {
         println!("\nEpoch = {i}");
-        let mut ss = s.at(i);
+        let mut ss = s.view_at(i);
         s.tree().print(&mut ss).await;
         s.diff_at(i).await.unwrap().print();
 
@@ -127,7 +127,7 @@ async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
 
     for i in initial_epoch + 1..=initial_epoch + 6 {
         println!("\nEpoch = {i}");
-        let mut ss = s.at(i);
+        let mut ss = s.view_at(i);
         s.tree().print(&mut ss).await;
         s.diff_at(i).await.unwrap().print();
 
@@ -295,7 +295,7 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
 
     for i in 1..=2 {
         println!("\nEpoch = {i}");
-        let mut ss = s2.at(i);
+        let mut ss = s2.view_at(i);
         s2.tree().print(&mut ss).await;
         s_psql.diff_at(i).await.unwrap().print();
     }

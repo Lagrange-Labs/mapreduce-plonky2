@@ -1064,6 +1064,13 @@ where
             }
         }
     }
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
+        let db = self.wrapped.lock().unwrap().db.clone();
+        let table = self.wrapped.lock().unwrap().table.to_owned();
+
+        T::fetch_all_keys(db, &table, epoch).await.unwrap()
+    }
 }
 impl<T, V> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
 where
@@ -1174,6 +1181,13 @@ where
                 T::fetch_payload_at(db, &table, k, epoch).await.unwrap()
             }
         }
+    }
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
+        let db = self.wrapped.lock().unwrap().db.clone();
+        let table = self.wrapped.lock().unwrap().table.to_owned();
+
+        T::fetch_all_keys(db, &table, epoch).await.unwrap()
     }
 }
 impl<T, V> EpochKvStorage<T::Key, V> for PayloadProjection<T, V>

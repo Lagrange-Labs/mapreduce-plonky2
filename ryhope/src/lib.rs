@@ -305,7 +305,7 @@ impl<
 
     /// Return an epoch-locked, read-only, [`TreeStorage`] offering a view on
     /// this Merkle tree as it was at the given epoch.
-    pub fn at(&self, epoch: Epoch) -> TreeStorageView<'_, T, S> {
+    pub fn view_at(&self, epoch: Epoch) -> TreeStorageView<'_, T, S> {
         TreeStorageView::<'_, T, S>::new(&self.storage, epoch)
     }
 
@@ -401,16 +401,6 @@ impl<
 
     async fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Option<V> {
         self.storage.data().try_fetch_at(k, epoch).await
-    }
-
-    async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
-        &self,
-        data: I,
-    ) -> Result<Vec<Option<(Epoch, T::Key, V)>>>
-    where
-        <I as IntoIterator>::IntoIter: Send,
-    {
-        self.storage.data().try_fetch_many_at(data).await
     }
 
     async fn size_at(&self, epoch: Epoch) -> usize {

@@ -131,7 +131,7 @@ impl<T: Default + Eq + std::hash::Hash + std::fmt::Debug> PayloadFormatter<RowPa
         outer_table_b.push_record(self.display.outer_header());
         let mut outer_content = Vec::new();
         if self.display.hash {
-            outer_content.push(hex::encode(&p.hash));
+            outer_content.push(hex::encode(&p.hash.0));
         }
         outer_content.push(inner_table.to_string());
         outer_table_b.push_record(outer_content);

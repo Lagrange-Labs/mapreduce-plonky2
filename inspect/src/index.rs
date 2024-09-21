@@ -76,7 +76,7 @@ impl PayloadFormatter<IndexNode<BlockPrimaryIndex>> for IndexPayloadFormatter {
             r.push(format!("0x{:x}", payload.value.0));
         }
         if self.display.hash {
-            r.push(hex::encode(&payload.node_hash));
+            r.push(hex::encode(&payload.node_hash.0));
         }
         if self.display.min {
             r.push(format!("{}", payload.min()));
@@ -88,7 +88,7 @@ impl PayloadFormatter<IndexNode<BlockPrimaryIndex>> for IndexPayloadFormatter {
             r.push(format!("{:?}", payload.row_tree_root_key));
         }
         if self.display.row_tree_root_hash {
-            r.push(hex::encode(&payload.row_tree_hash));
+            r.push(hex::encode(&payload.row_tree_hash.0));
         }
         builder.push_record(r);
 

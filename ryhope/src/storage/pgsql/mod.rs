@@ -845,7 +845,7 @@ where
     ) -> Result<WideLineage<T::Key, V>> {
         let r = t
             .wide_lineage_between(
-                self.view_at(at),
+                &self.view_at(at),
                 self.db.clone(),
                 &self.table,
                 &keys,
