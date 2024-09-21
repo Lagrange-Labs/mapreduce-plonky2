@@ -867,11 +867,12 @@ impl MergeSource {
         // alternate between table a update or table b
         // TODO: implement mixed update
         match rotate() {
-            // SINGLE UPDATE only part. Can only do it if change type is not insertion since we
-            // can't insert a new row for single variables, there's only one...
+            // SINGLE UPDATE only part. Can only do it if change type is not insertion or deletion since we
+            // can't insert a new row for single variables, there's only one... and we can't delete
+            // it either then.
             // for single updates, we need to apply this update to all the mapping entries, that's
             // the "multiplier" part.
-            0 if !matches!(c, ChangeType::Insertion) => {
+            0 if !matches!(c, ChangeType::Insertion) && !matches!(c, ChangeType::Deletion) => {
                 let single_updates = self.single.random_contract_update(ctx, contract, c).await;
                 let rsu = &single_updates;
                 let bn = ctx.block_number().await;
