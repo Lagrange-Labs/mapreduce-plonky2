@@ -271,8 +271,8 @@ async fn prove_query(
         .index
         // TODO: Not sure about this epoch/key set @nikolasgg?
         .try_fetch_many_at(itertools::iproduct!(
-            block_range.clone().map(|x| x as Epoch),
-            block_range.clone()
+            row_keys_per_epoch.keys().copied().map(|x| x as Epoch),
+            row_keys_per_epoch.keys().copied().map(|x| x as usize)
         ))
         .await
         .context("while fetching all (epoch, key, values)")?
@@ -603,7 +603,17 @@ where
         // number as epoch number
         let (node_ctx, node_payload) = gen_cache
             .get(&(primary as Epoch, k.clone()))
-            .expect("missing entry in cache");
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing entry {k:?}@{primary} in cache; available entries: {}",
+                    gen_cache
+                        .keys()
+                        .map(|(e, k)| format!("{k:?}@{e}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            });
+
         let is_satisfying_query = info.is_satisfying_query(&k);
         let embedded_proof = info
             .load_or_prove_embedded(
