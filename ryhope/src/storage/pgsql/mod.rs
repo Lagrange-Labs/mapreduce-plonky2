@@ -707,7 +707,45 @@ where
             .await
             .expect("unable to create DB transaction");
 
-        self.commit_in_transaction(&mut db_tx).await?;
+        self.commit_in_transaction(&mut db_tx)
+            .await
+            .with_context(|| {
+                let mut cached_keys = HashSet::new();
+                {
+                    cached_keys.extend(self.tree_store.lock().unwrap().nodes_cache.keys().cloned());
+                }
+                {
+                    cached_keys.extend(
+                        self.tree_store
+                            .lock()
+                            .unwrap()
+                            .payload_cache
+                            .keys()
+                            .cloned(),
+                    );
+
+                    let mut r = String::new();
+
+                    for k in cached_keys {
+                        let node_value =
+                            { self.tree_store.lock().unwrap().nodes_cache.get(&k).cloned() };
+                        let data_value = {
+                            self.tree_store
+                                .lock()
+                                .unwrap()
+                                .payload_cache
+                                .get(&k)
+                                .cloned()
+                        };
+                        r.push_str(&format!(
+                            "{:?}: node = {:?} data = {:?}  ",
+                            k, node_value, data_value
+                        ))
+                    }
+
+                    anyhow!("internal caches at failure time: {r}")
+                }
+            })?;
 
         // Atomically execute the PgSQL transaction
         let err = db_tx.commit().await.context("while committing transaction");
