@@ -867,12 +867,11 @@ impl MergeSource {
         // alternate between table a update or table b
         // TODO: implement mixed update
         match rotate() {
-            // mapping itself is good since it is the one containing the secondary index so need
-            // need to merge anything
-            1 => self.mapping.random_contract_update(ctx, contract, c).await,
+            // SINGLE UPDATE only part. Can only do it if change type is not insertion since we
+            // can't insert a new row for single variables, there's only one...
             // for single updates, we need to apply this update to all the mapping entries, that's
             // the "multiplier" part.
-            0 => {
+            0 if !matches!(c, ChangeType::Insertion) => {
                 let single_updates = self.single.random_contract_update(ctx, contract, c).await;
                 let rsu = &single_updates;
                 let bn = ctx.block_number().await;
@@ -906,7 +905,9 @@ impl MergeSource {
                 }
                 all_updates
             }
-            _ => panic!("bug in rotation"),
+            // mapping itself is good since it is the one containing the secondary index so need
+            // need to merge anything
+            _ => self.mapping.random_contract_update(ctx, contract, c).await,
         }
     }
 
