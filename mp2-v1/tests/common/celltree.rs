@@ -58,9 +58,10 @@ impl TestContext {
             let column = table.columns.column_info(cell.identifier());
             let proof = if context.is_leaf() {
                 debug!(
-                    "MP2 Proving Cell Tree hash for id {:?} - value {:?} -> {:?}",
+                    "MP2 Proving Cell Tree hash for id {:?} - value {:?} || multiplier {} -> {:?}",
                     cell.identifier(),
                     cell.value(),
+                    column.multiplier,
                     hex::encode(cell.hash.0)
                 );
                 let inputs = CircuitInput::CellsTree(

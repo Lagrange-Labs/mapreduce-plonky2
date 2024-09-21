@@ -104,7 +104,7 @@ impl TableIndexing {
             identifier_for_mapping_value_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
         let key_id =
             identifier_for_mapping_key_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
-        let (index_identifier, mapping_index, cell_identifier) = match value_as_index {
+        let (mapping_index_id, mapping_index, mapping_cell_id) = match value_as_index {
             true => (value_id, MappingIndex::Value(value_id), key_id),
             false => (key_id, MappingIndex::Key(key_id), value_id),
         };
@@ -142,7 +142,7 @@ impl TableIndexing {
                 MAPPING_VALUE_COLUMN
             }
             .to_string(),
-            identifier: cell_identifier,
+            identifier: mapping_cell_id,
             index: IndexType::None,
             // here is it important to specify false to mean that the entries of table B are
             // not repeated.
@@ -165,7 +165,7 @@ impl TableIndexing {
                     MAPPING_KEY_COLUMN
                 }
                 .to_string(),
-                identifier: index_identifier,
+                identifier: mapping_index_id,
                 index: IndexType::Secondary,
                 // here is it important to specify false to mean that the entries of table B are
                 // not repeated.
@@ -173,6 +173,10 @@ impl TableIndexing {
             },
             rest: all_columns,
         };
+        println!(
+            "Table information:\n{}\n",
+            serde_json::to_string_pretty(&columns)?
+        );
 
         let indexing_genesis_block = ctx.block_number().await;
         let table = Table::new(indexing_genesis_block, "merged_table".to_string(), columns).await;

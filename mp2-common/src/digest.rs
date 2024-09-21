@@ -106,7 +106,8 @@ impl SplitDigestPoint {
 
     pub fn cond_combine_to_row_digest(&self) -> Digest {
         let base = map_to_curve_point(&self.individual.to_fields());
-        cond_field_hashed_scalar_mul(self.multiplier, base)
+        let multiplier = map_to_curve_point(&self.multiplier.to_fields());
+        cond_field_hashed_scalar_mul(multiplier, base)
     }
     pub fn combine_to_row_digest(&self) -> Digest {
         field_hashed_scalar_mul(self.multiplier.to_fields(), self.individual)
@@ -138,14 +139,16 @@ impl SplitDigestTarget {
             multiplier: digest_mul,
         }
     }
-    /// Recombine the split and individual targets into a single one. It hashes the individual
-    /// digest first as to look as a single table.
+    /// First compute the individual row digest of each component (i.e. digesting again to make a
+    /// digest of a row). Then recombine the split and individual targets into a single one. It
+    /// hashes the individual digest first as to look as a single table.
     /// NOTE: it takes care of looking if the multiplier is NEUTRAL. In this case, it simply
     /// returns the individual one. This is to accomodate for single table digest or "merged" table
     /// digest.
     pub fn cond_combine_to_row_digest(&self, b: &mut CBuilder) -> DigestTarget {
-        let digest_ind = b.map_to_curve_point(&self.individual.to_targets());
-        cond_circuit_hashed_scalar_mul(b, self.multiplier, digest_ind)
+        let row_digest_ind = b.map_to_curve_point(&self.individual.to_targets());
+        let row_digest_mul = b.map_to_curve_point(&self.multiplier.to_targets());
+        cond_circuit_hashed_scalar_mul(b, row_digest_mul, row_digest_ind)
     }
 
     /// Recombine the split and individual target digest into a single one. It does NOT hashes the
