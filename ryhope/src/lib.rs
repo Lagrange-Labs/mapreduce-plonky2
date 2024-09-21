@@ -1,7 +1,12 @@
 use anyhow::*;
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
+};
 use storage::{
     updatetree::{Next, UpdatePlan, UpdateTree},
     view::TreeStorageView,
@@ -28,6 +33,8 @@ pub const EPOCH: &str = "__epoch";
 pub const VALID_FROM: &str = "__valid_from";
 /// The column containing the last epoch of validity of the row in the zkTable
 pub const VALID_UNTIL: &str = "__valid_until";
+
+pub type NodeCache<K, V> = HashMap<(Epoch, K), (NodeContext<K>, V)>;
 
 /// A timestamp in a versioned storage. Using a signed type allows for easy
 /// detection & debugging of erroneous subtractions.
@@ -322,16 +329,6 @@ impl<
             Some(ut)
         }
     }
-
-    pub async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
-        &self,
-        data: I,
-    ) -> Result<Vec<Option<(Epoch, T::Key, V)>>>
-    where
-        <I as IntoIterator>::IntoIter: Send,
-    {
-        self.storage.data().try_fetch_many_at(data).await
-    }
 }
 
 impl<
@@ -364,6 +361,16 @@ impl<
         self.storage
             .wide_lineage_between(at, &self.tree, keys_query, bounds)
             .await
+    }
+
+    pub async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
+        &self,
+        data: I,
+    ) -> Result<Vec<(Epoch, NodeContext<T::Key>, V)>>
+    where
+        <I as IntoIterator>::IntoIter: Send,
+    {
+        self.storage.try_fetch_many_at(&self.tree, data).await
     }
 }
 

@@ -263,14 +263,6 @@ where
     /// `None` otherwise.
     fn try_fetch_at(&self, k: &K, epoch: Epoch) -> impl Future<Output = Option<V>> + Send;
 
-    /// Return the value associated to a list `(Epoch, Key)` pairs, if they exist.
-    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, K)> + Send>(
-        &self,
-        data: I,
-    ) -> impl Future<Output = Result<Vec<Option<(Epoch, K, V)>>>> + Send
-    where
-        <I as IntoIterator>::IntoIter: Send;
-
     /// Return whether the given key is present at the current epoch.
     async fn contains(&self, k: &K) -> bool {
         self.try_fetch(k).await.is_some()
@@ -506,4 +498,12 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
         }
         Ok(r)
     }
+
+    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
+        &self,
+        t: &T,
+        data: I,
+    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<T::Key>, V)>>> + Send
+    where
+        <I as IntoIterator>::IntoIter: Send;
 }

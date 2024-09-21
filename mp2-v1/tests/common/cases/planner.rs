@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    future::Future,
-};
+use std::{collections::HashSet, future::Future};
 
 use anyhow::Result;
 use log::info;
@@ -11,7 +8,7 @@ use mp2_v1::indexing::{
     row::{RowPayload, RowTreeKey},
 };
 use parsil::{assembler::DynamicCircuitPis, ParsilSettings};
-use ryhope::{storage::WideLineage, tree::NodeContext, Epoch, NodePayload};
+use ryhope::{storage::WideLineage, tree::NodeContext, Epoch, NodeCache};
 
 use crate::common::{
     cases::query::prove_non_existence_row,
@@ -60,7 +57,8 @@ pub trait TreeInfo<K, V> {
         primary: BlockPrimaryIndex,
         k: &K,
         v: &V,
-        cache: &HashMap<(Epoch, RowTreeKey), RowPayload<BlockPrimaryIndex>>,
+        index_cache: &NodeCache<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>,
+        value_cache: &NodeCache<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     ) -> Result<Option<Vec<u8>>>;
 
     fn fetch_ctx_and_payload_at(
@@ -111,8 +109,9 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         planner: &mut QueryPlanner<'a>,
         primary: BlockPrimaryIndex,
         k: &RowTreeKey,
-        v: &RowPayload<BlockPrimaryIndex>,
-        cache: &HashMap<(Epoch, RowTreeKey), RowPayload<BlockPrimaryIndex>>,
+        _v: &RowPayload<BlockPrimaryIndex>,
+        _index_cache: &NodeCache<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>,
+        value_cache: &NodeCache<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     ) -> Result<Option<Vec<u8>>> {
         // TODO export that in single function
         Ok(if self.is_satisfying_query(k) {
@@ -120,12 +119,12 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
             Some(
                 prove_single_row(
                     ctx,
-                    self,
                     &planner.columns,
                     primary,
                     &k,
                     &planner.pis,
                     &planner.query,
+                    value_cache,
                 )
                 .await?,
             )
@@ -196,19 +195,20 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         primary: BlockPrimaryIndex,
         k: &RowTreeKey,
         _v: &RowPayload<BlockPrimaryIndex>,
-        cache: &HashMap<(Epoch, RowTreeKey), RowPayload<BlockPrimaryIndex>>,
+        _index_cache: &NodeCache<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>,
+        value_cache: &NodeCache<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     ) -> Result<Option<Vec<u8>>> {
         Ok(if self.is_satisfying_query(k) {
             let ctx = &mut planner.ctx;
             Some(
                 prove_single_row(
                     ctx,
-                    self,
                     &planner.columns,
                     primary,
                     &k,
                     &planner.pis,
                     &planner.query,
+                    value_cache,
                 )
                 .await?,
             )
@@ -270,9 +270,10 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         primary: BlockPrimaryIndex,
         k: &BlockPrimaryIndex,
         v: &IndexNode<BlockPrimaryIndex>,
-        cache: &HashMap<(Epoch, RowTreeKey), RowPayload<BlockPrimaryIndex>>,
+        index_cache: &NodeCache<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>,
+        value_cache: &NodeCache<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     ) -> Result<Option<Vec<u8>>> {
-        load_or_prove_embedded_index(self, planner, primary, k, v, cache).await
+        load_or_prove_embedded_index(self, planner, primary, k, v, index_cache, value_cache).await
     }
 
     fn fetch_ctx_and_payload_at(
@@ -341,9 +342,10 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
         primary: BlockPrimaryIndex,
         k: &BlockPrimaryIndex,
         v: &IndexNode<BlockPrimaryIndex>,
-        cache: &HashMap<(Epoch, RowTreeKey), RowPayload<BlockPrimaryIndex>>,
+        index_cache: &NodeCache<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>,
+        value_cache: &NodeCache<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     ) -> Result<Option<Vec<u8>>> {
-        load_or_prove_embedded_index(self, planner, primary, k, v, cache).await
+        load_or_prove_embedded_index(self, planner, primary, k, v, index_cache, value_cache).await
     }
 
     fn fetch_ctx_and_payload_at(
@@ -365,7 +367,8 @@ async fn load_or_prove_embedded_index<
     primary: BlockPrimaryIndex,
     k: &BlockPrimaryIndex,
     v: &IndexNode<BlockPrimaryIndex>,
-    cache: &HashMap<(Epoch, RowTreeKey), RowPayload<BlockPrimaryIndex>>,
+    index_cache: &NodeCache<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>,
+    value_cache: &NodeCache<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
 ) -> Result<Option<Vec<u8>>> {
     //assert_eq!(primary, *k);
     info!("loading embedded proof for node {primary} -> {k:?}");
@@ -382,7 +385,7 @@ async fn load_or_prove_embedded_index<
         let proof = match planner.ctx.storage.get_proof_exact(&row_root_proof_key) {
             Ok(proof) => proof,
             Err(_) => {
-                prove_non_existence_row(planner, *k, cache).await?;
+                prove_non_existence_row(planner, *k, index_cache, value_cache).await?;
                 info!("non existence proved for {primary} -> {k:?}");
                 // fetch again the generated proof
                 planner

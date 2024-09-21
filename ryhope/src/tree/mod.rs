@@ -140,7 +140,7 @@ pub trait MutableTree: TreeTopology {
 }
 
 /// A data structure encompassing the immediate neighborhood of a node.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NodeContext<K> {
     /// The considered node ID
     pub node_id: K,

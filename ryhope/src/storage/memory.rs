@@ -4,8 +4,7 @@ use std::collections::HashSet;
 use std::hash::Hash;
 use std::{collections::HashMap, fmt::Debug};
 
-use crate::tree::TreeTopology;
-use crate::{Epoch, InitSettings};
+use crate::{tree::TreeTopology, Epoch, InitSettings};
 
 use super::{
     EpochKvStorage, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
@@ -182,22 +181,6 @@ where
         }
 
         None
-    }
-
-    async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, K)> + Send>(
-        &self,
-        data: I,
-    ) -> Result<Vec<Option<(Epoch, K, V)>>>
-    where
-        <I as IntoIterator>::IntoIter: Send,
-    {
-        let mut r = Vec::new();
-        for (epoch, k) in data.into_iter() {
-            let v = self.try_fetch_at(&k, epoch).await;
-
-            r.push(v.map(|v| (epoch, k, v)));
-        }
-        Ok(r)
     }
 
     // Expensive, but only used in test context.

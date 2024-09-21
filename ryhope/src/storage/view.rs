@@ -5,7 +5,10 @@ use std::{fmt::Debug, marker::PhantomData};
 use anyhow::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{tree::TreeTopology, Epoch};
+use crate::{
+    tree::{NodeContext, TreeTopology},
+    Epoch,
+};
 
 use super::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage};
 
@@ -106,30 +109,6 @@ impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
         } else {
             self.wrapped.try_fetch_at(k, self.current_epoch).await
         }
-    }
-
-    async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
-        &self,
-        data: I,
-    ) -> Result<Vec<Option<(Epoch, T::Key, T::Node)>>>
-    where
-        <I as IntoIterator>::IntoIter: Send,
-    {
-        let checked_data = data
-            .into_iter()
-            .map(|(epoch, v)| {
-                if epoch == self.current_epoch {
-                    Ok((epoch, v))
-                } else {
-                    Err(anyhow!(
-                        "this storage view is locked at {}; {epoch} unreachable",
-                        self.current_epoch
-                    ))
-                }
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        self.wrapped.try_fetch_many_at(checked_data).await
     }
 
     async fn fetch(&self, k: &T::Key) -> T::Node {
