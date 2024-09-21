@@ -413,7 +413,20 @@ impl SingleValuesExtractionArgs {
                     let pproof = ProofWithVK::deserialize(&single_values_proof).unwrap();
                     let pi =
                         mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
-                    debug!("[--] FINAL MPT DIGEST VALUE --> {:?} ", pi.values_digest());
+                    debug!(
+                        "[--] SINGLE FINAL MPT DIGEST VALUE --> {:?} ",
+                        pi.values_digest()
+                    );
+                    debug!(
+                        "[--] SINGLE FINAL ROOT HASH --> {:?} ",
+                        hex::encode(
+                            &pi.root_hash()
+                                .into_iter()
+                                .map(|u| u.to_be_bytes())
+                                .flatten()
+                                .collect::<Vec<_>>()
+                        )
+                    );
                 }
                 single_values_proof
             }
@@ -642,7 +655,20 @@ impl MappingValuesExtractionArgs {
                     let pproof = ProofWithVK::deserialize(&mapping_values_proof).unwrap();
                     let pi =
                         mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
-                    debug!("[--] FINAL MPT DIGEST VALUE --> {:?} ", pi.values_digest());
+                    debug!(
+                        "[--] MAPPING FINAL MPT DIGEST VALUE --> {:?} ",
+                        pi.values_digest()
+                    );
+                    debug!(
+                        "[--] MAPPING FINAL ROOT HASH --> {:?} ",
+                        hex::encode(
+                            &pi.root_hash()
+                                .into_iter()
+                                .map(|u| u.to_be_bytes())
+                                .flatten()
+                                .collect::<Vec<_>>()
+                        )
+                    );
                 }
                 mapping_values_proof
             }

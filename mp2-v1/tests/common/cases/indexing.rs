@@ -4,6 +4,7 @@
 use anyhow::Result;
 use log::{debug, info};
 use mp2_v1::{
+    contract_extraction,
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
@@ -43,7 +44,7 @@ use alloy::{
     primitives::{Address, U256},
     providers::ProviderBuilder,
 };
-use mp2_common::{eth::StorageSlot, types::HashOutput};
+use mp2_common::{eth::StorageSlot, proof::ProofWithVK, types::HashOutput};
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
@@ -577,6 +578,21 @@ impl TableIndexing {
                     "Generated Contract Extraction (C.3) proof for block number {}",
                     bn
                 );
+                {
+                    let pvk = ProofWithVK::deserialize(&contract_proof)?;
+                    let pis =
+                        contract_extraction::PublicInputs::from_slice(&pvk.proof().public_inputs);
+                    debug!(
+                        " CONTRACT storage root pis.storage_root() {:?}",
+                        hex::encode(
+                            &pis.root_hash_field()
+                                .into_iter()
+                                .map(|u| u.to_be_bytes())
+                                .flatten()
+                                .collect::<Vec<_>>()
+                        )
+                    );
+                }
                 contract_proof
             }
         };
