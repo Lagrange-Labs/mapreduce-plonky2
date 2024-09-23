@@ -297,6 +297,16 @@ impl<
         self.tree.lineage(k, &s).await
     }
 
+    /// Return the union of the lineages of the keys in the given iterator at
+    /// the specified epoch.
+    pub async fn ascendance_at<I: IntoIterator<Item = T::Key>>(
+        &self,
+        ks: I,
+        epoch: Epoch,
+    ) -> HashSet<T::Key> {
+        self.tree.ascendance(ks, &self.view_at(epoch)).await
+    }
+
     /// Return a handle to this merkle tree storage, as it stands at its most
     /// recent epoch.
     pub fn now(&self) -> &S {

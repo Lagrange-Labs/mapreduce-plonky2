@@ -234,13 +234,31 @@ async fn prove_query(
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
     let row_keys_per_epoch = row_cache.keys_by_epochs();
+
+    let all_keys = row_keys_per_epoch
+        .values()
+        .flatten()
+        .cloned()
+        .collect::<HashSet<_>>();
+
+    let mut values_to_cache: Vec<(Epoch, RowTreeKey)> = Vec::new();
+    for (epoch, ks) in row_keys_per_epoch
+        .iter()
+        .chain(std::iter::once((&table.index.current_epoch(), &all_keys)))
+    {
+        values_to_cache.extend(
+            table
+                .row
+                .ascendance_at(ks.iter().cloned(), *epoch)
+                .await
+                .into_iter()
+                .map(|k| (*epoch, k)),
+        );
+    }
+
     let value_cache: HashMap<_, _> = table
         .row
-        .try_fetch_many_at(
-            row_keys_per_epoch
-                .iter()
-                .flat_map(|(epoch, keys)| keys.iter().map(|k| (*epoch, k.to_owned()))),
-        )
+        .try_fetch_many_at(values_to_cache)
         .await
         .context("while fetching all (epoch, key, values)")?
         .into_iter()
@@ -267,13 +285,39 @@ async fn prove_query(
         block_range
     );
 
+    // TODO: this is not optimized for now; a combined_ascendance([(Epoch,
+    // Key)]) should be developed in Ryhope.
+    let mut index_to_cache: Vec<(Epoch, BlockPrimaryIndex)> = Vec::new();
+    warn!(
+        "Building index cache from {:?}",
+        row_keys_per_epoch.iter().collect_vec()
+    );
+    for epoch in row_keys_per_epoch
+        .keys()
+        .copied()
+        .map(|x| x as Epoch)
+        .chain(std::iter::once(table.index.current_epoch()))
+    {
+        index_to_cache.extend(
+            table
+                .index
+                .ascendance_at(
+                    row_keys_per_epoch
+                        .keys()
+                        .copied()
+                        .map(|x| x as usize)
+                        .chain(std::iter::once(table.index.current_epoch() as usize)),
+                    epoch,
+                )
+                .await
+                .into_iter()
+                .map(|k| (epoch, k)),
+        );
+    }
+
     let index_cache: HashMap<_, _> = table
         .index
-        // TODO: Not sure about this epoch/key set @nikolasgg?
-        .try_fetch_many_at(itertools::iproduct!(
-            row_keys_per_epoch.keys().copied().map(|x| x as Epoch),
-            row_keys_per_epoch.keys().copied().map(|x| x as usize)
-        ))
+        .try_fetch_many_at(index_to_cache)
         .await
         .context("while fetching all (epoch, key, values)")?
         .into_iter()
@@ -564,6 +608,7 @@ where
     K: Debug + Hash + Clone + Eq + Sync + Send,
 {
     let query_id = planner.query.query.clone();
+    update.print();
     let mut workplan = update.into_workplan();
     let mut proven_nodes = HashSet::new();
     let fetch_only_proven_child = |nctx: &NodeContext<K>,
@@ -601,6 +646,7 @@ where
         };
         // since epoch starts at genesis now, we can directly give the value of the block
         // number as epoch number
+        warn!("PRIMARY is {primary}");
         let (node_ctx, node_payload) = gen_cache
             .get(&(primary as Epoch, k.clone()))
             .unwrap_or_else(|| {
