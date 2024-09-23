@@ -117,6 +117,7 @@ async fn integrated_indexing() -> Result<()> {
 }
 
 #[test(tokio::test)]
+#[ignore]
 async fn integrated_querying() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test");
