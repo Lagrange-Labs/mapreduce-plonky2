@@ -152,9 +152,10 @@ impl SplitDigestTarget {
     /// NOTE: it takes care of looking if the multiplier is NEUTRAL. In this case, it simply
     /// returns the individual one. This is to accomodate for single table digest or "merged" table
     /// digest.
-    pub fn cond_combine_to_row_digest(&self, b: &mut CBuilder, cond: BoolTarget) -> DigestTarget {
+    pub fn cond_combine_to_row_digest(&self, b: &mut CBuilder) -> DigestTarget {
         let row_digest_ind = b.map_to_curve_point(&self.individual.to_targets());
         let row_digest_mul = b.map_to_curve_point(&self.multiplier.to_targets());
+        let cond = self.is_merge_case(b);
         cond_circuit_hashed_scalar_mul(b, cond, row_digest_mul, row_digest_ind)
     }
 
