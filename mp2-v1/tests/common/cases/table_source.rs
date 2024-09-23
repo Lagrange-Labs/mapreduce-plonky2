@@ -216,7 +216,7 @@ impl TableSource {
         .boxed()
     }
 
-    pub async fn generate_extraction_proof(
+    pub async fn generate_extraction_proof_inputs(
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
@@ -226,16 +226,16 @@ impl TableSource {
             // first lets do without length
             TableSource::Mapping((ref mapping, _)) => {
                 mapping
-                    .generate_extraction_proof(ctx, contract, value_key)
+                    .generate_extraction_proof_inputs(ctx, contract, value_key)
                     .await
             }
             TableSource::SingleValues(ref args) => {
-                args.generate_extraction_proof(ctx, contract, value_key)
+                args.generate_extraction_proof_inputs(ctx, contract, value_key)
                     .await
             }
             TableSource::Merge(ref merge) => {
                 merge
-                    .generate_extraction_proof(ctx, contract, value_key)
+                    .generate_extraction_proof_inputs(ctx, contract, value_key)
                     .await
             }
         }
@@ -392,7 +392,7 @@ impl SingleValuesExtractionArgs {
         }]
     }
 
-    pub async fn generate_extraction_proof(
+    pub async fn generate_extraction_proof_inputs(
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
@@ -475,6 +475,7 @@ impl MappingValuesExtractionArgs {
         // NOTE: here is the same address but for different mapping key (10,11)
         let pair2 = (next_value(), init_pair.1);
         let init_state = [init_pair, pair2, (next_value(), next_address())];
+        // NOTE: uncomment this for simpler testing
         //let init_state = [init_pair];
         // saving the keys we are tracking in the mapping
         self.mapping_keys.extend(
@@ -637,7 +638,7 @@ impl MappingValuesExtractionArgs {
         )
     }
 
-    pub async fn generate_extraction_proof(
+    pub async fn generate_extraction_proof_inputs(
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
@@ -792,8 +793,8 @@ pub struct MergeSource {
     // NOTE: this is a hardcore assumption currently that  table_a is single and table_b is mapping for now
     // Extending to full merge between any table is not far - it requires some quick changes in
     // circuit but quite a lot of changes in integrated test.
-    single: SingleValuesExtractionArgs,
-    mapping: MappingValuesExtractionArgs,
+    pub(crate) single: SingleValuesExtractionArgs,
+    pub(crate) mapping: MappingValuesExtractionArgs,
 }
 
 impl MergeSource {
@@ -808,20 +809,20 @@ impl MergeSource {
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         // OK to call both sequentially since we only look a the block number after setting the
         // initial data
-        let update_a = self.single.init_contract_data(ctx, contract).await;
-        let update_b = self.mapping.init_contract_data(ctx, contract).await;
+        let update_single = self.single.init_contract_data(ctx, contract).await;
+        let update_mapping = self.mapping.init_contract_data(ctx, contract).await;
         // now we merge all the cells change from the single contract to the mapping contract
-        update_b
+        update_mapping
             .into_iter()
-            .map(|ua| {
-                let refa = &ua;
+            .map(|um| {
+                let refm = &um;
                 // for each update from mapping, we "merge" all the updates from single, i.e. since
                 // single is the multiplier table
                 // NOTE: It assumes there is no secondary index on the single table right now.
                 // NOTE: there should be only one update per block for single table. Here we just try
                 // to make it a bit more general by saying each update of table a must be present for
                 // all updates of table b
-                update_a.iter().map(|ub| match (refa, ub) {
+                update_single.iter().map(|us| match (refm, us) {
                     // We start by a few impossible methods
                     (_, TableRowUpdate::Deletion(_)) => panic!("no deletion on single table"),
                     (TableRowUpdate::Update(_), TableRowUpdate::Insertion(_, _)) => {
@@ -941,7 +942,7 @@ impl MergeSource {
         }
     }
 
-    pub fn generate_extraction_proof<'a>(
+    pub fn generate_extraction_proof_inputs<'a>(
         &'a self,
         ctx: &'a mut TestContext,
         contract: &'a Contract,
@@ -956,14 +957,22 @@ impl MergeSource {
             // generate the value extraction proof for the both table individually
             let (extract_single, _) = self
                 .single
-                .generate_extraction_proof(ctx, contract, ProofKey::ValueExtraction((id_a, bn)))
+                .generate_extraction_proof_inputs(
+                    ctx,
+                    contract,
+                    ProofKey::ValueExtraction((id_a, bn)),
+                )
                 .await?;
             let ExtractionProofInput::Single(extract_a) = extract_single else {
                 bail!("can't merge non single tables")
             };
             let (extract_mappping, _) = self
                 .mapping
-                .generate_extraction_proof(ctx, contract, ProofKey::ValueExtraction((id_b, bn)))
+                .generate_extraction_proof_inputs(
+                    ctx,
+                    contract,
+                    ProofKey::ValueExtraction((id_b, bn)),
+                )
                 .await?;
             let ExtractionProofInput::Single(extract_b) = extract_mappping else {
                 bail!("can't merge non single tables")

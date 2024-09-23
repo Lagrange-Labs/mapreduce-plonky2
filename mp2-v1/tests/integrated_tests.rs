@@ -110,7 +110,7 @@ async fn integrated_indexing() -> Result<()> {
     merged.run(&mut ctx, genesis, changes).await?;
 
     // save columns information and table information in JSON so querying test can pick up
-    //write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
+    write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
     Ok(())
 }
 

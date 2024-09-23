@@ -10,6 +10,7 @@ use mp2_v1::{
         block::BlockPrimaryIndex,
         cell::Cell,
         row::{RowTreeKey, ToNonce},
+        ColumnID,
     },
     values_extraction::{
         identifier_for_mapping_key_column, identifier_for_mapping_value_column,
@@ -37,4 +38,7 @@ pub(crate) struct TableIndexing {
     pub(crate) contract: Contract,
     pub(crate) contract_extraction: ContractExtractionArgs,
     pub(crate) source: TableSource,
+    // the column over which we can do queries like ` y > 64`. It is not the address column that we
+    // assume it the secondary index always.
+    pub(crate) value_column: String,
 }

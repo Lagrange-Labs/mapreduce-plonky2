@@ -148,6 +148,7 @@ impl TableIndexing {
             // not repeated.
             multiplier: false,
         }];
+        let value_column = mapping_column[0].name.clone();
         let all_columns = [single_columns.as_slice(), mapping_column.as_slice()].concat();
         let columns = TableColumns {
             primary: TableColumn {
@@ -182,6 +183,7 @@ impl TableIndexing {
         let table = Table::new(indexing_genesis_block, "merged_table".to_string(), columns).await;
         Ok((
             Self {
+                value_column,
                 source: source.clone(),
                 table,
                 contract,
@@ -265,6 +267,7 @@ impl TableIndexing {
         let table = Table::new(indexing_genesis_block, "single_table".to_string(), columns).await;
         Ok((
             Self {
+                value_column: "".to_string(),
                 source: source.clone(),
                 table,
                 contract,
@@ -360,12 +363,14 @@ impl TableIndexing {
                 multiplier: false,
             }],
         };
+        let value_column = columns.rest[0].name.clone();
         debug!("MAPPING ZK COLUMNS -> {:?}", columns);
         let index_genesis_block = ctx.block_number().await;
         let table = Table::new(index_genesis_block, "mapping_table".to_string(), columns).await;
 
         Ok((
             Self {
+                value_column,
                 contract_extraction: ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
                 },
@@ -634,7 +639,7 @@ impl TableIndexing {
         let final_key = ProofKey::FinalExtraction((table_id.clone(), bn as BlockPrimaryIndex));
         let (extraction, metadata_hash) = self
             .source
-            .generate_extraction_proof(ctx, &self.contract, value_key)
+            .generate_extraction_proof_inputs(ctx, &self.contract, value_key)
             .await?;
         // no need to generate it if it's already present
         if ctx.storage.get_proof_exact(&final_key).is_err() {

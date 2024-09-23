@@ -2,7 +2,7 @@
 use alloy::primitives::Address;
 use anyhow::Result;
 use cases::table_source::TableSource;
-use mp2_v1::api::{metadata_hash, MetadataHash, SlotInputs};
+use mp2_v1::api::{merge_metadata_hash, metadata_hash, MetadataHash, SlotInputs};
 use serde::{Deserialize, Serialize};
 use table::TableColumns;
 pub mod benchmarker;
@@ -75,12 +75,27 @@ pub struct TableInfo {
 
 impl TableInfo {
     pub fn metadata_hash(&self) -> MetadataHash {
-        let slots = match &self.source {
-            TableSource::Mapping((mapping, _)) => SlotInputs::Mapping(mapping.slot),
+        match &self.source {
+            TableSource::Mapping((mapping, _)) => {
+                let slot = SlotInputs::Mapping(mapping.slot);
+                metadata_hash(slot, &self.contract_address, self.chain_id, vec![])
+            }
             // mapping with length not tested right now
-            TableSource::SingleValues(args) => SlotInputs::Simple(args.slots.clone()),
-            TableSource::Merge(_) => unimplemented!("yet"),
-        };
-        metadata_hash(slots, &self.contract_address, self.chain_id, vec![])
+            TableSource::SingleValues(args) => {
+                let slot = SlotInputs::Simple(args.slots.clone());
+                metadata_hash(slot, &self.contract_address, self.chain_id, vec![])
+            }
+            TableSource::Merge(merge) => {
+                let single = SlotInputs::Simple(merge.single.slots.clone());
+                let mapping = SlotInputs::Mapping(merge.mapping.slot);
+                merge_metadata_hash(
+                    self.contract_address,
+                    self.chain_id,
+                    vec![],
+                    single,
+                    mapping,
+                )
+            }
+        }
     }
 }
