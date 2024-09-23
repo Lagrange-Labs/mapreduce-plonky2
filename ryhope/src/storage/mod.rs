@@ -110,14 +110,16 @@ impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
                 let mut path = vec![k.clone()];
                 // ok to unwrap since we passed the filter, so that key must exist
                 // otherwise it's ryhope failure
-                let mut ctx = epoch_data.0.get(k).expect("lineage should get all keys");
+                let mut ctx = epoch_data.0.get(k).unwrap_or_else(|| panic!(
+                    "lineage should get all core keys, but {k:?} is missing"
+                ));
                 // go back up to there is no more parent anymore, i.e. the root
                 while ctx.parent.is_some() {
                     let parent_k = ctx.parent.as_ref().unwrap();
                     ctx = epoch_data
                         .0
                         .get(parent_k)
-                        .expect("lineage should get all keys");
+                        .unwrap_or_else(|| panic!("lineage should get all ascendant keys, but {parent_k:?} (for {k:?}) is missing"));
                     path.push(parent_k.clone());
                 }
                 // NOTE: these paths are *ascending*, whereas the update tree is
@@ -280,7 +282,14 @@ where
     }
 
     /// Return the number of stored K/V pairs at the current epoch.
-    async fn size(&self) -> usize;
+    async fn size(&self) -> usize {
+        self.size_at(self.current_epoch()).await
+    }
+
+    /// Return the number of stored K/V pairs at the gievm epoch
+    async fn size_at(&self, epoch: Epoch) -> usize;
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<K>;
 }
 
 /// A versioned KV storage only allowed to mutate entries only in the current
@@ -475,6 +484,7 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
     /// by the union of all the paths-to-the-root for the given keys.
     async fn wide_lineage_between(
         &self,
+        at: Epoch,
         t: &T,
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
@@ -482,11 +492,12 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
 
     async fn wide_update_trees(
         &self,
+        at: Epoch,
         t: &T,
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<Vec<UpdateTree<T::Key>>> {
-        let wide_lineage = self.wide_lineage_between(t, keys, bounds).await?;
+        let wide_lineage = self.wide_lineage_between(at, t, keys, bounds).await?;
         let mut r = Vec::new();
         for (epoch, nodes) in wide_lineage.epoch_lineages.iter() {
             if let Some(root) = t.root(&self.view_at(*epoch)).await {

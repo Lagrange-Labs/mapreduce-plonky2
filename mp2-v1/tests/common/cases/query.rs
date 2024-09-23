@@ -130,6 +130,9 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table, info: TableInfo) ->
     //// cook query with custom placeholders
     let query_info = cook_query_secondary_index_placeholder(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    let query_info = cook_query_secondary_index_nonexisting_placeholder(table).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+
     // cook query filtering over a secondary index value not valid in all the blocks
     let query_info = cook_query_non_matching_entries_some_blocks(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
@@ -191,6 +194,7 @@ async fn test_query_mapping(
     let big_row_cache = table
         .row
         .wide_lineage_between(
+            table.row.current_epoch(),
             &core_keys_for_row_tree(
                 &query_info.query,
                 &settings,
@@ -311,15 +315,16 @@ async fn prove_query(
             // The bounds here means between which versions of the tree should we look. For index tree,
             // we only look at _one_ version of the tree.
             .wide_lineage_between(
+                current_epoch as Epoch,
                 &index_query,
                 (current_epoch as Epoch, current_epoch as Epoch),
             )
             .await?;
         // since we only analyze the index tree for one epoch
         assert_eq!(big_index_cache.keys_by_epochs().len(), 1);
-        /// This is ok because the cache only have the block that are in the range so the
-        /// filter_check is gonna return the same thing
-        /// TOOD: @franklin is that correct ?
+        // This is ok because the cache only have the block that are in the range so the
+        // filter_check is gonna return the same thing
+        // TOOD: @franklin is that correct ?
         let up = big_index_cache
             // this is the epoch we choose how to prove
             .update_tree_for(current_epoch as Epoch)
@@ -365,7 +370,11 @@ async fn prove_revelation(
     // load the query proof, which is at the root of the tree
     let query_proof = {
         let root_key = table.index.root_at(tree_epoch).await.unwrap();
-        let proof_key = ProofKey::QueryAggregateIndex((query.query.clone(), root_key));
+        let proof_key = ProofKey::QueryAggregateIndex((
+            query.query.clone(),
+            query.placeholders.placeholder_values(),
+            root_key,
+        ));
         ctx.storage.get_proof_exact(&proof_key)?
     };
     // load the preprocessing proof at the same epoch
@@ -515,6 +524,7 @@ where
     K: Debug + Hash + Clone + Eq + Sync + Send,
 {
     let query_id = planner.query.query.clone();
+    let placeholder_values = planner.query.placeholders.placeholder_values();
     let mut workplan = update.into_workplan();
     let mut proven_nodes = HashSet::new();
     let fetch_only_proven_child = |nctx: NodeContext<K>,
@@ -538,7 +548,13 @@ where
             _ => panic!("stg's wrong in the tree"),
         };
         let child_proof = info
-            .load_proof(cctx, &query_id, primary, &child_key)
+            .load_proof(
+                cctx,
+                &query_id,
+                primary,
+                &child_key,
+                placeholder_values.clone(),
+            )
             .expect("key should already been proven");
         (pos, child_proof)
     };
@@ -562,18 +578,24 @@ where
             .await;
         if node_ctx.is_leaf() && info.is_row_tree() {
             // NOTE: if it is a leaf of the row tree, then there is no need to prove anything,
-            // since we're not "aggregating" any from below. So in this test, we just copy the
-            // proof to the expected aggregation location and move on.
-            // For the index tree however, we need to always generate an aggregate proof
-            // unwrap is safe since we are a leaf and therefore there is an embedded proof since we
-            // are guaranteed the row is satisfying the query
-            info.save_proof(
-                &mut planner.ctx,
-                &query_id,
-                primary,
-                &k,
-                embedded_proof?.unwrap(),
-            )?;
+            // since we're not "aggregating" any from below. For the index tree however, we
+            // need to always generate an aggregate proof. Therefore, in this test, we just copy the
+            // proof to the expected aggregation location and move on. Note that we need to
+            // save the proof only if the current row is satisfying the query: indeed, if
+            // this not the case, then the proof should have already been generated and stored
+            // with the non-existence circuit
+            if is_satisfying_query {
+                // unwrap is safe since we are guaranteed the row is satisfying the query
+                info.save_proof(
+                    &mut planner.ctx,
+                    &query_id,
+                    primary,
+                    &k,
+                    placeholder_values.clone(),
+                    embedded_proof?.unwrap(),
+                )?;
+            }
+
             end_iteration(&mut proven_nodes)?;
             continue;
         }
@@ -657,12 +679,14 @@ where
                         &query_id,
                         primary,
                         node_ctx.left.as_ref().unwrap(),
+                        placeholder_values.clone(),
                     )?;
                     let right_proof = info.load_proof(
                         planner.ctx,
                         &query_id,
                         primary,
                         node_ctx.right.as_ref().unwrap(),
+                        placeholder_values.clone(),
                     )?;
                     (
                         "querying::aggregation::full",
@@ -704,7 +728,14 @@ where
         let proof = planner
             .ctx
             .run_query_proof(name, GlobalCircuitInput::Query(input))?;
-        info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
+        info.save_proof(
+            planner.ctx,
+            &query_id,
+            primary,
+            &k,
+            placeholder_values.clone(),
+            proof,
+        )?;
         info!("query proof DONE for {primary} -> {k:?} ");
         end_iteration(&mut proven_nodes)?;
     }
@@ -855,7 +886,11 @@ async fn prove_non_existence_index<'a>(
         current_epoch,
     )
     .await;
-    let proof_key = ProofKey::QueryAggregateIndex((planner.query.query.clone(), primary));
+    let proof_key = ProofKey::QueryAggregateIndex((
+        planner.query.query.clone(),
+        planner.query.placeholders.placeholder_values(),
+        primary,
+    ));
     info!("Non-existence circuit proof RUNNING for {current_epoch} -> {primary} ");
     let proof = generate_non_existence_proof(
         node_info,
@@ -945,6 +980,7 @@ pub async fn prove_non_existence_row<'a>(
 
     let proof_key = ProofKey::QueryAggregateRow((
         planner.query.query.clone(),
+        planner.query.placeholders.placeholder_values(),
         primary,
         to_be_proven_node.clone(),
     ));
@@ -1037,7 +1073,12 @@ pub async fn prove_single_row<T: TreeInfo<RowTreeKey, RowPayload<BlockPrimaryInd
     )
     .expect("unable to create universal query circuit inputs");
     // 3. run proof if not ran already
-    let proof_key = ProofKey::QueryUniversal((query.query.clone(), primary, row_key.clone()));
+    let proof_key = ProofKey::QueryUniversal((
+        query.query.clone(),
+        query.placeholders.placeholder_values(),
+        primary,
+        row_key.clone(),
+    ));
     let proof = {
         info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
         let proof = ctx
@@ -1077,6 +1118,46 @@ async fn cook_query_between_blocks(table: &Table, info: &TableInfo) -> Result<Qu
     Ok(QueryCooking {
         min_block: min as BlockPrimaryIndex,
         max_block: max as BlockPrimaryIndex,
+        query: query_str,
+        placeholders,
+    })
+}
+
+async fn cook_query_secondary_index_nonexisting_placeholder(table: &Table) -> Result<QueryCooking> {
+    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
+    let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
+    info!(
+        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
+        min_block, max_block, key_value
+    );
+    // now we can fetch the key that we want
+    let key_column = table.columns.secondary.name.clone();
+    // Assuming this is mapping with only two columns !
+    let value_column = &table.columns.rest[0].name;
+    let table_name = &table.public_name;
+
+    let filtering_value = *BASE_VALUE + U256::from(5);
+
+    let random_value = U256::from(1234567890);
+    let placeholders = Placeholders::from((
+        vec![
+            (PlaceholderId::Generic(1), random_value),
+            (PlaceholderId::Generic(2), filtering_value),
+        ],
+        U256::from(min_block),
+        U256::from(max_block),
+    ));
+
+    let query_str = format!(
+        "SELECT AVG({value_column})
+                FROM {table_name}
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
+                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
+                AND {key_column} = $1 AND {value_column} >= $2;"
+    );
+    Ok(QueryCooking {
+        min_block: min_block as BlockPrimaryIndex,
+        max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
     })

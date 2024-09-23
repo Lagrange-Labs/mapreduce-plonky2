@@ -45,6 +45,10 @@ pub trait NodePayload: Debug + Sized + Serialize + for<'a> Deserialize<'a> {
     fn aggregate<I: Iterator<Item = Option<Self>>>(&mut self, _children: I) {}
 }
 
+impl NodePayload for serde_json::Value {
+    fn aggregate<I: Iterator<Item = Option<Self>>>(&mut self, _children: I) {}
+}
+
 /// Define how to initialize a Merkle tree KV DB depending on the current status
 /// of the persisted data, if any.
 pub enum InitSettings<T> {
@@ -266,6 +270,12 @@ impl<
         self.tree.node_context(k, &self.storage).await
     }
 
+    pub async fn node_context_at(&self, k: &T::Key, epoch: Epoch) -> Option<NodeContext<T::Key>> {
+        self.tree
+            .node_context(k, &self.storage.view_at(epoch))
+            .await
+    }
+
     /// Return, if it exists, a [`NodePath`] for the given key in the underlying
     /// tree representing its ascendance up to the tree root.
     pub async fn lineage(&self, k: &T::Key) -> Option<NodePath<T::Key>> {
@@ -328,22 +338,25 @@ impl<
             + MetaOperations<T, V>,
     > MerkleTreeKvDb<T, V, S>
 {
-    pub async fn wide_update_trees(
+    pub async fn wide_update_trees_at(
         &self,
+        at: Epoch,
         keys_query: &S::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<Vec<UpdateTree<T::Key>>> {
         self.storage
-            .wide_update_trees(&self.tree, keys_query, bounds)
+            .wide_update_trees(at, &self.tree, keys_query, bounds)
             .await
     }
+
     pub async fn wide_lineage_between(
         &self,
+        at: Epoch,
         keys_query: &S::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<WideLineage<T::Key, V>> {
         self.storage
-            .wide_lineage_between(&self.tree, keys_query, bounds)
+            .wide_lineage_between(at, &self.tree, keys_query, bounds)
             .await
     }
 }
@@ -386,8 +399,13 @@ impl<
     {
         self.storage.data().try_fetch_many_at(data).await
     }
-    async fn size(&self) -> usize {
-        self.storage.data().size().await
+
+    async fn size_at(&self, epoch: Epoch) -> usize {
+        self.storage.data().size_at(epoch).await
+    }
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
+        self.storage.data().keys_at(epoch).await
     }
 }
 

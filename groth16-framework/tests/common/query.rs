@@ -138,6 +138,8 @@ impl TestContext {
         write_query_input(asset_dir, &query_input);
 
         // Save the testing query output.
+        let overflow = revelation_pi.overflow_flag();
+        let error = if overflow { 1 } else { 0 };
         let entry_count = revelation_pi.entry_count().to_canonical_u64();
         let num_results = revelation_pi.num_results().to_canonical_u64();
         assert!(entry_count <= u32::MAX as u64);
@@ -147,6 +149,7 @@ impl TestContext {
         let query_output = TestQueryOutput {
             total_matched_rows,
             rows,
+            error,
         };
         write_query_output(asset_dir, &query_output);
 

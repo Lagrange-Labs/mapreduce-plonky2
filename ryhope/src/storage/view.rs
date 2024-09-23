@@ -136,8 +136,12 @@ impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
         self.wrapped.fetch_at(k, self.current_epoch).await
     }
 
-    async fn size(&self) -> usize {
-        self.wrapped.size().await
+    async fn size_at(&self, epoch: Epoch) -> usize {
+        self.wrapped.size_at(epoch).await
+    }
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
+        self.wrapped.keys_at(epoch).await
     }
 }
 

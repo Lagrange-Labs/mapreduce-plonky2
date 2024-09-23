@@ -52,6 +52,16 @@ impl ToFromBytea for String {
     }
 }
 
+impl ToFromBytea for Vec<u8> {
+    fn to_bytea(&self) -> Vec<u8> {
+        self.clone()
+    }
+
+    fn from_bytea(bytes: Vec<u8>) -> Self {
+        bytes
+    }
+}
+
 impl ToFromBytea for i64 {
     fn to_bytea(&self) -> Vec<u8> {
         self.to_be_bytes().to_vec()
@@ -697,7 +707,45 @@ where
             .await
             .expect("unable to create DB transaction");
 
-        self.commit_in_transaction(&mut db_tx).await?;
+        self.commit_in_transaction(&mut db_tx)
+            .await
+            .with_context(|| {
+                let mut cached_keys = HashSet::new();
+                {
+                    cached_keys.extend(self.tree_store.lock().unwrap().nodes_cache.keys().cloned());
+                }
+                {
+                    cached_keys.extend(
+                        self.tree_store
+                            .lock()
+                            .unwrap()
+                            .payload_cache
+                            .keys()
+                            .cloned(),
+                    );
+
+                    let mut r = String::new();
+
+                    for k in cached_keys {
+                        let node_value =
+                            { self.tree_store.lock().unwrap().nodes_cache.get(&k).cloned() };
+                        let data_value = {
+                            self.tree_store
+                                .lock()
+                                .unwrap()
+                                .payload_cache
+                                .get(&k)
+                                .cloned()
+                        };
+                        r.push_str(&format!(
+                            "{:?}: node = {:?} data = {:?}  ",
+                            k, node_value, data_value
+                        ))
+                    }
+
+                    anyhow!("internal caches at failure time: {r}")
+                }
+            })?;
 
         // Atomically execute the PgSQL transaction
         let err = db_tx.commit().await.context("while committing transaction");
@@ -720,7 +768,43 @@ where
 {
     async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()> {
         trace!("[{self}] API-facing commit_in called");
-        self.commit_in_transaction(tx).await
+        self.commit_in_transaction(tx).await.with_context(|| {
+            let mut cached_keys = HashSet::new();
+            {
+                cached_keys.extend(self.tree_store.lock().unwrap().nodes_cache.keys().cloned());
+            }
+            {
+                cached_keys.extend(
+                    self.tree_store
+                        .lock()
+                        .unwrap()
+                        .payload_cache
+                        .keys()
+                        .cloned(),
+                );
+
+                let mut r = String::new();
+
+                for k in cached_keys {
+                    let node_value =
+                        { self.tree_store.lock().unwrap().nodes_cache.get(&k).cloned() };
+                    let data_value = {
+                        self.tree_store
+                            .lock()
+                            .unwrap()
+                            .payload_cache
+                            .get(&k)
+                            .cloned()
+                    };
+                    r.push_str(&format!(
+                        "{:?}: node = {:?} data = {:?}  ",
+                        k, node_value, data_value
+                    ))
+                }
+
+                anyhow!("internal caches at failure time: {r}")
+            }
+        })
     }
 
     fn commit_success(&mut self) {
@@ -826,12 +910,20 @@ where
 
     async fn wide_lineage_between(
         &self,
+        at: Epoch,
         t: &T,
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<WideLineage<T::Key, V>> {
-        let r =
-            T::wide_lineage_between(t, self, self.db.clone(), &self.table, &keys, bounds).await?;
+        let r = T::wide_lineage_between(
+            t,
+            &self.view_at(at),
+            self.db.clone(),
+            &self.table,
+            &keys,
+            bounds,
+        )
+        .await?;
 
         Ok(r)
     }

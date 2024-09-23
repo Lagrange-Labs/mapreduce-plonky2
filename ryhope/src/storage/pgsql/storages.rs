@@ -100,6 +100,29 @@ where
         epoch: Epoch,
     ) -> impl Future<Output = Result<Option<Self::Node>>> + Send;
 
+    fn fetch_all_keys(
+        db: DBPool,
+        table: &str,
+        epoch: Epoch,
+    ) -> impl std::future::Future<Output = Result<Vec<Self::Key>>> + std::marker::Send {
+        async move {
+            let connection = db.get().await.unwrap();
+            Ok(connection
+                .query(
+                    &format!(
+                        "SELECT {KEY} FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
+                        table
+                    ),
+                    &[&epoch],
+                )
+                .await
+                .context("while fetching all keys from database")?
+                .iter()
+                .map(|row| Self::Key::from_bytea(row.get::<_, Vec<u8>>(0)))
+                .collect())
+        }
+    }
+
     /// Return the value associated to the given key at the given epoch.
     fn fetch_payload_at(
         db: DBPool,
@@ -148,13 +171,13 @@ where
                 .join(", ");
             Ok(connection
             .query(
-                &dbg!(format!(
+                &format!(
                    "SELECT batch.key, batch.epoch, {table}.{PAYLOAD} FROM
                      (VALUES {}) AS batch (epoch, key)
                      LEFT JOIN {table} ON
                      batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
                    immediate_table
-               )),
+               ),
                 &[],
             )
                .await
@@ -286,7 +309,7 @@ where
             "SELECT
                {KEY}, generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS epoch, {PAYLOAD}
              FROM {table}
-             WHERE {VALID_FROM} <= $1 AND $2 <= {VALID_UNTIL} AND {KEY} = ANY($3)",
+             WHERE NOT ({VALID_FROM} > $2 OR {VALID_UNTIL} < $1) AND {KEY} = ANY($3)",
         );
         let rows = db
             .get()
@@ -708,15 +731,15 @@ where
                 &[&epoch],
             )
             .await
-            .map(|row| row.get::<_, Json<T>>(0).0)
+            .and_then(|row| row.try_get::<_, Json<T>>(0))
+            .map(|x| x.0)
             .with_context(|| {
                 anyhow!(
                     "failed to fetch state from `{}_meta` at epoch `{}`",
                     self.table,
                     epoch
                 )
-            })
-            .unwrap()
+            }).unwrap()
     }
 
     async fn store(&mut self, t: T) {
@@ -843,6 +866,10 @@ where
     }
 
     pub async fn size(&self) -> usize {
+        self.size_at(self.epoch).await
+    }
+
+    pub async fn size_at(&self, epoch: Epoch) -> usize {
         let connection = self.db.get().await.unwrap();
         connection
             .query_one(
@@ -850,7 +877,7 @@ where
                     "SELECT COUNT(*) FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
                     self.table
                 ),
-                &[&self.epoch],
+                &[&epoch],
             )
             .await
             .ok()
@@ -941,6 +968,7 @@ where
             fn initial_epoch(&self) -> Epoch ;
             fn current_epoch(&self) -> Epoch ;
             async fn size(&self) -> usize;
+            async fn size_at(&self, epoch: Epoch) -> usize;
         }
     }
 
@@ -982,6 +1010,13 @@ where
         <I as IntoIterator>::IntoIter: Send,
     {
         async move { unimplemented!("should never be used") }
+    }
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
+        let db = self.wrapped.lock().unwrap().db.clone();
+        let table = self.wrapped.lock().unwrap().table.to_owned();
+
+        T::fetch_all_keys(db, &table, epoch).await.unwrap()
     }
 }
 impl<T, V> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
@@ -1064,6 +1099,7 @@ where
             fn initial_epoch(&self) -> Epoch ;
             fn current_epoch(&self) -> Epoch ;
             async fn size(&self) -> usize ;
+            async fn size_at(&self, epoch: Epoch) -> usize ;
         }
     }
 
@@ -1105,6 +1141,13 @@ where
         let db = self.wrapped.lock().unwrap().db.clone();
         let table = self.wrapped.lock().unwrap().table.to_owned();
         async move { T::fetch_many_payload_at(db, &table, data).await }
+    }
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
+        let db = self.wrapped.lock().unwrap().db.clone();
+        let table = self.wrapped.lock().unwrap().table.to_owned();
+
+        T::fetch_all_keys(db, &table, epoch).await.unwrap()
     }
 }
 impl<T, V> EpochKvStorage<T::Key, V> for PayloadProjection<T, V>

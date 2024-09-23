@@ -1123,7 +1123,7 @@ SELECT {KEY}, generate_series(GREATEST(1, {VALID_FROM}), LEAST(2, {VALID_UNTIL})
 FROM wide
 WHERE {KEY} = ANY(ARRAY['\\x72657374657261'::bytea,'\\x706c7573'::bytea, '\\x636172']) AND NOT ({VALID_FROM} > 2 OR {VALID_UNTIL} < 1)");
 
-    let trees = s.wide_update_trees(&query, (1, 2)).await.unwrap();
+    let trees = s.wide_update_trees_at(2, &query, (1, 2)).await.unwrap();
     for t in trees.iter() {
         println!("{}:", t.epoch());
         t.print();
