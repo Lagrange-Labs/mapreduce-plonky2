@@ -4,7 +4,7 @@ use std::{
 };
 
 use super::{context::TestContextConfig, mkdir_all, table::TableID};
-use alloy::primitives::Address;
+use alloy::primitives::{Address, U256};
 use anyhow::{bail, Context, Result};
 use envconfig::Envconfig;
 use mp2_test::cells_tree::CellTree;
@@ -58,6 +58,8 @@ pub(crate) struct IndexProofIdentifier<PrimaryIndex> {
 
 pub type QueryID = String;
 
+pub type PlaceholderValues = Vec<U256>;
+
 /// Uniquely identifies a proof in the proof storage backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProofKey {
@@ -70,9 +72,9 @@ pub enum ProofKey {
     ValueExtraction((TableID, BlockPrimaryIndex)),
     #[allow(clippy::upper_case_acronyms)]
     IVC(BlockPrimaryIndex),
-    QueryUniversal((QueryID, BlockPrimaryIndex, RowTreeKey)),
-    QueryAggregateRow((QueryID, BlockPrimaryIndex, RowTreeKey)),
-    QueryAggregateIndex((QueryID, BlockPrimaryIndex)),
+    QueryUniversal((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
+    QueryAggregateRow((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
+    QueryAggregateIndex((QueryID, PlaceholderValues, BlockPrimaryIndex)),
 }
 
 impl ProofKey {

@@ -104,10 +104,10 @@ impl TranslatedQuery {
         mut query: SafeQuery,
         settings: &ParsilSettings<C>,
     ) -> Result<Self> {
-        let largest_placeholder = placeholders::validate(settings, query.as_mut())?;
+        let used_placeholders = placeholders::gather_placeholders(settings, query.as_mut())?;
         let placeholder_mapping = std::iter::once(PlaceholderId::MinQueryOnIdx1)
             .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
-            .chain((1..=largest_placeholder).map(|i| PlaceholderId::Generic(i)))
+            .chain(used_placeholders.iter().map(|i| PlaceholderId::Generic(*i)))
             .enumerate()
             .map(|(i, p)| (p, i))
             .collect();
@@ -117,7 +117,7 @@ impl TranslatedQuery {
                 .chain(std::iter::once(
                     settings.placeholders.max_block_placeholder.clone(),
                 ))
-                .chain((1..=largest_placeholder).map(|i| format!("${i}")))
+                .chain(used_placeholders.iter().map(|i| format!("${i}")))
                 .enumerate()
                 .map(|(i, p)| (p, format!("${}", i + 1)))
                 .collect();
