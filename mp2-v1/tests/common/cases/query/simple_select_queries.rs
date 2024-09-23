@@ -5,6 +5,7 @@ use anyhow::{Error, Result};
 use futures::{stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use log::info;
+use mp2_common::types::HashOutput;
 use mp2_v1::{
     api::MetadataHash,
     indexing::{block::BlockPrimaryIndex, row::RowTreeKey, LagrangeNode},
@@ -178,21 +179,22 @@ async fn get_path_info<K, V, T: TreeInfo<K, V>>(
     key: &K,
     tree_info: &T,
     epoch: Epoch,
-) -> Result<(Vec<(NodeInfo, ChildPosition)>, Vec<Option<NodeInfo>>)>
+) -> Result<(Vec<(NodeInfo, ChildPosition)>, Vec<Option<HashOutput>>)>
 where
     K: Debug + Hash + Clone + Send + Sync + Eq,
     V: NodePayload + Send + Sync + LagrangeNode + Clone,
 {
     let mut tree_path = vec![];
     let mut siblings = vec![];
-    let (mut node_ctx, _) = tree_info
+    let (mut node_ctx, mut node_payload) = tree_info
         .fetch_ctx_and_payload_at(epoch, key)
         .await
         .ok_or(Error::msg(format!("Node not found for key {:?}", key)))?;
+    let mut previous_node_hash = node_payload.hash();
     let mut previous_node_key = key.clone();
     while node_ctx.parent.is_some() {
         let parent_key = node_ctx.parent.unwrap();
-        (node_ctx, _) = tree_info
+        (node_ctx, node_payload) = tree_info
             .fetch_ctx_and_payload_at(epoch, &parent_key)
             .await
             .ok_or(Error::msg(format!(
@@ -203,8 +205,43 @@ where
             .iter_children()
             .find_position(|child| child.is_some() && child.unwrap() == &previous_node_key);
         let is_left_child = child_pos.unwrap().0 == 0; // unwrap is safe
-        let (node_info, left_child, right_child) =
-            get_node_info(tree_info, &parent_key, epoch).await;
+        let (left_child_hash, right_child_hash) = if is_left_child {
+            (
+                Some(previous_node_hash),
+                match node_ctx.right {
+                    Some(k) => {
+                        let (_, payload) = tree_info
+                            .fetch_ctx_and_payload_at(epoch, &k)
+                            .await
+                            .ok_or(Error::msg(format!("Node not found for key {:?}", k)))?;
+                        Some(payload.hash())
+                    }
+                    None => None,
+                },
+            )
+        } else {
+            (
+                match node_ctx.left {
+                    Some(k) => {
+                        let (_, payload) = tree_info
+                            .fetch_ctx_and_payload_at(epoch, &k)
+                            .await
+                            .ok_or(Error::msg(format!("Node not found for key {:?}", k)))?;
+                        Some(payload.hash())
+                    }
+                    None => None,
+                },
+                Some(previous_node_hash),
+            )
+        };
+        let node_info = NodeInfo::new(
+            &node_payload.embedded_hash(),
+            left_child_hash.as_ref(),
+            right_child_hash.as_ref(),
+            node_payload.value(),
+            node_payload.min(),
+            node_payload.max(),
+        );
         tree_path.push((
             node_info,
             if is_left_child {
@@ -214,10 +251,11 @@ where
             },
         ));
         siblings.push(if is_left_child {
-            right_child
+            right_child_hash
         } else {
-            left_child
+            left_child_hash
         });
+        previous_node_hash = node_payload.hash();
         previous_node_key = parent_key;
     }
 

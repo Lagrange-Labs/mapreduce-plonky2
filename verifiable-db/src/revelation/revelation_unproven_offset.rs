@@ -234,15 +234,15 @@ pub struct RowPath {
     /// Info about the nodes in the path of the rows tree for the node storing the row; The `ChildPosition` refers to
     /// the position of the previous node in the path as a child of the current node
     row_tree_path: Vec<(NodeInfo, ChildPosition)>,
-    /// Info about the siblings of the node in the rows tree path (except for the root)
-    row_path_siblings: Vec<Option<NodeInfo>>,
+    /// Hash of the siblings of the node in the rows tree path (except for the root)
+    row_path_siblings: Vec<Option<HashOutput>>,
     /// Info about the node of the index tree storing the rows tree containing the row
     index_node_info: NodeInfo,
     /// Info about the nodes in the path of the index tree for the index_node; The `ChildPosition` refers to
     /// the position of the previous node in the path as a child of the current node
     index_tree_path: Vec<(NodeInfo, ChildPosition)>,
-    /// Info about the siblings of the nodes in the index tree path (except for the root)
-    index_path_siblings: Vec<Option<NodeInfo>>,
+    /// Hash of the siblings of the nodes in the index tree path (except for the root)
+    index_path_siblings: Vec<Option<HashOutput>>,
 }
 
 impl RowPath {
@@ -250,18 +250,18 @@ impl RowPath {
     /// - `row_node_info`: data about the node of the row tree storing the row
     /// - `row_tree_path`: data about the nodes in the path of the rows tree for the node storing the row;
     ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
-    /// - `row_path_siblings`: data about the siblings of the node in the rows tree path (except for the root)
+    /// - `row_path_siblings`: hash of the siblings of the node in the rows tree path (except for the root)
     /// - `index_node_info`: data about the node of the index tree storing the rows tree containing the row
     /// - `index_tree_path`: data about the nodes in the path of the index tree for the index_node;
     ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
-    /// - `index_path_siblinfs`: data about the siblings of the nodes in the index tree path (except for the root)
+    /// - `index_path_siblings`: hash of the siblings of the nodes in the index tree path (except for the root)
     pub fn new(
         row_node_info: NodeInfo,
         row_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        row_path_siblings: Vec<Option<NodeInfo>>,
+        row_path_siblings: Vec<Option<HashOutput>>,
         index_node_info: NodeInfo,
         index_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        index_path_siblings: Vec<Option<NodeInfo>>,
+        index_path_siblings: Vec<Option<HashOutput>>,
     ) -> Self {
         Self {
             row_node_info,
@@ -1084,19 +1084,17 @@ mod tests {
                 node_max,
             )
         };
+        let node_4_hash = HashOutput::try_from(node_4_hash.to_bytes()).unwrap();
+        let node_5_hash =
+            HashOutput::try_from(node_5.compute_node_hash(index_ids[1]).to_bytes()).unwrap();
         let node_3 = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[3]);
             let embedded_tree_hash = HashOutput::try_from(row_pi.tree_hash().to_bytes()).unwrap();
             let node_value = row_pi.min_value();
-            // left child is node 4
-            let left_child_hash = HashOutput::try_from(node_4_hash.to_bytes()).unwrap();
-            // right child is node 5
-            let right_child_hash =
-                HashOutput::try_from(node_5.compute_node_hash(index_ids[1]).to_bytes()).unwrap();
             NodeInfo::new(
                 &embedded_tree_hash,
-                Some(&left_child_hash),
-                Some(&right_child_hash),
+                Some(&node_4_hash), // left child is node 4
+                Some(&node_5_hash), // right child is node 5
                 node_value,
                 node_4.min,
                 node_5.max,
@@ -1134,6 +1132,10 @@ mod tests {
                 node_value,
             )
         };
+        let node_B_hash =
+            HashOutput::try_from(node_B.compute_node_hash(index_ids[0]).to_bytes()).unwrap();
+        let node_C_hash =
+            HashOutput::try_from(node_C.compute_node_hash(index_ids[0]).to_bytes()).unwrap();
         let node_A = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[0]);
             let embedded_tree_hash =
@@ -1142,16 +1144,10 @@ mod tests {
             let node_value = enforce_index_value_in_query_range(&mut row_pis[0], index_value);
             // we need also to set index value PI in row_pis[1] to the same value of row_pis[0], as they are in the same index tree
             row_pis[1][index_value_range].copy_from_slice(&node_value.to_fields());
-            // left child is node B
-            let left_child_hash =
-                HashOutput::try_from(node_B.compute_node_hash(index_ids[0]).to_bytes()).unwrap();
-            // right child is node C
-            let right_child_hash =
-                HashOutput::try_from(node_C.compute_node_hash(index_ids[0]).to_bytes()).unwrap();
             NodeInfo::new(
                 &embedded_tree_hash,
-                Some(&left_child_hash),
-                Some(&right_child_hash),
+                Some(&node_B_hash), // left child is node B
+                Some(&node_C_hash), // right child is node C
                 node_value,
                 node_B.min,
                 node_C.max,
@@ -1239,15 +1235,15 @@ mod tests {
             row_path_siblings: vec![],
             index_node_info: node_B.clone(),
             index_tree_path: vec![(node_A.clone(), ChildPosition::Left)],
-            index_path_siblings: vec![Some(node_C.clone())],
+            index_path_siblings: vec![Some(node_C_hash)],
         };
         let row_path_4 = RowPath {
             row_node_info: node_4,
             row_tree_path: vec![(node_3.clone(), ChildPosition::Left)],
-            row_path_siblings: vec![Some(node_5)],
+            row_path_siblings: vec![Some(node_5_hash)],
             index_node_info: node_C.clone(),
             index_tree_path: vec![(node_A.clone(), ChildPosition::Right)],
-            index_path_siblings: vec![Some(node_B.clone())],
+            index_path_siblings: vec![Some(node_B_hash.clone())],
         };
         let row_path_3 = RowPath {
             row_node_info: node_3,
@@ -1255,7 +1251,7 @@ mod tests {
             row_path_siblings: vec![],
             index_node_info: node_C.clone(),
             index_tree_path: vec![(node_A.clone(), ChildPosition::Right)],
-            index_path_siblings: vec![Some(node_B.clone())],
+            index_path_siblings: vec![Some(node_B_hash)],
         };
 
         let circuit =

@@ -11,6 +11,7 @@ use mp2_common::{
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
+    types::HashOutput,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{Fieldable, SelectHashBuilder, ToTargets},
     D, F,
@@ -21,7 +22,7 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
 };
 use serde::{Deserialize, Serialize};
 
@@ -155,7 +156,7 @@ where
     /// input provides the siblings of the nodes in the path, if any
     pub fn new(
         path: &[(NodeInfo, ChildPosition)],
-        siblings: &[Option<NodeInfo>],
+        siblings: &[Option<HashOutput>],
         index_id: u64,
     ) -> Result<Self> {
         let num_real_nodes = path.len();
@@ -187,7 +188,7 @@ where
                 .and_then(|sibling| {
                     sibling
                         .clone()
-                        .and_then(|node| Some(node.compute_node_hash(index_id.to_field())))
+                        .and_then(|node_hash| Some(HashOut::from_bytes((&node_hash).into())))
                 })
                 .unwrap_or(*empty_poseidon_hash())
         });
@@ -377,8 +378,10 @@ mod tests {
         let node_E = random_node(None, None); // it's a leaf node, so no children
         let node_F = random_node(None, None);
         let node_G = random_node(None, None);
+        let node_E_hash =
+            HashOutput::try_from(node_E.compute_node_hash(index_id).to_bytes()).unwrap();
         let node_D = random_node(
-            Some(&HashOutput::try_from(node_E.compute_node_hash(index_id).to_bytes()).unwrap()),
+            Some(&node_E_hash),
             Some(&HashOutput::try_from(node_F.compute_node_hash(index_id).to_bytes()).unwrap()),
         );
         let node_B = random_node(
@@ -389,10 +392,11 @@ mod tests {
             None,
             Some(&HashOutput::try_from(node_G.compute_node_hash(index_id).to_bytes()).unwrap()),
         );
-        let node_A = random_node(
-            Some(&HashOutput::try_from(node_B.compute_node_hash(index_id).to_bytes()).unwrap()),
-            Some(&HashOutput::try_from(node_C.compute_node_hash(index_id).to_bytes()).unwrap()),
-        );
+        let node_B_hash =
+            HashOutput::try_from(node_B.compute_node_hash(index_id).to_bytes()).unwrap();
+        let node_C_hash =
+            HashOutput::try_from(node_C.compute_node_hash(index_id).to_bytes()).unwrap();
+        let node_A = random_node(Some(&node_B_hash), Some(&node_C_hash));
         let root = node_A.compute_node_hash(index_id);
 
         // verify Merkle-path related to leaf F
@@ -402,7 +406,7 @@ mod tests {
             (node_B.clone(), ChildPosition::Left),
             (node_A.clone(), ChildPosition::Left),
         ];
-        let siblings = vec![Some(node_E.clone()), None, Some(node_C.clone())];
+        let siblings = vec![Some(node_E_hash), None, Some(node_C_hash.clone())];
         let merkle_path_inputs =
             MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings, index_id.to_canonical_u64())
                 .unwrap();
@@ -422,7 +426,7 @@ mod tests {
             (node_C.clone(), ChildPosition::Right),
             (node_A.clone(), ChildPosition::Right),
         ];
-        let siblings = vec![None, Some(node_B.clone())];
+        let siblings = vec![None, Some(node_B_hash)];
         let merkle_path_inputs =
             MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings, index_id.to_canonical_u64())
                 .unwrap();
@@ -441,7 +445,7 @@ mod tests {
             (node_B.clone(), ChildPosition::Left),
             (node_A.clone(), ChildPosition::Left),
         ];
-        let siblings = vec![None, Some(node_C.clone())];
+        let siblings = vec![None, Some(node_C_hash)];
         let merkle_path_inputs =
             MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings, index_id.to_canonical_u64())
                 .unwrap();
