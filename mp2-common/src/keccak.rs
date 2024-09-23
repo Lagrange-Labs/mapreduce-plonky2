@@ -31,9 +31,11 @@ pub const HASH_LEN: usize = 32;
 /// Length of a hash in U32
 pub const PACKED_HASH_LEN: usize = HASH_LEN / 4;
 
-/// Keccak pads data before "hashing" it. This method returns the full size
-/// of the padded data before hashing. This is useful to know the actual number
-/// of allocated wire one needs to reserve inside the circuit.
+/// Keccak pads data before "hashing" it.
+///
+/// This method returns the full size of the padded data before hashing.
+/// This is useful to know the actual number of allocated wire one needs to
+/// reserve inside the circuit.
 pub const fn compute_size_with_padding(data_len: usize) -> usize {
     let input_len_bits = data_len * 8; // only pad the data that is inside the fixed buffer
     let num_actual_blocks = 1 + input_len_bits / KECCAK256_R;
@@ -76,8 +78,10 @@ pub struct KeccakCircuit<const N: usize> {
     data: Vec<u8>,
 }
 /// Wires containing the output of the hash function as well as the intermediate
-/// wires created. It requires assigning during proving time because of a small
-/// computation done outside the circuit that requires the original input data.
+/// wires created.
+///
+/// It requires assigning during proving time because of a small computation done
+/// outside the circuit that requires the original input data.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct KeccakWires<const N: usize> {
     input_array: VectorWire<Target, N>,
@@ -266,6 +270,7 @@ impl<const N: usize> KeccakCircuit<N> {
 }
 
 /// InputData holds the information if the input data wire is already assigned or not.
+///
 /// Usually in most cases the input data is already assigned in other places of our circuits.
 /// For some cases like only hashing or bench or tests, we need to assign the data to the
 /// wires still.

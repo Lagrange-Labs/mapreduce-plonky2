@@ -45,6 +45,7 @@ pub const NUM_LIMBS: usize = 8;
 /// Check if an UInt256 array is less than or equal to the other. It iterates
 /// with the two arrays and compare each Uint256 element till to the last,
 /// the comparison is defined as `l < r` or `l==r`.
+///
 /// It's corresponding to the `is_less_than_or_equal_to_u256_arr` gadget
 /// function, and returns two flags: `left < right` and `left == right`.
 pub fn is_less_than_or_equal_to_u256_arr<const L: usize>(
@@ -1017,7 +1018,7 @@ mod tests {
             c.register_public_input_u256(&input);
         }
 
-        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {}
+        fn prove(&self, _pw: &mut PartialWitness<F>, _wires: &Self::Wires) {}
     }
 
     #[derive(Clone, Debug)]
@@ -1186,7 +1187,7 @@ mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_u256_target(&wires, self.0);
+            pw.set_u256_target(wires, self.0);
         }
     }
 

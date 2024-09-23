@@ -128,9 +128,10 @@ impl<'a, const D: usize> ProofOrDummyTarget<'a, D> {
     }
 }
 /// Circuit that can recursively verify itself. It is generic over
-///  * the number of recursive proofs: If ARITY == 1, then it is an IVC chain,
+///
+///  . the number of recursive proofs: If ARITY == 1, then it is an IVC chain,
 /// if ARITY > 1, then it becomes a PCD graph.
-///  * The circuit being executed at each step. It is a UserCircuit with some
+///  . The circuit being executed at each step. It is a UserCircuit with some
 /// additional required functionality to make it work in the cyclic case.
 ///
 /// The circuit is able to verify either a real proof OR a dummy proof for each
@@ -170,7 +171,9 @@ where
 /// input.
 const NUM_ELEM_VERIFIER_DATA_PUBLIC_INPUTS: usize = 68;
 /// Responsible for inserting the right gates inside the dummy circuit creation and to
-/// pad accordingly. The reason it is a closure is because these things depend on the
+/// pad accordingly.
+///
+/// The reason it is a closure is because these things depend on the
 /// whole circuit being proven, not only on small pieces like Keccak or Poseidon.
 /// The implementer of the whole circuit needs to give the right padder otherwise building
 /// the circuit data will fail.
@@ -341,13 +344,9 @@ where
         &self.circuit_data
     }
 }
-#[derive(Clone, Debug)]
-pub struct NoopCircuit {}
-impl NoopCircuit {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
+#[derive(Clone, Debug, Default)]
+pub struct NoopCircuit;
+
 impl<F, const D: usize> UserCircuit<F, D> for NoopCircuit
 where
     F: RichField + Extendable<D>,
