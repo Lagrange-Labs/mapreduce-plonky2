@@ -302,7 +302,7 @@ mod test {
         utils::{keccak256, read_le_u32},
         C, F,
     };
-    use mp2_test::circuit::{run_circuit, PCDCircuit, ProofOrDummyTarget, UserCircuit};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::extension::Extendable,
         hash::hash_types::RichField,
@@ -326,32 +326,6 @@ mod test {
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             let vector = Vector::<u8, N>::from_vec(&self.data).unwrap();
             KeccakCircuit::<N>::assign(pw, wires, &InputData::NonAssigned(&vector));
-        }
-    }
-    impl<F, const D: usize, const BYTES: usize, const ARITY: usize> PCDCircuit<F, D, ARITY>
-        for KeccakCircuit<BYTES>
-    where
-        [(); BYTES / 4]:,
-        F: RichField + Extendable<D>,
-    {
-        fn build_recursive(
-            b: &mut CircuitBuilder<F, D>,
-            _: &[ProofOrDummyTarget<D>; ARITY],
-        ) -> Self::Wires {
-            let wires = <Self as UserCircuit<F, D>>::build(b);
-            wires.output_array.register_as_public_input(b);
-            wires
-            // TODO: check the proof public input match what is in the hash node for example for MPT
-        }
-        fn base_inputs(&self) -> Vec<F> {
-            // since we don't care about the public inputs of the first
-            // proof (since we're not reading them , because we take array
-            // to hash as witness)
-            // 8 * u32 = 256 bits
-            F::rand_vec(8)
-        }
-        fn num_io() -> usize {
-            8
         }
     }
 
