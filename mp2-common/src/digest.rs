@@ -178,7 +178,10 @@ impl SplitDigestTarget {
 mod test {
     use crate::{types::CBuilder, utils::FromFields, C, D, F};
 
-    use super::{Digest, DigestTarget, SplitDigest, SplitDigestPoint, SplitDigestTarget};
+    use super::{
+        Digest, DigestTarget, SplitDigest, SplitDigestPoint, SplitDigestTarget, TableDimension,
+        TableDimensionWire,
+    };
     use crate::utils::TryIntoBool;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
@@ -257,6 +260,50 @@ mod test {
                 .expect("cant get bool");
             let is_merge_case_point = sp.is_merge_case();
             assert_eq!(is_merge_case_circuit, is_merge_case_point);
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestTableDimension {
+        digest: Digest,
+        dimension: TableDimension,
+    }
+
+    struct TestTableDimensionWire {
+        digest: DigestTarget,
+        dimension: TableDimensionWire,
+    }
+
+    impl UserCircuit<F, D> for TestTableDimension {
+        type Wires = TestTableDimensionWire;
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let digest = b.add_virtual_curve_target();
+            let dimension: TableDimensionWire = b.add_virtual_bool_target_safe().into();
+            let final_digest = dimension.conditional_row_digest(b, digest);
+            b.register_curve_public_input(final_digest);
+
+            TestTableDimensionWire { digest, dimension }
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_curve_target(wires.digest, self.digest.to_weierstrass());
+            self.dimension.assign_wire(pw, &wires.dimension);
+        }
+    }
+
+    #[test]
+    fn test_dimension_wire() {
+        let cases = vec![TableDimension::Single, TableDimension::Compound];
+        for dimension in cases {
+            let circuit = TestTableDimension {
+                digest: Point::rand(),
+                dimension,
+            };
+            let proof = run_circuit::<F, D, C, _>(circuit.clone());
+            let combined = Digest::from_fields(&proof.public_inputs);
+            let expected = dimension.conditional_row_digest(circuit.digest);
+            assert_eq!(combined, expected);
         }
     }
 }
