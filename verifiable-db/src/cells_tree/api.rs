@@ -64,7 +64,7 @@ impl CircuitInput {
     }
 
     /// Create a circuit input for proving a full node of 2 children.
-    /// It is not considered a multiplier column. Please use `leaf_multiplier` for registering a
+    /// It is not considered a multiplier column. Please use `full_multiplier` for registering a
     /// multiplier column.
     pub fn full(identifier: u64, value: U256, child_proofs: [Vec<u8>; 2]) -> Self {
         CircuitInput::FullNode(new_child_input(
