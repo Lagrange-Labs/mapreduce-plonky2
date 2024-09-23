@@ -79,6 +79,7 @@ impl TableDimensionWire {
 
 /// Generic struct that can either hold a digest in circuit (DigestTarget) or a digest outside
 /// circuit, useful for testing.
+#[derive(Clone, Debug)]
 pub struct SplitDigest<T> {
     pub individual: T,
     pub multiplier: T,
@@ -108,8 +109,10 @@ impl SplitDigestPoint {
     pub fn cond_combine_to_row_digest(&self) -> Digest {
         let base = map_to_curve_point(&self.individual.to_fields());
         let multiplier = map_to_curve_point(&self.multiplier.to_fields());
-        let is_merge = self.multiplier != Point::NEUTRAL;
-        cond_field_hashed_scalar_mul(is_merge, multiplier, base)
+        cond_field_hashed_scalar_mul(self.is_merge_case(), multiplier, base)
+    }
+    pub fn is_merge_case(&self) -> bool {
+        self.multiplier != Point::NEUTRAL
     }
     pub fn combine_to_row_digest(&self) -> Digest {
         field_hashed_scalar_mul(self.multiplier.to_fields(), self.individual)
@@ -156,8 +159,8 @@ impl SplitDigestTarget {
     pub fn cond_combine_to_row_digest(&self, b: &mut CBuilder) -> DigestTarget {
         let row_digest_ind = b.map_to_curve_point(&self.individual.to_targets());
         let row_digest_mul = b.map_to_curve_point(&self.multiplier.to_targets());
-        let cond = self.is_merge_case(b);
-        cond_circuit_hashed_scalar_mul(b, cond, row_digest_mul, row_digest_ind)
+        let is_merge_case = self.is_merge_case(b);
+        cond_circuit_hashed_scalar_mul(b, is_merge_case, row_digest_mul, row_digest_ind)
     }
 
     /// Recombine the split and individual target digest into a single one. It does NOT hashes the
@@ -168,5 +171,92 @@ impl SplitDigestTarget {
     /// digest of the proof is only `SUM Digest_column_j` so we need an additional digest on top.
     pub fn combine_to_digest(&self, b: &mut CBuilder) -> DigestTarget {
         circuit_hashed_scalar_mul(b, self.multiplier, self.individual)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{types::CBuilder, utils::FromFields, C, D, F};
+
+    use super::{Digest, DigestTarget, SplitDigest, SplitDigestPoint, SplitDigestTarget};
+    use crate::utils::TryIntoBool;
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::{
+        field::types::Sample,
+        iop::{
+            target::BoolTarget,
+            witness::{PartialWitness, WitnessWrite},
+        },
+    };
+    use plonky2_ecgfp5::{
+        curve::curve::Point,
+        gadgets::curve::{CircuitBuilderEcGFp5, PartialWitnessCurve},
+    };
+
+    #[derive(Clone, Debug)]
+    struct TestSplitDigest {
+        ind: Digest,
+        mul: Digest,
+    }
+
+    struct TestSplitDigestTarget {
+        ind: DigestTarget,
+        mul: DigestTarget,
+    }
+
+    impl UserCircuit<F, D> for TestSplitDigest {
+        type Wires = TestSplitDigestTarget;
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let d1 = b.add_virtual_curve_target();
+            let d2 = b.add_virtual_curve_target();
+            let sp = SplitDigestTarget {
+                individual: d1,
+                multiplier: d2,
+            };
+            let combined = sp.cond_combine_to_row_digest(b);
+            let is_merge = sp.is_merge_case(b);
+            b.register_public_input(is_merge.target);
+            b.register_curve_public_input(combined);
+
+            TestSplitDigestTarget { ind: d1, mul: d2 }
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_curve_target(wires.ind, self.ind.to_weierstrass());
+            pw.set_curve_target(wires.mul, self.mul.to_weierstrass());
+        }
+    }
+
+    #[test]
+    fn test_split_digest() {
+        let cases = vec![
+            TestSplitDigest {
+                ind: Point::rand(),
+                mul: Point::NEUTRAL,
+            },
+            TestSplitDigest {
+                ind: Point::rand(),
+                mul: Point::rand(),
+            },
+        ];
+
+        for t in cases {
+            let proof = run_circuit::<F, D, C, _>(t.clone());
+            let sp = SplitDigestPoint {
+                individual: t.ind,
+                multiplier: t.mul,
+            };
+            let combined = sp.cond_combine_to_row_digest();
+            // skipping the bool
+            let found = Point::from_fields(&proof.public_inputs[1..]);
+            assert_eq!(combined, found);
+
+            let is_merge_case_circuit = proof.public_inputs[0]
+                .try_into_bool()
+                .expect("cant get bool");
+            let is_merge_case_point = sp.is_merge_case();
+            assert_eq!(is_merge_case_circuit, is_merge_case_point);
+        }
     }
 }

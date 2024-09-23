@@ -9,7 +9,10 @@ use mp2_common::{
     C, D, F,
 };
 use plonky2::{
-    iop::{target::Target, witness::PartialWitness},
+    iop::{
+        target::{BoolTarget, Target},
+        witness::PartialWitness,
+    },
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
 use recursion_framework::{
@@ -40,7 +43,7 @@ impl LeafCircuit {
         // set the right digest depending on the multiplier and accumulate the ones from the public
         // inputs of the cell root proof
         let split_digest = tuple.split_and_accumulate_digest(b, cells_pis.split_digest_target());
-        // final_digest = HashToInt(mul_digest) * D(ind_digest)
+        // final_digest = HashToInt(D(mul_digest)) * D(ind_digest)
         // NOTE This additional digest is necessary since the individual digest is supposed to be a
         // full row, that is how it is extracted from MPT
         let final_digest = split_digest.cond_combine_to_row_digest(b);

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     base_circuit::BaseCircuitInput,
     lengthed_circuit::LengthedRecursiveWires,
-    merge::{MergeTable, MergeTableRecursiveWires},
+    merge_circuit::{MergeTable, MergeTableRecursiveWires},
     simple_circuit::SimpleCircuitRecursiveWires,
     BaseCircuitProofInputs, LengthedCircuit, MergeCircuit, PublicInputs, SimpleCircuit,
 };
