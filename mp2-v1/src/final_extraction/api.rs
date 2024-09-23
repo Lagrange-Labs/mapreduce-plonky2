@@ -1,12 +1,4 @@
-use mp2_common::{
-    default_config,
-    digest::TableDimension,
-    proof::ProofWithVK,
-    serialization::{
-        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
-    },
-    C, D, F,
-};
+use mp2_common::{self, default_config, digest::TableDimension, proof::ProofWithVK, C, D, F};
 use plonky2::{iop::target::Target, plonk::circuit_data::VerifierCircuitData};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
