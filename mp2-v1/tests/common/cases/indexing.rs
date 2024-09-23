@@ -944,6 +944,7 @@ impl TableIndexing {
     pub fn table_info(&self) -> TableInfo {
         TableInfo {
             public_name: self.table.public_name.clone(),
+            value_column: self.value_column.clone(),
             chain_id: self.contract.chain_id,
             columns: self.table.columns.clone(),
             contract_address: self.contract.address,

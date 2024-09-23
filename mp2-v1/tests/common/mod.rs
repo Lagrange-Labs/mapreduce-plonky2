@@ -67,6 +67,8 @@ pub fn mkdir_all(params_path_str: &str) -> Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableInfo {
     pub columns: TableColumns,
+    // column to do queries over for numerical values, NOT secondary index
+    pub value_column: String,
     pub public_name: String,
     pub contract_address: Address,
     pub chain_id: u64,

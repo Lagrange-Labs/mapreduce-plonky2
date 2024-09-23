@@ -114,33 +114,30 @@ pub type RevelationPublicInputs<'a> =
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
     match &t.source {
-        TableSource::Mapping(_) => query_mapping(ctx, &table, t.metadata_hash()).await?,
+        TableSource::Mapping(_) | TableSource::Merge(_) => query_mapping(ctx, &table, t).await?,
         _ => unimplemented!("yet"),
     }
     Ok(())
 }
 
-async fn query_mapping(
-    ctx: &mut TestContext,
-    table: &Table,
-    table_hash: MetadataHash,
-) -> Result<()> {
-    let query_info = cook_query_between_blocks(table).await?;
+async fn query_mapping(ctx: &mut TestContext, table: &Table, info: TableInfo) -> Result<()> {
+    let table_hash = info.metadata_hash();
+    let query_info = cook_query_between_blocks(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
 
-    let query_info = cook_query_unique_secondary_index(table).await?;
+    let query_info = cook_query_unique_secondary_index(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     //// cook query with custom placeholders
-    let query_info = cook_query_secondary_index_placeholder(table).await?;
+    let query_info = cook_query_secondary_index_placeholder(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query filtering over a secondary index value not valid in all the blocks
-    let query_info = cook_query_non_matching_entries_some_blocks(table).await?;
+    let query_info = cook_query_non_matching_entries_some_blocks(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with no valid blocks
-    let query_info = cook_query_no_matching_entries(table).await?;
+    let query_info = cook_query_no_matching_entries(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with block query range partially overlapping with blocks in the DB
-    let query_info = cook_query_partial_block_range(table).await?;
+    let query_info = cook_query_partial_block_range(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     Ok(())
 }
@@ -1063,11 +1060,11 @@ pub struct QueryCooking {
 
 type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
 
-async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_between_blocks(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
     let max = table.row.current_epoch();
     let min = max - 1;
 
-    let value_column = &table.columns.rest[0].name;
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
     let placeholders = Placeholders::new_empty(U256::from(min), U256::from(max));
 
@@ -1088,7 +1085,10 @@ async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
 // cook up a SQL query on the secondary index and with a predicate on the non-indexed column.
 // we just iterate on mapping keys and take the one that exist for most blocks. We also choose
 // a value to filter over the non-indexed column
-async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_secondary_index_placeholder(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1097,8 +1097,7 @@ async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCo
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
-    // Assuming this is mapping with only two columns !
-    let value_column = &table.columns.rest[0].name;
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
 
     let filtering_value = *BASE_VALUE + U256::from(5);
@@ -1129,7 +1128,10 @@ async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCo
 
 // cook up a SQL query on the secondary index. For that we just iterate on mapping keys and
 // take the one that exist for most blocks
-async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_unique_secondary_index(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1138,8 +1140,7 @@ async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
-    // Assuming this is mapping with only two columns !
-    let value_column = &table.columns.rest[0].name;
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
     let max_block = min_block + 1;
     // primary_min_placeholder = ".."
@@ -1201,7 +1202,7 @@ async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking
     })
 }
 
-async fn cook_query_partial_block_range(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_partial_block_range(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1210,8 +1211,7 @@ async fn cook_query_partial_block_range(table: &Table) -> Result<QueryCooking> {
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
-    // Assuming this is mapping with only two columns !
-    let value_column = table.columns.rest[0].name.clone();
+    let value_column = info.value_column.clone();
     let table_name = &table.public_name;
     let initial_epoch = table.row.initial_epoch();
     // choose a min query bound smaller than initial epoch
@@ -1233,14 +1233,13 @@ async fn cook_query_partial_block_range(table: &Table) -> Result<QueryCooking> {
     })
 }
 
-async fn cook_query_no_matching_entries(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_no_matching_entries(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
     let initial_epoch = table.row.initial_epoch();
     // choose query bounds outside of the range [initial_epoch, last_epoch]
     let min_block = 0;
     let max_block = initial_epoch - 1;
     // now we can fetch the key that we want
-    // Assuming this is mapping with only two columns !
-    let value_column = &table.columns.rest[0].name;
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
 
@@ -1261,7 +1260,10 @@ async fn cook_query_no_matching_entries(table: &Table) -> Result<QueryCooking> {
 
 /// Cook a query where there are no entries satisying the secondary query bounds only for some
 /// blocks of the primary index bounds (not for all the blocks)
-async fn cook_query_non_matching_entries_some_blocks(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_non_matching_entries_some_blocks(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, true).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1270,8 +1272,7 @@ async fn cook_query_non_matching_entries_some_blocks(table: &Table) -> Result<Qu
     );
     // now we can fetch the key that we want
     let key_column = &table.columns.secondary.name;
-    // Assuming this is mapping with only two columns !
-    let value_column = &table.columns.rest[0].name;
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
     // in this query we set query bounds on block numbers to the widest range, so that we
     // are sure that there are blocks where the chosen key is not alive

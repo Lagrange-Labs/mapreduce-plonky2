@@ -65,6 +65,7 @@ pub(crate) mod common;
 
 const PROOF_STORE_FILE: &str = "test_proofs.store";
 const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
+const MERGE_TABLE_INFO_FILE: &str = "merge_column_info.json";
 
 #[test(tokio::test)]
 #[ignore]
@@ -111,15 +112,16 @@ async fn integrated_indexing() -> Result<()> {
 
     // save columns information and table information in JSON so querying test can pick up
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
+    write_table_info(MERGE_TABLE_INFO_FILE, merged.table_info())?;
     Ok(())
 }
 
 #[test(tokio::test)]
-#[ignore]
 async fn integrated_querying() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test");
-    let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
+    //let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
+    let table_info = read_table_info(MERGE_TABLE_INFO_FILE)?;
     let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
     info!("Loading Anvil and contract");
     let mut ctx = context::new_local_chain(storage).await;
