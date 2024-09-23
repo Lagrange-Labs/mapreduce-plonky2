@@ -768,7 +768,43 @@ where
 {
     async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()> {
         trace!("[{self}] API-facing commit_in called");
-        self.commit_in_transaction(tx).await
+        self.commit_in_transaction(tx).await.with_context(|| {
+            let mut cached_keys = HashSet::new();
+            {
+                cached_keys.extend(self.tree_store.lock().unwrap().nodes_cache.keys().cloned());
+            }
+            {
+                cached_keys.extend(
+                    self.tree_store
+                        .lock()
+                        .unwrap()
+                        .payload_cache
+                        .keys()
+                        .cloned(),
+                );
+
+                let mut r = String::new();
+
+                for k in cached_keys {
+                    let node_value =
+                        { self.tree_store.lock().unwrap().nodes_cache.get(&k).cloned() };
+                    let data_value = {
+                        self.tree_store
+                            .lock()
+                            .unwrap()
+                            .payload_cache
+                            .get(&k)
+                            .cloned()
+                    };
+                    r.push_str(&format!(
+                        "{:?}: node = {:?} data = {:?}  ",
+                        k, node_value, data_value
+                    ))
+                }
+
+                anyhow!("internal caches at failure time: {r}")
+            }
+        })
     }
 
     fn commit_success(&mut self) {
