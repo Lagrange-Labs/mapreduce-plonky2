@@ -38,7 +38,6 @@ use anyhow::Result;
 #[derive(Debug, Clone)]
 pub struct BaseCircuit {}
 
-/// THe const generic represent how many value proof we want to verify in that step.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseWires {
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
@@ -358,6 +357,10 @@ pub(crate) mod test {
         }
         pub(crate) fn contract_inputs(&self) -> contract_extraction::PublicInputs<F> {
             contract_extraction::PublicInputs::from_slice(&self.contract_pi)
+        }
+
+        pub(crate) fn block_inputs(&self) -> block_extraction::PublicInputs<F> {
+            block_extraction::PublicInputs::from_slice(&self.blocks_pi)
         }
 
         pub(crate) fn value_inputs(&self) -> values_extraction::PublicInputs<F> {

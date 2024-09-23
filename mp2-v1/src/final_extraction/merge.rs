@@ -260,11 +260,15 @@ mod test {
         // then finally combined them into a single one
         let split_total = split_a.accumulate(&split_b);
         let final_digest = split_total.combine_to_row_digest();
-        // testing...
+        // testing the digest values
         assert_eq!(final_digest, wp(&pi.value_point()));
         let combined_metadata = wp(&pis_a.value_inputs().metadata_digest())
             + wp(&pis_b.value_inputs().metadata_digest())
             + wp(&pis_a.contract_inputs().metadata_point());
         assert_eq!(combined_metadata, wp(&pi.metadata_point()));
+        let block_pi = pis_a.block_inputs();
+        assert_eq!(pi.bn, block_pi.bn);
+        assert_eq!(pi.h, block_pi.bh);
+        assert_eq!(pi.ph, block_pi.prev_bh);
     }
 }

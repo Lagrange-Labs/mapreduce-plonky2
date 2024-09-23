@@ -76,8 +76,9 @@ impl TableDimensionWire {
         c.curve_select(self.0, digest, single)
     }
 }
-/// Public trait that can be implemented by public inputs struct to return either a target digest (curve
-/// target) or a field digest (point)
+
+/// Generic struct that can either hold a digest in circuit (DigestTarget) or a digest outside
+/// circuit, useful for testing.
 pub struct SplitDigest<T> {
     pub individual: T,
     pub multiplier: T,

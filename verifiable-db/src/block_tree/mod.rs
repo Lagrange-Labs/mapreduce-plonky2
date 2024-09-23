@@ -13,18 +13,6 @@ use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 pub use public_inputs::PublicInputs;
 
 /// Common function to compute the digest of the block tree which uses a special format using
-/// scalar multiplication
-pub fn scalar_mul(
-    b: &mut CircuitBuilder<F, D>,
-    inputs: Vec<Target>,
-    base: CurveTarget,
-) -> CurveTarget {
-    let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
-    let int = hash_to_int_target(b, hash);
-    let scalar = b.biguint_to_nonnative(&int);
-    b.curve_scalar_mul(base, &scalar)
-}
-/// Common function to compute the digest of the block tree which uses a special format using
 /// scalar1 multiplication
 pub(crate) fn compute_index_digest(
     b: &mut CircuitBuilder<F, D>,

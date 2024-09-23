@@ -35,11 +35,11 @@ pub use public_inputs::PublicInputs;
 #[derive(Clone, Debug, Serialize, Deserialize, Constructor)]
 pub(crate) struct Cell {
     /// identifier of the column for the secondary index
-    pub identifier: F,
+    pub(crate) identifier: F,
     /// secondary index value
-    pub value: U256,
+    pub(crate) value: U256,
     /// is the secondary value should be included in multiplier digest or not
-    pub is_multiplier: bool,
+    pub(crate) is_multiplier: bool,
 }
 
 impl Cell {

@@ -107,6 +107,11 @@ mod tests {
 
     #[test]
     fn test_cells_tree_leaf_circuit() {
+        test_cells_tree_leaf_multiplier(true);
+        test_cells_tree_leaf_multiplier(false);
+    }
+
+    fn test_cells_tree_leaf_multiplier(is_multiplier: bool) {
         let mut rng = thread_rng();
 
         let identifier = rng.gen::<u32>().to_field();
@@ -116,7 +121,7 @@ mod tests {
         let test_circuit: LeafCircuit = Cell {
             identifier,
             value,
-            is_multiplier: false,
+            is_multiplier,
         }
         .into();
 
@@ -141,8 +146,10 @@ mod tests {
         {
             let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
             let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
-
-            assert_eq!(pi.individual_digest_point(), exp_digest);
+            match is_multiplier {
+                true => assert_eq!(pi.multiplier_digest_point(), exp_digest),
+                false => assert_eq!(pi.individual_digest_point(), exp_digest),
+            }
         }
     }
 }
