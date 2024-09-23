@@ -90,7 +90,7 @@ impl CircuitInput {
         ))
     }
     /// Create a circuit input for proving a partial node of 1 child.
-    /// It is not considered a multiplier column. Please use `leaf_multiplier` for registering a
+    /// It is not considered a multiplier column. Please use `partial_multiplier` for registering a
     /// multiplier column.
     pub fn partial(identifier: u64, value: U256, child_proof: Vec<u8>) -> Self {
         CircuitInput::PartialNode(new_child_input(
