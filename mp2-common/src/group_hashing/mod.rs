@@ -224,10 +224,10 @@ pub fn field_hashed_scalar_mul(inputs: Vec<F>, base: Point) -> Point {
 /// Common function to compute a scalar multiplication in the format of HashToInt(inputs) * base
 /// NOTE: if the multiplier is NEUTRAL, then it only returns the base. This is to accomodate both a
 /// "merged" table digest and a "singleton" table digest.
-pub fn cond_field_hashed_scalar_mul(mul: Point, base: Point) -> Point {
-    match mul.equals(Point::NEUTRAL) {
-        true => base,
-        false => field_hashed_scalar_mul(mul.to_fields(), base),
+pub fn cond_field_hashed_scalar_mul(cond: bool, mul: Point, base: Point) -> Point {
+    match cond {
+        false => base,
+        true => field_hashed_scalar_mul(mul.to_fields(), base),
     }
 }
 

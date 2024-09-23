@@ -1,3 +1,4 @@
+use log::debug;
 use mp2_common::{digest::TableDimension, proof::ProofWithVK, types::HashOutput, utils::ToFields};
 use mp2_v1::{
     api,
@@ -75,6 +76,7 @@ impl TestContext {
         assert_eq!(pis.block_number(), block.header.number.unwrap());
         assert_eq!(pis.block_hash_raw(), block_hash.to_fields());
         assert_eq!(pis.prev_block_hash_raw(), prev_block_hash.to_fields());
+        debug!(" FINAL EXTRACTION MPT - digest: {:}", pis.value_point());
 
         Ok(proof)
     }

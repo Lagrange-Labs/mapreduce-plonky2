@@ -108,7 +108,8 @@ impl SplitDigestPoint {
     pub fn cond_combine_to_row_digest(&self) -> Digest {
         let base = map_to_curve_point(&self.individual.to_fields());
         let multiplier = map_to_curve_point(&self.multiplier.to_fields());
-        cond_field_hashed_scalar_mul(multiplier, base)
+        let is_merge = self.multiplier != Point::NEUTRAL;
+        cond_field_hashed_scalar_mul(is_merge, multiplier, base)
     }
     pub fn combine_to_row_digest(&self) -> Digest {
         field_hashed_scalar_mul(self.multiplier.to_fields(), self.individual)
