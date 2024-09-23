@@ -39,8 +39,8 @@ pub use leaf_or_extension::{MPTLeafOrExtensionNode, MPTLeafOrExtensionWires};
 /// Number of items in the RLP encoded list in a leaf node.
 const NB_ITEMS_LEAF: usize = 2;
 /// Currently a constant set to denote the length of the value we are extracting from the MPT trie.
-/// This can later be also be done in a generic way to allow different sizes.
 ///
+/// This can later be also be done in a generic way to allow different sizes.
 /// Given we target MPT storage proof, the value is 32 bytes + 1 byte for RLP encoding.
 pub const MAX_LEAF_VALUE_LEN: usize = 33;
 
@@ -60,7 +60,6 @@ pub const fn PAD_LEN(d: usize) -> usize {
 ///
 /// . DEPTH is the maximal depth of the tree. If the tree is smaller, the circuit
 /// will continue proving for "imaginary" nodes
-///
 /// . NODE_LEN is the max length of a node in the list of MPT nodes that form
 /// the MPT proof. For example, in storage trie, a leaf is 32 bytes max, and a
 /// branch node can be up to 32 * 17 = 544 bytes.
