@@ -43,7 +43,8 @@ impl LeafCircuit {
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
         // NOTE This additional digest is necessary since the individual digest is supposed to be a
         // full row, that is how it is extracted from MPT
-        let final_digest = split_digest.cond_combine_to_row_digest(b);
+        let is_split_case = split_digest.is_merge_case(b);
+        let final_digest = split_digest.cond_combine_to_row_digest(b, is_split_case);
 
         // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
         // in our case, min == max == index_value

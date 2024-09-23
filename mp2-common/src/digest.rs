@@ -116,6 +116,12 @@ impl SplitDigestPoint {
 }
 
 impl SplitDigestTarget {
+    /// Returns true if the situation is the merging of two tables. i.e. the multiplier is not zero
+    pub fn is_merge_case(&self, c: &mut CBuilder) -> BoolTarget {
+        let zero = c.curve_zero();
+        let is_simple = c.curve_eq(zero, self.multiplier);
+        c.not(is_simple)
+    }
     /// Returns a split digest depending if the given target should be a multiplier or not
     pub fn from_single_digest_target(
         c: &mut CBuilder,
@@ -146,10 +152,10 @@ impl SplitDigestTarget {
     /// NOTE: it takes care of looking if the multiplier is NEUTRAL. In this case, it simply
     /// returns the individual one. This is to accomodate for single table digest or "merged" table
     /// digest.
-    pub fn cond_combine_to_row_digest(&self, b: &mut CBuilder) -> DigestTarget {
+    pub fn cond_combine_to_row_digest(&self, b: &mut CBuilder, cond: BoolTarget) -> DigestTarget {
         let row_digest_ind = b.map_to_curve_point(&self.individual.to_targets());
         let row_digest_mul = b.map_to_curve_point(&self.multiplier.to_targets());
-        cond_circuit_hashed_scalar_mul(b, row_digest_mul, row_digest_ind)
+        cond_circuit_hashed_scalar_mul(b, cond, row_digest_mul, row_digest_ind)
     }
 
     /// Recombine the split and individual target digest into a single one. It does NOT hashes the

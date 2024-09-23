@@ -101,7 +101,8 @@ impl PartialNodeCircuit {
 
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
         let split_digest = tuple.split_and_accumulate_digest(b, cells_pi.split_digest_target());
-        let row_digest = split_digest.cond_combine_to_row_digest(b);
+        let is_split_case = split_digest.is_merge_case(b);
+        let row_digest = split_digest.cond_combine_to_row_digest(b, is_split_case);
 
         //  and add the digest of the row other rows
         let final_digest = b.curve_add(child_pi.rows_digest(), row_digest);

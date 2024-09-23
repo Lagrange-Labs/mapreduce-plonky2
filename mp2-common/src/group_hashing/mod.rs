@@ -204,18 +204,15 @@ pub fn circuit_hashed_scalar_mul(
 }
 
 /// Common function to compute the digest of the block tree which uses a special format using
-/// scalar multiplication
-/// NOTE: if the multiplier is NEUTRAL, then it only returns the base. This is to accomodate both a
-/// "merged" table digest and a "singleton" table digest.
+/// scalar multiplication. The output of that scalar mul is returned only if cond is true.
 pub fn cond_circuit_hashed_scalar_mul(
     b: &mut CircuitBuilder<F, D>,
+    cond: BoolTarget,
     multiplier: CurveTarget,
     base: CurveTarget,
 ) -> CurveTarget {
     let res_mul = circuit_hashed_scalar_mul(b, multiplier, base);
-    let neutral = b.curve_zero();
-    let is_base_case = b.curve_eq(neutral, multiplier);
-    b.curve_select(is_base_case, base, res_mul)
+    b.curve_select(cond, res_mul, base)
 }
 
 pub fn field_hashed_scalar_mul(inputs: Vec<F>, base: Point) -> Point {
