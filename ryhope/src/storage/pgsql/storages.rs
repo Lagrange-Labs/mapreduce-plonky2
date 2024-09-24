@@ -45,9 +45,9 @@ where
     /// Return a list of pairs column name, SQL type required by the connector.
     fn columns() -> Vec<(&'static str, &'static str)> {
         Self::node_columns()
-            .into_iter()
+            .iter()
             .cloned()
-            .chain(Self::payload_columns().into_iter().cloned())
+            .chain(Self::payload_columns().iter().cloned())
             .collect()
     }
 
@@ -62,24 +62,25 @@ where
     }
 
     /// Within a PgSQL transaction, insert the given value at the given epoch.
-    async fn create_node_in_tx(
+    fn create_node_in_tx(
         db_tx: &tokio_postgres::Transaction<'_>,
         table: &str,
         k: &Self::Key,
         birth_epoch: Epoch,
         v: &Self::Node,
-    ) -> Result<()>;
+    ) -> impl Future<Output = Result<()>>;
 
     /// Within a PgSQL transaction, update the value associated at the given
     /// epoch to the given key.
-    async fn set_at_in_tx(
+    fn set_at_in_tx(
         db_tx: &tokio_postgres::Transaction<'_>,
         table: &str,
         k: &Self::Key,
         epoch: Epoch,
         v: V,
-    ) -> Result<()> {
-        db_tx
+    ) -> impl Future<Output = Result<()>> {
+        async move {
+            db_tx
             .execute(
                 &format!(
                     "UPDATE {} SET {PAYLOAD}=$3 WHERE {KEY}=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}",
@@ -90,6 +91,7 @@ where
             .await
             .map(|_| ())
             .context("while updating payload")
+        }
     }
 
     /// Return the value associated to the given key at the given epoch.

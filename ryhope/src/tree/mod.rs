@@ -38,75 +38,83 @@ pub trait TreeTopology: Default + Send + Sync {
     type State: Send + Sync + Clone + Debug + Serialize + for<'a> Deserialize<'a>;
 
     /// Return the number of nodes currently stored in the tree
-    async fn size<S: TreeStorage<Self>>(&self, s: &S) -> usize;
+    fn size<S: TreeStorage<Self>>(&self, s: &S) -> impl Future<Output = usize>;
 
     /// Return the root of the tree.
     ///
     /// May be empty, e.g. if the tree is empty.
-    async fn root<S: TreeStorage<Self>>(&self, s: &S) -> Option<Self::Key>;
+    fn root<S: TreeStorage<Self>>(&self, s: &S) -> impl Future<Output = Option<Self::Key>>;
 
     /// Return the parent of `n`, or None if `n` is the root of the tree.
-    async fn parent<S: TreeStorage<Self>>(&self, n: Self::Key, s: &S) -> Option<Self::Key>;
+    fn parent<S: TreeStorage<Self>>(
+        &self,
+        n: Self::Key,
+        s: &S,
+    ) -> impl Future<Output = Option<Self::Key>>;
 
     /// Return whether `k` exists in the tree.
-    async fn contains<S: TreeStorage<Self>>(&self, k: &Self::Key, s: &S) -> bool;
+    fn contains<S: TreeStorage<Self>>(&self, k: &Self::Key, s: &S) -> impl Future<Output = bool>;
 
     /// Return, if it has some, the children of `k`.
     ///
     /// Return nothing if `k` is not in the tree.
-    async fn children<S: TreeStorage<Self>>(
+    fn children<S: TreeStorage<Self>>(
         &self,
         k: &Self::Key,
         s: &S,
-    ) -> Option<(Option<Self::Key>, Option<Self::Key>)>;
+    ) -> impl Future<Output = Option<(Option<Self::Key>, Option<Self::Key>)>>;
 
     /// Return a set of `n` and its descendants, if any, up to `depth` levels
     /// down.
-    async fn descendance<S: TreeStorage<Self>>(
+    fn descendance<S: TreeStorage<Self>>(
         &self,
         s: &S,
         n: &Self::Key,
         depth: usize,
-    ) -> HashSet<Self::Key> {
-        let mut todos = vec![(n.to_owned(), 0)];
-        let mut descendance = HashSet::new();
-        while let Some(todo) = todos.pop() {
-            let current_depth = todo.1;
-            if current_depth <= depth {
-                if let Some(children) = self.children(&todo.0, s).await {
-                    for child in [children.0, children.1] {
-                        if let Some(child) = child {
-                            todos.push((child, current_depth + 1));
+    ) -> impl Future<Output = HashSet<Self::Key>> {
+        async move {
+            let mut todos = vec![(n.to_owned(), 0)];
+            let mut descendance = HashSet::new();
+            while let Some(todo) = todos.pop() {
+                let current_depth = todo.1;
+                if current_depth <= depth {
+                    if let Some(children) = self.children(&todo.0, s).await {
+                        for child in [children.0, children.1] {
+                            if let Some(child) = child {
+                                todos.push((child, current_depth + 1));
+                            }
                         }
                     }
+                    descendance.insert(todo.0);
                 }
-                descendance.insert(todo.0);
             }
-        }
 
-        descendance
+            descendance
+        }
     }
 
     /// Returns the [`NodePath`] from the root of the tree to `k`.
-    async fn lineage<S: TreeStorage<Self>>(
+    fn lineage<S: TreeStorage<Self>>(
         &self,
         k: &Self::Key,
         s: &S,
-    ) -> Option<NodePath<Self::Key>>;
+    ) -> impl Future<Output = Option<NodePath<Self::Key>>>;
 
     /// Return the union of the lineages of all the `ns`
-    async fn ascendance<S: TreeStorage<Self>, I: IntoIterator<Item = Self::Key>>(
+    fn ascendance<S: TreeStorage<Self>, I: IntoIterator<Item = Self::Key>>(
         &self,
         ns: I,
         s: &S,
-    ) -> HashSet<Self::Key> {
-        let mut ascendance = HashSet::new();
-        for n in ns.into_iter() {
-            if let Some(np) = self.lineage(&n, s).await {
-                ascendance.extend(np.into_full_path());
+    ) -> impl Future<Output = HashSet<Self::Key>> {
+        async {
+            let mut ascendance = HashSet::new();
+            for n in ns.into_iter() {
+                if let Some(np) = self.lineage(&n, s).await {
+                    ascendance.extend(np.into_full_path());
+                }
             }
+            ascendance
         }
-        ascendance
     }
 
     /// Return the immediate neighborhood of the given `k`, if it exists, in the
@@ -170,11 +178,17 @@ impl<K> NodeContext<K> {
 }
 
 pub trait PrintableTree: TreeTopology {
-    async fn print<S: TreeStorage<Self>>(&self, s: &S) {
-        println!("{}", self.tree_to_string(s).await);
+    fn print<S: TreeStorage<Self>>(&self, s: &S) -> impl Future<Output = ()> {
+        async {
+            println!("{}", self.tree_to_string(s).await);
+        }
     }
 
-    async fn tree_to_string<S: TreeStorage<Self>>(&self, s: &S) -> String;
+    fn tree_to_string<S: TreeStorage<Self>>(&self, s: &S) -> impl Future<Output = String>;
 
-    async fn subtree_to_string<S: TreeStorage<Self>>(&self, s: &S, k: &Self::Key) -> String;
+    fn subtree_to_string<S: TreeStorage<Self>>(
+        &self,
+        s: &S,
+        k: &Self::Key,
+    ) -> impl Future<Output = String>;
 }
