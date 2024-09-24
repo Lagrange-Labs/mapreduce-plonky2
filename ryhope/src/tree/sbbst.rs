@@ -516,6 +516,7 @@ impl PrintableTree for Tree {
         r
     }
 
+    // TODO: Leave the warning for `k`, since we will implement it later.
     async fn subtree_to_string<S: TreeStorage<Self>>(&self, s: &S, k: &Self::Key) -> String {
         self.tree_to_string(s).await
     }
