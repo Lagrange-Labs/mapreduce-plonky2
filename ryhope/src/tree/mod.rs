@@ -18,12 +18,12 @@ pub struct NodePath<K> {
 impl<K> NodePath<K> {
     /// Return an iterator over references to the keys forming the full path
     /// from the root to `target` (included).
-    pub fn full_path(&self) -> impl Iterator<Item = &K> {
+    pub fn full_path(&self) -> impl Iterator<Item = &K> + DoubleEndedIterator {
         self.ascendance.iter().chain(std::iter::once(&self.target))
     }
     /// Return an iterator over the keys forming the full path from the root to
     /// `target` (included).
-    pub fn into_full_path(self) -> impl Iterator<Item = K> {
+    pub fn into_full_path(self) -> impl Iterator<Item = K> + DoubleEndedIterator {
         self.ascendance
             .into_iter()
             .chain(std::iter::once(self.target))
@@ -148,7 +148,7 @@ pub trait MutableTree: TreeTopology {
 }
 
 /// A data structure encompassing the immediate neighborhood of a node.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NodeContext<K> {
     /// The considered node ID
     pub node_id: K,

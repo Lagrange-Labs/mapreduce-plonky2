@@ -1051,18 +1051,16 @@ async fn fetch_many() {
         .await
         .unwrap()
         .into_iter()
+        .map(|(epoch, ctx, v)| (epoch, ctx.node_id, v))
         .collect::<HashSet<_>>();
 
     // using sets here, for PgSQL does not guarantee ordering
     assert_eq!(
         many,
         [
-            Some((1, "restera".to_string(), 12)),
-            Some((2, "restera".to_string(), 12)),
-            None,
-            Some((2, "car".to_string(), 0)),
-            None,
-            None
+            (1i64, "restera".to_string(), 12),
+            (2i64, "restera".to_string(), 12),
+            (2i64, "car".to_string(), 0),
         ]
         .into_iter()
         .collect::<HashSet<_>>()
