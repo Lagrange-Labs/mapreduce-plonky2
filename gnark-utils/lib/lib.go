@@ -38,6 +38,9 @@ import (
 	"github.com/succinctlabs/gnark-plonky2-verifier/types"
 )
 
+// gupeng
+const useBitDecompositionRangeCheck = "false"
+
 // Global variables for the proving process are only necessary to initialize
 // once by InitProver function.
 var (
@@ -74,7 +77,7 @@ func CompileAndGenerateAssets(
 	// TODO: need to test if the below fixes could work with Groth16 commitments.
 	// <https://github.com/Consensys/gnark/pull/1063>
 	// <https://github.com/Lagrange-Labs/gnark-plonky2-verifier/pull/1>
-	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
+	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", useBitDecompositionRangeCheck)
 
 	Logger.Info().Msg("starting compiling verifier circuit")
 
@@ -100,7 +103,7 @@ func CompileAndGenerateAssets(
 
 //export InitProver
 func InitProver(assetDirStr *C.char) *C.char {
-	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
+	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", useBitDecompositionRangeCheck)
 
 	var err error
 	assetDir := C.GoString(assetDirStr)
@@ -118,7 +121,7 @@ func InitProver(assetDirStr *C.char) *C.char {
 
 //export InitProverFromBytes
 func InitProverFromBytes(base64R1CS *C.char, base64PK *C.char) *C.char {
-	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
+	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", useBitDecompositionRangeCheck)
 
 	r1csBytes, err := base64.StdEncoding.DecodeString(C.GoString(base64R1CS))
 	if err != nil {
@@ -147,7 +150,7 @@ func Prove(
 	verifierOnlyCircuitData *C.char,
 	proofWithPublicInputs *C.char,
 ) *C.char {
-	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
+	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", useBitDecompositionRangeCheck)
 
 	Logger.Info().Msg("starting prove -- generating proof")
 	proof, err := ProveCircuit(C.GoString(verifierOnlyCircuitData), C.GoString(proofWithPublicInputs))
@@ -165,7 +168,7 @@ func Prove(
 
 //export InitVerifier
 func InitVerifier(assetDir *C.char) *C.char {
-	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
+	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", useBitDecompositionRangeCheck)
 
 	var err error
 	VK, err = LoadVerifierKey(C.GoString(assetDir))
@@ -178,7 +181,7 @@ func InitVerifier(assetDir *C.char) *C.char {
 
 //export Verify
 func Verify(proofStr *C.char) *C.char {
-	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
+	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", useBitDecompositionRangeCheck)
 
 	Logger.Info().Msg("starting verify")
 
