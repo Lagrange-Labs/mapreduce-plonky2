@@ -116,13 +116,7 @@ async fn integrated_indexing() -> Result<()> {
     Ok(())
 }
 
-#[test(tokio::test)]
-#[ignore]
-async fn integrated_querying() -> Result<()> {
-    let _ = env_logger::try_init();
-    info!("Running QUERY test");
-    //let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
-    let table_info = read_table_info(MERGE_TABLE_INFO_FILE)?;
+async fn integrated_querying(table_info: TableInfo) -> Result<()> {
     let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
     info!("Loading Anvil and contract");
     let mut ctx = context::new_local_chain(storage).await;
@@ -133,6 +127,24 @@ async fn integrated_querying() -> Result<()> {
     dbg!(&table.public_name);
     test_query(&mut ctx, table, table_info).await?;
     Ok(())
+}
+
+#[test(tokio::test)]
+#[ignore]
+async fn integrated_querying_mapping_table() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test for mapping table");
+    let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
+    integrated_querying(table_info).await
+}
+
+#[test(tokio::test)]
+#[ignore]
+async fn integrated_querying_merged_table() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test for merged table");
+    let table_info = read_table_info(MERGE_TABLE_INFO_FILE)?;
+    integrated_querying(table_info).await
 }
 
 fn table_info_path(f: &str) -> PathBuf {
