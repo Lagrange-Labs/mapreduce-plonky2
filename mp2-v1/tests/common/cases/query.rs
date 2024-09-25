@@ -1129,15 +1129,30 @@ pub async fn prove_non_existence_row<'a>(
             .context("unable to parse row key tree")
             .expect("");
         // among the nodes with the same index value of the node with `row_key`, we need to find
-        // the one in the highest place in the tree, i.e., a node whose parent has not the same
-        // index value
+        // the one that satisfies the following property: all its successor nodes have values bigger
+        // than `max_query_secondary`, and all its predecessor nodes have values smaller than
+        // `min_query_secondary`. Such a node can be found differently, depending on the case:
+        // - if `is_min_query = true`, then we are looking among nodes with the highest value smaller
+        //   than `min_query_secondary` bound (call this value `min_value`);
+        //   therefore, we need to find the "last" node among the nodes with value `min_value`, that
+        //   is the node whose successor (if exists) has a value bigger than `min_value`. Since there
+        //   are no nodes in the tree in the range [`min_query_secondary, max_query_secondary`], then
+        //   the value of the successor of the "last" node is necessarily bigger than `max_query_secondary`,
+        //   and so it implies that we found the node satisfying the property mentioned above
+        // - if `is_min_query = false`, then we are looking among nodes with the smallest value higher
+        //   than `max_query_secondary` bound (call this value `max_value`);
+        //   therefore, we need to find the "first" node among the nodes with value `max_value`, that
+        //   is the node whose predecessor (if exists) has a value smaller than `max_value`. Since there
+        //   are no nodes in the tree in the range [`min_query_secondary, max_query_secondary`], then
+        //   the value of the predecessor of the "first" node is necessarily smaller than `min_query_secondary`,
+        //   and so it implies that we found the node satisfying the property mentioned above
         let (mut node_ctx, node_value) = row_tree
             .fetch_with_context_at(&row_key, primary as Epoch)
             .await;
         let value = node_value.value();
 
         if is_min_query {
-            // starting from the node with key `row_key`, we iterate over the subsequent nodes of the tree,
+            // starting from the node with key `row_key`, we iterate over its successor nodes in the tree,
             // until we found a node that either has no successor or whose successor stores a value different
             // from the value `value` stored in the node with key `row_key`; the node found is the one to be
             // employed to generate the non-existence proof
@@ -1150,7 +1165,7 @@ pub async fn prove_non_existence_row<'a>(
                         .await;
             }
         } else {
-            // starting from the node with key `row_key`, we iterate over the previous nodes of the tree,
+            // starting from the node with key `row_key`, we iterate over its predecessor nodes in the tree,
             // until we found a node that either has no predecessor or whose predecessor stores a value different
             // from the value `value` stored in the node with key `row_key`; the node found is the one to be
             // employed to generate the non-existence proof
