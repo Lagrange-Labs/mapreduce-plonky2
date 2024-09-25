@@ -206,7 +206,7 @@ where
         let epoch = epoch - self.epoch_offset;
         let mut keys = HashSet::new();
 
-        for i in (0..=epoch as usize).rev() {
+        for i in 0..=epoch as usize {
             keys.extend(self.mem[i].keys())
         }
 
@@ -218,11 +218,26 @@ where
         let epoch = epoch - self.epoch_offset;
         let mut keys = HashSet::new();
 
-        for i in (0..=epoch as usize).rev() {
+        for i in 0..=epoch as usize {
             keys.extend(self.mem[i].keys())
         }
 
         keys.into_iter().cloned().collect()
+    }
+
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<K, V>> {
+        assert!(epoch >= self.epoch_offset);
+        let mut pairs = HashMap::new();
+        for i in 0..=epoch as usize {
+            for (k, v) in self.mem[i].iter() {
+                if let Some(v) = v.clone() {
+                    pairs.insert(k.clone(), v);
+                } else {
+                    pairs.remove(k);
+                }
+            }
+        }
+        Ok(pairs)
     }
 }
 

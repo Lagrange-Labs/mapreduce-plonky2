@@ -125,6 +125,30 @@ where
         }
     }
 
+    /// Retrieve all the (key, payload) pairs valid at a given epoch
+    fn fetch_all_pairs(
+        db: DBPool,
+        table: &str,
+        epoch: Epoch,
+    ) -> impl Future<Output = Result<HashMap<Self::Key, V>>> + std::marker::Send {
+        async move {
+            let connection = db.get().await.unwrap();
+            Ok(connection
+                .query(
+                    &format!(
+                        "SELECT {KEY}, {PAYLOAD} FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
+                        table
+                    ),
+                    &[&epoch],
+                )
+                .await
+                .context("while fetching all pairs from database")?
+                .iter()
+                .map(|row| (Self::Key::from_bytea(row.get::<_, Vec<u8>>(0)), row.get::<_, Json<V>>(1).0))
+                .collect())
+        }
+    }
+
     /// Return the value associated to the given key at the given epoch.
     fn fetch_payload_at(
         db: DBPool,
@@ -1071,6 +1095,10 @@ where
 
         T::fetch_all_keys(db, &table, epoch).await.unwrap()
     }
+
+    async fn pairs_at(&self, _epoch: Epoch) -> Result<HashMap<T::Key, T::Node>> {
+        unimplemented!("should never be used");
+    }
 }
 impl<T, V> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
 where
@@ -1188,6 +1216,13 @@ where
         let table = self.wrapped.lock().unwrap().table.to_owned();
 
         T::fetch_all_keys(db, &table, epoch).await.unwrap()
+    }
+
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, V>> {
+        let db = self.wrapped.lock().unwrap().db.clone();
+        let table = self.wrapped.lock().unwrap().table.to_owned();
+
+        T::fetch_all_pairs(db, &table, epoch).await
     }
 }
 impl<T, V> EpochKvStorage<T::Key, V> for PayloadProjection<T, V>

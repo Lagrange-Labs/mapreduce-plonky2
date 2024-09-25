@@ -1,7 +1,12 @@
 use anyhow::*;
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
+};
 use storage::{
     updatetree::{Next, UpdatePlan, UpdateTree},
     view::TreeStorageView,
@@ -412,6 +417,10 @@ impl<
 
     async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
         self.storage.data().keys_at(epoch).await
+    }
+
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, V>> {
+        self.storage.data().pairs_at(epoch).await
     }
 }
 

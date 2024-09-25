@@ -278,10 +278,16 @@ where
         self.size_at(self.current_epoch())
     }
 
-    /// Return the number of stored K/V pairs at the gievm epoch
+    /// Return the number of stored K/V pairs at the given epoch.
     fn size_at(&self, epoch: Epoch) -> impl Future<Output = usize>;
 
+    /// Return all the keys existing at the given epoch.
     fn keys_at(&self, epoch: Epoch) -> impl Future<Output = Vec<K>>;
+
+    /// Return all the valid key/value pairs at the given `epoch`.
+    ///
+    /// NOTE: be careful when using this function, it is not lazy.
+    fn pairs_at(&self, epoch: Epoch) -> impl Future<Output = Result<HashMap<K, V>>>;
 }
 
 /// A versioned KV storage only allowed to mutate entries only in the current

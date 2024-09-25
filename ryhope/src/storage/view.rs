@@ -1,6 +1,6 @@
 //! This module offers facilities to “time-travel”, i.e. access the successive
 //! states of a tree at given epochs.
-use std::{fmt::Debug, marker::PhantomData};
+use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
 use anyhow::*;
 use serde::{Deserialize, Serialize};
@@ -98,7 +98,7 @@ impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
     }
 
     async fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Option<T::Node> {
-        if epoch != self.current_epoch {
+        if epoch > self.current_epoch {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
                 self.current_epoch
@@ -118,6 +118,17 @@ impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
 
     async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
         self.wrapped.keys_at(epoch).await
+    }
+
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, T::Node>> {
+        if epoch > self.current_epoch {
+            unimplemented!(
+                "this storage view is locked at {}; {epoch} unreachable",
+                self.current_epoch
+            )
+        } else {
+            self.wrapped.pairs_at(epoch).await
+        }
     }
 }
 
