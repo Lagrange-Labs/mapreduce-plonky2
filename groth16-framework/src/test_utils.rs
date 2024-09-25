@@ -6,7 +6,7 @@ use crate::{
     utils::{deserialize_json_file, hex_to_u256, read_file, write_file},
     EVMVerifier, Groth16Proof, Groth16Prover, Groth16Verifier, C,
 };
-use alloy::{contract::Interface, dyn_abi::DynSolValue, json_abi::JsonAbi};
+use alloy::{contract::Interface, dyn_abi::DynSolValue, hex::deserialize, json_abi::JsonAbi};
 use mp2_common::{proof::deserialize_proof, D, F};
 use plonky2::plonk::proof::ProofWithPublicInputs;
 use std::path::Path;
@@ -83,14 +83,35 @@ fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
         .to_string_lossy()
         .to_string();
 
+    /*
+        // Build the contract interface for encoding the arguments of verification function.
+        let abi = JsonAbi::parse([
+            "function verifyProof(uint256[8] calldata proof, uint256[2] calldata commitments, uint256[2] calldata commitmentPok, uint256[3] calldata input)",
+        ])
+        .unwrap();
+        let contract = Interface::new(abi);
+
+        let proofs = &proof.proofs[..8];
+        let commitments = &proof.proofs[8..10];
+        let commitment_pok = &proof.proofs[10..12];
+        let input = [proofs, commitments, commitment_pok, &proof.inputs].map(|s| {
+            DynSolValue::FixedArray(
+                s.iter()
+                    .map(|s| DynSolValue::Uint(hex_to_u256(s).unwrap(), 256))
+                    .collect(),
+            )
+        });
+    */
     // Build the contract interface for encoding the arguments of verification function.
     let abi = JsonAbi::parse([
         "function verifyProof(uint256[8] calldata proof, uint256[2] calldata input)",
+        // "function verifyProof(uint256[8] calldata proof, uint256[2] calldata commitments, uint256[2] calldata commitmentPok, uint256[3] calldata input)",
     ])
     .unwrap();
     let contract = Interface::new(abi);
 
-    let input = [&proof.proofs, &proof.inputs].map(|s| {
+    let proofs = &proof.proofs[..8];
+    let input = [proofs, &proof.inputs].map(|s| {
         DynSolValue::FixedArray(
             s.iter()
                 .map(|s| DynSolValue::Uint(hex_to_u256(s).unwrap(), 256))

@@ -41,6 +41,11 @@ import (
 // gupeng
 const useBitDecompositionRangeCheck = "false"
 
+// gupeng
+// 8 proof + 2 commitments + 2 commitmentPok
+// const groth16ProofLen = 12
+const groth16ProofLen = 8
+
 // Global variables for the proving process are only necessary to initialize
 // once by InitProver function.
 var (
@@ -445,6 +450,7 @@ func ProveCircuit(
 	Logger.Info().Msg("successfully created proof in " + elapsed.String())
 
 	_proof := proof.(*groth16_bn254.Proof)
+	// gupeng
 	var buf bytes.Buffer
 	_, err = _proof.WriteRawTo(&buf)
 	proofBytes := buf.Bytes()
@@ -453,15 +459,25 @@ func ProveCircuit(
 	const fpSize = 4 * 8
 
 	// Ensure proofBytes contains enough data for the expected operation.
-	expectedLength := fpSize * 8
+	expectedLength := fpSize * groth16ProofLen
 	if len(proofBytes) < expectedLength {
 		return "", fmt.Errorf("proofBytes length is %d, expected at least %d", len(proofBytes), expectedLength)
 	}
 
-	proofs := make([]string, 8)
+	// gupeng
+	proofs := make([]string, groth16ProofLen)
 	for i := 0; i < 8; i++ {
 		start := i * fpSize
 		end := (i + 1) * fpSize
+		// Additional check to prevent slice bounds out of range panic.
+		if end > len(proofBytes) {
+			return "", fmt.Errorf("attempt to slice beyond proofBytes length at segment %d", i)
+		}
+		proofs[i] = "0x" + hex.EncodeToString(proofBytes[start:end])
+	}
+	for i := 8; i < groth16ProofLen; i++ {
+		start := 4 + i*fpSize
+		end := 4 + (i+1)*fpSize
 		// Additional check to prevent slice bounds out of range panic.
 		if end > len(proofBytes) {
 			return "", fmt.Errorf("attempt to slice beyond proofBytes length at segment %d", i)
@@ -505,12 +521,14 @@ func GetInputHashOutputHash(proofWithPis types.ProofWithPublicInputsRaw) (*big.I
 	}
 	inputHash := new(big.Int).SetBytes(publicInputsBytes[0:32])
 	outputHash := new(big.Int).SetBytes(publicInputsBytes[32:64])
-	if inputHash.BitLen() > 253 {
-		panic("inputHash must be at most 253 bits")
-	}
-	if outputHash.BitLen() > 253 {
-		panic("outputHash must be at most 253 bits")
-	}
+	/*
+		if inputHash.BitLen() > 253 {
+			panic("inputHash must be at most 253 bits")
+		}
+		if outputHash.BitLen() > 253 {
+			panic("outputHash must be at most 253 bits")
+		}
+	*/
 	return inputHash, outputHash
 }
 

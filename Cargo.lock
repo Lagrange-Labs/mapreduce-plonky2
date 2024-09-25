@@ -7243,3 +7243,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "plonky2x"
+version = "0.1.0"
