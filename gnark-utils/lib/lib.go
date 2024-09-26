@@ -12,6 +12,7 @@ package main
    #include <stdlib.h>
 */
 import "C"
+
 import (
 	"bufio"
 	"bytes"
@@ -39,8 +40,10 @@ import (
 
 // Global variables for the proving process are only necessary to initialize
 // once by InitProver function.
-var R1CS constraint.ConstraintSystem
-var PK groth16.ProvingKey
+var (
+	R1CS constraint.ConstraintSystem
+	PK   groth16.ProvingKey
+)
 
 // Global variables for the verifying process are only necessary to initialize
 // once by InitVerifier function.
@@ -468,9 +471,9 @@ func ProveCircuit(
 	// We cut off the first 12 bytes because they encode length information.
 	publicWitnessBytes := rawPublicWitnessBytes[12:]
 
-	inputs := make([]string, 3)
+	inputs := make([]string, 2)
 	// Print out the public witness bytes.
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		inputs[i] = "0x" + hex.EncodeToString(publicWitnessBytes[i*fpSize:(i+1)*fpSize])
 	}
 

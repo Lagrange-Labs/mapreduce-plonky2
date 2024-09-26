@@ -94,10 +94,10 @@ contract Query is Verifier {
     }
 
     // The processQuery function does the followings:
-    // 1. Parse the Groth16 proofs (8 uint256) and inputs (3 uint256) from the `data`
+    // 1. Parse the Groth16 proofs (8 uint256) and inputs (2 uint256) from the `data`
     //    argument, and call `verifyProof` function for Groth16 verification.
     // 2. Calculate sha256 on the public inputs, and set the top 3 bits of this hash to 0.
-    //    Then ensure this hash value equals to the last Groth16 input (groth16_inputs[2]).
+    //    Then ensure this hash value equals to the last Groth16 input (groth16_inputs[1]).
     // 3. Parse the items from public inputs, and check as expected for query.
     // 4. Parse and return the query output from public inputs.
     function processQuery(
@@ -105,7 +105,7 @@ contract Query is Verifier {
         QueryInput memory query
     ) public view returns (QueryOutput memory) {
         // 1. Groth16 verification
-        uint256[3] memory groth16Inputs = verifyGroth16Proof(data);
+        uint256[2] memory groth16Inputs = verifyGroth16Proof(data);
 
         // 2. Ensure the sha256 of public inputs equals to the last Groth16 input.
         verifyPublicInputs(data, groth16Inputs);
@@ -122,12 +122,12 @@ contract Query is Verifier {
         bytes32[] calldata data
     ) internal view returns (uint256[3] memory) {
         uint256[8] memory proofs;
-        uint256[3] memory inputs;
+        uint256[2] memory inputs;
 
         for (uint32 i = 0; i < 8; ++i) {
             proofs[i] = uint256(data[i]);
         }
-        for (uint32 i = 0; i < 3; ++i) {
+        for (uint32 i = 0; i < 2; ++i) {
             inputs[i] = uint256(data[i + 8]);
         }
 
@@ -146,7 +146,7 @@ contract Query is Verifier {
     // Compute sha256 on the public inputs, and ensure it equals to the last Groth16 input.
     function verifyPublicInputs(
         bytes32[] calldata data,
-        uint256[3] memory groth16Inputs
+        uint256[2] memory groth16Inputs
     ) internal pure {
         // Parse the public inputs from calldata.
         bytes memory pi = parsePublicInputs(data);
@@ -158,7 +158,7 @@ contract Query is Verifier {
 
         // Require the sha256 equals to the last Groth16 input.
         require(
-            hash == groth16Inputs[2],
+            hash == groth16Inputs[1],
             "The sha256 hash of public inputs must be equal to the last of the Groth16 inputs"
         );
     }
