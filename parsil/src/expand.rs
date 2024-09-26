@@ -1,11 +1,20 @@
 //! Expand high-level operations (e.g. IN or BETWEEN) into combination of
 //! operations supported by the circuits.
 
-use crate::visitor::{AstMutator, VisitMut};
+use crate::{
+    symbols::ContextProvider,
+    utils::val_to_expr,
+    visitor::{AstMutator, VisitMut},
+    ParsilSettings,
+};
+use alloy::primitives::U256;
 use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
 
-struct Expander;
-impl AstMutator for Expander {
+struct Expander<'a, C: ContextProvider> {
+    settings: &'a ParsilSettings<C>,
+}
+
+impl<'a, C: ContextProvider> AstMutator for Expander<'a, C> {
     type Error = anyhow::Error;
 
     fn pre_expr(&mut self, e: &mut Expr) -> anyhow::Result<()> {
@@ -131,8 +140,16 @@ impl AstMutator for Expander {
 
         Ok(())
     }
+
+    fn pre_query(&mut self, query: &mut Query) -> anyhow::Result<()> {
+        if query.limit.is_none() {
+            query.limit = Some(val_to_expr(U256::from(C::MAX_NUM_OUTPUTS)));
+        }
+        Ok(())
+    }
 }
 
-pub fn expand(q: &mut Query) {
-    q.visit_mut(&mut Expander).expect("can not fail");
+pub fn expand<C: ContextProvider>(settings: &ParsilSettings<C>, q: &mut Query) {
+    let mut expander = Expander { settings };
+    q.visit_mut(&mut expander).expect("can not fail");
 }

@@ -19,7 +19,8 @@ use common::{
         indexing::{ChangeType, TreeFactory, UpdateType},
         query::{
             test_query, GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput,
-            MAX_NUM_PLACEHOLDERS,
+            MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
+            MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
         },
     },
     context::{self, ParamsType, TestContextConfig},
@@ -151,6 +152,16 @@ impl ContextProvider for T {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         Ok(self.0.clone())
     }
+
+    const MAX_NUM_COLUMNS: usize = MAX_NUM_COLUMNS;
+
+    const MAX_NUM_PREDICATE_OPS: usize = MAX_NUM_PREDICATE_OPS;
+
+    const MAX_NUM_RESULT_OPS: usize = MAX_NUM_RESULT_OPS;
+
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize = MAX_NUM_ITEMS_PER_OUTPUT;
+
+    const MAX_NUM_OUTPUTS: usize = MAX_NUM_OUTPUTS;
 }
 
 #[tokio::test]

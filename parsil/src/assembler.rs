@@ -649,39 +649,37 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     fn prepare_result(&self) -> Result<ResultStructure> {
         let root_scope = &self.scopes.scope_at(1);
 
-        Ok(
-            if root_scope
-                .metadata()
-                .aggregation
-                .iter()
-                .all(|&a| a == AggregationOperation::IdOp)
-            {
-                ResultStructure::new_for_query_no_aggregation(
-                    self.query_ops.ops.clone(),
-                    root_scope.metadata().outputs.clone(),
-                    vec![0; root_scope.metadata().outputs.len()],
-                    self.distinct,
-                )
-            } else if root_scope
-                .metadata()
-                .aggregation
-                .iter()
-                .all(|&a| a != AggregationOperation::IdOp)
-            {
-                ResultStructure::new_for_query_with_aggregation(
-                    self.query_ops.ops.clone(),
-                    root_scope.metadata().outputs.clone(),
-                    root_scope
-                        .metadata()
-                        .aggregation
-                        .iter()
-                        .map(|x| x.to_id())
-                        .collect(),
-                )
-            } else {
-                unreachable!()
-            },
-        )
+        if root_scope
+            .metadata()
+            .aggregation
+            .iter()
+            .all(|&a| a == AggregationOperation::IdOp)
+        {
+            ResultStructure::new_for_query_no_aggregation(
+                self.query_ops.ops.clone(),
+                root_scope.metadata().outputs.clone(),
+                vec![0; root_scope.metadata().outputs.len()],
+                self.distinct,
+            )
+        } else if root_scope
+            .metadata()
+            .aggregation
+            .iter()
+            .all(|&a| a != AggregationOperation::IdOp)
+        {
+            ResultStructure::new_for_query_with_aggregation(
+                self.query_ops.ops.clone(),
+                root_scope.metadata().outputs.clone(),
+                root_scope
+                    .metadata()
+                    .aggregation
+                    .iter()
+                    .map(|x| x.to_id())
+                    .collect(),
+            )
+        } else {
+            unreachable!()
+        }
     }
 
     /// Generate appropriate universal query circuit PIs in static mode from the
@@ -690,7 +688,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         let result = self.prepare_result()?;
         let root_scope = &self.scopes.scope_at(1);
 
-        Ok(CircuitPis {
+        let pis = CircuitPis {
             result,
             column_ids: self.columns.clone(),
             query_aggregations: root_scope.metadata().aggregation.iter().cloned().collect(),
@@ -699,7 +697,9 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 self.secondary_index_bounds.low.clone(),
                 self.secondary_index_bounds.high.clone(),
             ),
-        })
+        };
+        pis.validate::<C>()?;
+        Ok(pis)
     }
 
     /// Generate appropriate universal query circuit PIs in runtime mode from
@@ -708,7 +708,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         let result = self.prepare_result()?;
         let root_scope = &self.scopes.scope_at(1);
 
-        Ok(CircuitPis {
+        let pis = CircuitPis {
             result,
             column_ids: self.columns.clone(),
             query_aggregations: root_scope.metadata().aggregation.iter().cloned().collect(),
@@ -719,7 +719,9 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 self.secondary_index_bounds.high.clone(),
             )
             .context("while setting query bounds")?,
-        })
+        };
+        pis.validate::<C>()?;
+        Ok(pis)
     }
 }
 
@@ -803,6 +805,29 @@ pub type StaticCircuitPis = CircuitPis<StaticQueryBounds>;
 /// Circuit PIs in dynamic mode, i.e. with the placeholder values set at query
 /// runtime.
 pub type DynamicCircuitPis = CircuitPis<QueryBounds>;
+
+impl<T: BuildableBounds> CircuitPis<T> {
+    fn validate<C: ContextProvider>(&self) -> Result<()> {
+        ensure!(
+            self.predication_operations.len() <= C::MAX_NUM_PREDICATE_OPS,
+            format!(
+                "too many basic operations found in WHERE clause: found {}, maximum allowed is {}",
+                self.predication_operations.len(),
+                C::MAX_NUM_PREDICATE_OPS,
+            )
+        );
+        ensure!(
+            self.column_ids.len() <= C::MAX_NUM_COLUMNS,
+            format!(
+                "too many columns found in the table: found {}, maximum allowed is {}",
+                self.column_ids.len(),
+                C::MAX_NUM_COLUMNS,
+            )
+        );
+        self.result
+            .validate(C::MAX_NUM_RESULT_OPS, C::MAX_NUM_ITEMS_PER_OUTPUT)
+    }
+}
 
 impl<'a, C: ContextProvider> AstVisitor for Assembler<'a, C> {
     type Error = anyhow::Error;
@@ -997,7 +1022,7 @@ impl<'a, C: ContextProvider> AstVisitor for Assembler<'a, C> {
 pub fn validate<C: ContextProvider>(query: &Query, settings: &ParsilSettings<C>) -> Result<()> {
     let mut resolver = Assembler::new(settings);
     query.visit(&mut resolver)?;
-    resolver.prepare_result().map(|_| ())
+    resolver.to_static_inputs().map(|_| ())
 }
 
 /// Generate static circuit public inputs, i.e. without reference to runtime

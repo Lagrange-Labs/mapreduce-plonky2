@@ -1434,7 +1434,8 @@ mod tests {
                 .iter()
                 .map(|op| op.to_canonical_u64())
                 .collect_vec(),
-        );
+        )
+        .unwrap();
 
         let query_bounds = QueryBounds::new(
             &placeholders,
@@ -1813,7 +1814,8 @@ mod tests {
                 .map(|id| id.to_canonical_u64())
                 .collect_vec(),
             false,
-        );
+        )
+        .unwrap();
         let query_bounds = QueryBounds::new(
             &placeholders,
             Some(QueryBoundSource::Placeholder(third_placeholder_id)),

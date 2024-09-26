@@ -16,10 +16,24 @@ const CAREFUL: &[&str] = &[
     "SELECT pipo.not_tt FROM (SELECT t AS tt FROM b) AS pipo (not_tt);",
 ];
 
+const MAX_NUM_COLUMNS: usize = 10;
+const MAX_NUM_PREDICATE_OPS: usize = 20;
+const MAX_NUM_RESULT_OPS: usize = 20;
+const MAX_NUM_ITEMS_PER_OUTPUT: usize = 10;
+const MAX_NUM_OUTPUTS: usize = 5;
+
+type TestFileContextProvider = FileContextProvider<
+    MAX_NUM_COLUMNS,
+    MAX_NUM_PREDICATE_OPS,
+    MAX_NUM_RESULT_OPS,
+    MAX_NUM_ITEMS_PER_OUTPUT,
+    MAX_NUM_OUTPUTS,
+>;
+
 #[test]
 fn must_accept() -> Result<()> {
     let settings = ParsilSettings {
-        context: FileContextProvider::from_file("tests/context.json")?,
+        context: TestFileContextProvider::from_file("tests/context.json")?,
         placeholders: PlaceholderSettings::with_freestanding(3),
     };
 
@@ -39,6 +53,7 @@ fn must_accept() -> Result<()> {
         "SELECT foo FROM table2 WHERE block IN (1, 2, 4)",
         "SELECT bar FROM table2 WHERE NOT block BETWEEN 12 AND 15",
         "SELECT a, c FROM table2 AS tt (a, b, c)",
+        "SELECT a+b FROM table2 AS tt (a, b, c) LIMIT 1+2",
     ] {
         parse_and_validate(q, &settings)?;
     }
@@ -48,7 +63,7 @@ fn must_accept() -> Result<()> {
 #[test]
 fn must_reject() {
     let settings = ParsilSettings {
-        context: FileContextProvider::from_file("tests/context.json").unwrap(),
+        context: TestFileContextProvider::from_file("tests/context.json").unwrap(),
         placeholders: PlaceholderSettings::with_freestanding(3),
     };
 
@@ -84,6 +99,16 @@ fn must_reject() {
         "SELECT '0t11223344556677889900112233445566778899001122334455667788990011223'",
         // Invalid digit
         "SELECT '0o12345678'",
+        // Too many items in SELECT
+        "SELECT a+b, a-b, a, b, c*a, c+b, c<b, c-a, a+b+c, a*b+c, c, c*a-b FROM table2 AS tt (a,b,c)",
+        // Too many operations in WHERE
+        "SELECT a FROM table2 AS tt (a,b,c) WHERE c+b-c*(a+c)-75 < 42*(a-b*c+a*(b-c)) AND a*56 >= b+63 OR a < b AND (a-b)*(a+b) >= a*c+b-4",
+        // Too many operations in SELECT
+        "SELECT c+b-c*(a+c)-75 + 42*(a-b*c+a*(b-c)), a*56 >= b+63, a < b, (a-b)*(a+b) >= a*c+b-4 FROM table2 as tt (a,b,c)",
+        // Too high LIMIT
+        "SELECT a+b FROM t LIMIT 10",
+        // Invalid LIMIT value
+        "SELECT b*c FROM t LIMIT a",
     ] {
         assert!(dbg!(parse_and_validate(q, &settings)).is_err())
     }
@@ -92,7 +117,7 @@ fn must_reject() {
 #[test]
 fn ref_query() -> Result<()> {
     let settings = ParsilSettings {
-        context: FileContextProvider::from_file("tests/context.json")?,
+        context: TestFileContextProvider::from_file("tests/context.json")?,
         placeholders: PlaceholderSettings::with_freestanding(2),
     };
 
@@ -104,7 +129,7 @@ fn ref_query() -> Result<()> {
 #[test]
 fn test_serde_circuit_pis() {
     let settings = ParsilSettings {
-        context: FileContextProvider::from_file("tests/context.json").unwrap(),
+        context: TestFileContextProvider::from_file("tests/context.json").unwrap(),
         placeholders: PlaceholderSettings::with_freestanding(3),
     };
 
@@ -127,7 +152,7 @@ fn test_serde_circuit_pis() {
 fn isolation() {
     fn isolated_to_string(q: &str, lo_sec: bool, hi_sec: bool) -> String {
         let settings = ParsilSettings {
-            context: FileContextProvider::from_file("tests/context.json").unwrap(),
+            context: TestFileContextProvider::from_file("tests/context.json").unwrap(),
             placeholders: PlaceholderSettings::with_freestanding(3),
         };
 

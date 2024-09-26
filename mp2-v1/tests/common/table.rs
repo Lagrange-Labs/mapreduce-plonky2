@@ -30,7 +30,15 @@ use std::{hash::Hash, iter::once};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql};
 use verifiable_db::query::computational_hash_ids::ColumnIDs;
 
-use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
+use super::{
+    cases::query::{
+        MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+    },
+    index_tree::MerkleIndexTree,
+    rowtree::MerkleRowTree,
+    ColumnIdentifier,
+};
 
 pub type TableID = String;
 
@@ -612,7 +620,18 @@ impl ContextProvider for Table {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         <&Self as ContextProvider>::fetch_table(&self, table_name)
     }
+
+    const MAX_NUM_COLUMNS: usize = <&Self as ContextProvider>::MAX_NUM_COLUMNS;
+
+    const MAX_NUM_PREDICATE_OPS: usize = <&Self as ContextProvider>::MAX_NUM_PREDICATE_OPS;
+
+    const MAX_NUM_RESULT_OPS: usize = <&Self as ContextProvider>::MAX_NUM_RESULT_OPS;
+
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize = <&Self as ContextProvider>::MAX_NUM_ITEMS_PER_OUTPUT;
+
+    const MAX_NUM_OUTPUTS: usize = <&Self as ContextProvider>::MAX_NUM_OUTPUTS;
 }
+
 impl ContextProvider for &Table {
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         ensure!(
@@ -623,4 +642,14 @@ impl ContextProvider for &Table {
         );
         self.to_zktable()
     }
+
+    const MAX_NUM_COLUMNS: usize = MAX_NUM_COLUMNS;
+
+    const MAX_NUM_PREDICATE_OPS: usize = MAX_NUM_PREDICATE_OPS;
+
+    const MAX_NUM_RESULT_OPS: usize = MAX_NUM_RESULT_OPS;
+
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize = MAX_NUM_ITEMS_PER_OUTPUT;
+
+    const MAX_NUM_OUTPUTS: usize = MAX_NUM_OUTPUTS;
 }

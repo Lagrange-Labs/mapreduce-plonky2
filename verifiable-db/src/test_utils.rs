@@ -212,7 +212,8 @@ impl TestRevelationData {
             result_operations,
             output_items,
             aggregation_ops,
-        );
+        )
+        .unwrap();
         let placeholders = Placeholders::from((
             placeholder_ids
                 .into_iter()
