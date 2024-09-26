@@ -43,10 +43,15 @@ fn groth16_prove(asset_dir: &str, plonky2_proof: &ProofWithPublicInputs<F, C, D>
     // Construct the file paths to save the Groth16 and full proofs.
     let groth16_proof_path = Path::new(asset_dir).join("groth16_proof.json");
 
+    // gupeng
     // Generate the Groth16 proof.
+    use std::time::Instant;
+    let start = Instant::now();
     let groth16_proof = prover
         .generate_groth16_proof(plonky2_proof)
         .expect("Failed to generate the proof");
+    let end = start.elapsed();
+    log::error!("Groth16 proving time: {:?}", end.as_millis());
     write_file(
         groth16_proof_path,
         serde_json::to_string(&groth16_proof).unwrap().as_bytes(),
