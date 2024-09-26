@@ -131,12 +131,6 @@ pub(crate) async fn prove_query<'a>(
         let pk = ProofKey::IVC(current_epoch as BlockPrimaryIndex);
         planner.ctx.storage.get_proof_exact(&pk)?
     };
-    let pis_hash = QueryCircuitInput::ids_for_placeholder_hash(
-        &planner.pis.predication_operations,
-        &planner.pis.result,
-        &planner.query.placeholders,
-        &planner.pis.bounds,
-    )?;
     let column_ids = ColumnIDs::from(&planner.table.columns);
     let num_matching_rows = matching_rows_input.len();
     let input = RevelationCircuitInput::new_revelation_unproven_offset(
@@ -144,13 +138,11 @@ pub(crate) async fn prove_query<'a>(
         matching_rows_input,
         &planner.pis.bounds,
         &planner.query.placeholders,
-        pis_hash,
         &column_ids,
         &planner.pis.predication_operations,
         &planner.pis.result,
         planner.query.limit.unwrap(),
         planner.query.offset.unwrap(),
-        false,
     )?;
     info!("Generating revelation proof");
     let final_proof = planner.ctx.run_query_proof(

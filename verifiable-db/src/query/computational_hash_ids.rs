@@ -206,7 +206,7 @@ impl Identifiers {
             Output::Aggregation => ComputationalHash::from_bytes((&hash).into()),
             Output::NoAggregation => ResultIdentifier::result_id_hash(
                 ComputationalHash::from_bytes((&hash).into()),
-                false, //ToDo: make it an input of the method or part of `results`
+                results.distinct.unwrap_or(false),
             ),
         };
 

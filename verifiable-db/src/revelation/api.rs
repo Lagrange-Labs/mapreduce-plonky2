@@ -1,4 +1,4 @@
-use std::{array, cmp::Ordering, collections::BTreeSet, iter::repeat};
+use std::{array, cmp::Ordering, collections::BTreeSet, fmt::Debug, iter::repeat};
 
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     query::{
+        self,
         aggregation::QueryBounds,
         api::{CircuitInput as QueryCircuitInput, Parameters as QueryParams},
         computational_hash_ids::{ColumnIDs, PlaceholderIdentifier},
@@ -149,13 +150,13 @@ pub struct Parameters<
     const MAX_NUM_OUTPUTS: usize,
     const MAX_NUM_ITEMS_PER_OUTPUT: usize,
     const MAX_NUM_PLACEHOLDERS: usize,
-    const NUM_PLACEHOLDERS_HASHED: usize,
 > where
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
     [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
     revelation_no_results_tree: CircuitWithUniversalVerifier<
         F,
@@ -166,7 +167,7 @@ pub struct Parameters<
             MAX_NUM_OUTPUTS,
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
-            NUM_PLACEHOLDERS_HASHED,
+            { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
         >,
     >,
     revelation_unproven_offset: CircuitWithUniversalVerifier<
@@ -180,7 +181,7 @@ pub struct Parameters<
             MAX_NUM_OUTPUTS,
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
-            NUM_PLACEHOLDERS_HASHED,
+            { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
         >,
     >,
     //ToDo: add revelation circuit with results tree
@@ -208,11 +209,11 @@ pub enum CircuitInput<
     const MAX_NUM_OUTPUTS: usize,
     const MAX_NUM_ITEMS_PER_OUTPUT: usize,
     const MAX_NUM_PLACEHOLDERS: usize,
-    const NUM_PLACEHOLDERS_HASHED: usize,
 > where
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
+    [(); { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) }]:,
 {
     NoResultsTree {
         query_proof: ProofWithVK,
@@ -221,7 +222,7 @@ pub enum CircuitInput<
             MAX_NUM_OUTPUTS,
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
-            NUM_PLACEHOLDERS_HASHED,
+            { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
         >,
     },
     UnprovenOffset {
@@ -233,7 +234,7 @@ pub enum CircuitInput<
             MAX_NUM_OUTPUTS,
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
-            NUM_PLACEHOLDERS_HASHED,
+            { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
         >,
         dummy_row_proof_input: Option<
             QueryCircuitInput<
@@ -255,7 +256,6 @@ impl<
         const MAX_NUM_OUTPUTS: usize,
         const MAX_NUM_ITEMS_PER_OUTPUT: usize,
         const MAX_NUM_PLACEHOLDERS: usize,
-        const NUM_PLACEHOLDERS_HASHED: usize,
     >
     CircuitInput<
         ROW_TREE_MAX_DEPTH,
@@ -266,7 +266,6 @@ impl<
         MAX_NUM_OUTPUTS,
         MAX_NUM_ITEMS_PER_OUTPUT,
         MAX_NUM_PLACEHOLDERS,
-        NUM_PLACEHOLDERS_HASHED,
     >
 where
     [(); ROW_TREE_MAX_DEPTH - 1]:,
@@ -274,6 +273,8 @@ where
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
     [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
     /// Initialize circuit inputs for the revelation circuit for queries without a results tree.
     /// The method requires the following inputs:
@@ -289,11 +290,22 @@ where
         preprocessing_proof: Vec<u8>,
         query_bounds: &QueryBounds,
         placeholders: &Placeholders,
-        placeholder_hash_ids: [PlaceholderId; NUM_PLACEHOLDERS_HASHED],
+        predicate_operations: &[BasicOperation],
+        results_structure: &ResultStructure,
     ) -> Result<Self> {
         let query_proof = ProofWithVK::deserialize(&query_proof)?;
         let preprocessing_proof = deserialize_proof(&preprocessing_proof)?;
-
+        let placeholder_hash_ids = query::api::CircuitInput::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_ITEMS_PER_OUTPUT,
+        >::ids_for_placeholder_hash(
+            predicate_operations,
+            results_structure,
+            placeholders,
+            query_bounds,
+        )?;
         let revelation_circuit = RevelationWithoutResultsTreeCircuit {
             check_placeholder: CheckPlaceholderGadget::new(
                 query_bounds,
@@ -329,13 +341,11 @@ where
         matching_rows: Vec<MatchingRow>,
         query_bounds: &QueryBounds,
         placeholders: &Placeholders,
-        placeholder_hash_ids: [PlaceholderId; NUM_PLACEHOLDERS_HASHED],
         column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
         results_structure: &ResultStructure,
         limit: u64,
         offset: u64,
-        distinct: bool,
     ) -> Result<Self>
     where
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
@@ -373,6 +383,17 @@ where
                 ProofWithVK::deserialize(&row.proof)
             })
             .collect::<Result<Vec<_>>>()?;
+        let placeholder_hash_ids = query::api::CircuitInput::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_ITEMS_PER_OUTPUT,
+        >::ids_for_placeholder_hash(
+            predicate_operations,
+            results_structure,
+            placeholders,
+            query_bounds,
+        )?;
         let placeholder_inputs =
             CheckPlaceholderGadget::new(query_bounds, placeholders, placeholder_hash_ids)?;
         let index_ids = [
@@ -386,7 +407,7 @@ where
             result_values,
             limit,
             offset,
-            distinct,
+            results_structure.distinct.unwrap_or(false),
             placeholder_inputs,
         )?;
 
@@ -409,7 +430,6 @@ impl<
         const MAX_NUM_OUTPUTS: usize,
         const MAX_NUM_ITEMS_PER_OUTPUT: usize,
         const MAX_NUM_PLACEHOLDERS: usize,
-        const NUM_PLACEHOLDERS_HASHED: usize,
     >
     Parameters<
         ROW_TREE_MAX_DEPTH,
@@ -420,7 +440,6 @@ impl<
         MAX_NUM_OUTPUTS,
         MAX_NUM_ITEMS_PER_OUTPUT,
         MAX_NUM_PLACEHOLDERS,
-        NUM_PLACEHOLDERS_HASHED,
     >
 where
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
@@ -432,6 +451,7 @@ where
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
     pub fn build(
         query_circuit_set: &RecursiveCircuits<F, C, D>,
@@ -476,7 +496,6 @@ where
             MAX_NUM_OUTPUTS,
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
-            NUM_PLACEHOLDERS_HASHED,
         >,
         query_circuit_set: &RecursiveCircuits<F, C, D>,
         query_params: Option<
@@ -612,7 +631,6 @@ mod tests {
             MAX_NUM_OUTPUTS,
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
-            { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
         >::build(
             query_circuits.get_recursive_circuit_set(),
             preprocessing_circuits.get_recursive_circuit_set(),
@@ -624,19 +642,6 @@ mod tests {
 
         // Generate the testing data for revalation circuit.
         let test_data = TestRevelationData::sample(42, 76);
-
-        let placeholder_hash_ids = QueryInput::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_ITEMS_PER_OUTPUT,
-        >::ids_for_placeholder_hash(
-            test_data.predicate_operations(),
-            test_data.results(),
-            test_data.placeholders(),
-            test_data.query_bounds(),
-        )
-        .unwrap();
 
         let query_pi = QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::from_slice(test_data.query_pi_raw());
 
@@ -660,7 +665,8 @@ mod tests {
             preprocessing_proof,
             test_data.query_bounds(),
             test_data.placeholders(),
-            placeholder_hash_ids,
+            test_data.predicate_operations(),
+            test_data.results(),
         )
         .unwrap();
         let proof = params

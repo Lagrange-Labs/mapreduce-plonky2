@@ -32,19 +32,6 @@ impl TestContext {
         let max_block_number = 76;
         let test_data = TestRevelationData::sample(min_block_number, max_block_number);
 
-        let placeholder_hash_ids = QueryInput::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_ITEMS_PER_OUTPUT,
-        >::ids_for_placeholder_hash(
-            test_data.predicate_operations(),
-            test_data.results(),
-            test_data.placeholders(),
-            test_data.query_bounds(),
-        )
-        .unwrap();
-
         // Generate the query proof.
         let [query_proof] = self
             .query_circuits
@@ -68,7 +55,8 @@ impl TestContext {
             preprocessing_proof,
             test_data.query_bounds(),
             test_data.placeholders(),
-            placeholder_hash_ids,
+            test_data.predicate_operations(),
+            test_data.results(),
         )
         .unwrap();
         let revelation_proof = self

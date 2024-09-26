@@ -200,18 +200,13 @@ async fn test_andrus_query() -> Result<()> {
     info!("Building querying params");
     ctx.build_params(ParamsType::Query).unwrap();
 
-    let pis_hash = QueryCircuitInput::ids_for_placeholder_hash(
-        &computed_pis.predication_operations,
-        &computed_pis.result,
-        &ph,
-        &computed_pis.bounds,
-    )?;
     let input = RevelationCircuitInput::new_revelation_no_results_tree(
         root_query_proof,
         ivc_proof,
         &computed_pis.bounds,
         &ph,
-        pis_hash,
+        &computed_pis.predication_operations,
+        &computed_pis.result,
     )?;
     info!("Generating the revelation proof");
     let proof = ctx.run_query_proof("revelation", GlobalCircuitInput::Revelation(input))?;

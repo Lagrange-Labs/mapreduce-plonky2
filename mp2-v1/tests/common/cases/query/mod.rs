@@ -64,7 +64,6 @@ pub type RevelationCircuitInput = verifiable_db::revelation::api::CircuitInput<
     MAX_NUM_OUTPUTS,
     MAX_NUM_ITEMS_PER_OUTPUT,
     MAX_NUM_PLACEHOLDERS,
-    { QueryCircuitInput::num_placeholders_ids() },
 >;
 
 #[derive(Clone, Debug)]

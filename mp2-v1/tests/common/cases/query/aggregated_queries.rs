@@ -245,18 +245,13 @@ async fn prove_revelation(
         let pk = ProofKey::IVC(tree_epoch as BlockPrimaryIndex);
         ctx.storage.get_proof_exact(&pk)?
     };
-    let pis_hash = QueryCircuitInput::ids_for_placeholder_hash(
-        &pis.predication_operations,
-        &pis.result,
-        &query.placeholders,
-        &pis.bounds,
-    )?;
     let input = RevelationCircuitInput::new_revelation_no_results_tree(
         query_proof,
         indexing_proof,
         &pis.bounds,
         &query.placeholders,
-        pis_hash,
+        &pis.predication_operations,
+        &pis.result,
     )?;
     let proof = ctx.run_query_proof(
         "querying::revelation",
