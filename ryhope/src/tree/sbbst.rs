@@ -214,11 +214,6 @@ impl State {
         }
     }
 
-    /// Return the largest value currently stored in the tree
-    fn outer_max(&self) -> NodeIdx {
-        self.outer_idx(self.inner_max())
-    }
-
     fn inner_max(&self) -> InnerIdx {
         self.max
     }

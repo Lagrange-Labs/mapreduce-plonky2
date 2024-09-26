@@ -1,7 +1,12 @@
 use anyhow::*;
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fmt::Debug, hash::Hash, marker::PhantomData};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
+};
 use storage::{
     updatetree::{Next, UpdatePlan, UpdateTree},
     view::TreeStorageView,
@@ -290,6 +295,22 @@ impl<
         self.tree.lineage(k, &s).await
     }
 
+    /// Return the union of the lineages of the keys in the given iterator at
+    /// the specified epoch.
+    pub async fn ascendance_at<I: IntoIterator<Item = T::Key>>(
+        &self,
+        ks: I,
+        epoch: Epoch,
+    ) -> HashSet<T::Key> {
+        self.tree.ascendance(ks, &self.view_at(epoch)).await
+    }
+
+    /// Return a handle to this merkle tree storage, as it stands at its most
+    /// recent epoch.
+    pub fn now(&self) -> &S {
+        &self.storage
+    }
+
     /// Return an epoch-locked, read-only, [`TreeStorage`] offering a view on
     /// this Merkle tree as it was at the given epoch.
     pub fn view_at(&self, epoch: Epoch) -> TreeStorageView<'_, T, S> {
@@ -316,16 +337,6 @@ impl<
             Some(ut)
         }
     }
-
-    pub async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
-        &self,
-        data: I,
-    ) -> Result<Vec<Option<(Epoch, T::Key, V)>>>
-    where
-        <I as IntoIterator>::IntoIter: Send,
-    {
-        self.storage.data().try_fetch_many_at(data).await
-    }
 }
 
 impl<
@@ -347,6 +358,16 @@ impl<
         self.storage
             .wide_update_trees(at, &self.tree, keys_query, bounds)
             .await
+    }
+
+    pub async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
+        &self,
+        data: I,
+    ) -> Result<Vec<(Epoch, NodeContext<T::Key>, V)>>
+    where
+        <I as IntoIterator>::IntoIter: Send,
+    {
+        self.storage.try_fetch_many_at(&self.tree, data).await
     }
 
     pub async fn wide_lineage_between(
@@ -390,22 +411,16 @@ impl<
         self.storage.data().try_fetch_at(k, epoch).await
     }
 
-    async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
-        &self,
-        data: I,
-    ) -> Result<Vec<Option<(Epoch, T::Key, V)>>>
-    where
-        <I as IntoIterator>::IntoIter: Send,
-    {
-        self.storage.data().try_fetch_many_at(data).await
-    }
-
     async fn size_at(&self, epoch: Epoch) -> usize {
         self.storage.data().size_at(epoch).await
     }
 
     async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
         self.storage.data().keys_at(epoch).await
+    }
+
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, V>> {
+        self.storage.data().pairs_at(epoch).await
     }
 }
 

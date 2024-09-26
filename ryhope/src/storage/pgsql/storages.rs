@@ -125,6 +125,30 @@ where
         }
     }
 
+    /// Retrieve all the (key, payload) pairs valid at a given epoch
+    fn fetch_all_pairs(
+        db: DBPool,
+        table: &str,
+        epoch: Epoch,
+    ) -> impl Future<Output = Result<HashMap<Self::Key, V>>> + std::marker::Send {
+        async move {
+            let connection = db.get().await.unwrap();
+            Ok(connection
+                .query(
+                    &format!(
+                        "SELECT {KEY}, {PAYLOAD} FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
+                        table
+                    ),
+                    &[&epoch],
+                )
+                .await
+                .context("while fetching all pairs from database")?
+                .iter()
+                .map(|row| (Self::Key::from_bytea(row.get::<_, Vec<u8>>(0)), row.get::<_, Json<V>>(1).0))
+                .collect())
+        }
+    }
+
     /// Return the value associated to the given key at the given epoch.
     fn fetch_payload_at(
         db: DBPool,
@@ -152,49 +176,6 @@ where
         }
     }
 
-    /// Return the value associated to the given key at the given epoch.
-    fn fetch_many_payload_at<I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
-        db: DBPool,
-        table: &str,
-        data: I,
-    ) -> impl std::future::Future<Output = Result<Vec<Option<(Epoch, Self::Key, V)>>>> + std::marker::Send
-    {
-        async move {
-            let data = data.into_iter().collect::<Vec<_>>();
-            let connection = db.get().await.unwrap();
-            let immediate_table = data
-                .iter()
-                .map(|(epoch, key)| {
-                    format!(
-                        "({epoch}::BIGINT, '\\x{}'::BYTEA)",
-                        hex::encode(key.to_bytea())
-                    )
-                })
-                .join(", ");
-            Ok(connection
-            .query(
-                &format!(
-                   "SELECT batch.key, batch.epoch, {table}.{PAYLOAD} FROM
-                     (VALUES {}) AS batch (epoch, key)
-                     LEFT JOIN {table} ON
-                     batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
-                   immediate_table
-               ),
-                &[],
-            )
-               .await
-               .context("while fetching payload from database")?
-               .iter()
-               .map(|row| {
-                   let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
-                   let epoch = row.get::<_, Epoch>(1);
-                   let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
-                   v.map(|v| (epoch, k, v))
-               })
-               .collect())
-        }
-    }
-
     /// Given a PgSQL row, extract a value from it.
     fn payload_from_row(row: &Row) -> Result<V> {
         row.try_get::<_, Json<V>>(PAYLOAD)
@@ -212,6 +193,15 @@ where
         keys_query: &str,
         bounds: (Epoch, Epoch),
     ) -> impl Future<Output = Result<WideLineage<Self::Key, V>>>;
+
+    /// Return the value associated to the given key at the given epoch.
+    fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
+        &self,
+        s: &S,
+        db: DBPool,
+        table: &str,
+        data: I,
+    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<Self::Key>, V)>>> + Send;
 }
 
 /// Implementation of a [`DbConnector`] for a tree over `K` with empty nodes.
@@ -356,6 +346,52 @@ where
             core_keys,
             epoch_lineages,
         })
+    }
+
+    fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
+        &self,
+        s: &S,
+        db: DBPool,
+        table: &str,
+        data: I,
+    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<Self::Key>, V)>>> + Send {
+        async move {
+            let data = data.into_iter().collect::<Vec<_>>();
+            let connection = db.get().await.unwrap();
+            let immediate_table = data
+                .iter()
+                .map(|(epoch, key)| {
+                    format!(
+                        "({epoch}::BIGINT, '\\x{}'::BYTEA)",
+                        hex::encode(key.to_bytea())
+                    )
+                })
+                .join(", ");
+
+            let mut r = Vec::new();
+            for row in connection
+            .query(
+                &dbg!(format!(
+                   "SELECT batch.key, batch.epoch, {table}.{PAYLOAD} FROM
+                     (VALUES {}) AS batch (epoch, key)
+                     LEFT JOIN {table} ON
+                     batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
+                   immediate_table
+               )),
+                &[],
+            )
+               .await
+               .context("while fetching payload from database")?
+                .iter() {
+                   let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
+                   let epoch = row.get::<_, Epoch>(1);
+                    let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
+                    if let Some(v) = v {
+                        r.push((epoch, self.node_context(&k, s).await.unwrap() , v));
+                    }
+                }
+            Ok(r)
+        }
     }
 }
 
@@ -537,6 +573,55 @@ where
                 core_keys,
                 epoch_lineages,
             })
+        }
+    }
+
+    fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
+        &self,
+        _s: &S,
+        db: DBPool,
+        table: &str,
+        data: I,
+    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<Self::Key>, V)>>> + Send {
+        async move {
+            let data = data.into_iter().collect::<Vec<_>>();
+            let connection = db.get().await.unwrap();
+            let immediate_table = data
+                .iter()
+                .map(|(epoch, key)| {
+                    format!(
+                        "({epoch}::BIGINT, '\\x{}'::BYTEA)",
+                        hex::encode(key.to_bytea())
+                    )
+                })
+                .join(", ");
+
+            let mut r = Vec::new();
+            for row in connection
+            .query(
+                &dbg!(format!(
+                    "SELECT
+                       batch.key, batch.epoch, {table}.{PAYLOAD},
+                       {table}.{PARENT}, {table}.{LEFT_CHILD}, {table}.{RIGHT_CHILD}
+                     FROM
+                       (VALUES {}) AS batch (epoch, key)
+                     LEFT JOIN {table} ON
+                       batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
+                   immediate_table
+               )),
+                &[],
+            )
+               .await
+               .context("while fetching payload from database")?
+                .iter() {
+                   let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
+                   let epoch = row.get::<_, Epoch>(1);
+                    let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
+                    if let Some(v) = v {
+                        r.push((epoch, NodeContext{ node_id: k, parent: row.get::<_, Option<Vec<u8>>>(3).map(K::from_bytea), left: row.get::<_, Option<Vec<u8>>>(4).map(K::from_bytea), right: row.get::<_, Option<Vec<u8>>>(5).map(K::from_bytea) }, v));
+                    }
+                }
+            Ok(r)
         }
     }
 }
@@ -1004,21 +1089,15 @@ where
         }
     }
 
-    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
-        &self,
-        _data: I,
-    ) -> impl Future<Output = Result<Vec<Option<(Epoch, T::Key, T::Node)>>>> + Send
-    where
-        <I as IntoIterator>::IntoIter: Send,
-    {
-        async move { unimplemented!("should never be used") }
-    }
-
     async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
         let db = self.wrapped.lock().unwrap().db.clone();
         let table = self.wrapped.lock().unwrap().table.to_owned();
 
         T::fetch_all_keys(db, &table, epoch).await.unwrap()
+    }
+
+    async fn pairs_at(&self, _epoch: Epoch) -> Result<HashMap<T::Key, T::Node>> {
+        unimplemented!("should never be used");
     }
 }
 impl<T, V> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
@@ -1132,24 +1211,18 @@ where
         }
     }
 
-    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
-        &self,
-        data: I,
-    ) -> impl Future<Output = Result<Vec<Option<(Epoch, T::Key, V)>>>> + Send
-    where
-        <I as IntoIterator>::IntoIter: Send,
-    {
-        trace!("[{self}] fetching many keys",);
-        let db = self.wrapped.lock().unwrap().db.clone();
-        let table = self.wrapped.lock().unwrap().table.to_owned();
-        async move { T::fetch_many_payload_at(db, &table, data).await }
-    }
-
     async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
         let db = self.wrapped.lock().unwrap().db.clone();
         let table = self.wrapped.lock().unwrap().table.to_owned();
 
         T::fetch_all_keys(db, &table, epoch).await.unwrap()
+    }
+
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, V>> {
+        let db = self.wrapped.lock().unwrap().db.clone();
+        let table = self.wrapped.lock().unwrap().table.to_owned();
+
+        T::fetch_all_pairs(db, &table, epoch).await
     }
 }
 impl<T, V> EpochKvStorage<T::Key, V> for PayloadProjection<T, V>

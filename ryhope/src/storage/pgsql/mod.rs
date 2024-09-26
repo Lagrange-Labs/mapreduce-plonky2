@@ -4,8 +4,9 @@ use super::{
     TransactionalStorage, TreeStorage, WideLineage,
 };
 use crate::{
-    storage::pgsql::storages::DBPool, tree::TreeTopology, Epoch, InitSettings, KEY, PAYLOAD,
-    VALID_FROM, VALID_UNTIL,
+    storage::pgsql::storages::DBPool,
+    tree::{NodeContext, TreeTopology},
+    Epoch, InitSettings, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL,
 };
 use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     fmt::Debug,
+    future::Future,
     sync::{Arc, Mutex},
 };
 use storages::{NodeProjection, PayloadProjection};
@@ -915,16 +917,29 @@ where
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<WideLineage<T::Key, V>> {
-        let r = T::wide_lineage_between(
-            t,
-            &self.view_at(at),
-            self.db.clone(),
-            &self.table,
-            &keys,
-            bounds,
-        )
-        .await?;
+        let r = t
+            .wide_lineage_between(
+                &self.view_at(at),
+                self.db.clone(),
+                &self.table,
+                &keys,
+                bounds,
+            )
+            .await?;
 
         Ok(r)
+    }
+
+    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, <T as TreeTopology>::Key)> + Send>(
+        &self,
+        t: &T,
+        data: I,
+    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<T::Key>, V)>>> + Send
+    where
+        <I as IntoIterator>::IntoIter: Send,
+    {
+        trace!("[{self}] fetching many contexts & payloads",);
+        let table = self.table.to_owned();
+        async move { t.fetch_many_at(self, self.db.clone(), &table, data).await }
     }
 }
