@@ -14,6 +14,7 @@ require (
 	github.com/bits-and-blooms/bitset v1.10.0 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/consensys/bavard v0.1.13 // indirect
+	github.com/consensys/gnark-ignition-verifier v0.0.0-20230527014722-10693546ab33 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/ethereum/go-ethereum v1.13.14 // indirect
 	github.com/fxamacker/cbor/v2 v2.5.0 // indirect

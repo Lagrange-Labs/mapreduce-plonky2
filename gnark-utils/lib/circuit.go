@@ -8,10 +8,10 @@ import (
 	"math/big"
 
 	"github.com/consensys/gnark/frontend"
+	gl "github.com/succinctlabs/gnark-plonky2-verifier/goldilocks"
 	"github.com/succinctlabs/gnark-plonky2-verifier/types"
 	"github.com/succinctlabs/gnark-plonky2-verifier/variables"
 	"github.com/succinctlabs/gnark-plonky2-verifier/verifier"
-	gl "github.com/succinctlabs/gnark-plonky2-verifier/goldilocks"
 )
 
 type VerifierCircuit struct {
@@ -72,35 +72,35 @@ func (c *VerifierCircuit) Define(api frontend.API) error {
 }
 
 // Build a `ProofWithPublicInputs` variable to be employed in `VerifierCircuit` to verify a proof for a circuit
-// with `commonCircuitData` 
+// with `commonCircuitData`
 func NewProofWithPublicInputs(commonCircuitData *types.CommonCircuitData) variables.ProofWithPublicInputs {
 	proof := newProof(commonCircuitData)
 	public_inputs := make([]gl.Variable, commonCircuitData.NumPublicInputs)
 	return variables.ProofWithPublicInputs{
-		Proof: proof,
+		Proof:        proof,
 		PublicInputs: public_inputs,
 	}
 }
 
-const SALT_SIZE = 4; // same as SALT_SIZE constant in Plonky2
+const SALT_SIZE = 4 // same as SALT_SIZE constant in Plonky2
 
 func newOpeningSet(commonCircuitData *types.CommonCircuitData) variables.OpeningSet {
-		constants := make([]gl.QuadraticExtensionVariable, commonCircuitData.NumConstants)
-		plonk_sigmas := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumRoutedWires)
-		wires := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumWires)
-		plonk_zs := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumChallenges)
-		plonk_zs_next := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumChallenges)
-		partial_products := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumChallenges * commonCircuitData.NumPartialProducts)
-		quotient_polys := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumChallenges * commonCircuitData.QuotientDegreeFactor)
-		return variables.OpeningSet{
-			Constants:       constants,
-			PlonkSigmas:     plonk_sigmas,
-			Wires:           wires,
-			PlonkZs:         plonk_zs,
-			PlonkZsNext:     plonk_zs_next,
-			PartialProducts: partial_products,
-			QuotientPolys:   quotient_polys,
-		}
+	constants := make([]gl.QuadraticExtensionVariable, commonCircuitData.NumConstants)
+	plonk_sigmas := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumRoutedWires)
+	wires := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumWires)
+	plonk_zs := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumChallenges)
+	plonk_zs_next := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumChallenges)
+	partial_products := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumChallenges*commonCircuitData.NumPartialProducts)
+	quotient_polys := make([]gl.QuadraticExtensionVariable, commonCircuitData.Config.NumChallenges*commonCircuitData.QuotientDegreeFactor)
+	return variables.OpeningSet{
+		Constants:       constants,
+		PlonkSigmas:     plonk_sigmas,
+		Wires:           wires,
+		PlonkZs:         plonk_zs,
+		PlonkZsNext:     plonk_zs_next,
+		PartialProducts: partial_products,
+		QuotientPolys:   quotient_polys,
+	}
 }
 
 func newFriQueryRound(commonCircuitData *types.CommonCircuitData) variables.FriQueryRound {
@@ -116,8 +116,8 @@ func newFriQueryRound(commonCircuitData *types.CommonCircuitData) variables.FriQ
 	num_leaves_per_oracle := [4]uint64{
 		commonCircuitData.NumConstants + commonCircuitData.Config.NumRoutedWires,
 		commonCircuitData.Config.NumWires + salt_size(),
-		commonCircuitData.Config.NumChallenges*(1 + commonCircuitData.NumPartialProducts) + salt_size(),
-		commonCircuitData.QuotientDegreeFactor* commonCircuitData.Config.NumChallenges + salt_size(),
+		commonCircuitData.Config.NumChallenges*(1+commonCircuitData.NumPartialProducts) + salt_size(),
+		commonCircuitData.QuotientDegreeFactor*commonCircuitData.Config.NumChallenges + salt_size(),
 	}
 	merkle_proof_len := params.LdeBits() - int(cap_height)
 	if merkle_proof_len < 0 {
@@ -127,9 +127,9 @@ func newFriQueryRound(commonCircuitData *types.CommonCircuitData) variables.FriQ
 	eval_proofs := make([]variables.FriEvalProof, len(num_leaves_per_oracle))
 	for j := 0; j < len(eval_proofs); j++ {
 		eval_proofs[j] = variables.NewFriEvalProof(
-				make([]gl.Variable, num_leaves_per_oracle[j]),
-				variables.NewFriMerkleProof(uint64(merkle_proof_len)),
-			)
+			make([]gl.Variable, num_leaves_per_oracle[j]),
+			variables.NewFriMerkleProof(uint64(merkle_proof_len)),
+		)
 	}
 	initial_trees := variables.NewFriInitialTreeProof(eval_proofs)
 	// build `FriQueryStep`
@@ -186,4 +186,3 @@ func newProof(commonCircuitData *types.CommonCircuitData) variables.Proof {
 		OpeningProof:              fri_proof,
 	}
 }
-
