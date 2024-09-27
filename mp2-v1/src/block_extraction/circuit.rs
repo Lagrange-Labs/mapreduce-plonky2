@@ -174,7 +174,7 @@ mod test {
             .0
             .pack(Endianness::Little)
             .to_fields();
-        let block_number_buff = block.header.number.unwrap().to_be_bytes();
+        let block_number_buff = block.header.number.to_be_bytes();
         const NUM_LIMBS: usize = u256::NUM_LIMBS;
         let block_number =
             left_pad_generic::<u32, NUM_LIMBS>(&block_number_buff.pack(Endianness::Big))
@@ -189,13 +189,7 @@ mod test {
         assert_eq!(pi.block_hash_raw(), &block_hash);
         assert_eq!(
             pi.block_hash_raw(),
-            block
-                .header
-                .hash
-                .unwrap()
-                .0
-                .pack(Endianness::Little)
-                .to_fields()
+            block.header.hash.0.pack(Endianness::Little).to_fields()
         );
         assert_eq!(pi.state_root_raw(), &state_root);
         assert_eq!(pi.block_number_raw(), &block_number);

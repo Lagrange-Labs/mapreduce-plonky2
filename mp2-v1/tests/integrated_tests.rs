@@ -38,6 +38,7 @@ use parsil::{
 use test_log::test;
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
+pub(crate) mod bindings;
 pub(crate) mod common;
 
 //) {

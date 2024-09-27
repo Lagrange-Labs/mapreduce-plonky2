@@ -5,7 +5,7 @@ TEST_CONTRACT_PATH=test-contracts
 TEST_BINDINGS_FOLDER=bindings
 
 # Integration test bindings module path
-TEST_BINDINGS_MOD_PATH=tests/common/$(TEST_BINDINGS_FOLDER)
+TEST_BINDINGS_MOD_PATH=tests/$(TEST_BINDINGS_FOLDER)
 
 # Integration test bindings output path
 TEST_BINDINGS_OUT_PATH=$(TEST_CONTRACT_PATH)/out/$(TEST_BINDINGS_FOLDER)
