@@ -70,4 +70,10 @@ pub enum ValidationError {
 
     #[error("NULL-related ordering specifiers unsupported")]
     NullRelatedOrdering,
+
+    #[error("Only single value expression allowed in LIMIT clause")]
+    InvalidLimitExpression,
+
+    #[error("LIMIT value specified in the query is too high: maximum value allowed is `{0}`")]
+    LimitTooHigh(usize),
 }

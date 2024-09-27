@@ -370,6 +370,12 @@ impl<'a, C: ContextProvider> AstMutator for Isolator<'a, C> {
         self.scopes.current_scope_mut().provides(provided);
         Ok(())
     }
+
+    fn pre_query(&mut self, query: &mut Query) -> Result<()> {
+        query.limit = None; // Remove any LIMIT specifier
+        query.offset = None; // Remove any OFFSET specifier
+        Ok(())
+    }
 }
 
 /// Validate the given query, ensuring that it satisfies all the requirements of

@@ -202,8 +202,15 @@ impl Identifiers {
 
         //ToDo: add ORDER BY info and DISTINCT info for queries without the results tree, when adding results tree
         // circuits APIs
+        let computational_hash = match results.output_variant {
+            Output::Aggregation => ComputationalHash::from_bytes((&hash).into()),
+            Output::NoAggregation => ResultIdentifier::result_id_hash(
+                ComputationalHash::from_bytes((&hash).into()),
+                results.distinct.unwrap_or(false),
+            ),
+        };
 
-        let inputs = ComputationalHash::from_bytes((&hash).into())
+        let inputs = computational_hash
             .to_vec()
             .into_iter()
             .chain(placeholder_id_hash.to_vec())
@@ -711,5 +718,42 @@ pub enum ResultIdentifier {
 impl<F: RichField> ToField<F> for ResultIdentifier {
     fn to_field(&self) -> F {
         Identifiers::ResultIdentifiers(*self).to_field()
+    }
+}
+
+impl ResultIdentifier {
+    pub(crate) fn result_id_hash(
+        computational_hash: ComputationalHash,
+        distinct: bool,
+    ) -> ComputationalHash {
+        let res_id = if distinct {
+            ResultIdentifier::ResultWithDistinct
+        } else {
+            ResultIdentifier::ResultNoDistinct
+        };
+        let input = once(res_id.to_field())
+            .chain(computational_hash.to_fields())
+            .collect_vec();
+        hash_n_to_hash_no_pad::<_, HashPermutation>(&input)
+    }
+
+    pub(crate) fn result_id_hash_circuit(
+        b: &mut CBuilder,
+        computational_hash: ComputationalHashTarget,
+        distinct: &BoolTarget,
+    ) -> ComputationalHashTarget {
+        let [res_no_distinct, res_with_distinct] = [
+            ResultIdentifier::ResultNoDistinct,
+            ResultIdentifier::ResultWithDistinct,
+        ]
+        .map(|id| b.constant(id.to_field()));
+        let res_id = b.select(*distinct, res_with_distinct, res_no_distinct);
+
+        // Compute the computational hash:
+        // H(res_id || pQ.C)
+        let inputs = once(res_id)
+            .chain(computational_hash.to_targets())
+            .collect();
+        b.hash_n_to_hash_no_pad::<CHasher>(inputs)
     }
 }
