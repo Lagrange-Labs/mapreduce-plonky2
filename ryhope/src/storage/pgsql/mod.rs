@@ -922,7 +922,7 @@ where
                 &self.view_at(at),
                 self.db.clone(),
                 &self.table,
-                &keys,
+                keys,
                 bounds,
             )
             .await?;

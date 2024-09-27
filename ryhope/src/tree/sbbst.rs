@@ -174,17 +174,9 @@ impl State {
                 None
             };
 
-            let left_outer = if let Some(left) = inner.left {
-                Some(self.outer_idx(left))
-            } else {
-                None
-            };
+            let left_outer = inner.left.map(|left| self.outer_idx(left));
+            let right_outer = inner.right.map(|right| self.outer_idx(right));
 
-            let right_outer = if let Some(right) = inner.right {
-                Some(self.outer_idx(right))
-            } else {
-                None
-            };
             Some(NodeContext {
                 node_id: self.outer_idx(inner.node_id),
                 parent: parent_outer,
@@ -198,17 +190,7 @@ impl State {
 
     pub fn children(&self, n: &NodeIdx) -> Option<(Option<NodeIdx>, Option<NodeIdx>)> {
         if let Some((l, r)) = self.children_inner(&self.inner_idx(*n)) {
-            let l_option = if let Some(l) = l {
-                Some(self.outer_idx(l))
-            } else {
-                None
-            };
-            let r_option = if let Some(r) = r {
-                Some(self.outer_idx(r))
-            } else {
-                None
-            };
-            Some((l_option, r_option))
+            Some((l.map(|l| self.outer_idx(l)), r.map(|r| self.outer_idx(r))))
         } else {
             None
         }
@@ -505,7 +487,7 @@ impl PrintableTree for Tree {
                     r.push_str(&format!("{}{}", state.outer_idx(n), spacing))
                 }
             }
-            r.push_str("\n");
+            r.push('\n');
         }
 
         r

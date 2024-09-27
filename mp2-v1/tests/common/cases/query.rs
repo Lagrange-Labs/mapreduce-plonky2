@@ -57,7 +57,7 @@ use parsil::{
 use ryhope::{
     storage::{
         pgsql::ToFromBytea,
-        updatetree::{Next, UpdateTree},
+        updatetree::{Next, UpdateTree, WorkplanItem},
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage, WideLineage,
     },
     tree::NodeContext,
@@ -561,7 +561,7 @@ where
         (pos, child_proof)
     };
     while let Some(Next::Ready(wk)) = workplan.next() {
-        let k = wk.k.clone();
+        let k = wk.k();
         // closure performing all the operations necessary beofre jumping to the next iteration
         let mut end_iteration = |proven_nodes: &mut HashSet<K>| -> Result<()> {
             proven_nodes.insert(k.clone());
@@ -571,12 +571,12 @@ where
         // since epoch starts at genesis now, we can directly give the value of the block
         // number as epoch number
         let (node_ctx, node_payload) = info
-            .fetch_ctx_and_payload_at(primary as Epoch, &k)
+            .fetch_ctx_and_payload_at(primary as Epoch, k)
             .await
             .expect("cache is not full");
-        let is_satisfying_query = info.is_satisfying_query(&k);
+        let is_satisfying_query = info.is_satisfying_query(k);
         let embedded_proof = info
-            .load_or_prove_embedded(&mut planner, primary, &k, &node_payload)
+            .load_or_prove_embedded(&mut planner, primary, k, &node_payload)
             .await;
         if node_ctx.is_leaf() && info.is_row_tree() {
             // NOTE: if it is a leaf of the row tree, then there is no need to prove anything,
@@ -606,7 +606,13 @@ where
         // It is sufficient to check if this node is one of the leaves we in this update tree.Note
         // it is not the same meaning as a "leaf of a tree", here it just means is it the first
         // node in the merkle path.
-        let (name, input) = if wk.is_path_end {
+        let (k, is_path_end) = if let WorkplanItem::Node { k, is_path_end } = &wk {
+            (k, *is_path_end)
+        } else {
+            unreachable!("this update tree has been created with a batch size of 1")
+        };
+
+        let (name, input) = if is_path_end {
             info!("node {primary} -> {k:?} is at path end");
             if !is_satisfying_query {
                 // if the node of the key does not satisfy the query, but this node is at the end of
