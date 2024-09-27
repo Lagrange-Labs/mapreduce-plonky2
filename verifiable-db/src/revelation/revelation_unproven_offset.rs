@@ -469,10 +469,15 @@ where
 
                 // Expose results for this row.
                 // First, we compute the digest of the results corresponding to this row, as computed in the universal
-                // query circuit, to check that the results correspond to the one computed by that circuit
+                // query circuit, to check that the results correspond to the one computed by that circuit.
+                // To recompute the digest of the results, we first need to build the cells tree that is constructed
+                // in the universal query circuit to store the results computed for each row. Note that the
+                // universal query circuit stores results in a cells tree since to prove some queries a results tree
+                // needs to be built
                 let cells_tree_hash =
                     build_cells_tree(b, &get_result(i)[2..], &ids[2..], &is_item_included[2..]);
                 let second_item = b.select_u256(is_item_included[1], &get_result(i)[1], &zero_u256);
+                // digest = D(ids[0]||result[0]||ids[1]||second_item||cells_tree_hash)
                 let digest = {
                     let inputs = once(ids[0])
                         .chain(get_result(i)[0].to_targets())
