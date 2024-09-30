@@ -7,9 +7,15 @@ use crate::{
     eth::{left_pad32, StorageSlot},
     keccak::{ByteKeccakWires, InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, PAD_LEN},
+    serialization::circuit_data_serialization::SerializableRichField,
     types::{MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
-    utils::keccak256,
+    u256::{CircuitBuilderU256, UInt256Target, NUM_LIMBS},
+    utils::{
+        keccak256, unpack_u32_to_u8_target, unpack_u32_to_u8_targets, Endianness, PackerTarget,
+        ToTargets,
+    },
 };
+use itertools::Itertools;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -19,7 +25,12 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
+use plonky2_crypto::{
+    biguint::{BigUintTarget, CircuitBuilderBiguint},
+    u32::arithmetic_u32::{CircuitBuilderU32, U32Target},
+};
 use serde::{Deserialize, Serialize};
+use std::iter::{once, repeat};
 
 /// One input element length to Keccak
 const INPUT_ELEMENT_LEN: usize = 32;
@@ -52,18 +63,55 @@ impl KeccakMPT {
         inputs: VectorWire<Target, INPUT_PADDED_LEN>,
     ) -> KeccakMPTWires {
         let keccak_location = KeccakCircuit::<{ INPUT_PADDED_LEN }>::hash_to_bytes(b, &inputs);
-        // keccak(location) - take the output and copy it in a slice large
-        // enough for padding.
-        let mut padded_location = [b.zero(); PAD_LEN(HASH_LEN)];
-        padded_location[0..HASH_LEN].copy_from_slice(&keccak_location.output.arr);
+        let location_offset = keccak_location.output.arr;
+
+        Self::build_location(b, keccak_location, location_offset)
+    }
+
+    fn build_with_offset<F: SerializableRichField<D> + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        inputs: VectorWire<Target, INPUT_PADDED_LEN>,
+        offset: Target,
+    ) -> KeccakMPTWires {
+        // location = keccak(inputs) + offset
+        let zero = b.zero();
+        let keccak_location = KeccakCircuit::<{ INPUT_PADDED_LEN }>::hash_to_bytes(b, &inputs);
+        let location = keccak_location.output.arr.pack(b, Endianness::Big);
+        let location = UInt256Target::new_from_be_target_limbs(&location).unwrap();
+        let limbs = repeat(zero)
+            .take(NUM_LIMBS - 1)
+            .chain(once(offset))
+            .collect_vec();
+        let offset = UInt256Target::new_from_be_target_limbs(&limbs).unwrap();
+        let (location_offset, overflow) = b.add_u256(&location, &offset);
+        b.assert_zero(overflow.0);
+        let location_offset =
+            unpack_u32_to_u8_targets(b, location_offset.to_targets(), Endianness::Big)
+                .try_into()
+                .unwrap();
+
+        Self::build_location(b, keccak_location, location_offset)
+    }
+
+    fn build_location<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        keccak_location: ByteKeccakWires<INPUT_PADDED_LEN>,
+        location_offset: [Target; HASH_LEN],
+    ) -> KeccakMPTWires {
+        // keccak(location_offset)
+        let zero = b.zero();
+        let arr = repeat(zero)
+            .take(PAD_LEN(HASH_LEN) - HASH_LEN)
+            .chain(location_offset)
+            .collect_vec()
+            .try_into()
+            .unwrap();
         let hash_len = b.constant(F::from_canonical_usize(HASH_LEN));
         let keccak_mpt_key = KeccakCircuit::<{ PAD_LEN(HASH_LEN) }>::hash_vector(
             b,
             &VectorWire {
                 real_len: hash_len,
-                arr: Array {
-                    arr: padded_location,
-                },
+                arr: Array { arr },
             },
         );
 
@@ -158,18 +206,17 @@ impl SimpleSlot {
     pub fn build<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
     ) -> SimpleSlotWires {
+        let zero = b.zero();
         let slot = b.add_virtual_target();
-
-        // keccak(left_pad32(slot))
-        let mut arr = [b.zero(); INPUT_PADDED_LEN];
-        arr[INPUT_ELEMENT_LEN - 1] = slot;
-        let inputs = VectorWire::<Target, INPUT_PADDED_LEN> {
-            real_len: b.constant(F::from_canonical_usize(INPUT_ELEMENT_LEN)),
-            arr: Array { arr },
-        };
-        // Build for keccak MPT.
-        let keccak_mpt = KeccakCircuit::<INPUT_PADDED_LEN>::hash_vector(b, &inputs);
-        // MPT KEY is expressed in nibbles
+        let location = repeat(zero)
+            .take(INPUT_ELEMENT_LEN - 1)
+            .chain(once(slot))
+            .collect_vec()
+            .try_into()
+            .unwrap();
+        // Build the Keccak MPT.
+        let keccak_mpt = Self::build_keccak_mpt(b, location);
+        // Transform the MPT key to nibbles.
         let mpt_key = MPTKeyWire::init_from_u32_targets(b, &keccak_mpt.output_array);
 
         SimpleSlotWires {
@@ -177,6 +224,81 @@ impl SimpleSlot {
             keccak_mpt,
             mpt_key,
         }
+    }
+
+    /// Derive the MPT key with a specified offset in circuit according to simple storage slot.
+    /// Remember the rules to get the MPT key is as follow:
+    /// location = left_pad32(slot) + offset
+    /// mpt_key = keccak256(location)
+    /// Note the simple slot wire and the contract address wires are NOT range
+    /// checked, because they are expected to be given by the verifier.
+    /// If that assumption is not true, then the caller should call
+    /// `b.range_check(slot, 8)` to ensure its byteness.
+    pub fn build_with_offset<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        offset: Target,
+    ) -> SimpleSlotWires {
+        let zero = b.zero();
+        let slot = b.add_virtual_target();
+        // addition = offset + slot
+        // TODO: Could we assume the offset and addition should be within the range of Uint32?
+        let (addition, overflow) = b.add_u32(U32Target(offset), U32Target(slot));
+        b.assert_zero(overflow.0);
+        let addition = unpack_u32_to_u8_target(b, addition.0, Endianness::Big);
+        let location = repeat(zero)
+            .take(INPUT_ELEMENT_LEN - addition.len())
+            .chain(addition)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+        // Build the Keccak MPT.
+        let keccak_mpt = Self::build_keccak_mpt(b, location);
+        // Convert the MPT key to a BigUint.
+        let limbs = keccak_mpt
+            .output_array
+            .to_targets()
+            .into_iter()
+            .map(U32Target)
+            .collect();
+        let mpt_key = BigUintTarget { limbs };
+        // Compute `mpt_key + offset`.
+        let offset = BigUintTarget {
+            limbs: vec![U32Target(offset)],
+        };
+        let mpt_key = b.add_biguint(&mpt_key, &offset);
+        // The last limb is carry, check it's not overflow.
+        assert_eq!(mpt_key.num_limbs(), 9);
+        b.assert_zero(mpt_key.get_limb(8).0);
+        let mpt_key = mpt_key.limbs[..8].try_into().unwrap();
+        // Transform the MPT key to nibbles.
+        let mpt_key = MPTKeyWire::init_from_u32_targets(b, &mpt_key);
+
+        SimpleSlotWires {
+            slot,
+            keccak_mpt,
+            mpt_key,
+        }
+    }
+
+    /// Build the Keccak MPT.
+    fn build_keccak_mpt<F: RichField + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        location: [Target; INPUT_ELEMENT_LEN],
+    ) -> KeccakWires<INPUT_PADDED_LEN> {
+        // keccak(location)
+        let zero = b.zero();
+        let arr = location
+            .into_iter()
+            .chain(repeat(zero).take(INPUT_PADDED_LEN - INPUT_ELEMENT_LEN))
+            .collect_vec()
+            .try_into()
+            .unwrap();
+        let inputs = VectorWire::<Target, INPUT_PADDED_LEN> {
+            real_len: b.constant(F::from_canonical_usize(INPUT_ELEMENT_LEN)),
+            arr: Array { arr },
+        };
+        // Build for keccak MPT.
+        KeccakCircuit::<INPUT_PADDED_LEN>::hash_vector(b, &inputs)
     }
 
     pub fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, wires: &SimpleSlotWires) {
@@ -235,13 +357,13 @@ pub(crate) const MAPPING_INPUT_TOTAL_LEN: usize = MAPPING_KEY_LEN + MAPPING_LEAF
 /// Value but with the padding taken into account.
 const MAPPING_INPUT_PADDED_LEN: usize = PAD_LEN(MAPPING_INPUT_TOTAL_LEN);
 impl MappingSlot {
-    /// Derives the mpt_key in circuit according to which type of storage slot
+    /// Derives the MPT key in circuit according to mapping storage slot
     /// Remember the rules to get the mpt key is as follow:
     /// * location = keccak256(pad32(mapping_key), pad32(mapping_slot))
     /// * mpt_key = keccak256(location)
     /// Note the mapping slot wire is NOT range checked, because it is expected to
     /// be given by the verifier. If that assumption is not true, then the caller
-    /// should call `b.range_check(mapping_slot,8)` to ensure its byteness.
+    /// should call `b.range_check(mapping_slot, 8)` to ensure its byteness.
     pub fn mpt_key<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
     ) -> MappingSlotWires {
@@ -267,6 +389,42 @@ impl MappingSlot {
             keccak_mpt,
         }
     }
+
+    /// Derive the MPT key with a specified offset in circuit according to mapping storage slot
+    /// Remember the rules to get the mpt key is as follow:
+    /// * location = keccak256(pad32(mapping_key), pad32(mapping_slot)) + offset
+    /// * mpt_key = keccak256(location)
+    /// Note the mapping slot wire is NOT range checked, because it is expected to
+    /// be given by the verifier. If that assumption is not true, then the caller
+    /// should call `b.range_check(mapping_slot, 8)` to ensure its byteness.
+    pub fn mpt_key_with_offset<F: SerializableRichField<D> + Extendable<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        offset: Target,
+    ) -> MappingSlotWires {
+        let mapping_key = Array::<Target, MAPPING_KEY_LEN>::new(b);
+        // always ensure whatever goes into hash function, it's bytes
+        mapping_key.assert_bytes(b);
+        let mapping_slot = b.add_virtual_target();
+        let mut input = [b.zero(); MAPPING_INPUT_PADDED_LEN];
+        input[0..MAPPING_KEY_LEN].copy_from_slice(&mapping_key.arr);
+        input[2 * MAPPING_KEY_LEN - 1] = mapping_slot;
+
+        // location = keccak(left_pad32(mapping_key), left_pad32(mapping_slot))
+        let inputs = VectorWire::<Target, MAPPING_INPUT_PADDED_LEN> {
+            real_len: b.constant(F::from_canonical_usize(MAPPING_INPUT_TOTAL_LEN)),
+            arr: Array { arr: input },
+        };
+        // Build for keccak MPT.
+        // location_offset = keccak(location + offset)
+        let keccak_mpt = KeccakMPT::build_with_offset(b, inputs, offset);
+
+        MappingSlotWires {
+            mapping_key,
+            mapping_slot,
+            keccak_mpt,
+        }
+    }
+
     pub fn assign<F: RichField>(&self, pw: &mut PartialWitness<F>, wires: &MappingSlotWires) {
         // first assign the "inputs"
         let padded_mkey = left_pad32(&self.mapping_key);

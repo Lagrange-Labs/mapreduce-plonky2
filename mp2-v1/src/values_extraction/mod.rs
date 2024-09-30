@@ -17,8 +17,10 @@ use std::iter;
 pub mod api;
 mod branch;
 mod extension;
+mod gadgets;
 mod leaf_mapping;
 mod leaf_single;
+mod leaves;
 pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};

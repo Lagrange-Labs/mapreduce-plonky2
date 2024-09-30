@@ -15,6 +15,7 @@ log.workspace = true
 paste.workspace = true
 plonky2.workspace = true
 plonky2_crypto.workspace = true
+plonky2_ecdsa.workspace = true
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
 rlp.workspace = true

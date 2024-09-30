@@ -17,9 +17,13 @@ use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTa
 use sha3::Digest;
 use sha3::Keccak256;
 
-use crate::array::Targetable;
-use crate::poseidon::{HashableField, H};
-use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
+use crate::{
+    array::Targetable,
+    group_hashing::EXTENSION_DEGREE,
+    poseidon::{HashableField, H},
+    types::HashOutput,
+    ProofTuple,
+};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
@@ -502,6 +506,7 @@ pub trait PackableRichField: RichField {}
 
 impl PackableRichField for GoldilocksField {}
 
+#[derive(Clone, Copy, Debug)]
 pub enum Endianness {
     Big,
     Little,
@@ -739,6 +744,38 @@ impl<F: RichField + Extendable<D>, const D: usize> SliceConnector for CircuitBui
             self.connect(*xx, *yy)
         }
     }
+}
+
+/// Convert an Uint32 target to an Uint8 target.
+pub(crate) fn unpack_u32_to_u8_target<F: RichField + Extendable<D>, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    u: Target,
+    endianness: Endianness,
+) -> Vec<Target> {
+    let zero = b.zero();
+    let bits = b.split_le(u, u32::BITS as usize);
+    let bytes = bits.chunks(8).map(|chunk| {
+        chunk
+            .iter()
+            .rev()
+            .fold(zero, |acc, bit| b.mul_const_add(F::TWO, acc, bit.target))
+    });
+
+    match endianness {
+        Endianness::Big => bytes.rev().collect_vec(),
+        Endianness::Little => bytes.collect(),
+    }
+}
+
+/// Convert Uint32 targets to Uint8 targets.
+pub(crate) fn unpack_u32_to_u8_targets<F: RichField + Extendable<D>, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    u32s: Vec<Target>,
+    endianness: Endianness,
+) -> Vec<Target> {
+    u32s.into_iter()
+        .flat_map(|u| unpack_u32_to_u8_target(b, u, endianness))
+        .collect()
 }
 
 #[cfg(test)]
