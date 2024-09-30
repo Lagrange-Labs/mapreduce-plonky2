@@ -1,24 +1,25 @@
 //! Custom types
 
-use crate::{array::Array, D};
+use crate::{array::Array, D, F};
 use anyhow::ensure;
 use derive_more::Deref;
 use plonky2::{
-    field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
+    field::extension::quintic::QuinticExtension,
+    hash::hash_types::HashOut,
     iop::target::Target,
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};
 
 /// Default field
-pub type GFp = GoldilocksField;
+pub type GFp = F;
 
 /// Quintic extension field
-pub type GFp5 = QuinticExtension<GFp>;
+pub type GFp5 = QuinticExtension<F>;
 
 /// Default circuit builder
-pub type CBuilder = CircuitBuilder<GoldilocksField, D>;
+pub type CBuilder = CircuitBuilder<F, D>;
 
 /// Length of an U64
 pub const U64_LEN: usize = 8;
@@ -57,8 +58,13 @@ pub type PackedMappingKeyTarget = Array<U32Target, PACKED_MAPPING_KEY_LEN>;
 
 /// Regular hash output function - it can be generated from field elements using
 /// poseidon with the output serialized or via regular hash functions.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, Deref, PartialEq, Eq)]
+#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, Deref, PartialEq, Eq)]
 pub struct HashOutput(pub [u8; 32]);
+impl AsRef<[u8]> for &HashOutput {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 /// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
 /// since it still has to do 5 rounds in 622 or 650.
@@ -93,5 +99,11 @@ impl<'a> From<&'a HashOutput> for &'a [u8] {
 impl<'a> From<&'a HashOutput> for Vec<u8> {
     fn from(value: &'a HashOutput) -> Self {
         value.0.to_vec()
+    }
+}
+
+impl From<HashOut<F>> for HashOutput {
+    fn from(value: HashOut<F>) -> Self {
+        value.to_bytes().try_into().unwrap()
     }
 }

@@ -1,5 +1,4 @@
 //! Map to curve circuit functions
-
 use super::{
     field_to_curve::ToCurveTarget,
     utils::{a_sw, b_sw, neg_b_div_a_sw, neg_z_inv_sw, two_thirds, z_sw},
@@ -100,7 +99,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::group_hashing::sswu_value;
+    use crate::{group_hashing::sswu_value, C, D, F};
     use anyhow::Result;
     use plonky2::{
         field::{
@@ -109,21 +108,13 @@ mod tests {
             types::{Field, Sample},
         },
         iop::witness::PartialWitness,
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
-        },
+        plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
     };
     use plonky2_ecgfp5::{
         curve::curve::WeierstrassPoint, gadgets::base_field::PartialWitnessQuinticExt,
     };
     use rand::thread_rng;
     use std::array;
-
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     /// Test simplified SWU method.
     #[test]

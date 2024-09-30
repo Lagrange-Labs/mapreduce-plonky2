@@ -303,7 +303,9 @@ impl BlockUtil for alloy::consensus::Header {
 
 #[cfg(test)]
 mod test {
-    use std::{env, str::FromStr};
+    #[cfg(feature = "ci")]
+    use std::env;
+    use std::str::FromStr;
 
     use alloy::{primitives::Bytes, providers::ProviderBuilder, rpc::types::BlockTransactionsKind};
     use ethereum_types::U64;

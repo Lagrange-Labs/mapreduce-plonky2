@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::array;
 
 /// Input wires for the column extraction component
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ColumnExtractionInputWires<const MAX_NUM_COLUMNS: usize> {
     /// values of the columns for the current row
     #[serde(

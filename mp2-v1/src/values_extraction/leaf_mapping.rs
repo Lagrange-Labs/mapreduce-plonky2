@@ -236,8 +236,9 @@ mod tests {
         let mapping_key = hex::decode("1234").unwrap();
         let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot as usize);
         let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let key_id = identifier_for_mapping_key_column(mapping_slot, &contract_address);
-        let value_id = identifier_for_mapping_value_column(mapping_slot, &contract_address);
+        let key_id = identifier_for_mapping_key_column(mapping_slot, &contract_address, 1, vec![]);
+        let value_id =
+            identifier_for_mapping_value_column(mapping_slot, &contract_address, 1, vec![]);
 
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);

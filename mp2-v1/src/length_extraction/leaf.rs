@@ -142,12 +142,10 @@ pub mod tests {
         rlp::MAX_KEY_NIBBLE_LEN,
         types::{CBuilder, GFp},
         utils::{keccak256, Endianness, Packer, ToFields},
-        D,
+        C, D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
-    use plonky2::{
-        field::types::Field, iop::witness::PartialWitness, plonk::config::PoseidonGoldilocksConfig,
-    };
+    use plonky2::{field::types::Field, iop::witness::PartialWitness};
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
     use crate::length_extraction::{
@@ -160,7 +158,7 @@ pub mod tests {
     fn prove_and_verify_length_extraction_leaf_circuit() {
         let rng = &mut StdRng::seed_from_u64(0xffff);
         let memdb = Arc::new(MemoryDB::new(true));
-        let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, LeafLengthCircuit>();
+        let setup = setup_circuit::<_, D, C, LeafLengthCircuit>();
         let mut trie = EthTrie::new(Arc::clone(&memdb));
         let mut cases = vec![];
 

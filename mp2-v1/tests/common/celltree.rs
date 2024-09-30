@@ -24,7 +24,7 @@ use super::{
     table::{CellsUpdateResult, Table, TableID},
 };
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// Given a [`MerkleCellTree`], recursively prove its hash and returns the storage key
     /// associated to the root proof
     /// The row key is used for (a) saving the new proofs to the storage (b) loading the previous
@@ -47,12 +47,13 @@ impl<P: ProofStorage> TestContext<P> {
             true => new_row_key.clone(),
             false => previous_row.k.clone(),
         };
-        let table_id = &table.id;
+        let table_id = &table.public_name;
         // Store the proofs here for the tests; will probably be done in S3 for
         // prod.
         let mut workplan = ut.into_workplan();
 
-        while let Some(Next::Ready(k)) = workplan.next() {
+        while let Some(Next::Ready(wk)) = workplan.next() {
+            let k = wk.k();
             let (context, cell) = tree.fetch_with_context(&k).await;
 
             let proof = if context.is_leaf() {
@@ -65,7 +66,9 @@ impl<P: ProofStorage> TestContext<P> {
                 let inputs = CircuitInput::CellsTree(
                     verifiable_db::cells_tree::CircuitInput::leaf(cell.identifier(), cell.value()),
                 );
-                api::generate_proof(self.params(), inputs).expect("while proving leaf")
+                self.b.bench("indexing::cell_tree::leaf", || {
+                    api::generate_proof(self.params(), inputs)
+                })
             } else if context.right.is_none() {
                 // Prove a partial node - only care about the left side since sbbst has this nice
                 // property
@@ -95,7 +98,9 @@ impl<P: ProofStorage> TestContext<P> {
                     hex::encode(cells_tree::extract_hash_from_proof(&left_proof).map(|c|c.to_bytes()).unwrap())
                 );
 
-                api::generate_proof(self.params(), inputs).expect("while proving partial node")
+                self.b.bench("indexing::cell_tree::partial", || {
+                    api::generate_proof(self.params(), inputs).context("cell tree partial node")
+                })
             } else {
                 // Prove a full node.
                 let left_key = context.left.unwrap();
@@ -139,15 +144,17 @@ impl<P: ProofStorage> TestContext<P> {
                         [left_proof, right_proof],
                     ));
 
-                api::generate_proof(self.params(), inputs).expect("while proving full node")
+                self.b.bench("indexing::cell_tree::full", || {
+                    api::generate_proof(self.params(), inputs).context("while proving full node")
+                })
             };
             let generated_proof_key = CellProofIdentifier {
                 table: table_id.clone(),
                 secondary: new_row_key.clone(),
                 primary,
-                tree_key: k,
+                tree_key: *k,
             };
-
+            let proof = proof.expect("error generating proof");
             let pproof = ProofWithVK::deserialize(&proof).unwrap();
             let pi =
                 verifiable_db::cells_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
@@ -171,7 +178,7 @@ impl<P: ProofStorage> TestContext<P> {
                         .unwrap()
                 )
             );
-            workplan.done(&k).unwrap();
+            workplan.done(&wk).unwrap();
         }
         let root = tree.root().await.unwrap();
         let root_data = tree.root_data().await.unwrap();
@@ -215,7 +222,7 @@ impl<P: ProofStorage> TestContext<P> {
         // We need to (a) move the proofs to the new (new_row_key, primary) identifier
         // then (b) update all the impacted cells to also have this new information about the new
         // primary index
-        self.move_cells_proof_to_new_row(&table.id, primary, &cells_update)
+        self.move_cells_proof_to_new_row(&table.public_name.clone(), primary, &cells_update)
             .await
             .expect("unable to move cells tree proof:");
         // set the primary index for all cells that are in the update plan to the new primary
@@ -278,7 +285,7 @@ impl<P: ProofStorage> TestContext<P> {
             .await;
         let root_proof_key = CellProofIdentifier {
             primary,
-            table: table.id.clone(),
+            table: table.public_name.clone(),
             secondary: cells_update.new_row_key,
             tree_key: root_key,
         };

@@ -1,15 +1,14 @@
 //! Test the Groth16 proving process for the Keccak circuit.
 
 use groth16_framework::{
-    compile_and_generate_assets,
-    test_utils::{save_plonky2_proof_pis, test_groth16_proving_and_verification},
-    C, D, F,
+    compile_and_generate_assets, test_utils::test_groth16_proving_and_verification, C,
 };
-use mapreduce_plonky2::api::serialize_proof;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit},
     mpt_sequential::PAD_LEN,
+    proof::serialize_proof,
+    D, F,
 };
 use plonky2::{
     field::types::Field,
@@ -33,7 +32,7 @@ fn test_groth16_proving_for_keccak() {
     const ASSET_DIR: &str = "groth16_keccak";
 
     // Build for the Keccak circuit and generate the plonky2 proof.
-    let (circuit_data, proof) = plonky2_build_and_prove(ASSET_DIR);
+    let (circuit_data, proof) = plonky2_build_and_prove();
 
     // Generate the asset files.
     compile_and_generate_assets(circuit_data, ASSET_DIR)
@@ -44,7 +43,7 @@ fn test_groth16_proving_for_keccak() {
 }
 
 /// Build for the plonky2 circuit and generate the proof.
-fn plonky2_build_and_prove(asset_dir: &str) -> (CircuitData<F, C, D>, Vec<u8>) {
+fn plonky2_build_and_prove() -> (CircuitData<F, C, D>, Vec<u8>) {
     let config = CircuitConfig::standard_recursion_config();
     let mut cb = CircuitBuilder::<F, D>::new(config);
 
@@ -69,7 +68,6 @@ fn plonky2_build_and_prove(asset_dir: &str) -> (CircuitData<F, C, D>, Vec<u8>) {
 
     let circuit_data = cb.build::<C>();
     let proof = circuit_data.prove(pw).unwrap();
-    save_plonky2_proof_pis(asset_dir, &proof);
     let proof = serialize_proof(&proof).unwrap();
 
     (circuit_data, proof)

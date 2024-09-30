@@ -18,42 +18,26 @@ pub use public_inputs::PublicInputs;
 pub(crate) const PI_LEN<const L: usize, const S: usize, const PH: usize>: usize =
     PublicInputs::<F, L, S, PH>::total_len();
 
-pub(crate) const NUM_PREPROCESSING_IO: usize = NUM_IO;
+pub const NUM_PREPROCESSING_IO: usize = NUM_IO;
 #[rustfmt::skip]
-pub(crate) const NUM_QUERY_IO<const S: usize>: usize = QUERY_PI_LEN::<S>;
+pub const NUM_QUERY_IO<const S: usize>: usize = QUERY_PI_LEN::<S>;
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{
-        ivc::{
-            public_inputs::H_RANGE as ORIGINAL_TREE_H_RANGE,
-            PublicInputs as OriginalTreePublicInputs,
-        },
-        query::{
-            computational_hash_ids::{AggregationOperation, PlaceholderIdentifier},
-            public_inputs::PublicInputs as QueryPublicInputs,
-        },
+    use crate::query::{
+        computational_hash_ids::{AggregationOperation, PlaceholderIdentifier},
+        public_inputs::PublicInputs as QueryProofPublicInputs,
     };
     use alloy::primitives::U256;
     use itertools::Itertools;
-    use mp2_common::{
-        array::ToField,
-        poseidon::{empty_poseidon_hash, H},
-        utils::ToFields,
-    };
-    use mp2_test::utils::random_vector;
+    use mp2_common::{array::ToField, poseidon::H, utils::ToFields, F};
     use placeholders_check::{
         placeholder_ids_hash, CheckedPlaceholder, NUM_SECONDARY_INDEX_PLACEHOLDERS,
     };
-    use plonky2::{
-        field::types::PrimeField64, hash::hash_types::HashOut, iop::target::Target,
-        plonk::config::Hasher,
-    };
+    use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
     use std::{array, iter::once};
-
-    pub(crate) const ORIGINAL_TREE_PI_LEN: usize = OriginalTreePublicInputs::<Target>::TOTAL_LEN;
 
     // Placeholders for testing
     // PH: maximum number of unique placeholder IDs and values bound for query
@@ -85,7 +69,7 @@ pub(crate) mod tests {
             // Create an array of sample placeholder identifiers,
             // will set the first 4 to the query bounds as below.
             let mut placeholder_ids: [PlaceholderIdentifier; PH] =
-                array::from_fn(|_| PlaceholderIdentifier::GenericPlaceholder(rng.gen()));
+                array::from_fn(|_| PlaceholderIdentifier::Generic(rng.gen()));
             let mut placeholder_values = array::from_fn(|_| U256::from_limbs(rng.gen()));
 
             // Set the first 2 placeholder identifiers as below constants.
@@ -98,7 +82,8 @@ pub(crate) mod tests {
             .for_each(|(i, id)| placeholder_ids[i] = *id);
 
             // Compute the hash of placeholder identifiers.
-            let placeholder_ids_hash = placeholder_ids_hash(&placeholder_ids[2..num_placeholders]);
+            let placeholder_ids_hash =
+                placeholder_ids_hash(placeholder_ids[..num_placeholders].to_vec());
 
             // Re-compute placeholder hash
 
@@ -193,20 +178,9 @@ pub(crate) mod tests {
         }
     }
 
-    /// Generate a random original tree proof.
-    pub(crate) fn random_original_tree_proof<const S: usize>(
-        query_pi: &QueryPublicInputs<F, S>,
-    ) -> Vec<F> {
-        let mut proof = random_vector::<u32>(ORIGINAL_TREE_PI_LEN).to_fields();
-
-        // Set the tree hash.
-        proof[ORIGINAL_TREE_H_RANGE].copy_from_slice(query_pi.to_hash_raw());
-
-        proof
-    }
-
+    /// Compute the query results from the proof, and it returns the results and overflow flag.
     pub(crate) fn compute_results_from_query_proof<const S: usize>(
-        query_pi: &QueryPublicInputs<F, S>,
+        query_pi: &QueryProofPublicInputs<F, S>,
     ) -> ([U256; S], bool)
     where
         [(); S - 1]:,

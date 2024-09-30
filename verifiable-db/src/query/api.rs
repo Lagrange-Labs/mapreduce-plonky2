@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::repeat};
+use std::iter::repeat;
 
 use crate::query::aggregation::full_node_index_leaf::FullNodeIndexLeafCircuit;
 
@@ -22,15 +22,11 @@ use super::{
             NUM_VERIFIED_PROOFS as NUM_PROOFS_FN2,
         },
         non_existence_inter::{
-            self, NonExistenceInterNodeCircuit, NonExistenceInterNodeWires,
+            NonExistenceInterNodeCircuit, NonExistenceInterNodeWires,
             NUM_VERIFIED_PROOFS as NUM_PROOFS_NE_INTER,
         },
-        non_existence_leaf::{
-            self, NonExistenceLeafCircuit, NonExistenceLeafWires,
-            NUM_VERIFIED_PROOFS as NUM_PROOFS_NE_LEAF,
-        },
         partial_node::{
-            self, PartialNodeCircuit, PartialNodeWires, NUM_VERIFIED_PROOFS as NUM_PROOFS_PN,
+            PartialNodeCircuit, PartialNodeWires, NUM_VERIFIED_PROOFS as NUM_PROOFS_PN,
         },
         ChildPosition, ChildProof, CommonInputs, NodeInfo, NonExistenceInput,
         OneProvenChildNodeInput, QueryBounds, QueryHashNonExistenceCircuits, SinglePathInput,
@@ -41,29 +37,30 @@ use super::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
         universal_circuit_inputs::{
-            BasicOperation, ColumnCell, PlaceholderId, Placeholders, ResultStructure, RowCells,
+            BasicOperation, PlaceholderId, Placeholders, ResultStructure, RowCells,
         },
         universal_query_circuit::{
             placeholder_hash, QueryBound, UniversalCircuitInput, UniversalQueryCircuitInputs,
             UniversalQueryCircuitWires,
         },
-        ComputationalHash, PlaceholderHash,
     },
     PI_LEN,
 };
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 use itertools::Itertools;
+use log::info;
 use mp2_common::{
     array::ToField,
     default_config,
+    poseidon::H,
     proof::ProofWithVK,
     types::HashOutput,
     utils::{Fieldable, ToFields},
     C, D, F,
 };
 use plonky2::{
-    hash::{hashing::hash_n_to_hash_no_pad, poseidon::PoseidonHash},
+    hash::hashing::hash_n_to_hash_no_pad,
     plonk::config::{GenericHashOut, Hasher},
 };
 use recursion_framework::{
@@ -74,7 +71,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // we need to clone data if we fix by put variants inside a `Box`
 pub enum CircuitInput<
     const MAX_NUM_COLUMNS: usize,
@@ -112,6 +109,9 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
+    pub const fn num_placeholders_ids() -> usize {
+        2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)
+    }
     /// Initialize input for universal circuit to prove the execution of a query over a
     /// single row, from the following inputs:
     /// - `column_cells`: set of columns (including primary and secondary indexes) of the row being proven
@@ -122,7 +122,7 @@ where
     /// - `is_leaf`: Flag specifying whether the row being proven is stored in a leaf node of the rows tree or not
     /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
     /// Note that the following assumption is expected on the structure of the inputs:
-    /// The output of the last operation in `predicate_operations` will be taken as the filtering predicate evaluation;
+    /// The output of the last operation in `predicate_operations` is taken as the filtering predicate evaluation;
     /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
     /// the caller of this method
     pub fn new_universal_circuit(
@@ -234,8 +234,10 @@ where
     /// Initialize input to prove a node storing a value of the primary or secondary index which
     /// is outside of the query bounds, from the following inputs:
     /// - `node_info`: Data about the node being proven
-    /// - `child_info`: Data aboout the child of the node being proven, altogether with the child position;
-    ///     must be `None` if the node being proven has no children
+    /// - `left_child_info`: Data aboout the left child of the node being proven; must be `None` if
+    ///     the node being proven has no left child
+    /// - `right_child_info`: Data aboout the right child of the node being proven; must be `None` if
+    ///     the node being proven has no right child
     /// - `primary_index_value`: Value of the primary index associated to the current node
     /// - `index_ids`: Identifiers of the primary and secondary index columns
     /// - `aggregation_ops`: Set of aggregation operations employed to aggregate the results of the query
@@ -246,7 +248,8 @@ where
     #[allow(clippy::too_many_arguments)] // doesn't make sense to aggregate arguments
     pub fn new_non_existence_input(
         node_info: NodeInfo,
-        child_info: Option<(NodeInfo, ChildPosition)>,
+        left_child_info: Option<NodeInfo>,
+        right_child_info: Option<NodeInfo>,
         primary_index_value: U256,
         index_ids: &[u64; 2],
         aggregation_ops: &[AggregationOperation],
@@ -262,19 +265,19 @@ where
             .take(MAX_NUM_RESULTS)
             .collect_vec();
         let min_query = if is_rows_tree_node {
-            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary)
+            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary())
         } else {
             QueryBound::new_primary_index_bound(placeholders, true)
         }?;
         let max_query = if is_rows_tree_node {
-            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary)
+            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary())
         } else {
             QueryBound::new_primary_index_bound(placeholders, false)
         }?;
         Ok(CircuitInput::NonExistence(NonExistenceInput {
             node_info,
-            child_info: child_info.clone().map(|info| info.0),
-            is_child_left: child_info.map(|info| info.1.to_flag()),
+            left_child_info,
+            right_child_info,
             primary_index_value,
             index_ids: index_ids
                 .iter()
@@ -282,8 +285,8 @@ where
                 .collect_vec()
                 .try_into()
                 .unwrap(),
-            computational_hash: query_hashes.computational_hash,
-            placeholder_hash: query_hashes.placeholder_hash,
+            computational_hash: query_hashes.computational_hash(),
+            placeholder_hash: query_hashes.placeholder_hash(),
             aggregation_ops: aggregation_ops.try_into().unwrap(),
             is_rows_tree_node,
             min_query,
@@ -295,12 +298,12 @@ where
     /// in the same order, so that those ids can be provided as input to other circuits that need
     /// to recompute this hash
     pub fn ids_for_placeholder_hash(
-        row_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         placeholders: &Placeholders,
         query_bounds: &QueryBounds,
     ) -> Result<[PlaceholderId; 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]> {
+        let row_cells = &RowCells::default();
         Ok(match results.output_variant {
             Output::Aggregation => {
                 let circuit = UniversalQueryCircuitInputs::<
@@ -343,14 +346,12 @@ where
 
     /// Compute the `placeholder_hash` associated to a query
     pub fn placeholder_hash(
-        row_cells: &RowCells,
         predicate_operations: &[BasicOperation],
         results: &ResultStructure,
         placeholders: &Placeholders,
         query_bounds: &QueryBounds,
     ) -> Result<HashOutput> {
         let placeholder_hash_ids = Self::ids_for_placeholder_hash(
-            row_cells,
             predicate_operations,
             results,
             placeholders,
@@ -363,8 +364,8 @@ where
                 &hash
                     .to_vec()
                     .into_iter()
-                    .chain(query_bounds.min_query_primary.to_fields())
-                    .chain(query_bounds.max_query_primary.to_fields())
+                    .chain(query_bounds.min_query_primary().to_fields())
+                    .chain(query_bounds.max_query_primary().to_fields())
                     .collect_vec(),
             )
             .to_bytes(),
@@ -444,13 +445,6 @@ pub struct Parameters<
         NUM_PROOFS_EMBEDDED,
         EmbeddedTreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
     >,
-    non_existence_leaf: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        NUM_PROOFS_NE_LEAF,
-        NonExistenceLeafWires<MAX_NUM_RESULTS>,
-    >,
     non_existence_intermediate: CircuitWithUniversalVerifier<
         F,
         C,
@@ -472,7 +466,7 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_RESULTS - 1]:,
     [(); PI_LEN::<MAX_NUM_RESULTS>]:,
-    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+    [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     /// Build `Parameters` for query circuits
     pub fn build() -> Self {
@@ -481,15 +475,18 @@ where
                 default_config(),
                 QUERY_CIRCUIT_SET_SIZE,
             );
+        info!("Building the query circuits parameters...");
+        info!("Building universal circuits...");
         let circuit_with_agg = builder.build_circuit(());
         let circuit_no_agg = builder.build_circuit(());
+        info!("Building aggregation circuits..");
         let full_node_two_children = builder.build_circuit(());
         let full_node_one_child = builder.build_circuit(());
         let full_node_leaf = builder.build_circuit(());
         let partial_node = builder.build_circuit(());
         let single_path_proven_child = builder.build_circuit(());
         let single_path_embedded_tree = builder.build_circuit(());
-        let non_existence_leaf = builder.build_circuit(());
+        info!("Building non-existence circuits..");
         let non_existence_intermediate = builder.build_circuit(());
 
         let circuits = vec![
@@ -501,7 +498,6 @@ where
             prepare_recursive_circuit_for_circuit_set(&partial_node),
             prepare_recursive_circuit_for_circuit_set(&single_path_proven_child),
             prepare_recursive_circuit_for_circuit_set(&single_path_embedded_tree),
-            prepare_recursive_circuit_for_circuit_set(&non_existence_leaf),
             prepare_recursive_circuit_for_circuit_set(&non_existence_intermediate),
         ];
 
@@ -517,7 +513,6 @@ where
             partial_node,
             single_path_proven_child,
             single_path_embedded_tree,
-            non_existence_leaf,
             non_existence_intermediate,
         }
     }
@@ -722,8 +717,8 @@ where
             }
             CircuitInput::NonExistence(NonExistenceInput {
                 node_info,
-                child_info,
-                is_child_left,
+                left_child_info,
+                right_child_info,
                 primary_index_value,
                 index_ids,
                 computational_hash,
@@ -733,62 +728,44 @@ where
                 min_query,
                 max_query,
             }) => {
-                match child_info {
-                    Some(child_data) => {
-                        // intermediate node
-                        let input = NonExistenceInterNodeCircuit {
-                            is_rows_tree_node,
-                            is_left_child: is_child_left.unwrap(),
-                            min_query,
-                            max_query,
-                            value: node_info.value,
-                            index_value: primary_index_value,
-                            child_value: child_data.value,
-                            child_min: child_data.min,
-                            child_max: child_data.max,
-                            index_ids,
-                            ops: aggregation_ops,
-                            subtree_hash: node_info.embedded_tree_hash,
-                            computational_hash,
-                            placeholder_hash,
-                            child_subtree_hash: child_data.embedded_tree_hash,
-                            grand_child_hashes: child_data.child_hashes,
-                        };
-                        (
-                            self.circuit_set.generate_proof(
-                                &self.non_existence_intermediate,
-                                [],
-                                [],
-                                input,
-                            )?,
-                            self.non_existence_intermediate.get_verifier_data().clone(),
-                        )
-                    }
-                    None => {
-                        // leaf node
-                        let input = NonExistenceLeafCircuit {
-                            is_rows_tree_node: is_rows_tree_node,
-                            min_query: min_query,
-                            max_query: max_query,
-                            value: node_info.value,
-                            index_value: primary_index_value,
-                            index_ids,
-                            ops: aggregation_ops,
-                            subtree_hash: node_info.embedded_tree_hash,
-                            computational_hash,
-                            placeholder_hash,
-                        };
-                        (
-                            self.circuit_set.generate_proof(
-                                &self.non_existence_leaf,
-                                [],
-                                [],
-                                input,
-                            )?,
-                            self.non_existence_leaf.get_verifier_data().clone(),
-                        )
-                    }
-                }
+                // intermediate node
+                let left_child_exists = left_child_info.is_some();
+                let right_child_exists = right_child_info.is_some();
+                let left_child_data = left_child_info.unwrap_or_default();
+                let right_child_data = right_child_info.unwrap_or_default();
+                let input = NonExistenceInterNodeCircuit {
+                    is_rows_tree_node,
+                    left_child_exists,
+                    right_child_exists,
+                    min_query,
+                    max_query,
+                    value: node_info.value,
+                    index_value: primary_index_value,
+                    left_child_value: left_child_data.value,
+                    left_child_min: left_child_data.min,
+                    left_child_max: left_child_data.max,
+                    right_child_value: right_child_data.value,
+                    right_child_min: right_child_data.min,
+                    right_child_max: right_child_data.max,
+                    index_ids,
+                    ops: aggregation_ops,
+                    subtree_hash: node_info.embedded_tree_hash,
+                    computational_hash,
+                    placeholder_hash,
+                    left_tree_hash: left_child_data.embedded_tree_hash,
+                    left_grand_children: left_child_data.child_hashes,
+                    right_tree_hash: right_child_data.embedded_tree_hash,
+                    right_grand_children: right_child_data.child_hashes,
+                };
+                (
+                    self.circuit_set.generate_proof(
+                        &self.non_existence_intermediate,
+                        [],
+                        [],
+                        input,
+                    )?,
+                    self.non_existence_intermediate.get_verifier_data().clone(),
+                )
             }
         });
 
@@ -802,33 +779,32 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{cmp::Ordering, collections::HashMap, iter::once};
+    use std::{cmp::Ordering, iter::once};
 
-    use alloy::{primitives::U256, signers::k256::elliptic_curve::consts::U2};
+    use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
-        poseidon::empty_poseidon_hash,
-        proof::{self, ProofWithVK},
+        proof::ProofWithVK,
         types::HashOutput,
         utils::{Fieldable, ToFields},
         F,
     };
     use mp2_test::utils::{gen_random_field_hash, gen_random_u256};
     use plonky2::{
+        field::types::{PrimeField64, Sample},
         hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
         plonk::config::GenericHashOut,
     };
     use rand::{thread_rng, Rng};
-    use ryhope::tree::scapegoat::Node;
 
     use crate::query::{
         aggregation::{
-            ChildPosition, NodeInfo, QueryBoundSecondary, QueryBoundSource, QueryBounds,
-            QueryHashNonExistenceCircuits, SubProof,
+            ChildPosition, NodeInfo, QueryBoundSource, QueryBounds, QueryHashNonExistenceCircuits,
+            SubProof,
         },
         api::{CircuitInput, Parameters},
         computational_hash_ids::{
-            AggregationOperation, HashPermutation, Operation, PlaceholderIdentifier,
+            AggregationOperation, ColumnIDs, HashPermutation, Operation, PlaceholderIdentifier,
         },
         public_inputs::PublicInputs,
         universal_circuit::universal_circuit_inputs::{
@@ -869,9 +845,16 @@ mod tests {
                 id as u64
             })
             .collect_vec();
+        let column_ids = ColumnIDs::new(
+            F::rand().to_canonical_u64(),
+            F::rand().to_canonical_u64(),
+            (0..NUM_COLUMNS - 2)
+                .map(|_| F::rand().to_canonical_u64())
+                .collect_vec(),
+        );
 
-        let primary_index_id: F = column_ids[0].to_field();
-        let secondary_index_id: F = column_ids[1].to_field();
+        let primary_index_id: F = column_ids.primary;
+        let secondary_index_id: F = column_ids.secondary;
 
         let min_query_primary = 57;
         let max_query_primary = 67;
@@ -921,7 +904,7 @@ mod tests {
             output_items,
             aggregation_op_ids.clone(),
         );
-        let first_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(0);
+        let first_placeholder_id = PlaceholderIdentifier::Generic(0);
         let placeholders = Placeholders::from((
             vec![(first_placeholder_id, U256::from(max_query_secondary))],
             U256::from(min_query_primary),
@@ -934,12 +917,17 @@ mod tests {
         )
         .unwrap();
 
-        let params = Parameters::<
+        let mut params = Parameters::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >::build();
+
+        // Test serialization of params
+        let serialized_params = bincode::serialize(&params).unwrap();
+        // use deserialized params to generate proofs
+        params = bincode::deserialize(&serialized_params).unwrap();
 
         type Input = CircuitInput<
             MAX_NUM_COLUMNS,
@@ -969,10 +957,14 @@ mod tests {
         let gen_universal_circuit_proofs = |values: &[U256], is_leaf: bool| {
             let column_cells = values
                 .iter()
-                .zip(column_ids.iter())
-                .map(|(&value, &id)| ColumnCell::new(id, value))
+                .zip(column_ids.to_vec().iter())
+                .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
                 .collect_vec();
-            let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
+            let row_cells = RowCells::new(
+                column_cells[0].clone(),
+                column_cells[1].clone(),
+                column_cells[2..].to_vec(),
+            );
             let input = Input::new_universal_circuit(
                 &row_cells,
                 &predicate_operations,
@@ -1109,15 +1101,11 @@ mod tests {
             );
             assert_eq!(pis.min_value(), node_info.min,);
             assert_eq!(pis.max_value(), node_info.max,);
-            assert_eq!(pis.min_query_value(), query_bounds.min_query_primary,);
-            assert_eq!(pis.max_query_value(), query_bounds.max_query_primary,);
+            assert_eq!(pis.min_query_value(), query_bounds.min_query_primary());
+            assert_eq!(pis.max_query_value(), query_bounds.max_query_primary());
             assert_eq!(
                 pis.index_ids().to_vec(),
-                column_ids
-                    .iter()
-                    .take(2)
-                    .map(|id| id.to_field())
-                    .collect_vec(),
+                vec![column_ids.primary, column_ids.secondary,],
             );
             // compute output value: SUM(C1 + C3) for all the rows where C3 >= 5
             let (output, overflow, count) =
@@ -1125,10 +1113,10 @@ mod tests {
                     .iter()
                     .fold((U256::ZERO, false, 0u64), |acc, value| {
                         if value[2] >= U256::from(5)
-                            && value[0] >= query_bounds.min_query_primary
-                            && value[0] <= query_bounds.max_query_primary
-                            && value[1] >= query_bounds.min_query_secondary.value
-                            && value[1] <= query_bounds.max_query_secondary.value
+                            && value[0] >= query_bounds.min_query_primary()
+                            && value[0] <= query_bounds.max_query_primary()
+                            && value[1] >= query_bounds.min_query_secondary().value
+                            && value[1] <= query_bounds.max_query_secondary().value
                         {
                             let (sum, overflow) = value[0].overflowing_add(value[2]);
                             let new_overflow = acc.1 || overflow;
@@ -1409,8 +1397,8 @@ mod tests {
         let hash_0 = node_info_0.compute_node_hash(primary_index_id);
         let column_cells = column_values[0]
             .iter()
-            .zip(column_ids.iter())
-            .map(|(&value, &id)| ColumnCell::new(id, value))
+            .zip(column_ids.to_vec().iter())
+            .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
             .collect_vec();
         // compute hashes associated to query, which are needed as inputs
         let query_hashes = QueryHashNonExistenceCircuits::new::<
@@ -1419,7 +1407,7 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
+            &column_ids,
             &predicate_operations,
             &results,
             &placeholders,
@@ -1430,8 +1418,14 @@ mod tests {
         let input = Input::new_non_existence_input(
             node_info_0.clone(),
             None,
+            None,
             node_info_0.value,
-            &column_ids[..2].try_into().unwrap(),
+            &[
+                column_ids.primary.to_canonical_u64(),
+                column_ids.secondary.to_canonical_u64(),
+            ]
+            .try_into()
+            .unwrap(),
             &[AggregationOperation::SumOp],
             query_hashes,
             false,
@@ -1512,8 +1506,8 @@ mod tests {
         // generate proof with non-existence circuit for node 1
         let column_cells = column_values[1]
             .iter()
-            .zip(column_ids.iter())
-            .map(|(&value, &id)| ColumnCell::new(id, value))
+            .zip(column_ids.to_vec().iter())
+            .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
             .collect_vec();
         // compute hashes associated to query, which are needed as inputs
         let query_hashes = QueryHashNonExistenceCircuits::new::<
@@ -1522,7 +1516,7 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
+            &column_ids,
             &predicate_operations,
             &results,
             &placeholders,
@@ -1532,9 +1526,15 @@ mod tests {
         .unwrap();
         let input = Input::new_non_existence_input(
             node_info_1.clone(),
-            Some((node_info_0, ChildPosition::Left)), // node 0 is the left child
+            Some(node_info_0), // node 0 is the left child
+            None,
             node_info_1.value,
-            &column_ids[..2].try_into().unwrap(),
+            &[
+                column_ids.primary.to_canonical_u64(),
+                column_ids.secondary.to_canonical_u64(),
+            ]
+            .try_into()
+            .unwrap(),
             &[AggregationOperation::SumOp],
             query_hashes,
             false,
@@ -1609,8 +1609,8 @@ mod tests {
         let hash_2 = node_info_2.compute_node_hash(secondary_index_id);
         let column_cells = column_values[2]
             .iter()
-            .zip(column_ids.iter())
-            .map(|(&value, &id)| ColumnCell::new(id, value))
+            .zip(column_ids.to_vec().iter())
+            .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
             .collect_vec();
         // compute hashes associated to query, which are needed as inputs
         let query_hashes = QueryHashNonExistenceCircuits::new::<
@@ -1619,7 +1619,7 @@ mod tests {
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >(
-            &RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]),
+            &column_ids,
             &predicate_operations,
             &results,
             &placeholders,
@@ -1630,8 +1630,14 @@ mod tests {
         let input = Input::new_non_existence_input(
             node_info_2.clone(),
             None,
+            None,
             column_values[2][0], // we need to place the primary index value associated to this row
-            &column_ids[..2].try_into().unwrap(),
+            &[
+                column_ids.primary.to_canonical_u64(),
+                column_ids.secondary.to_canonical_u64(),
+            ]
+            .try_into()
+            .unwrap(),
             &[AggregationOperation::SumOp],
             query_hashes,
             true,

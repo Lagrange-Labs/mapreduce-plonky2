@@ -8,7 +8,7 @@ in
   cachix.enable = false;
 
   # https://devenv.sh/packages/
-  packages = [ pkgs.git pkgs.figlet pkgs.openssl pkgs.pkg-config ]
+  packages = [ pkgs.git pkgs.figlet pkgs.openssl pkgs.pkg-config pkgs.cargo-limit ]
              ++ lib.optionals config.devenv.isTesting [ pkgs.docker ]
              ++ lib.optionals pkgs.stdenv.targetPlatform.isDarwin [
                pkgs.libiconv
@@ -21,13 +21,19 @@ in
   enterShell = ''figlet -f slant "MR2 loaded"'';
 
   # Env. variables
-  env.RUST_BACKTRACE = 1;
-  # Make Go dependencies RW
-  env.GOFLAGS = "-modcacherw";
-  # Required for Rust linking to OpenSSL
-  env.OPENSSL_DEV = pkgs.openssl.dev;
-  env.DB_URL = "host=localhost dbname=storage port=${builtins.toString config.env.PGPORT}";
-  env.RUST_LOG = "debug";
+  env = {
+    # Rust debuggingin
+    RUST_BACKTRACE = 1;
+    RUST_LOG = "debug";
+
+    # Required for Rust linking to OpenSSL
+    OPENSSL_DEV = pkgs.openssl.dev;
+
+    # Make Go dependencies RW
+    GOFLAGS = "-modcacherw";
+
+    DB_URL = "host=localhost dbname=storage port=${builtins.toString config.env.PGPORT}";
+  };
 
   # Use a DB_URL tuned for the dockerized processes.postgres-ci
   enterTest = ''
@@ -59,11 +65,11 @@ in
   languages.go.enable = true;
 
   # https://devenv.sh/pre-commit-hooks/
-  pre-commit.hooks = {
-    # cargo-check.enable = true;
-    check-merge-conflicts.enable = true;
-    # clippy.enable = true;
-    # commitizen.enable = true;
-    # rustfmt.enable = true;
-  };
+  ## pre-commit.hooks = {
+  ##   # cargo-check.enable = true;
+  ##   # check-merge-conflicts.enable = true;
+  ##   # clippy.enable = true;
+  ##   # commitizen.enable = true;
+  ##   # rustfmt.enable = true;
+  ## };
 }

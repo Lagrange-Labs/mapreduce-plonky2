@@ -53,7 +53,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::group_hashing::CircuitBuilderGroupHashing;
+    use crate::{group_hashing::CircuitBuilderGroupHashing, C, D, F};
     use anyhow::Result;
     use plonky2::{
         field::{
@@ -61,11 +61,7 @@ mod tests {
             types::{Field, Sample},
         },
         iop::witness::PartialWitness,
-        plonk::{
-            circuit_builder::CircuitBuilder,
-            circuit_data::CircuitConfig,
-            config::{GenericConfig, PoseidonGoldilocksConfig},
-        },
+        plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
     };
     use plonky2_ecgfp5::{
         curve::curve::{Point, WeierstrassPoint},
@@ -74,9 +70,6 @@ mod tests {
     use rand::thread_rng;
 
     const ARITY: usize = 4;
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
 
     /// Test curve point addition.
     #[test]

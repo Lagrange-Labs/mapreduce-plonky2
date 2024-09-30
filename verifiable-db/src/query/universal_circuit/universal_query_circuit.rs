@@ -1,27 +1,24 @@
 use std::{
-    collections::HashMap,
     fmt::Debug,
     iter::{once, repeat},
 };
 
 use alloy::primitives::U256;
-use anyhow::{anyhow, bail, ensure, Error, Result};
+use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    default_config,
     poseidon::{empty_poseidon_hash, H},
-    proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    u256::{CircuitBuilderU256, UInt256Target},
     utils::{FromFields, SelectHashBuilder, ToFields, ToTargets},
-    CHasher, C, D, F,
+    CHasher, D, F,
 };
 use plonky2::{
-    field::{goldilocks_field::GoldilocksField, types::Field},
-    hash::{hash_types::HashOutTarget, hashing::hash_n_to_hash_no_pad, poseidon::PoseidonHash},
+    field::types::Field,
+    hash::hashing::hash_n_to_hash_no_pad,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -32,12 +29,7 @@ use plonky2::{
         proof::ProofWithPublicInputsTarget,
     },
 };
-use recursion_framework::{
-    circuit_builder::{
-        CircuitLogicWires, CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder,
-    },
-    framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
-};
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
@@ -58,8 +50,8 @@ use super::{
     output_no_aggregation::Circuit as NoAggOutputCircuit,
     output_with_aggregation::Circuit as AggOutputCircuit,
     universal_circuit_inputs::{
-        BasicOperation, ColumnCell, InputOperand, Placeholder, PlaceholderId, Placeholders,
-        ResultStructure, RowCells,
+        BasicOperation, InputOperand, Placeholder, PlaceholderId, Placeholders, ResultStructure,
+        RowCells,
     },
     ComputationalHash, ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
 };
@@ -333,7 +325,7 @@ impl QueryBound {
                 if let Some(operand) = op.second_operand {
                     match operand {
                         InputOperand::Constant(_) | InputOperand::Placeholder(_) => (),
-                        _ => bail!("Invalid operand for query bound operation: must be either a placeholder or a constant")     
+                        _ => bail!("Invalid operand for query bound operation: must be either a placeholder or a constant")
                     }
                 }
                 *op
@@ -387,7 +379,7 @@ impl QueryBound {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 /// Input wires for the universal query circuit
 pub struct UniversalQueryCircuitWires<
     const MAX_NUM_COLUMNS: usize,
@@ -397,7 +389,7 @@ pub struct UniversalQueryCircuitWires<
     T: OutputComponent<MAX_NUM_RESULTS>,
 > {
     /// Input wires for column extraction component
-    column_extraction_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
+    pub(crate) column_extraction_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
     /// flag specifying whether the given row is stored in a leaf node of a rows tree or not
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_leaf: BoolTarget,
@@ -457,7 +449,7 @@ pub trait OutputComponentWires {
     /// - It is a `UInt256Target` in the output for queries with aggregation operations
     type FirstT: ToTargets;
     /// Input wires of the output component
-    type InputWires: Serialize + for<'a> Deserialize<'a> + Clone + Debug;
+    type InputWires: Serialize + for<'a> Deserialize<'a> + Clone + Debug + Eq + PartialEq;
 
     /// Get the identifiers of the aggregation operations specified in the query to aggregate the
     /// results (e.g., `SUM`, `AVG`)
@@ -596,12 +588,12 @@ where
 
         let min_query = QueryBound::new_secondary_index_bound(
             &placeholders,
-            &query_bounds.min_query_secondary,
+            &query_bounds.min_query_secondary(),
         )?;
 
         let max_query = QueryBound::new_secondary_index_bound(
             &placeholders,
-            &query_bounds.max_query_secondary,
+            &query_bounds.max_query_secondary(),
         )?;
 
         Ok(Self {
@@ -977,8 +969,8 @@ fn dummy_placeholder(placeholders: &Placeholders) -> Placeholder {
 
 fn dummy_placeholder_from_query_bounds(query_bounds: &QueryBounds) -> Placeholder {
     let placeholders = Placeholders::new_empty(
-        query_bounds.min_query_primary,
-        query_bounds.max_query_primary,
+        query_bounds.min_query_primary(),
+        query_bounds.max_query_primary(),
     );
     dummy_placeholder(&placeholders)
 }
@@ -1016,9 +1008,9 @@ pub(crate) fn placeholder_hash(
     // a constant or a placeholder. This information is available in `query_bounds`, so we just
     // process it
     let min_query =
-        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary)?;
+        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary())?;
     let max_query =
-        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary)?;
+        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary())?;
     Ok(QueryBound::add_secondary_query_bounds_to_placeholder_hash(
         &min_query,
         &max_query,
@@ -1070,7 +1062,7 @@ where
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 /// Inputs for the 2 variant of universal query circuit
 pub enum UniversalCircuitInput<
     const MAX_NUM_COLUMNS: usize,
@@ -1186,10 +1178,10 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-        aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
+        aggregation::{QueryBoundSource, QueryBounds},
         api::{CircuitInput, Parameters},
         computational_hash_ids::{
-            AggregationOperation, HashPermutation, Identifiers, Operation, Output,
+            AggregationOperation, ColumnIDs, HashPermutation, Identifiers, Operation,
             PlaceholderIdentifier,
         },
         public_inputs::PublicInputs,
@@ -1287,10 +1279,14 @@ mod tests {
             .zip(column_ids.iter())
             .map(|(&value, &id)| ColumnCell { value, id })
             .collect_vec();
-        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
+        let row_cells = RowCells::new(
+            column_cells[0].clone(),
+            column_cells[1].clone(),
+            column_cells[2..].to_vec(),
+        );
         // define placeholders
-        let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
-        let second_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(1);
+        let first_placeholder_id = PlaceholderId::Generic(0);
+        let second_placeholder_id = PlaceholderIdentifier::Generic(1);
         let mut placeholders = Placeholders::new_empty(
             U256::default(),
             U256::default(), // dummy values
@@ -1299,7 +1295,7 @@ mod tests {
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is the max query bound
-        let third_placeholder_id = PlaceholderId::GenericPlaceholder(2);
+        let third_placeholder_id = PlaceholderId::Generic(2);
         placeholders.insert(third_placeholder_id, max_query);
 
         // build predicate operations
@@ -1454,8 +1450,8 @@ mod tests {
             ),
         )
         .unwrap();
-        let min_query_value = query_bounds.min_query_secondary.value;
-        let max_query_value = query_bounds.max_query_secondary.value;
+        let min_query_value = query_bounds.min_query_secondary().value;
+        let max_query_value = query_bounds.max_query_secondary().value;
 
         let input = CircuitInput::<
             MAX_NUM_COLUMNS,
@@ -1543,15 +1539,18 @@ mod tests {
             placeholder_hash(&placeholder_hash_ids, &placeholders, &query_bounds).unwrap();
         let computational_hash = ComputationalHash::from_bytes(
             (&Identifiers::computational_hash_universal_circuit(
-                column_ids
-                    .iter()
-                    .map(|id| id.to_canonical_u64())
-                    .collect_vec()
-                    .as_slice(),
+                &ColumnIDs::new(
+                    column_ids[0].to_canonical_u64(),
+                    column_ids[1].to_canonical_u64(),
+                    column_ids[2..]
+                        .iter()
+                        .map(|id| id.to_canonical_u64())
+                        .collect_vec(),
+                ),
                 &predicate_operations,
                 &results,
-                Some((&query_bounds.min_query_secondary).into()),
-                Some((&query_bounds.max_query_secondary).into()),
+                Some(query_bounds.min_query_secondary().into()),
+                Some(query_bounds.max_query_secondary().into()),
             )
             .unwrap())
                 .into(),
@@ -1630,10 +1629,14 @@ mod tests {
             .zip(column_ids.iter())
             .map(|(&value, &id)| ColumnCell { value, id })
             .collect_vec();
-        let row_cells = RowCells::new(&column_cells[0], &column_cells[1], &column_cells[2..]);
+        let row_cells = RowCells::new(
+            column_cells[0].clone(),
+            column_cells[1].clone(),
+            column_cells[2..].to_vec(),
+        );
         // define placeholders
-        let first_placeholder_id = PlaceholderId::GenericPlaceholder(0);
-        let second_placeholder_id = PlaceholderIdentifier::GenericPlaceholder(1);
+        let first_placeholder_id = PlaceholderId::Generic(0);
+        let second_placeholder_id = PlaceholderIdentifier::Generic(1);
         let mut placeholders = Placeholders::new_empty(
             U256::default(),
             U256::default(), // dummy values
@@ -1642,7 +1645,7 @@ mod tests {
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is the min query bound
-        let third_placeholder_id = PlaceholderId::GenericPlaceholder(2);
+        let third_placeholder_id = PlaceholderId::Generic(2);
         placeholders.insert(third_placeholder_id, min_query);
 
         // build predicate operations
@@ -1915,15 +1918,18 @@ mod tests {
             placeholder_hash(&placeholder_hash_ids, &placeholders, &query_bounds).unwrap();
         let computational_hash = ComputationalHash::from_bytes(
             (&Identifiers::computational_hash_universal_circuit(
-                column_ids
-                    .iter()
-                    .map(|id| id.to_canonical_u64())
-                    .collect_vec()
-                    .as_slice(),
+                &ColumnIDs::new(
+                    column_ids[0].to_canonical_u64(),
+                    column_ids[1].to_canonical_u64(),
+                    column_ids[2..]
+                        .iter()
+                        .map(|id| id.to_canonical_u64())
+                        .collect_vec(),
+                ),
                 &predicate_operations,
                 &results,
-                Some((&query_bounds.min_query_secondary).into()),
-                Some((&query_bounds.max_query_secondary).into()),
+                Some(query_bounds.min_query_secondary().into()),
+                Some(query_bounds.max_query_secondary().into()),
             )
             .unwrap())
                 .into(),

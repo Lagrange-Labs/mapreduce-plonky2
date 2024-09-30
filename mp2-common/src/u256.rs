@@ -42,9 +42,10 @@ use serde::{Deserialize, Serialize};
 /// Number of limbs employed to represent a 256-bit unsigned integer
 pub const NUM_LIMBS: usize = 8;
 
-/// Check if an UInt256 array is less than or equal to the other. It iterates
-/// with the two arrays and compare each Uint256 element till to the last,
-/// the comparison is defined as `l < r` or `l==r`.
+/// Check if an UInt256 array is less than or equal to the other.
+///
+/// It iterates with the two arrays and compare each Uint256 element till to
+/// the last, the comparison is defined as `l < r` or `l==r`.
 /// It's corresponding to the `is_less_than_or_equal_to_u256_arr` gadget
 /// function, and returns two flags: `left < right` and `left == right`.
 pub fn is_less_than_or_equal_to_u256_arr<const L: usize>(
@@ -64,6 +65,14 @@ pub fn is_less_than_or_equal_to_u256_arr<const L: usize>(
 /// Circuit representation of u256
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct UInt256Target([U32Target; NUM_LIMBS]);
+
+impl PartialEq for UInt256Target {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.iter().zip(other.0.iter()).all(|(s, o)| s.0 == o.0)
+    }
+}
+
+impl Eq for UInt256Target {}
 
 pub trait CircuitBuilderU256<F: SerializableRichField<D>, const D: usize> {
     /// Add a UInt256Target without any range-check on the limbs
@@ -804,8 +813,10 @@ impl UInt256Target {
         Ok(UInt256Target(
             (0..NUM_LIMBS)
                 .map(|_| buffer.read_target().map(U32Target))
-                .rev() // targets are serialized in big-endian order, so we need to reverse them to get little-endian
                 .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .rev() // targets are serialized in big-endian order, so we need to reverse them to get little-endian
+                .collect_vec()
                 .try_into()
                 .unwrap(),
         ))
@@ -977,7 +988,6 @@ mod tests {
         plonk::{
             circuit_builder::CircuitBuilder,
             circuit_data::{CircuitConfig, CircuitData},
-            config::PoseidonGoldilocksConfig,
             proof::ProofWithPublicInputs,
         },
     };
@@ -990,15 +1000,12 @@ mod tests {
         types::GFp,
         u256::NUM_LIMBS,
         utils::FromFields,
+        C, D, F,
     };
 
     use super::{
         is_less_than_or_equal_to_u256_arr, CircuitBuilderU256, UInt256Target, WitnessWriteU256,
     };
-
-    const D: usize = 2;
-    type F = GFp;
-    type C = PoseidonGoldilocksConfig;
 
     #[derive(Clone, Debug)]
     struct TestCreateOne;
@@ -1011,7 +1018,7 @@ mod tests {
             c.register_public_input_u256(&input);
         }
 
-        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {}
+        fn prove(&self, _pw: &mut PartialWitness<F>, _wires: &Self::Wires) {}
     }
 
     #[derive(Clone, Debug)]
@@ -1180,7 +1187,7 @@ mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_u256_target(&wires, self.0);
+            pw.set_u256_target(wires, self.0);
         }
     }
 

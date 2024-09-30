@@ -118,7 +118,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         NUM_HASH_OUT_ELTS,
     ];
 
-    pub(crate) const fn to_range(query_pi: QueryPublicInputs) -> PublicInputRange {
+    pub const fn to_range(query_pi: QueryPublicInputs) -> PublicInputRange {
         let mut i = 0;
         let mut offset = 0;
         let pi_pos = query_pi as usize;

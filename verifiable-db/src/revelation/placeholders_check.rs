@@ -1,7 +1,7 @@
 //! Check the placeholder identifiers and values with the specified `final_placeholder_hash`,
 //! compute and return the `num_placeholders` and the `placeholder_ids_hash`.
 
-use crate::query::{aggregation::QueryBounds, computational_hash_ids::PlaceholderIdentifier};
+use crate::query::computational_hash_ids::PlaceholderIdentifier;
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
@@ -197,21 +197,19 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
 
 /// Compute the hash of placeholder ids provided as input, in the same way as it is computed in the `check_placeholders`
 /// gadget
-pub(crate) fn placeholder_ids_hash(placeholder_ids: &[PlaceholderIdentifier]) -> HashOut<F> {
-    [
-        &PlaceholderIdentifier::MinQueryOnIdx1,
-        &PlaceholderIdentifier::MaxQueryOnIdx1,
-    ]
-    .into_iter()
-    .chain(placeholder_ids)
-    .fold(*empty_poseidon_hash(), |acc, id| {
-        let inputs = acc
-            .to_fields()
-            .into_iter()
-            .chain(once(id.to_field()))
-            .collect_vec();
-        H::hash_no_pad(&inputs)
-    })
+pub(crate) fn placeholder_ids_hash<I: IntoIterator<Item = PlaceholderIdentifier>>(
+    placeholder_ids: I,
+) -> HashOut<F> {
+    placeholder_ids
+        .into_iter()
+        .fold(*empty_poseidon_hash(), |acc, id| {
+            let inputs = acc
+                .to_fields()
+                .into_iter()
+                .chain(once(id.to_field()))
+                .collect_vec();
+            H::hash_no_pad(&inputs)
+        })
 }
 
 #[cfg(test)]

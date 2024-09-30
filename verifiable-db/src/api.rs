@@ -12,19 +12,20 @@ use crate::{
 };
 use alloy::primitives::U256;
 use anyhow::Result;
+use log::info;
 use mp2_common::{
     default_config,
+    poseidon::H,
     proof::{serialize_proof, ProofWithVK},
     serialization::{deserialize, serialize},
     C, D, F,
 };
 use plonky2::{
-    hash::poseidon::PoseidonHash,
     iop::witness::PartialWitness,
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitData, VerifierOnlyCircuitData},
-        config::Hasher,
+        config::{Hasher, PoseidonGoldilocksConfig},
     },
 };
 use recursion_framework::framework::{
@@ -130,6 +131,8 @@ struct ParamsInfo {
     preprocessing_vk: VerifierOnlyCircuitData<C, D>,
 }
 
+type WrapC = PoseidonGoldilocksConfig;
+
 #[derive(Serialize, Deserialize)]
 /// Wrapper circuit around the different type of revelation circuits we expose. Reason we need one is to be able
 /// to always keep the same succinct wrapper circuit and Groth16 circuit regardless of the end result we submit
@@ -141,7 +144,7 @@ pub struct WrapCircuitParams<
 > {
     query_verifier_wires: RecursiveCircuitsVerifierTarget<D>,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    circuit_data: CircuitData<F, C, D>,
+    circuit_data: CircuitData<F, WrapC, D>,
 }
 
 impl<
@@ -151,7 +154,7 @@ impl<
     > WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
 where
     [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
-    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+    [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     pub fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
         let mut builder = CircuitBuilder::new(default_config());
@@ -190,7 +193,7 @@ where
         serialize_proof(&proof)
     }
 
-    pub fn circuit_data(&self) -> &CircuitData<F, C, D> {
+    pub fn circuit_data(&self) -> &CircuitData<F, WrapC, D> {
         &self.circuit_data
     }
 }
@@ -282,12 +285,15 @@ where
     pub fn build_params(preprocessing_params_info: &[u8]) -> Result<Self> {
         let params_info: ParamsInfo = bincode::deserialize(preprocessing_params_info)?;
         let query_params = QueryParams::build();
+        info!("Building the revelation circuit parameters...");
         let revelation_params = RevelationParams::build(
             query_params.get_circuit_set(),
             &params_info.preprocessing_circuit_set,
             &params_info.preprocessing_vk,
         );
+        info!("Building the final wrapping circuit parameters...");
         let wrap_circuit = WrapCircuitParams::build(revelation_params.get_circuit_set());
+        info!("All QUERY parameters built !");
         Ok(Self {
             query_params,
             revelation_params,
@@ -318,5 +324,55 @@ where
                 )
             }
         }
+    }
+
+    pub fn final_proof_circuit_data(&self) -> &CircuitData<F, WrapC, D> {
+        &self.wrap_circuit.circuit_data
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plonky2::plonk::proof::ProofWithPublicInputs;
+    use std::{fs::File, io::BufReader};
+
+    // Constants associating with test data.
+    const MAX_NUM_COLUMNS: usize = 20;
+    const MAX_NUM_PREDICATE_OPS: usize = 20;
+    const MAX_NUM_RESULT_OPS: usize = 20;
+    const MAX_NUM_OUTPUTS: usize = 3;
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
+    const MAX_NUM_PLACEHOLDERS: usize = 10;
+
+    // This is only used for testing on local.
+    #[ignore]
+    #[test]
+    fn test_local_proof_verification() {
+        const QUERY_PARAMS_FILE_PATH: &str = "test_data/query_params.bin";
+        const QUERY_PROOF_FILE_PATH: &str = "test_data/revelation";
+
+        // Load the query parameters.
+        let file = File::open(QUERY_PARAMS_FILE_PATH).unwrap();
+        let reader = BufReader::new(file);
+        let query_params: QueryParameters<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_OUTPUTS,
+            MAX_NUM_ITEMS_PER_OUTPUT,
+            MAX_NUM_PLACEHOLDERS,
+        > = bincode::deserialize_from(reader).unwrap();
+
+        // Load the query proof.
+        let file = File::open(QUERY_PROOF_FILE_PATH).unwrap();
+        let reader = BufReader::new(file);
+        let proof: ProofWithPublicInputs<F, WrapC, D> = bincode::deserialize_from(reader).unwrap();
+
+        query_params
+            .wrap_circuit
+            .circuit_data()
+            .verify(proof)
+            .unwrap();
     }
 }

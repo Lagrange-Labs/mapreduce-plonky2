@@ -1,10 +1,8 @@
+use anyhow::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::{collections::HashMap, fmt::Debug};
-
-use anyhow::*;
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 use crate::tree::TreeTopology;
 use crate::{Epoch, InitSettings};
@@ -32,20 +30,26 @@ where
     in_tx: bool,
     /// The successive states of the persisted value.
     ts: Vec<Option<T>>,
+    /// The initial epoch
+    epoch_offset: Epoch,
 }
 impl<T> VersionedStorage<T>
 where
     T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     fn new(initial_state: T) -> Self {
+        Self::new_at(initial_state, 0)
+    }
+
+    fn new_at(initial_state: T, epoch: Epoch) -> Self {
         Self {
             in_tx: false,
             ts: vec![Some(initial_state)],
+            epoch_offset: epoch,
         }
     }
 }
 
-#[async_trait]
 impl<T> TransactionalStorage for VersionedStorage<T>
 where
     T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
@@ -68,16 +72,18 @@ where
     }
 }
 
-#[async_trait]
 impl<T> EpochStorage<T> for VersionedStorage<T>
 where
     T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     fn current_epoch(&self) -> Epoch {
-        (self.ts.len() - 1).try_into().unwrap()
+        let inner_epoch: Epoch = (self.ts.len() - 1).try_into().unwrap();
+        inner_epoch + self.epoch_offset
     }
 
     async fn fetch_at(&self, epoch: Epoch) -> T {
+        let epoch = epoch - self.epoch_offset;
+        assert!(epoch >= 0);
         self.ts[epoch as usize].clone().unwrap()
     }
 
@@ -88,7 +94,13 @@ where
     }
 
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
-        ensure!(epoch >= 0, "unable to rollback before epoch 0");
+        ensure!(
+            epoch >= self.epoch_offset,
+            "unable to rollback before epoch {}",
+            self.epoch_offset
+        );
+
+        let epoch = epoch - self.epoch_offset;
         ensure!(
             epoch <= self.current_epoch(),
             "unable to rollback to epoch `{}` more recent than current epoch `{}`",
@@ -117,11 +129,18 @@ pub struct VersionedKvStorage<K: Debug, V: Debug> {
     /// is represented as a Some, whereas a deletion is represented by
     /// associating k to None.
     mem: Vec<HashMap<K, Option<V>>>,
+    /// The initial epoch
+    epoch_offset: Epoch,
 }
 impl<K: Debug, V: Debug> VersionedKvStorage<K, V> {
     pub fn new() -> Self {
+        Self::new_at(0)
+    }
+
+    pub fn new_at(initial_epoch: Epoch) -> Self {
         VersionedKvStorage {
             mem: vec![Default::default()],
+            epoch_offset: initial_epoch,
         }
     }
 
@@ -130,19 +149,25 @@ impl<K: Debug, V: Debug> VersionedKvStorage<K, V> {
     }
 }
 
-#[async_trait]
 impl<K, V> RoEpochKvStorage<K, V> for VersionedKvStorage<K, V>
 where
     K: Hash + Eq + Clone + Debug + Send + Sync,
     V: Clone + Debug + Send + Sync,
 {
+    fn initial_epoch(&self) -> Epoch {
+        self.epoch_offset
+    }
+
     fn current_epoch(&self) -> Epoch {
         // There is a 1-1 mapping between the epoch and the position in the list of
         // diffs; epoch 0 being the initial empty state.
-        (self.mem.len() - 1) as Epoch
+        let inner_epoch: Epoch = (self.mem.len() - 1) as Epoch;
+        inner_epoch + self.epoch_offset
     }
 
     async fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Option<V> {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
         // To fetch a key at a given epoch, the list of diffs up to the
         // requested epoch is iterated in reverse. The first occurence of k,
         // i.e. the most recent one, will be the current value.
@@ -175,9 +200,47 @@ where
         }
         count
     }
+
+    async fn size_at(&self, epoch: Epoch) -> usize {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
+        let mut keys = HashSet::new();
+
+        for i in 0..=epoch as usize {
+            keys.extend(self.mem[i].keys())
+        }
+
+        keys.len()
+    }
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<K> {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
+        let mut keys = HashSet::new();
+
+        for i in 0..=epoch as usize {
+            keys.extend(self.mem[i].keys())
+        }
+
+        keys.into_iter().cloned().collect()
+    }
+
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<K, V>> {
+        assert!(epoch >= self.epoch_offset);
+        let mut pairs = HashMap::new();
+        for i in 0..=epoch as usize {
+            for (k, v) in self.mem[i].iter() {
+                if let Some(v) = v.clone() {
+                    pairs.insert(k.clone(), v);
+                } else {
+                    pairs.remove(k);
+                }
+            }
+        }
+        Ok(pairs)
+    }
 }
 
-#[async_trait]
 impl<K, V> EpochKvStorage<K, V> for VersionedKvStorage<K, V>
 where
     K: Hash + Eq + Clone + Debug + Send + Sync,
@@ -201,7 +264,12 @@ where
     }
 
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
-        ensure!(epoch >= 0, "unable to rollback before epoch 0");
+        ensure!(
+            epoch >= self.epoch_offset,
+            "unable to rollback before epoch {}",
+            self.epoch_offset
+        );
+        let epoch = epoch - self.epoch_offset;
         ensure!(
             epoch <= self.current_epoch(),
             "unable to rollback to epoch `{}` more recent than current epoch `{}`",
@@ -228,16 +296,19 @@ pub struct InMemory<T: TreeTopology, V: Debug + Sync> {
 }
 impl<T: TreeTopology, V: Debug + Sync> InMemory<T, V> {
     pub fn new(tree_state: T::State) -> Self {
+        Self::new_at(tree_state, 0)
+    }
+
+    pub fn new_at(tree_state: T::State, initial_epoch: Epoch) -> Self {
         Self {
-            state: VersionedStorage::new(tree_state),
-            nodes: VersionedKvStorage::new(),
-            data: VersionedKvStorage::new(),
+            state: VersionedStorage::new_at(tree_state, initial_epoch),
+            nodes: VersionedKvStorage::new_at(initial_epoch),
+            data: VersionedKvStorage::new_at(initial_epoch),
             in_tx: false,
         }
     }
 }
 
-#[async_trait]
 impl<T: TreeTopology, V: Debug + Sync> FromSettings<T::State> for InMemory<T, V> {
     type Settings = ();
 
@@ -250,19 +321,22 @@ impl<T: TreeTopology, V: Debug + Sync> FromSettings<T::State> for InMemory<T, V>
             InitSettings::MustNotExist(tree_state) | InitSettings::Reset(tree_state) => {
                 Ok(Self::new(tree_state))
             }
+            InitSettings::MustNotExistAt(tree_state, initial_epoch)
+            | InitSettings::ResetAt(tree_state, initial_epoch) => {
+                Ok(Self::new_at(tree_state, initial_epoch))
+            }
         }
     }
 }
 
-#[async_trait]
 impl<T, V> TreeStorage<T> for InMemory<T, V>
 where
     T: TreeTopology,
     T::Node: Clone,
     V: Clone + Debug + Sync + Send,
 {
-    type StateStorage = VersionedStorage<<T as TreeTopology>::State>;
-    type NodeStorage = VersionedKvStorage<<T as TreeTopology>::Key, <T as TreeTopology>::Node>;
+    type StateStorage = VersionedStorage<T::State>;
+    type NodeStorage = VersionedKvStorage<T::Key, T::Node>;
 
     fn nodes(&self) -> &Self::NodeStorage {
         &self.nodes
@@ -281,7 +355,11 @@ where
     }
 
     async fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
-        self.nodes.mem[epoch as usize].keys().cloned().collect()
+        assert!(epoch >= self.nodes.epoch_offset);
+        self.nodes.mem[(epoch - self.nodes.epoch_offset) as usize]
+            .keys()
+            .cloned()
+            .collect()
     }
 
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
@@ -314,7 +392,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T, V> TransactionalStorage for InMemory<T, V>
 where
     T: TreeTopology,

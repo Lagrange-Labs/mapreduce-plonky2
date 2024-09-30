@@ -6,7 +6,6 @@ use itertools::Itertools;
 use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
-use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -19,6 +18,7 @@ use sha3::Digest;
 use sha3::Keccak256;
 
 use crate::array::Targetable;
+use crate::poseidon::{HashableField, H};
 use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
 
 const TWO_POWER_8: usize = 256;
@@ -277,7 +277,7 @@ pub fn hash_two_to_one<F: RichField, H: Hasher<F>>(
 }
 
 /// Pack the inputs (according to endianness) then compute the Poseidon hash value.
-pub fn pack_and_compute_poseidon_value<F: RichField>(
+pub fn pack_and_compute_poseidon_value<F: HashableField>(
     inputs: &[u8],
     endianness: Endianness,
 ) -> HashOut<F> {
@@ -288,11 +288,11 @@ pub fn pack_and_compute_poseidon_value<F: RichField>(
 
     let packed: Vec<_> = inputs.pack(endianness).to_fields();
 
-    PoseidonHash::hash_no_pad(&packed)
+    H::hash_no_pad(&packed)
 }
 
 /// Pack the inputs (according to endianness) then compute the Poseidon hash target.
-pub fn pack_and_compute_poseidon_target<F: RichField + Extendable<D>, const D: usize>(
+pub fn pack_and_compute_poseidon_target<F: HashableField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
     inputs: &[Target],
     endianness: Endianness,
@@ -304,7 +304,7 @@ pub fn pack_and_compute_poseidon_target<F: RichField + Extendable<D>, const D: u
 
     let packed = inputs.pack(b, endianness);
 
-    b.hash_n_to_hash_no_pad::<PoseidonHash>(packed)
+    b.hash_n_to_hash_no_pad::<H>(packed)
 }
 
 pub trait SelectHashBuilder {
@@ -749,6 +749,7 @@ mod test {
         greater_than, greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits,
         Endianness, PackerTarget,
     };
+    use crate::{C, D, F};
     use alloy::primitives::Address;
     use anyhow::Result;
     use plonky2::field::goldilocks_field::GoldilocksField;
@@ -757,7 +758,7 @@ mod test {
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+
     use rand::{thread_rng, Rng, RngCore};
 
     #[test]
@@ -775,9 +776,6 @@ mod test {
         rng.fill_bytes(&mut data);
 
         // instantiate a circuit which packs u8 into u32 with both endianness orders
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
@@ -831,9 +829,6 @@ mod test {
 
     #[test]
     fn test_bits_to_num() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -860,9 +855,6 @@ mod test {
 
     #[test]
     fn test_num_to_bits_valid() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -890,9 +882,6 @@ mod test {
 
     #[test]
     fn test_less_than() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -922,9 +911,6 @@ mod test {
 
     #[test]
     fn test_greater_than() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -948,9 +934,6 @@ mod test {
 
     #[test]
     fn test_less_than_or_equal_to() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);
@@ -974,9 +957,6 @@ mod test {
 
     #[test]
     fn test_greater_than_or_equal_to() -> Result<()> {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
         let config = CircuitConfig::standard_recursion_config();
         let pw = PartialWitness::new();
         let mut builder = CircuitBuilder::<F, D>::new(config);

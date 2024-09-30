@@ -2,12 +2,16 @@ use super::PrintableTree;
 use super::{MutableTree, NodeContext, NodePath, TreeTopology};
 use crate::storage::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TreeStorage};
 use anyhow::*;
-use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::{cmp::Ordering, fmt::Debug, hash::Hash, marker::PhantomData};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
+};
 
 /// The representation of a fraction as its numerator and denominator, allowing
 /// for efficient generation of the fraction and its inverse.
@@ -163,7 +167,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     }
 
     fn rec_depth<'a, S: TreeStorage<Tree<K>> + Sync>(k: &'a K, s: &'a S) -> BoxFuture<'a, usize> {
-        async move {
+        async {
             let n = &s.nodes().fetch(k).await;
             let depth_l = if let Some(left) = n.left.as_ref() {
                 Self::rec_depth(left, s).await + 1
@@ -457,24 +461,15 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     // --------------------------------------------------------------------------
     // Private methods
     // --------------------------------------------------------------------------
-    async fn rec_print<S: TreeStorage<Tree<K>>>(i: &K, d: usize, s: &S) {
+    async fn rec_print<S: TreeStorage<Tree<K>>>(i: &K, d: usize, s: &S, r: &mut String) {
         Box::pin(async move {
             let n = &s.nodes().fetch(i).await;
             if let Some(left) = n.left() {
-                Self::rec_print(left, d + 1, s).await;
+                Self::rec_print(left, d + 1, s, r).await;
             }
-            println!(
-                "{}{:?}/{} ({})",
-                "  |".repeat(d),
-                n.k,
-                n.parent
-                    .as_ref()
-                    .map(|x| format!("{:?}", x))
-                    .unwrap_or("None".to_string()),
-                n.subtree_size
-            );
+            r.push_str(&format!("{}{:?}\n", "    ".repeat(d), n.k,));
             if let Some(right) = n.right() {
-                Self::rec_print(right, d + 1, s).await;
+                Self::rec_print(right, d + 1, s, r).await;
             }
         })
         .await;
@@ -791,7 +786,6 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     }
 }
 
-#[async_trait]
 impl<K: Sync + Debug + Ord + Clone + Hash + Serialize + for<'a> Deserialize<'a>> TreeTopology
     for Tree<K>
 where
@@ -803,7 +797,11 @@ where
 
     async fn size<S: TreeStorage<Tree<K>>>(&self, s: &S) -> usize {
         if let Some(root) = s.state().fetch().await.root.as_ref() {
-            s.nodes().fetch(root).await.subtree_size
+            s.nodes()
+                .try_fetch(root)
+                .await
+                .unwrap_or_else(|| panic!("Failed to fetch {:?}", root))
+                .subtree_size
         } else {
             0
         }
@@ -866,7 +864,6 @@ where
     }
 }
 
-#[async_trait]
 impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send>
     MutableTree for Tree<K>
 {
@@ -879,15 +876,22 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     }
 }
 
-#[async_trait]
 impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send>
     PrintableTree for Tree<K>
 {
-    async fn print<S: TreeStorage<Tree<K>>>(&self, s: &S) {
+    async fn tree_to_string<S: TreeStorage<Tree<K>>>(&self, s: &S) -> String {
         if let Some(root) = s.state().fetch().await.root.as_ref() {
-            Self::rec_print(root, 0, s).await;
+            let mut r = String::new();
+            Self::rec_print(root, 0, s, &mut r).await;
+            r
         } else {
-            println!("EMPTY TREE");
+            "EMPTY TREE".into()
         }
+    }
+
+    async fn subtree_to_string<S: TreeStorage<Self>>(&self, s: &S, k: &Self::Key) -> String {
+        let mut r = String::new();
+        Self::rec_print(k, 0, s, &mut r).await;
+        r
     }
 }

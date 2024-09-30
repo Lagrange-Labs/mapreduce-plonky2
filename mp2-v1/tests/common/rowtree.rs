@@ -14,7 +14,7 @@ use mp2_v1::{
 use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
-        memory::InMemory,
+        pgsql::PgsqlStorage,
         updatetree::{Next, UpdateTree},
         RoEpochKvStorage,
     },
@@ -67,10 +67,10 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
     }
 }
 
-type RowStorage = InMemory<RowTree, RowPayload<BlockPrimaryIndex>>;
+pub type RowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
 pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// Given a row tree (i.e. secondary index tree) and its update tree, prove
     /// it.
     pub async fn prove_row_tree(
@@ -85,7 +85,8 @@ impl<P: ProofStorage> TestContext<P> {
         debug!("PROVE_ROW_TREE -- BEGIN for block {}", primary);
         let t = &table.row;
         let mut workplan = ut.into_workplan();
-        while let Some(Next::Ready(k)) = workplan.next() {
+        while let Some(Next::Ready(wk)) = workplan.next() {
+            let k = wk.k();
             let (context, row) = t.fetch_with_context(&k).await;
             let id = row.secondary_index_column;
             // Sec. index value
@@ -96,7 +97,7 @@ impl<P: ProofStorage> TestContext<P> {
             // generated.
             let cell_root_primary = row.fetch_cell_root_info().unwrap().primary;
             let cell_proof_key = CellProofIdentifier {
-                table: table.id.clone(),
+                table: table.public_name.clone(),
                 primary: cell_root_primary,
                 tree_key: row.cell_root_key.unwrap(),
                 secondary: k.clone(), // the cells proofs is already stored under the new key, even in the
@@ -126,17 +127,22 @@ impl<P: ProofStorage> TestContext<P> {
             let proof = if context.is_leaf() {
                 // Prove a leaf
                 println!(
-                    " \n PROVING ROW --> id {:?}, value {:?}, cell_tree_proof hash {:?}",
+                    " \n PROVING ROW --> id {:?}, value {:?}, cell_tree_proof hash {:?} - vs row.cell_root_hash {:?}",
                     id,
                     value,
-                    hex::encode(cell_root_hash_from_proof.clone())
+                    hex::encode(cell_root_hash_from_proof.clone()),
+                    hex::encode(row.cell_root_hash.unwrap().0)
                 );
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
                         .unwrap(),
                 );
                 debug!("Before proving leaf node row tree key {:?}", k);
-                api::generate_proof(self.params(), inputs).expect("while proving leaf")
+                self.b
+                    .bench("indexing::row_tree::leaf", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
+                    .expect("while proving leaf")
             } else if context.is_partial() {
                 let child_key = context
                     .left
@@ -147,7 +153,7 @@ impl<P: ProofStorage> TestContext<P> {
                 let child_row = table.row.fetch(&child_key).await;
 
                 let proof_key = RowProofIdentifier {
-                    table: table.id.clone(),
+                    table: table.public_name.clone(),
                     primary: child_row.primary_index_value(),
                     tree_key: child_key,
                 };
@@ -169,19 +175,23 @@ impl<P: ProofStorage> TestContext<P> {
                 );
 
                 debug!("Before proving partial node row tree key");
-                api::generate_proof(self.params(), inputs).expect("while proving partial node")
+                self.b
+                    .bench("indexing::row_tree::partial", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
+                    .expect("while proving partial node")
             } else {
                 let left_key = context.left.unwrap();
                 let left_row = table.row.fetch(&left_key).await;
                 let left_proof_key = RowProofIdentifier {
-                    table: table.id.clone(),
+                    table: table.public_name.clone(),
                     primary: left_row.primary_index_value(),
                     tree_key: left_key,
                 };
                 let right_key = context.right.unwrap();
                 let right_row = table.row.fetch(&right_key).await;
                 let right_proof_key = RowProofIdentifier {
-                    table: table.id.clone(),
+                    table: table.public_name.clone(),
                     primary: right_row.primary_index_value(),
                     tree_key: right_key,
                 };
@@ -206,10 +216,14 @@ impl<P: ProofStorage> TestContext<P> {
                     .unwrap(),
                 );
                 debug!("Before proving full node row tree key {:?}", k);
-                api::generate_proof(self.params(), inputs).expect("while proving full node")
+                self.b
+                    .bench("indexing::row_tree::full", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
+                    .expect("while proving full node")
             };
             let new_proof_key = RowProofIdentifier {
-                table: table.id.clone(),
+                table: table.public_name.clone(),
                 // we save the new proof under the new row key
                 primary,
                 tree_key: k.clone(),
@@ -224,12 +238,12 @@ impl<P: ProofStorage> TestContext<P> {
                 new_proof_key,
                 hex::encode(extract_hash_from_proof(&proof).unwrap().to_bytes())
             );
-            workplan.done(&k).unwrap();
+            workplan.done(&wk).unwrap();
         }
         let root = t.root().await.unwrap();
         let row = table.row.fetch(&root).await;
         let root_proof_key = RowProofIdentifier {
-            table: table.id.clone(),
+            table: table.public_name.clone(),
             primary: row.primary_index_value(),
             tree_key: root,
         };
@@ -285,7 +299,7 @@ impl<P: ProofStorage> TestContext<P> {
             value: U256::from(primary).into(),
             row_tree_root_key: root_proof_key.tree_key,
             row_tree_hash: table.row.root_data().await.unwrap().hash,
-            row_tree_root_primary: primary,
+            row_tree_root_primary: root_proof_key.primary,
             ..Default::default()
         })
     }

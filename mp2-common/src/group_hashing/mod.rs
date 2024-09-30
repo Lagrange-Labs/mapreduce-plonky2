@@ -5,8 +5,7 @@ use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::iop::target::BoolTarget;
 use plonky2::{
-    field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
-    plonk::circuit_builder::CircuitBuilder,
+    field::extension::Extendable, iop::target::Target, plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::curve::curve::Point;
 use plonky2_ecgfp5::gadgets::base_field::QuinticExtensionTarget;
@@ -31,6 +30,7 @@ pub use curve_add::{add_curve_point, add_weierstrass_point};
 /// Field-to-curve and curve point addition functions
 pub use field_to_curve::map_to_curve_point;
 
+use crate::poseidon::HashableField;
 use crate::types::CURVE_TARGET_LEN;
 use crate::utils::ToTargets;
 use crate::{
@@ -59,7 +59,7 @@ pub trait CircuitBuilderGroupHashing {
 
 impl<F, const D: usize> CircuitBuilderGroupHashing for CircuitBuilder<F, D>
 where
-    F: RichField + Extendable<D> + Extendable<EXTENSION_DEGREE>,
+    F: HashableField + Extendable<D> + Extendable<EXTENSION_DEGREE>,
     Self: CircuitBuilderGFp5<F> + CircuitBuilderEcGFp5,
 {
     fn add_curve_point(&mut self, targets: &[CurveTarget]) -> CurveTarget {
@@ -118,7 +118,7 @@ impl ToTargets for CurveTarget {
     }
 }
 
-impl FromFields<GFp> for WeierstrassPoint {
+impl FromFields<GoldilocksField> for WeierstrassPoint {
     fn from_fields(t: &[GFp]) -> Self {
         let x = std::array::from_fn::<_, EXTENSION_DEGREE, _>(|i| t[i]);
         let y = std::array::from_fn::<_, EXTENSION_DEGREE, _>(|i| t[i + EXTENSION_DEGREE]);

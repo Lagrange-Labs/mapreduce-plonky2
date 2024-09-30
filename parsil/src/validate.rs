@@ -1,241 +1,261 @@
-use anyhow::*;
 use sqlparser::ast::{
-    BinaryOperator, Expr, GroupByExpr, JoinConstraint, JoinOperator, OrderBy, Query, Select,
-    SelectItem, SetExpr, TableFactor, TableWithJoins, UnaryOperator, Value,
-    WildcardAdditionalOptions,
+    BinaryOperator, Distinct, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr,
+    JoinOperator, Offset, OffsetRows, OrderBy, OrderByExpr, Query, Select, SelectItem, SetExpr,
+    TableFactor, UnaryOperator, Value,
 };
 
-fn validate_unary_op(o: &UnaryOperator) -> Result<()> {
-    match o {
-        UnaryOperator::Plus | UnaryOperator::Not => Ok(()),
-        _ => bail!("{o}: unsupported operator"),
-    }
-}
+use crate::{
+    errors::ValidationError,
+    symbols::ContextProvider,
+    utils::{str_to_u256, ParsilSettings},
+    visitor::{AstVisitor, Visit},
+};
 
-fn validate_binary_op(op: &BinaryOperator) -> Result<()> {
-    match op {
-        BinaryOperator::Eq
-        | BinaryOperator::NotEq
-        | BinaryOperator::Plus
-        | BinaryOperator::Minus
-        | BinaryOperator::Multiply
-        | BinaryOperator::Divide
-        | BinaryOperator::Modulo
-        | BinaryOperator::Gt
-        | BinaryOperator::Lt
-        | BinaryOperator::GtEq
-        | BinaryOperator::LtEq
-        | BinaryOperator::And
-        | BinaryOperator::Or
-        | BinaryOperator::Xor => Ok(()),
-
-        BinaryOperator::StringConcat
-        | BinaryOperator::Spaceship
-        | BinaryOperator::BitwiseOr
-        | BinaryOperator::BitwiseAnd
-        | BinaryOperator::BitwiseXor
-        | BinaryOperator::DuckIntegerDivide
-        | BinaryOperator::MyIntegerDivide
-        | BinaryOperator::Custom(_)
-        | BinaryOperator::PGBitwiseXor
-        | BinaryOperator::PGBitwiseShiftLeft
-        | BinaryOperator::PGBitwiseShiftRight
-        | BinaryOperator::PGExp
-        | BinaryOperator::PGOverlap
-        | BinaryOperator::PGRegexMatch
-        | BinaryOperator::PGRegexIMatch
-        | BinaryOperator::PGRegexNotMatch
-        | BinaryOperator::PGRegexNotIMatch
-        | BinaryOperator::PGLikeMatch
-        | BinaryOperator::PGILikeMatch
-        | BinaryOperator::PGNotLikeMatch
-        | BinaryOperator::PGNotILikeMatch
-        | BinaryOperator::PGStartsWith
-        | BinaryOperator::Arrow
-        | BinaryOperator::LongArrow
-        | BinaryOperator::HashArrow
-        | BinaryOperator::HashLongArrow
-        | BinaryOperator::AtAt
-        | BinaryOperator::AtArrow
-        | BinaryOperator::ArrowAt
-        | BinaryOperator::HashMinus
-        | BinaryOperator::AtQuestion
-        | BinaryOperator::Question
-        | BinaryOperator::QuestionAnd
-        | BinaryOperator::QuestionPipe
-        | BinaryOperator::PGCustomBinaryOperator(_) => bail!("{op}: unsupported operator"),
-    }
-}
-
-fn validate_expr(e: &Expr) -> Result<()> {
-    match e {
-        Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {}
-        Expr::IsFalse(e) | Expr::IsNotFalse(e) | Expr::IsTrue(e) | Expr::IsNotTrue(e) => {
-            validate_expr(e)?;
+macro_rules! ensure {
+    ($cond:expr, $error:expr) => {
+        if !$cond {
+            return Err($error);
         }
-        Expr::InList { expr, list, .. } => {
-            validate_expr(expr)?;
-            for e in list.iter() {
-                validate_expr(e)?;
+    };
+}
+
+/// Ensure that a top-level [`Query`] is compatible with the currently
+/// implemented subset of SQL.
+pub struct SqlValidator<'a, C: ContextProvider> {
+    settings: &'a ParsilSettings<C>,
+}
+impl<'a, C: ContextProvider> AstVisitor for SqlValidator<'a, C> {
+    type Error = ValidationError;
+
+    fn pre_unary_operator(&mut self, unary_operator: &UnaryOperator) -> Result<(), Self::Error> {
+        match unary_operator {
+            UnaryOperator::Plus | UnaryOperator::Not => Ok(()),
+            _ => Err(ValidationError::UnsupportedUnaryOperator(*unary_operator)),
+        }
+    }
+
+    fn pre_binary_operator(&mut self, op: &BinaryOperator) -> Result<(), ValidationError> {
+        match op {
+            BinaryOperator::Eq
+            | BinaryOperator::NotEq
+            | BinaryOperator::Plus
+            | BinaryOperator::Minus
+            | BinaryOperator::Multiply
+            | BinaryOperator::Divide
+            | BinaryOperator::Modulo
+            | BinaryOperator::Gt
+            | BinaryOperator::Lt
+            | BinaryOperator::GtEq
+            | BinaryOperator::LtEq
+            | BinaryOperator::And
+            | BinaryOperator::Or
+            | BinaryOperator::Xor => Ok(()),
+
+            _ => Err(ValidationError::UnsupportedBinaryOperator(op.clone())),
+        }
+    }
+
+    fn pre_expr(&mut self, expr: &Expr) -> Result<(), ValidationError> {
+        match expr {
+            Expr::Identifier(name) => {
+                ensure!(
+                    !name.value.starts_with("__"),
+                    ValidationError::ReservedIdentifier(name.value.to_owned())
+                );
+            }
+            Expr::CompoundIdentifier(names) => {
+                let latest = names.last().unwrap();
+                ensure!(
+                    !latest.value.starts_with("__"),
+                    ValidationError::ReservedIdentifier(latest.value.to_owned())
+                );
+            }
+            Expr::IsFalse(_)
+            | Expr::IsNotFalse(_)
+            | Expr::IsTrue(_)
+            | Expr::IsNotTrue(_)
+            | Expr::InList { .. }
+            | Expr::Between { .. }
+            | Expr::BinaryOp { .. }
+            | Expr::UnaryOp { .. }
+            | Expr::Nested(_) => {}
+
+            Expr::Function(funcall) => {
+                ensure!(
+                    funcall.name.0.len() == 1,
+                    ValidationError::UnknownFunction(funcall.name.to_string())
+                );
+
+                if let FunctionArguments::List(arglist) = &funcall.args {
+                    ensure!(
+                        arglist.args.len() == 1,
+                        ValidationError::InvalidArity(
+                            funcall.name.to_string(),
+                            1,
+                            arglist.args.len()
+                        )
+                    );
+                    match &arglist.args[0] {
+                        FunctionArg::Unnamed(FunctionArgExpr::Expr(_)) => {}
+                        _ => {
+                            return Err(ValidationError::InvalidFunctionArgument(
+                                arglist.args[0].to_string(),
+                            ))
+                        }
+                    }
+                } else {
+                    return Err(ValidationError::InvalidFunctionArgument(format!(
+                        "{}",
+                        funcall.args
+                    )));
+                }
+            }
+
+            Expr::Value(v) => match v {
+                Value::Number(_, _) | Value::Boolean(_) => {}
+                Value::Placeholder(p) => {
+                    self.settings
+                        .placeholders
+                        .resolve_placeholder(p)
+                        .map_err(|_| ValidationError::UnknownPlaceholder(p.to_owned()))?;
+                }
+                Value::SingleQuotedString(s) => {
+                    str_to_u256(s).map_err(|_| ValidationError::InvalidInteger(s.to_owned()))?;
+                }
+                Value::HexStringLiteral(_)
+                | Value::DollarQuotedString(_)
+                | Value::TripleSingleQuotedString(_)
+                | Value::TripleDoubleQuotedString(_)
+                | Value::EscapedStringLiteral(_)
+                | Value::SingleQuotedByteStringLiteral(_)
+                | Value::DoubleQuotedByteStringLiteral(_)
+                | Value::TripleSingleQuotedByteStringLiteral(_)
+                | Value::TripleDoubleQuotedByteStringLiteral(_)
+                | Value::SingleQuotedRawStringLiteral(_)
+                | Value::DoubleQuotedRawStringLiteral(_)
+                | Value::TripleSingleQuotedRawStringLiteral(_)
+                | Value::TripleDoubleQuotedRawStringLiteral(_)
+                | Value::NationalStringLiteral(_)
+                | Value::DoubleQuotedString(_)
+                | Value::Null => {
+                    return Err(ValidationError::UnsupportedImmediateValue(v.to_string()))
+                }
+            },
+            Expr::Subquery(s) => {
+                return Err(ValidationError::NestedSelect(s.to_string()));
+            }
+
+            Expr::AnyOp { .. }
+            | Expr::Tuple(_)
+            | Expr::AllOp { .. }
+            | Expr::InSubquery { .. }
+            | Expr::InUnnest { .. }
+            | Expr::IsNull(_)
+            | Expr::IsNotNull(_)
+            | Expr::IsUnknown(_)
+            | Expr::IsNotUnknown(_)
+            | Expr::IsDistinctFrom(_, _)
+            | Expr::IsNotDistinctFrom(_, _)
+            | Expr::JsonAccess { .. }
+            | Expr::CompositeAccess { .. }
+            | Expr::AtTimeZone { .. }
+            | Expr::Extract { .. }
+            | Expr::Substring { .. }
+            | Expr::Overlay { .. }
+            | Expr::Trim { .. }
+            | Expr::Ceil { .. }
+            | Expr::Floor { .. }
+            | Expr::Convert { .. }
+            | Expr::Cast { .. }
+            | Expr::Position { .. }
+            | Expr::Collate { .. }
+            | Expr::Like { .. }
+            | Expr::ILike { .. }
+            | Expr::SimilarTo { .. }
+            | Expr::RLike { .. }
+            | Expr::Interval(_)
+            | Expr::MatchAgainst { .. }
+            | Expr::Struct { .. }
+            | Expr::Dictionary(_)
+            | Expr::Subscript { .. }
+            | Expr::Array(_)
+            | Expr::GroupingSets(_)
+            | Expr::Cube(_)
+            | Expr::Rollup(_)
+            | Expr::IntroducedString { .. }
+            | Expr::TypedString { .. }
+            | Expr::MapAccess { .. }
+            | Expr::Exists { .. }
+            | Expr::Case { .. }
+            | Expr::Named { .. }
+            | Expr::Wildcard
+            | Expr::QualifiedWildcard(_)
+            | Expr::OuterJoin(_)
+            | Expr::Prior(_)
+            | Expr::Lambda(_)
+            | Expr::Map(_) => return Err(ValidationError::UnsupportedFeature(expr.to_string())),
+        }
+        Ok(())
+    }
+
+    fn pre_select_item(&mut self, p: &SelectItem) -> Result<(), ValidationError> {
+        match p {
+            SelectItem::Wildcard(w) => {
+                ensure!(
+                    w.opt_ilike.is_none(),
+                    ValidationError::UnsupportedFeature("ILIKE".into())
+                );
+                ensure!(
+                    w.opt_exclude.is_none(),
+                    ValidationError::UnsupportedFeature("EXCLUDE".into())
+                );
+                ensure!(
+                    w.opt_except.is_none(),
+                    ValidationError::UnsupportedFeature("EXCEPT".into())
+                );
+                ensure!(
+                    w.opt_replace.is_none(),
+                    ValidationError::UnsupportedFeature("REPLACE".into())
+                );
+                ensure!(
+                    w.opt_rename.is_none(),
+                    ValidationError::UnsupportedFeature("RENAME".into())
+                );
+                Ok(())
+            }
+            SelectItem::QualifiedWildcard(_, _) => {
+                Err(ValidationError::UnsupportedFeature(p.to_string()))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn pre_table_factor(&mut self, j: &TableFactor) -> Result<(), ValidationError> {
+        match j {
+            TableFactor::Table { .. } => Ok(()),
+            TableFactor::Derived { .. } => {
+                // NOTE: when the time comes, let us be careful of LATERAL joins
+                Err(ValidationError::NestedSelect(j.to_string()))
+            }
+            TableFactor::TableFunction { .. }
+            | TableFactor::Function { .. }
+            | TableFactor::UNNEST { .. }
+            | TableFactor::JsonTable { .. }
+            | TableFactor::NestedJoin { .. }
+            | TableFactor::Pivot { .. }
+            | TableFactor::Unpivot { .. }
+            | TableFactor::MatchRecognize { .. } => {
+                Err(ValidationError::UnsupportedJointure(format!("{j}:#?")))
             }
         }
-        Expr::Between {
-            expr, low, high, ..
-        } => {
-            validate_expr(expr)?;
-            validate_expr(low)?;
-            validate_expr(high)?;
-        }
-        Expr::BinaryOp { left, op, right } => {
-            validate_binary_op(op)?;
-            validate_expr(left)?;
-            validate_expr(right)?;
-        }
-        Expr::UnaryOp { op, expr } => {
-            validate_unary_op(op)?;
-            validate_expr(expr)?;
-        }
-
-        Expr::Nested(e) => {
-            validate_expr(e)?;
-        }
-        Expr::AnyOp { left, right, .. } | Expr::AllOp { left, right, .. } => {
-            bail!("unsupported for now");
-            validate_expr(left)?;
-            validate_expr(right)?;
-        }
-        Expr::Value(v) => match v {
-            Value::Placeholder(_) | Value::Number(_, _) | Value::Boolean(_) => {}
-            Value::HexStringLiteral(s) => ensure!(s.len() <= 32, "{s}: more than 32 bytes"),
-            Value::SingleQuotedString(_)
-            | Value::DollarQuotedString(_)
-            | Value::TripleSingleQuotedString(_)
-            | Value::TripleDoubleQuotedString(_)
-            | Value::EscapedStringLiteral(_)
-            | Value::SingleQuotedByteStringLiteral(_)
-            | Value::DoubleQuotedByteStringLiteral(_)
-            | Value::TripleSingleQuotedByteStringLiteral(_)
-            | Value::TripleDoubleQuotedByteStringLiteral(_)
-            | Value::SingleQuotedRawStringLiteral(_)
-            | Value::DoubleQuotedRawStringLiteral(_)
-            | Value::TripleSingleQuotedRawStringLiteral(_)
-            | Value::TripleDoubleQuotedRawStringLiteral(_)
-            | Value::NationalStringLiteral(_)
-            | Value::DoubleQuotedString(_)
-            | Value::Null => bail!("{v}: unsupported immediate value"),
-        },
-        Expr::Tuple(es) => {
-            for e in es {
-                validate_expr(e)?;
-            }
-        }
-
-        Expr::Subquery(s) => {
-            validate_query(s)?;
-            // NOTE: probably soon supported
-            bail!("{s}: nested selects not supported");
-        }
-
-        Expr::InSubquery { .. }
-        | Expr::InUnnest { .. }
-        | Expr::IsNull(_)
-        | Expr::IsNotNull(_)
-        | Expr::IsUnknown(_)
-        | Expr::IsNotUnknown(_)
-        | Expr::IsDistinctFrom(_, _)
-        | Expr::IsNotDistinctFrom(_, _)
-        | Expr::JsonAccess { .. }
-        | Expr::CompositeAccess { .. }
-        | Expr::AtTimeZone { .. }
-        | Expr::Extract { .. }
-        | Expr::Substring { .. }
-        | Expr::Overlay { .. }
-        | Expr::Trim { .. }
-        | Expr::Ceil { .. }
-        | Expr::Floor { .. }
-        | Expr::Convert { .. }
-        | Expr::Cast { .. }
-        | Expr::Position { .. }
-        | Expr::Collate { .. }
-        | Expr::Like { .. }
-        | Expr::ILike { .. }
-        | Expr::SimilarTo { .. }
-        | Expr::RLike { .. }
-        | Expr::Interval(_)
-        | Expr::MatchAgainst { .. }
-        | Expr::Struct { .. }
-        | Expr::Dictionary(_)
-        | Expr::Subscript { .. }
-        | Expr::Array(_)
-        | Expr::GroupingSets(_)
-        | Expr::Cube(_)
-        | Expr::Rollup(_)
-        | Expr::IntroducedString { .. }
-        | Expr::TypedString { .. }
-        | Expr::MapAccess { .. }
-        | Expr::Function(_)
-        | Expr::Exists { .. }
-        | Expr::Case { .. }
-        | Expr::Named { .. }
-        | Expr::Wildcard
-        | Expr::QualifiedWildcard(_)
-        | Expr::OuterJoin(_)
-        | Expr::Prior(_)
-        | Expr::Lambda(_)
-        | Expr::Map(_) => {
-            bail!("{}: unsupported", e)
-        }
     }
-    Ok(())
-}
 
-fn validate_projection(p: &SelectItem) -> Result<()> {
-    match p {
-        SelectItem::UnnamedExpr(e) => validate_expr(e),
-        SelectItem::ExprWithAlias { expr, .. } => validate_expr(expr),
-        SelectItem::QualifiedWildcard(_, _) => bail!("{p} not supported"),
-        SelectItem::Wildcard(w) => validate_wildcard(w),
-    }
-}
-
-fn validate_wildcard(w: &WildcardAdditionalOptions) -> Result<()> {
-    ensure!(w.opt_ilike.is_none(), "ILIKE is not supported");
-    ensure!(w.opt_exclude.is_none(), "EXCLUDE is not supported");
-    ensure!(w.opt_except.is_none(), "EXCEPT is not supported");
-    ensure!(w.opt_replace.is_none(), "REPLACE is not supported");
-    ensure!(w.opt_rename.is_none(), "RENAME is not supported");
-
-    Ok(())
-}
-
-fn validate_join_constraint(c: &JoinConstraint) -> Result<()> {
-    match c {
-        JoinConstraint::On(e) => validate_expr(e),
-        JoinConstraint::Using(_) | JoinConstraint::Natural | JoinConstraint::None => Ok(()),
-    }
-}
-
-fn validate_from(f: &TableWithJoins) -> Result<()> {
-    match &f.relation {
-        // TODO: add symbol resolution
-        TableFactor::Table { .. } => Ok(()),
-        TableFactor::Derived { .. }
-        | TableFactor::TableFunction { .. }
-        | TableFactor::Function { .. }
-        | TableFactor::UNNEST { .. }
-        | TableFactor::JsonTable { .. }
-        | TableFactor::NestedJoin { .. }
-        | TableFactor::Pivot { .. }
-        | TableFactor::Unpivot { .. }
-        | TableFactor::MatchRecognize { .. } => bail!("{}: unsupported relation", f.relation),
-    }?;
-
-    for join in &f.joins {
-        match &join.join_operator {
-            JoinOperator::Inner(c)
-            | JoinOperator::LeftOuter(c)
-            | JoinOperator::RightOuter(c)
-            | JoinOperator::FullOuter(c) => validate_join_constraint(c)?,
+    fn pre_join_operator(&mut self, j: &JoinOperator) -> Result<(), ValidationError> {
+        match j {
+            JoinOperator::Inner(_)
+            | JoinOperator::LeftOuter(_)
+            | JoinOperator::RightOuter(_)
+            | JoinOperator::FullOuter(_) => Ok(()),
 
             JoinOperator::CrossJoin
             | JoinOperator::LeftSemi(_)
@@ -244,106 +264,151 @@ fn validate_from(f: &TableWithJoins) -> Result<()> {
             | JoinOperator::RightAnti(_)
             | JoinOperator::CrossApply
             | JoinOperator::OuterApply
-            | JoinOperator::AsOf { .. } => bail!("{:?}: non-standard syntax", join.join_operator),
+            | JoinOperator::AsOf { .. } => Err(ValidationError::NonStandardSql(format!("{j:#?}"))),
         }
     }
-    Ok(())
-}
 
-fn validate_select(s: &Select) -> Result<()> {
-    ensure!(s.distinct.is_none(), "DISTINCT is not supported");
-    ensure!(s.top.is_none(), "TOP is an MSSQL syntax");
-    for p in s.projection.iter() {
-        validate_projection(p)?;
-    }
-    ensure!(s.into.is_none(), "{s}: SELECT ... INTO not supported");
-    for f in s.from.iter() {
-        validate_from(f)?;
-    }
-    ensure!(s.lateral_views.is_empty(), "LATERAL VIEW unsupported");
-    if let Some(selection) = s.selection.as_ref() {
-        validate_expr(selection)?;
-    }
-    match &s.group_by {
-        GroupByExpr::All(_) => bail!("{}: non-standard syntax", s.group_by),
-        GroupByExpr::Expressions(es, _) => ensure!(es.is_empty(), "GROUP BY not supported"),
-    }
-    ensure!(s.cluster_by.is_empty(), "CLUSTER BY not supported");
-    ensure!(
-        s.distribute_by.is_empty(),
-        "DISTRIBUTE BY is a Spark-specific syntax extension"
-    );
-    for sort in &s.sort_by {
-        validate_expr(sort)?;
-    }
-    if let Some(having) = s.having.as_ref() {
-        validate_expr(having)?;
-    }
-    ensure!(s.named_window.is_empty(), "windows are not supporrted");
-    ensure!(
-        s.qualify.is_none(),
-        "QUALIFY is a Snowflake-specific extension"
-    );
-    ensure!(
-        s.value_table_mode.is_none(),
-        "{:?}: BigQuery-specific extension",
-        s.value_table_mode
-    );
-    ensure!(
-        s.connect_by.is_none(),
-        "STARTING WITH ... CONNECT BY: OracleSQL-specific syntax extension"
-    );
-
-    Ok(())
-}
-
-fn validate_setexpr(s: &SetExpr) -> Result<()> {
-    match s {
-        SetExpr::Select(s) => validate_select(s),
-        SetExpr::Query(q) => bail!("{s}: nested queries are not supported"),
-        SetExpr::SetOperation { .. } => bail!("{s}: set operations are not supported"),
-        SetExpr::Values(_) | SetExpr::Insert(_) | SetExpr::Update(_) | SetExpr::Table(_) => {
-            bail!("{s}: mutable queries not supported")
+    fn pre_distinct(&mut self, distinct: &Distinct) -> Result<(), ValidationError> {
+        match distinct {
+            Distinct::Distinct => Ok(()),
+            Distinct::On(_) => Err(ValidationError::UnsupportedFeature("DISTINCT ON".into())),
         }
     }
-}
 
-fn validate_order_by(o: &OrderBy) -> Result<()> {
-    for e in &o.exprs {
+    fn pre_offset(&mut self, offset: &Offset) -> Result<(), ValidationError> {
+        match offset.rows {
+            OffsetRows::None => Ok(()),
+            OffsetRows::Row | OffsetRows::Rows => {
+                Err(ValidationError::UnsupportedFeature(offset.to_string()))
+            }
+        }
+    }
+
+    fn pre_select(&mut self, s: &Select) -> Result<(), ValidationError> {
         ensure!(
-            e.nulls_first.is_none(),
-            "NULL-related specifiers not supported"
+            s.top.is_none(),
+            ValidationError::NonStandardSql("TOP".into())
         );
-        validate_expr(&e.expr)?;
+        ensure!(
+            s.into.is_none(),
+            ValidationError::UnsupportedFeature("SELECT ... INTO not supported".into())
+        );
+        ensure!(
+            s.lateral_views.is_empty(),
+            ValidationError::UnsupportedFeature("LATERAL VIEW".into())
+        );
+        match &s.group_by {
+            GroupByExpr::All(_) => {
+                return Err(ValidationError::NonStandardSql(s.group_by.to_string()))
+            }
+            GroupByExpr::Expressions(es, _) => ensure!(
+                es.is_empty(),
+                ValidationError::UnsupportedFeature("GROUP BY".into())
+            ),
+        };
+        ensure!(
+            s.cluster_by.is_empty(),
+            ValidationError::UnsupportedFeature("CLUSTER BY".into())
+        );
+        ensure!(
+            s.distribute_by.is_empty(),
+            ValidationError::NonStandardSql("DISTRIBUTE BY".into())
+        );
+        ensure!(
+            s.named_window.is_empty(),
+            ValidationError::UnsupportedFeature("windows".into())
+        );
+        ensure!(
+            s.qualify.is_none(),
+            ValidationError::UnsupportedFeature("QUALIFY".into())
+        );
+        ensure!(
+            s.value_table_mode.is_none(),
+            ValidationError::NonStandardSql(s.value_table_mode.unwrap().to_string())
+        );
+        ensure!(
+            s.connect_by.is_none(),
+            ValidationError::NonStandardSql("STARTING WITH ... CONNECT BY".into())
+        );
+        Ok(())
     }
-    ensure!(
-        o.interpolate.is_none(),
-        "{:?}: unsupported clickhouse extension",
-        o.interpolate
-    );
-    Ok(())
-}
 
-/// Ensure that a [`Query`] is compatible with the currently implemented subset
-/// of SQL.
-fn validate_query(q: &Query) -> Result<()> {
-    ensure!(q.with.is_none(), "CTEs are not supported");
-    ensure!(q.limit_by.is_empty(), "LIMIT BY not supported");
-    ensure!(q.offset.is_none(), "OFFSET is an Oracle syntax");
-    ensure!(q.locks.is_empty(), "locks not supported");
-    ensure!(q.for_clause.is_none(), "FOR is an MSSQL extension");
-    if let Some(o) = q.order_by.as_ref() {
-        validate_order_by(o)?;
+    fn pre_set_expr(&mut self, s: &SetExpr) -> Result<(), ValidationError> {
+        match s {
+            SetExpr::Select(_) => Ok(()),
+            SetExpr::Query(_) => Err(ValidationError::NestedSelect(s.to_string())),
+            SetExpr::SetOperation { .. } => Err(ValidationError::SetOperation(s.to_string())),
+            SetExpr::Values(_) | SetExpr::Insert(_) | SetExpr::Update(_) | SetExpr::Table(_) => {
+                Err(ValidationError::MutableQueries(s.to_string()))
+            }
+        }
     }
-    validate_setexpr(&q.body)
-}
 
-/// Ensure that a top-level [`Query`] is compatible with the currently
-/// implemented subset of SQL.
-pub fn validate(query: &Query) -> Result<()> {
-    ensure!(
-        matches!(*query.body, SetExpr::Select(_)),
-        "query body should be a SELECT statement"
-    );
-    validate_query(query)
+    fn pre_order_by(&mut self, o: &OrderBy) -> Result<(), ValidationError> {
+        ensure!(
+            o.exprs.len() <= 2,
+            ValidationError::OrderByArity(format!("{o:?}"), 2)
+        );
+        ensure!(
+            o.interpolate.is_none(),
+            ValidationError::NonStandardSql(format!("{:?}", o.interpolate.as_ref().unwrap()))
+        );
+        Ok(())
+    }
+
+    fn pre_order_by_expr(&mut self, o: &OrderByExpr) -> Result<(), ValidationError> {
+        ensure!(
+            o.nulls_first.is_none(),
+            ValidationError::NullRelatedOrdering
+        );
+        Ok(())
+    }
+
+    fn pre_query(&mut self, q: &Query) -> Result<(), ValidationError> {
+        ensure!(
+            q.with.is_none(),
+            ValidationError::UnsupportedFeature("CTEs".into())
+        );
+        ensure!(
+            q.limit_by.is_empty(),
+            ValidationError::UnsupportedFeature("LIMIT BY".into())
+        );
+        ensure!(
+            q.locks.is_empty(),
+            ValidationError::UnsupportedFeature("locks".into())
+        );
+        ensure!(
+            q.for_clause.is_none(),
+            ValidationError::NonStandardSql("FOR".into())
+        );
+        ensure!(
+            q.fetch.is_none(),
+            ValidationError::NonStandardSql("FETCH".into())
+        );
+        Ok(())
+    }
+}
+/// Instantiate a new [`Validator`] and validate this query with it.
+pub fn validate<C: ContextProvider>(
+    settings: &ParsilSettings<C>,
+    query: &Query,
+) -> Result<(), ValidationError> {
+    if let SetExpr::Select(ref select) = *query.body {
+        ensure!(
+            select.projection.iter().all(|s| matches!(
+                s,
+                SelectItem::UnnamedExpr(Expr::Function(_))
+                    | SelectItem::ExprWithAlias {
+                        expr: Expr::Function(_),
+                        ..
+                    }
+            )),
+            ValidationError::TabularQuery
+        );
+    } else {
+        return Err(ValidationError::NotASelect);
+    }
+
+    let mut validator = SqlValidator { settings };
+    query.visit(&mut validator)
 }

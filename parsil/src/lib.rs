@@ -1,24 +1,44 @@
+use anyhow::Context;
 use anyhow::Result;
-use sqlparser::ast::Query;
+use executor::TranslatedQuery;
+use symbols::ContextProvider;
+pub use utils::parse_and_validate;
+pub use utils::ParsilSettings;
+pub use utils::PlaceholderSettings;
+pub use utils::DEFAULT_MAX_BLOCK_PLACEHOLDER;
+pub use utils::DEFAULT_MIN_BLOCK_PLACEHOLDER;
+use verifiable_db::query::aggregation::QueryBounds;
 
-mod execute;
+pub mod assembler;
+pub mod bracketer;
+pub mod errors;
+pub mod executor;
 mod expand;
-mod inject;
+pub mod isolator;
 mod parser;
-mod symbols;
+mod placeholders;
+pub mod queries;
+pub mod symbols;
 #[cfg(test)]
 mod tests;
+mod utils;
 mod validate;
+mod visitor;
 
-/// Given an SQL `query`:
-///  - parse it;
-///  - ensure that it validates Lagrange requirements;
-///  - expand it into base operations processable by the proof system.
-///
-/// Return an error if any of these steps failed.
-pub fn prepare(query: &str) -> Result<Query> {
-    let mut query = parser::parse(query)?;
-    validate::validate(&query)?;
-    expand::expand_query(&mut query);
-    Ok(query)
+/// Given an SQL query textual representation, ensure it satisfies all the
+/// criterion imposed by the current proving architecture.
+pub fn check<C: ContextProvider>(query: &str, settings: &ParsilSettings<C>) -> Result<()> {
+    parse_and_validate(query, settings).map(|_| ())
+}
+
+/// Generate a SQL queries to fetch the keys and blocks where the conditions on
+/// the primary (and potentially secondary) index is satisfied.
+pub fn keys_in_index_boundaries<C: ContextProvider>(
+    query: &str,
+    settings: &ParsilSettings<C>,
+    bounds: &QueryBounds,
+) -> Result<TranslatedQuery> {
+    let mut q = parse_and_validate(query, settings).context("while validating query")?;
+    q = isolator::isolate(&q, settings, bounds).context("while isolating indices")?;
+    executor::generate_query_keys(&mut q, settings).context("while generating query keys")
 }

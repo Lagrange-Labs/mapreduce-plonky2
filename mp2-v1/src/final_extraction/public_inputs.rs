@@ -4,9 +4,10 @@ use alloy::primitives::U256;
 use mp2_common::{
     keccak::{OutputHash, PACKED_HASH_LEN},
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::{CBuilder, GFp, CURVE_TARGET_LEN},
+    types::{CBuilder, CURVE_TARGET_LEN},
     u256::{self, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
+    F,
 };
 use plonky2::iop::target::Target;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
@@ -75,7 +76,7 @@ impl<'a> ExtractionPI<'a> for PublicInputs<'a, Target> {
     }
 
     fn primary_index_value(&self) -> Vec<Target> {
-        self.block_number().to_targets()
+        self.block_number_target().to_targets()
     }
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -87,7 +88,7 @@ impl<'a> ExtractionPIWrap for PublicInputs<'a, Target> {
     type PI<'b> = PublicInputs<'b, Target>;
 }
 
-impl<'a> PublicInputs<'a, GFp> {
+impl<'a> PublicInputs<'a, F> {
     /// Get the metadata point.
     pub fn metadata_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.dm)
@@ -138,7 +139,7 @@ impl<'a> PublicInputs<'a, Target> {
         CurveTarget::from_targets(dm)
     }
 
-    pub fn block_number(&self) -> UInt256Target {
+    pub fn block_number_target(&self) -> UInt256Target {
         UInt256Target::from_targets(self.bn)
     }
 }
@@ -192,10 +193,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{
-        utils::{Fieldable, ToFields},
-        C, D, F,
-    };
+    use mp2_common::{utils::ToFields, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

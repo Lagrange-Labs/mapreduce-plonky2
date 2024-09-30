@@ -120,7 +120,7 @@ pub mod tests {
         rlp::MAX_KEY_NIBBLE_LEN,
         types::{CBuilder, GFp},
         utils::{keccak256, Endianness, Packer, ToFields},
-        D,
+        C, D,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
@@ -129,7 +129,6 @@ pub mod tests {
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
-        plonk::config::PoseidonGoldilocksConfig,
     };
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
@@ -191,7 +190,7 @@ pub mod tests {
 
         let node = proof.pop().unwrap();
         let leaf_circuit = LeafLengthCircuit::new(length_slot, node.clone(), variable_slot);
-        let leaf_proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(leaf_circuit);
+        let leaf_proof = run_circuit::<_, D, C, _>(leaf_circuit);
         let leaf_pi = PublicInputs::<GFp>::from_slice(&leaf_proof.public_inputs);
 
         let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
@@ -214,7 +213,7 @@ pub mod tests {
             base: BranchLengthCircuit::new(node.clone()),
             pi: &leaf_pi.to_vec(),
         };
-        let branch_proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(branch_circuit);
+        let branch_proof = run_circuit::<_, D, C, _>(branch_circuit);
         let branch_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
 
         let t = t - GFp::ONE;
@@ -233,7 +232,7 @@ pub mod tests {
             base: ExtensionLengthCircuit::new(node.clone()),
             pi: &branch_pi.to_vec(),
         };
-        let ext_proof = run_circuit::<_, D, PoseidonGoldilocksConfig, _>(ext_circuit);
+        let ext_proof = run_circuit::<_, D, C, _>(ext_circuit);
         let ext_pi = PublicInputs::<GFp>::from_slice(&ext_proof.public_inputs);
 
         let t = GFp::ZERO - GFp::ONE;

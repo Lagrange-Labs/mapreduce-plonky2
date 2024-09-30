@@ -109,13 +109,11 @@ impl<const S: usize> BindingResultsCircuit<S> {
 mod tests {
     use super::*;
     use crate::{
-        query::aggregation::tests::{
-            random_aggregation_operations, random_aggregation_public_inputs,
-        },
         results_tree::construction::{
             public_inputs::ResultsConstructionPublicInputs,
             tests::random_results_construction_public_inputs,
         },
+        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
     use itertools::Itertools;
     use mp2_common::{poseidon::H, utils::ToFields, C, D, F};

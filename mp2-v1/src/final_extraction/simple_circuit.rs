@@ -2,7 +2,6 @@ use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    types::GFp,
     utils::ToTargets,
     D, F,
 };
@@ -47,7 +46,7 @@ pub struct SimpleWires {
 
 impl SimpleCircuit {
     fn build(
-        b: &mut CircuitBuilder<GFp, 2>,
+        b: &mut CircuitBuilder<F, D>,
         block_pi: &[Target],
         contract_pi: &[Target],
         value_pi: &[Target],
@@ -55,10 +54,10 @@ impl SimpleCircuit {
         let base_wires = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, value_pi);
 
         let value_pi = values_extraction::PublicInputs::<Target>::new(value_pi);
-        let dv = value_pi.values_digest().to_targets();
+        let dv = value_pi.values_digest_target().to_targets();
         let single_variable = b.map_to_curve_point(&dv);
         let compound = b.add_virtual_bool_target_safe();
-        let final_dv = b.curve_select(compound, value_pi.values_digest(), single_variable);
+        let final_dv = b.curve_select(compound, value_pi.values_digest_target(), single_variable);
         PublicInputs::new(
             &base_wires.bh,
             &base_wires.prev_bh,
@@ -70,7 +69,7 @@ impl SimpleCircuit {
         SimpleWires { compound }
     }
 
-    fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &SimpleWires) {
+    fn assign(&self, pw: &mut PartialWitness<F>, wires: &SimpleWires) {
         pw.set_bool_target(wires.compound, self.compound_type);
     }
 }
@@ -131,11 +130,8 @@ impl CircuitLogicWires<F, D, 0> for SimpleCircuitRecursiveWires {
 mod test {
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
+    use mp2_common::C;
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-    pub const D: usize = 2;
-    pub type C = PoseidonGoldilocksConfig;
-    pub type F = <C as GenericConfig<D>>::F;
 
     #[derive(Clone, Debug)]
     struct TestSimpleCircuit {
@@ -148,9 +144,9 @@ mod test {
         pis: ProofsPiTarget,
     }
 
-    impl UserCircuit<GFp, 2> for TestSimpleCircuit {
+    impl UserCircuit<F, D> for TestSimpleCircuit {
         type Wires = TestSimpleWires;
-        fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<GFp, 2>) -> Self::Wires {
+        fn build(c: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>) -> Self::Wires {
             let pis = ProofsPiTarget::new(c);
             let wires = SimpleCircuit::build(c, &pis.blocks_pi, &pis.contract_pi, &pis.values_pi);
             TestSimpleWires {
@@ -158,7 +154,7 @@ mod test {
                 pis,
             }
         }
-        fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<GFp>, wires: &Self::Wires) {
+        fn prove(&self, pw: &mut plonky2::iop::witness::PartialWitness<F>, wires: &Self::Wires) {
             wires.pis.assign(pw, &self.pis);
             self.circuit.assign(pw, &wires.circuit)
         }

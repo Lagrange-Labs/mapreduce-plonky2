@@ -1,25 +1,31 @@
 //! Define test cases
 
 use alloy::primitives::{Address, U256};
-use local_simple::TableRowValues;
+use indexing::TableRowValues;
 use log::debug;
 use mp2_common::eth::StorageSlot;
-use mp2_test::utils::random_vector;
 use mp2_v1::{
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
         row::{RowTreeKey, ToNonce},
     },
-    values_extraction::{identifier_for_mapping_key_column, identifier_for_mapping_value_column},
+    values_extraction::{
+        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+        identifier_single_var_column,
+    },
 };
+use serde::{Deserialize, Serialize};
 
 use super::{
     rowtree::SecondaryIndexCell,
     table::{CellsUpdate, Table},
+    TableInfo,
 };
 
-pub mod local_simple;
+pub mod indexing;
+pub mod planner;
+pub mod query;
 
 /// The key,value such that the combination is unique. This can be turned into a RowTreeKey.
 /// to store in the row tree.
@@ -40,7 +46,7 @@ impl From<(U256, U256)> for UniqueMappingEntry {
 
 /// What is the secondary index chosen for the table in the mapping.
 /// Each entry contains the identifier of the column expected to store in our tree
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MappingIndex {
     Key(u64),
     Value(u64),
@@ -56,9 +62,11 @@ impl UniqueMappingEntry {
         mapping_index: &MappingIndex,
         slot: u8,
         contract: &Address,
+        chain_id: u64,
         previous_row_key: Option<RowTreeKey>,
     ) -> (CellsUpdate<BlockPrimaryIndex>, SecondaryIndexCell) {
-        let row_value = self.to_table_row_value(block_number, mapping_index, slot, contract);
+        let row_value =
+            self.to_table_row_value(block_number, mapping_index, slot, contract, chain_id);
         let cells_update = CellsUpdate {
             previous_row_key: previous_row_key.unwrap_or_default(),
             new_row_key: self.to_row_key(mapping_index),
@@ -76,13 +84,24 @@ impl UniqueMappingEntry {
         index: &MappingIndex,
         slot: u8,
         contract: &Address,
+        chain_id: u64,
     ) -> TableRowValues<BlockPrimaryIndex> {
         // we construct the two associated cells in the table. One of them will become
         // a SecondaryIndexCell depending on the secondary index type we have chosen
         // for this mapping.
-        let extract_key = MappingIndex::Key(identifier_for_mapping_key_column(slot, contract));
+        let extract_key = MappingIndex::Key(identifier_for_mapping_key_column(
+            slot,
+            contract,
+            chain_id,
+            vec![],
+        ));
         let key_cell = self.to_cell(extract_key);
-        let extract_key = MappingIndex::Value(identifier_for_mapping_value_column(slot, contract));
+        let extract_key = MappingIndex::Value(identifier_for_mapping_value_column(
+            slot,
+            contract,
+            chain_id,
+            vec![],
+        ));
         let value_cell = self.to_cell(extract_key);
         // then we look at which one is must be the secondary cell
         let (secondary, rest) = match index {
@@ -134,7 +153,7 @@ impl UniqueMappingEntry {
     }
 }
 
-#[derive(Debug, Hash, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Hash, Clone, PartialEq, Eq)]
 pub(crate) enum TableSourceSlot {
     /// Test arguments for single values extraction (C.1)
     SingleValues(SingleValuesExtractionArgs),
@@ -161,20 +180,33 @@ impl TableSourceSlot {
 /// Test case definition
 pub(crate) struct TestCase {
     pub(crate) table: Table,
+    pub(crate) chain_id: u64,
     pub(crate) contract_address: Address,
     pub(crate) contract_extraction: ContractExtractionArgs,
     pub(crate) source: TableSourceSlot,
 }
 
+impl TestCase {
+    pub fn table_info(&self) -> TableInfo {
+        TableInfo {
+            public_name: self.table.public_name.clone(),
+            chain_id: self.chain_id,
+            columns: self.table.columns.clone(),
+            contract_address: self.contract_address,
+            source: self.source.clone(),
+        }
+    }
+}
+
 /// Single values extraction arguments (C.1)
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct SingleValuesExtractionArgs {
     /// Simple slots
     pub(crate) slots: Vec<u8>,
 }
 
 /// Mapping values extraction arguments (C.1)
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct MappingValuesExtractionArgs {
     /// Mapping slot number
     pub(crate) slot: u8,
@@ -188,7 +220,7 @@ pub(crate) struct MappingValuesExtractionArgs {
 }
 
 /// Length extraction arguments (C.2)
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct LengthExtractionArgs {
     /// Length slot
     pub(crate) slot: u8,
@@ -201,8 +233,4 @@ pub(crate) struct LengthExtractionArgs {
 pub(crate) struct ContractExtractionArgs {
     /// Storage slot
     pub(crate) slot: StorageSlot,
-}
-
-fn random_address() -> Address {
-    Address::from_slice(&random_vector(20))
 }

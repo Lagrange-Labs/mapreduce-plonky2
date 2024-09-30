@@ -1,13 +1,13 @@
-use mp2_common::{keccak::OutputHash, proof::ProofWithVK, types::HashOutput, utils::ToFields};
+use mp2_common::{proof::ProofWithVK, types::HashOutput, utils::ToFields};
 use mp2_v1::{
     api,
     final_extraction::{CircuitInput, PublicInputs},
 };
 
-use super::{proof_storage::ProofStorage, TestContext};
+use super::TestContext;
 use anyhow::Result;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     pub(crate) async fn prove_final_extraction(
         &self,
         contract_proof: Vec<u8>,
@@ -26,16 +26,19 @@ impl<P: ProofStorage> TestContext<P> {
         } else {
             CircuitInput::new_simple_input(block_proof, contract_proof, values_proof, compound_type)
         }?;
-        let proof = api::generate_proof(
-            self.params(),
-            api::CircuitInput::FinalExtraction(circuit_input),
-        )?;
+        let params = self.params();
+        let proof = self
+            .b
+            .bench("indexing::extraction::final", || {
+                api::generate_proof(params, api::CircuitInput::FinalExtraction(circuit_input))
+            })
+            .expect("unable to generate final extraction proof");
 
         let pproof = ProofWithVK::deserialize(&proof)?;
         let block = self.query_current_block().await;
 
-        let block_hash = HashOutput::try_from(block.header.hash.unwrap().0).unwrap();
-        let prev_block_hash = HashOutput::try_from(block.header.parent_hash.0).unwrap();
+        let block_hash = HashOutput::from(block.header.hash.unwrap().0);
+        let prev_block_hash = HashOutput::from(block.header.parent_hash.0);
 
         let pis = PublicInputs::from_slice(pproof.proof().public_inputs.as_slice());
         assert_eq!(pis.block_number(), block.header.number.unwrap());

@@ -1,6 +1,6 @@
-use anyhow::{anyhow, ensure, Context, Result};
-use serde::{de::value, Deserialize, Serialize};
-use std::collections::HashMap;
+use anyhow::{ensure, Context, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::{btree_set, BTreeSet, HashMap};
 
 use alloy::primitives::U256;
 use itertools::Itertools;
@@ -9,10 +9,7 @@ use mp2_common::{
     F,
 };
 
-use crate::query::{
-    aggregation::QueryBounds,
-    computational_hash_ids::{Operation, Output, PlaceholderIdentifier},
-};
+use crate::query::computational_hash_ids::{Operation, Output, PlaceholderIdentifier};
 
 use super::universal_query_circuit::dummy_placeholder_id;
 
@@ -25,9 +22,34 @@ pub struct Placeholder {
 
 pub type PlaceholderId = PlaceholderIdentifier;
 
+/// Define a set of placeholder ids which can be iterated over
+/// following the ids expected for placeholders as outputs of
+/// the revelation circuit
 #[derive(Clone, Debug)]
+pub(crate) struct PlaceholderIdsSet(BTreeSet<PlaceholderId>);
+
+impl<I: Iterator<Item = PlaceholderId>> From<I> for PlaceholderIdsSet {
+    fn from(value: I) -> Self {
+        Self(value.collect::<BTreeSet<PlaceholderId>>())
+    }
+}
+
+/// Implement an iterator over the set of placeholder ids which return
+/// the ids according to the order expected in the public inputs of the
+/// revelation circuit
+impl IntoIterator for PlaceholderIdsSet {
+    type Item = PlaceholderId;
+
+    type IntoIter = btree_set::IntoIter<PlaceholderId>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 /// Data structure employed to represent a set of placeholders, identified by their `PlaceholderId`
-pub struct Placeholders(HashMap<PlaceholderId, U256>);
+pub struct Placeholders(pub HashMap<PlaceholderId, U256>);
 
 impl Placeholders {
     /// Initialize an empty set of placeholders
@@ -60,12 +82,22 @@ impl Placeholders {
         self.0.len()
     }
 
-    pub fn ids(&self) -> Vec<PlaceholderId> {
-        self.0.keys().cloned().collect_vec()
+    /// Return set of placeholders ids, in the order expected in the public inputs of the final
+    /// proof
+    pub fn ids(&self) -> Vec<PlaceholderIdentifier> {
+        let sorted_ids = PlaceholderIdsSet::from(self.0.keys().cloned());
+        sorted_ids.into_iter().collect_vec()
     }
 
+    /// Return placeholder values in the order expected in the public inputs of the final
+    /// proof
     pub fn placeholder_values(&self) -> Vec<U256> {
-        self.0.values().cloned().collect_vec()
+        self.ids()
+            .iter()
+            .map(
+                |id| self.get(id).unwrap(), // safe to unwrap since we get ids from `self.ids`
+            )
+            .collect_vec()
     }
 }
 
@@ -83,7 +115,7 @@ impl From<(Vec<(PlaceholderId, U256)>, U256, U256)> for Placeholders {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 /// Enumeration representing all the possible types of input operands for a basic operation
 pub enum InputOperand {
     // Input operand is a placeholder in the query
@@ -99,21 +131,43 @@ pub enum InputOperand {
     /// an operation found before the current operation in the set of operations
     PreviousValue(usize),
 }
-
+impl std::fmt::Debug for InputOperand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputOperand::Placeholder(i) => write!(f, "${i:?}"),
+            InputOperand::Constant(x) => write!(f, "{x}"),
+            InputOperand::Column(id) => write!(f, "C[{id}]"),
+            InputOperand::PreviousValue(previous) => write!(f, "@{previous}"),
+        }
+    }
+}
 impl Default for InputOperand {
     fn default() -> Self {
         InputOperand::Placeholder(dummy_placeholder_id())
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 /// Data structure employed to specify a basic operation to be performed to
 /// compute the query
 pub struct BasicOperation {
-    pub(crate) first_operand: InputOperand,
+    pub first_operand: InputOperand,
     /// Can be None in case of unary operation
-    pub(crate) second_operand: Option<InputOperand>,
-    pub(crate) op: Operation,
+    pub second_operand: Option<InputOperand>,
+    pub op: Operation,
+}
+impl std::fmt::Debug for BasicOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(second_operand) = self.second_operand {
+            write!(
+                f,
+                "({:?} {:?} {:?})",
+                self.first_operand, self.op, second_operand
+            )
+        } else {
+            write!(f, "({:?} {:?})", self.first_operand, self.op)
+        }
+    }
 }
 
 impl BasicOperation {
@@ -264,7 +318,7 @@ impl BasicOperation {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Enumeration representing the type of output values that can be returned for each row
 pub enum OutputItem {
     /// Output value is a column of the table
@@ -277,11 +331,12 @@ pub enum OutputItem {
 
 /// Data structure that contains the description of the output items to be returned and the
 /// operations necessary to compute the output items
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResultStructure {
-    pub(crate) result_operations: Vec<BasicOperation>,
-    pub(crate) output_items: Vec<OutputItem>,
-    pub(crate) output_ids: Vec<F>,
-    pub(crate) output_variant: Output,
+    pub result_operations: Vec<BasicOperation>,
+    pub output_items: Vec<OutputItem>,
+    pub output_ids: Vec<F>,
+    pub output_variant: Output,
 }
 
 impl ResultStructure {
@@ -340,10 +395,10 @@ impl ResultStructure {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColumnCell {
-    pub(crate) value: U256,
-    pub(crate) id: F,
+    pub value: U256,
+    pub id: F,
 }
 
 impl ColumnCell {
@@ -355,6 +410,7 @@ impl ColumnCell {
     }
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RowCells {
     primary: ColumnCell,
     secondary: ColumnCell,
@@ -362,11 +418,11 @@ pub struct RowCells {
 }
 
 impl RowCells {
-    pub fn new(primary: &ColumnCell, secondary: &ColumnCell, rest: &[ColumnCell]) -> Self {
+    pub fn new(primary: ColumnCell, secondary: ColumnCell, rest: Vec<ColumnCell>) -> Self {
         Self {
-            primary: primary.clone(),
-            secondary: secondary.clone(),
-            rest: rest.to_vec(),
+            primary,
+            secondary,
+            rest,
         }
     }
     /// Get number of columns in the row represented by `self`
@@ -375,7 +431,7 @@ impl RowCells {
     }
 
     /// Return the set of column cells, placing primary and secondary index columns at the beginning of the array
-    pub(crate) fn to_cells(&self) -> Vec<ColumnCell> {
+    pub fn to_cells(&self) -> Vec<ColumnCell> {
         [&self.primary, &self.secondary]
             .into_iter()
             .chain(&self.rest)

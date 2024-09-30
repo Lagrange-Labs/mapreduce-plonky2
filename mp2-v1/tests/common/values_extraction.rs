@@ -1,17 +1,15 @@
 //! Test utilities for Values Extraction (C.1)
 
-use std::str::FromStr;
-
-use super::{proof_storage::ProofStorage, storage_trie::TestStorageTrie, TestContext};
+use super::{storage_trie::TestStorageTrie, TestContext};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
+    providers::Provider,
 };
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     mpt_sequential::utils::bytes_to_nibbles,
-    proof::ProofWithVK,
     F,
 };
 use mp2_v1::values_extraction::public_inputs::PublicInputs;
@@ -19,7 +17,7 @@ use plonky2::field::types::Field;
 
 type MappingKey = Vec<u8>;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// Generate the Values Extraction (C.1) proof for single variables.
     pub(crate) async fn prove_single_values_extraction(
         &self,
@@ -36,8 +34,9 @@ impl<P: ProofStorage> TestContext<P> {
                 .await;
         }
 
+        let chain_id = self.rpc.get_chain_id().await.unwrap();
         info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof_value = trie.prove_value(contract_address, self.params());
+        let proof_value = trie.prove_value(contract_address, chain_id, self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof_value.proof().public_inputs);
@@ -101,8 +100,9 @@ impl<P: ProofStorage> TestContext<P> {
             trie.add_slot(sslot, nodes);
         }
 
+        let chain_id = self.rpc.get_chain_id().await.unwrap();
         info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
-        let proof = trie.prove_value(&contract_address, &self.params());
+        let proof = trie.prove_value(&contract_address, chain_id, &self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof.proof().public_inputs);

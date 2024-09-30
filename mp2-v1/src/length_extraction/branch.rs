@@ -127,7 +127,7 @@ pub mod tests {
         eth::StorageSlot,
         types::{CBuilder, GFp},
         utils::{keccak256, Endianness, Packer, ToFields},
-        D,
+        C, D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
     use plonky2::{
@@ -136,7 +136,6 @@ pub mod tests {
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
-        plonk::config::PoseidonGoldilocksConfig,
     };
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
@@ -147,7 +146,7 @@ pub mod tests {
     #[test]
     fn prove_and_verify_length_extraction_branch_circuit() {
         let rng = &mut StdRng::seed_from_u64(0xffff);
-        let setup = setup_circuit::<_, D, PoseidonGoldilocksConfig, BranchTestCircuit>();
+        let setup = setup_circuit::<_, D, C, BranchTestCircuit>();
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
 

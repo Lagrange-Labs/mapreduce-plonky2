@@ -9,46 +9,45 @@ name: Check, Test, and Format
 
 jobs:
   fmt:
-    name: Rustfmt
-    runs-on: ubuntu-latest
+    runs-on: ['memory:8GB']
     steps:
-      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v3
-        with:
-          go-version: ~1.20
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2024-05-17
-          override: true
-      - run: rustup component add rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install devenv
+        run: |
+          if [ -e /nix/var/nix/profiles/default/bin/nix-env ]
+          then
+              /nix/var/nix/profiles/default/bin/nix-env -if https://github.com/cachix/devenv/tarball/latest
+          else
+              nix-env -if https://github.com/cachix/devenv/tarball/latest
+          fi
+          echo "$HOME/.nix-profile/bin" >> $GITHUB_PATH
+      - name: Run cargo test
+        shell: devenv shell bash -- -e {0}
+        run: cargo fmt --all -- --check #
 
   check:
     name: Check
-    runs-on: ubuntu-latest
+    runs-on: ['memory:8GB']
     steps:
-      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v3
-        with:
-          go-version: ~1.20
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2024-05-17
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install devenv
+        run: |
+          if [ -e /nix/var/nix/profiles/default/bin/nix-env ]
+          then
+              /nix/var/nix/profiles/default/bin/nix-env -if https://github.com/cachix/devenv/tarball/latest
+          else
+              nix-env -if https://github.com/cachix/devenv/tarball/latest
+          fi
+          echo "$HOME/.nix-profile/bin" >> $GITHUB_PATH
+      - name: Run cargo check
+        shell: devenv shell bash -- -e {0}
+        run: cargo check --tests
 
   test:
     name: Test Suite
-    runs-on: nix-128g
+    runs-on: ['nix-128g']
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -68,3 +67,5 @@ jobs:
           CI_RPC_URL: ${{ secrets.CI_RPC_URL }}
           CI_SEPOLIA: ${{ secrets.CI_SEPOLIA }}
           CI_ETH: ${{ secrets.CI_ETH }}
+          LPN_PARAMS_DIR: $HOME/ci_params/
+          LPN_PARAMS_REBUILD: "true"

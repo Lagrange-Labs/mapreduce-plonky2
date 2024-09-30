@@ -1,8 +1,6 @@
-use std::{collections::HashSet, fmt::Debug, hash::Hash};
-
 use anyhow::*;
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, fmt::Debug, future::Future, hash::Hash};
 
 use crate::storage::TreeStorage;
 
@@ -20,12 +18,12 @@ pub struct NodePath<K> {
 impl<K> NodePath<K> {
     /// Return an iterator over references to the keys forming the full path
     /// from the root to `target` (included).
-    pub fn full_path(&self) -> impl Iterator<Item = &K> {
+    pub fn full_path(&self) -> impl Iterator<Item = &K> + DoubleEndedIterator {
         self.ascendance.iter().chain(std::iter::once(&self.target))
     }
     /// Return an iterator over the keys forming the full path from the root to
     /// `target` (included).
-    pub fn into_full_path(self) -> impl Iterator<Item = K> {
+    pub fn into_full_path(self) -> impl Iterator<Item = K> + DoubleEndedIterator {
         self.ascendance
             .into_iter()
             .chain(std::iter::once(self.target))
@@ -33,91 +31,122 @@ impl<K> NodePath<K> {
 }
 
 /// Define common topological operations on trees.
-#[async_trait]
 pub trait TreeTopology: Default + Send + Sync {
-    type Key: Debug + Clone + Hash + Eq + Sync + Send;
-    type Node: Debug + Sync + Send;
+    type Key: Debug + Clone + Hash + Eq + Sync + Send + Serialize + for<'a> Deserialize<'a>;
+    type Node: Debug + Clone + Sync + Send;
     /// Minimal data required to persist the tree.
     type State: Send + Sync + Clone + Debug + Serialize + for<'a> Deserialize<'a>;
 
     /// Return the number of nodes currently stored in the tree
-    async fn size<S: TreeStorage<Self>>(&self, s: &S) -> usize;
+    fn size<S: TreeStorage<Self>>(&self, s: &S) -> impl Future<Output = usize>;
 
     /// Return the root of the tree.
     ///
     /// May be empty, e.g. if the tree is empty.
-    async fn root<S: TreeStorage<Self>>(&self, s: &S) -> Option<Self::Key>;
+    fn root<S: TreeStorage<Self>>(&self, s: &S) -> impl Future<Output = Option<Self::Key>>;
 
     /// Return the parent of `n`, or None if `n` is the root of the tree.
-    async fn parent<S: TreeStorage<Self>>(&self, n: Self::Key, s: &S) -> Option<Self::Key>;
+    fn parent<S: TreeStorage<Self>>(
+        &self,
+        n: Self::Key,
+        s: &S,
+    ) -> impl Future<Output = Option<Self::Key>>;
 
     /// Return whether `k` exists in the tree.
-    async fn contains<S: TreeStorage<Self>>(&self, k: &Self::Key, s: &S) -> bool;
+    fn contains<S: TreeStorage<Self>>(&self, k: &Self::Key, s: &S) -> impl Future<Output = bool>;
 
     /// Return, if it has some, the children of `k`.
     ///
     /// Return nothing if `k` is not in the tree.
-    async fn children<S: TreeStorage<Self>>(
+    fn children<S: TreeStorage<Self>>(
         &self,
         k: &Self::Key,
         s: &S,
-    ) -> Option<(Option<Self::Key>, Option<Self::Key>)>;
+    ) -> impl Future<Output = Option<(Option<Self::Key>, Option<Self::Key>)>>;
+
+    /// Return a set of `n` and its descendants, if any, up to `depth` levels
+    /// down.
+    fn descendance<S: TreeStorage<Self>>(
+        &self,
+        s: &S,
+        n: &Self::Key,
+        depth: usize,
+    ) -> impl Future<Output = HashSet<Self::Key>> {
+        async move {
+            let mut todos = vec![(n.to_owned(), 0)];
+            let mut descendance = HashSet::new();
+            while let Some(todo) = todos.pop() {
+                let current_depth = todo.1;
+                if current_depth <= depth {
+                    if let Some(children) = self.children(&todo.0, s).await {
+                        for child in [children.0, children.1].into_iter().flatten() {
+                            todos.push((child, current_depth + 1));
+                        }
+                    }
+                    descendance.insert(todo.0);
+                }
+            }
+
+            descendance
+        }
+    }
 
     /// Returns the [`NodePath`] from the root of the tree to `k`.
-    async fn lineage<S: TreeStorage<Self>>(
+    fn lineage<S: TreeStorage<Self>>(
         &self,
         k: &Self::Key,
         s: &S,
-    ) -> Option<NodePath<Self::Key>>;
+    ) -> impl Future<Output = Option<NodePath<Self::Key>>>;
 
     /// Return the union of the lineages of all the `ns`
-    async fn ascendance<S: TreeStorage<Self>>(
+    fn ascendance<S: TreeStorage<Self>, I: IntoIterator<Item = Self::Key>>(
         &self,
-        ns: &[Self::Key],
+        ns: I,
         s: &S,
-    ) -> HashSet<Self::Key> {
-        let mut ascendance = HashSet::new();
-        for n in ns {
-            if let Some(np) = self.lineage(&n, s).await {
-                ascendance.extend(np.into_full_path());
+    ) -> impl Future<Output = HashSet<Self::Key>> {
+        async {
+            let mut ascendance = HashSet::new();
+            for n in ns.into_iter() {
+                if let Some(np) = self.lineage(&n, s).await {
+                    ascendance.extend(np.into_full_path());
+                }
             }
+            ascendance
         }
-        ascendance
     }
 
     /// Return the immediate neighborhood of the given `k`, if it exists, in the
     /// tree.
-    async fn node_context<S: TreeStorage<Self>>(
+    fn node_context<S: TreeStorage<Self>>(
         &self,
         k: &Self::Key,
         s: &S,
-    ) -> Option<NodeContext<Self::Key>>;
+    ) -> impl Future<Output = Option<NodeContext<Self::Key>>> + Send;
 }
 
 /// Define operations to mutate a tree.
-#[async_trait]
 pub trait MutableTree: TreeTopology {
     /// Insert the given key in the tree; fail if it is already present.
     ///
     /// Return the [`NodePath`] to the newly inserted node.
-    async fn insert<S: TreeStorage<Self>>(
+    fn insert<S: TreeStorage<Self>>(
         &mut self,
         k: Self::Key,
         s: &mut S,
-    ) -> Result<NodePath<Self::Key>>;
+    ) -> impl Future<Output = Result<NodePath<Self::Key>>> + Send;
 
     /// Remove the given key from the tree; fail if it is already present.
     ///
     /// Return the `Key`s of the nodes affected by the deletion.
-    async fn delete<S: TreeStorage<Self>>(
+    fn delete<S: TreeStorage<Self>>(
         &mut self,
         k: &Self::Key,
         s: &mut S,
-    ) -> Result<Vec<Self::Key>>;
+    ) -> impl Future<Output = Result<Vec<Self::Key>>> + Send;
 }
 
 /// A data structure encompassing the immediate neighborhood of a node.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NodeContext<K> {
     /// The considered node ID
     pub node_id: K,
@@ -146,7 +175,18 @@ impl<K> NodeContext<K> {
     }
 }
 
-#[async_trait]
 pub trait PrintableTree: TreeTopology {
-    async fn print<S: TreeStorage<Self>>(&self, s: &S);
+    fn print<S: TreeStorage<Self>>(&self, s: &S) -> impl Future<Output = ()> {
+        async {
+            println!("{}", self.tree_to_string(s).await);
+        }
+    }
+
+    fn tree_to_string<S: TreeStorage<Self>>(&self, s: &S) -> impl Future<Output = String>;
+
+    fn subtree_to_string<S: TreeStorage<Self>>(
+        &self,
+        s: &S,
+        k: &Self::Key,
+    ) -> impl Future<Output = String>;
 }

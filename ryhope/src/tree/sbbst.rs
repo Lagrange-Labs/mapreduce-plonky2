@@ -50,11 +50,11 @@
 //! while parent > max(tree)
 //!   parent = parent(s_tree, parent)
 use super::{MutableTree, NodeContext, NodePath, TreeTopology};
-use crate::storage::{EpochKvStorage, EpochStorage, TreeStorage};
-use crate::tree::PrintableTree;
+use crate::{
+    storage::{EpochKvStorage, EpochStorage, TreeStorage},
+    tree::PrintableTree,
+};
 use anyhow::*;
-use async_trait::async_trait;
-use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -106,7 +106,7 @@ pub struct State {
     /// The largest block that will be stored in this tree (inclusive)
     pub(crate) max: InnerIdx,
     /// The actual beginning of the tree w.r.t. 1
-    pub(crate) shift: usize,
+    pub shift: usize,
 }
 
 impl State {
@@ -114,15 +114,15 @@ impl State {
         self.outer_root()
     }
 
-    pub fn ascendance(&self, ns: &[NodeIdx]) -> HashSet<NodeIdx> {
+    pub fn ascendance<I: IntoIterator<Item = NodeIdx>>(&self, ns: I) -> HashSet<NodeIdx> {
         let mut ascendance = HashSet::new();
         let inner_max = self.inner_max();
-        for n in ns {
-            let inner_idx = self.inner_idx(*n);
+        for n in ns.into_iter() {
+            let inner_idx = self.inner_idx(n);
             if inner_idx <= inner_max {
                 if let Some(lineage) = self.lineage_inner(&inner_idx) {
                     for n in lineage.into_full_path() {
-                        if n < inner_max {
+                        if n <= inner_max {
                             ascendance.insert(self.outer_idx(n));
                         }
                     }
@@ -174,17 +174,9 @@ impl State {
                 None
             };
 
-            let left_outer = if let Some(left) = inner.left {
-                Some(self.outer_idx(left))
-            } else {
-                None
-            };
+            let left_outer = inner.left.map(|left| self.outer_idx(left));
+            let right_outer = inner.right.map(|right| self.outer_idx(right));
 
-            let right_outer = if let Some(right) = inner.right {
-                Some(self.outer_idx(right))
-            } else {
-                None
-            };
             Some(NodeContext {
                 node_id: self.outer_idx(inner.node_id),
                 parent: parent_outer,
@@ -198,25 +190,10 @@ impl State {
 
     pub fn children(&self, n: &NodeIdx) -> Option<(Option<NodeIdx>, Option<NodeIdx>)> {
         if let Some((l, r)) = self.children_inner(&self.inner_idx(*n)) {
-            let l_option = if let Some(l) = l {
-                Some(self.outer_idx(l))
-            } else {
-                None
-            };
-            let r_option = if let Some(r) = r {
-                Some(self.outer_idx(r))
-            } else {
-                None
-            };
-            Some((l_option, r_option))
+            Some((l.map(|l| self.outer_idx(l)), r.map(|r| self.outer_idx(r))))
         } else {
             None
         }
-    }
-
-    /// Return the largest value currently stored in the tree
-    fn outer_max(&self) -> NodeIdx {
-        self.outer_idx(self.inner_max())
     }
 
     fn inner_max(&self) -> InnerIdx {
@@ -398,7 +375,6 @@ fn children_inner_in_saturated(n: &InnerIdx) -> Option<(InnerIdx, InnerIdx)> {
     Some((maybe_left, maybe_right))
 }
 
-#[async_trait]
 impl TreeTopology for Tree {
     /// Max, shift
     type State = State;
@@ -410,7 +386,11 @@ impl TreeTopology for Tree {
         state.inner_max().0
     }
 
-    async fn ascendance<S: TreeStorage<Tree>>(&self, ns: &[Self::Key], s: &S) -> HashSet<NodeIdx> {
+    async fn ascendance<S: TreeStorage<Tree>, I: IntoIterator<Item = Self::Key>>(
+        &self,
+        ns: I,
+        s: &S,
+    ) -> HashSet<NodeIdx> {
         let state = s.state().fetch().await;
         state.ascendance(ns)
     }
@@ -444,12 +424,8 @@ impl TreeTopology for Tree {
         k: &NodeIdx,
         s: &S,
     ) -> Option<NodeContext<NodeIdx>> {
-        async {
-            let state = s.state().fetch().await;
-            state.node_context(k)
-        }
-        .boxed()
-        .await
+        let state = s.state().fetch().await;
+        state.node_context(k)
     }
 
     async fn contains<S: TreeStorage<Tree>>(&self, k: &NodeIdx, s: &S) -> bool {
@@ -458,7 +434,6 @@ impl TreeTopology for Tree {
     }
 }
 
-#[async_trait]
 impl MutableTree for Tree {
     // The SBBST only support appending exactly after the current largest key.
     async fn insert<S: TreeStorage<Tree>>(
@@ -497,9 +472,10 @@ impl MutableTree for Tree {
     }
 }
 
-#[async_trait]
 impl PrintableTree for Tree {
-    async fn print<S: TreeStorage<Tree>>(&self, s: &S) {
+    async fn tree_to_string<S: TreeStorage<Tree>>(&self, s: &S) -> String {
+        let mut r = String::new();
+
         let state = s.state().fetch().await;
         let max_layer = state.inner_root().0.trailing_zeros();
         for layer in (0..max_layer).rev() {
@@ -508,10 +484,17 @@ impl PrintableTree for Tree {
                 let maybe_left = rank * (1 << (layer + 1)) + (1 << layer);
                 if maybe_left <= state.inner_max().0 {
                     let n = InnerIdx(maybe_left);
-                    print!("{}{}", state.outer_idx(n), spacing);
+                    r.push_str(&format!("{}{}", state.outer_idx(n), spacing))
                 }
             }
-            println!()
+            r.push('\n');
         }
+
+        r
+    }
+
+    // TODO: Leave the warning for `k`, since we will implement it later.
+    async fn subtree_to_string<S: TreeStorage<Self>>(&self, s: &S, k: &Self::Key) -> String {
+        self.tree_to_string(s).await
     }
 }

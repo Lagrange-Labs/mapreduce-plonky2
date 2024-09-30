@@ -1,4 +1,5 @@
 use alloy::primitives::U256;
+
 use log::{debug, info};
 use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK};
 use mp2_v1::{
@@ -12,7 +13,7 @@ use mp2_v1::{
 use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
-        memory::InMemory,
+        pgsql::PgsqlStorage,
         updatetree::{Next, UpdateTree},
         RoEpochKvStorage,
     },
@@ -27,10 +28,10 @@ use super::{
     TestContext,
 };
 
-type IndexStorage = InMemory<BlockTree, IndexNode<BlockPrimaryIndex>>;
+pub type IndexStorage = PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>>;
 pub type MerkleIndexTree = MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     /// NOTE: we require the added_index information because we need to distinguish if a new node
     /// added has a leaf or a as parent. The rest of the nodes in the update tree are to be proven
     /// by the "membership" circuit. So we need to differentiate between the two cases.
@@ -42,7 +43,8 @@ impl<P: ProofStorage> TestContext<P> {
         added_index: &IndexNode<BlockPrimaryIndex>,
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
-        while let Some(Next::Ready(k)) = workplan.next() {
+        while let Some(Next::Ready(wk)) = workplan.next() {
+            let k = wk.k();
             let (context, node) = t.fetch_with_context(&k).await;
             let row_proof_key = RowProofIdentifier {
                 table: table_id.clone(),
@@ -101,8 +103,11 @@ impl<P: ProofStorage> TestContext<P> {
                         row_tree_proof,
                     ),
                 );
-                api::generate_proof(self.params(), inputs)
-                    .expect("error while leaf index proof generation")
+                self.b
+                    .bench("indexing::index_tree::leaf", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
+                    .expect("unable to generate index tree leaf")
             } else if context.is_partial() {
                 info!(
                     "NodeIndex Proving --> PARTIAL (node {})",
@@ -149,7 +154,10 @@ impl<P: ProofStorage> TestContext<P> {
                         row_tree_proof,
                     ),
                 );
-                api::generate_proof(self.params(), inputs)
+                self.b
+                    .bench("indexing::index_tree::parent", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
                     .expect("error while leaf index proof generation")
             } else {
                 // here we are simply proving the new updated nodes from the new node to
@@ -178,18 +186,21 @@ impl<P: ProofStorage> TestContext<P> {
                         right_proof,
                     ),
                 );
-                api::generate_proof(self.params(), inputs)
+                self.b
+                    .bench("indexing::index_tree::membership", || {
+                        api::generate_proof(self.params(), inputs)
+                    })
                     .expect("error while membership index proof generation")
             };
             let proof_key = IndexProofIdentifier {
                 table: table_id.clone(),
-                tree_key: k,
+                tree_key: k.clone(),
             };
             self.storage
                 .store_proof(ProofKey::Index(proof_key), proof)
                 .expect("unable to store index tree proof");
 
-            workplan.done(&k).unwrap();
+            workplan.done(&wk).unwrap();
         }
         let root = t.root().await.unwrap();
         let root_proof_key = IndexProofIdentifier {
@@ -214,7 +225,7 @@ impl<P: ProofStorage> TestContext<P> {
         let row_tree_root = table.row.root().await.unwrap();
         let row_payload = table.row.fetch(&row_tree_root).await;
         let row_root_proof_key = RowProofIdentifier {
-            table: table.id.clone(),
+            table: table.public_name.clone(),
             tree_key: row_tree_root,
             primary: row_payload.primary_index_value(),
         };
@@ -234,7 +245,7 @@ impl<P: ProofStorage> TestContext<P> {
             ..Default::default()
         };
         info!("Generated index tree");
-        self.prove_index_tree(&table.id, &table.index, ut, &node)
+        self.prove_index_tree(&table.public_name.clone(), &table.index, ut, &node)
             .await
     }
 }

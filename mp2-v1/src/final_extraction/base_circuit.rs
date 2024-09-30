@@ -61,13 +61,15 @@ impl BaseCircuit {
         b.connect(value_pi.mpt_key().pointer, minus_one);
         b.connect(contract_pi.mpt_key().pointer, minus_one);
 
-        let metadata =
-            b.add_curve_point(&[value_pi.metadata_digest(), contract_pi.metadata_digest()]);
+        let metadata = b.add_curve_point(&[
+            value_pi.metadata_digest_target(),
+            contract_pi.metadata_digest(),
+        ]);
 
         // enforce contract_pi.storage_root == value_pi.storage_root
         contract_pi
             .storage_root()
-            .enforce_equal(b, &value_pi.root_hash());
+            .enforce_equal(b, &value_pi.root_hash_target());
         // enforce block_pi.state_root == contract_pi.state_root
         block_pi
             .state_root()
@@ -213,7 +215,6 @@ pub(crate) mod test {
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
         rlp::MAX_KEY_NIBBLE_LEN,
-        types::GFp,
         utils::{Endianness, Packer, ToFields},
     };
     use mp2_test::{
@@ -224,14 +225,10 @@ pub(crate) mod test {
         field::types::{PrimeField64, Sample},
         hash::hash_types::HashOut,
         iop::witness::WitnessWrite,
-        plonk::config::{GenericConfig, GenericHashOut, PoseidonGoldilocksConfig},
+        plonk::config::GenericHashOut,
     };
     use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
     use values_extraction::public_inputs::tests::new_extraction_public_inputs;
-
-    pub const D: usize = 2;
-    pub type C = PoseidonGoldilocksConfig;
-    pub type F = <C as GenericConfig<D>>::F;
 
     #[derive(Clone, Debug)]
     struct TestBaseCircuit {
@@ -244,9 +241,9 @@ pub(crate) mod test {
         base: BaseWires,
     }
 
-    impl UserCircuit<GoldilocksField, 2> for TestBaseCircuit {
+    impl UserCircuit<F, D> for TestBaseCircuit {
         type Wires = TestBaseWires;
-        fn build(c: &mut CircuitBuilder<GoldilocksField, 2>) -> Self::Wires {
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let proofs_pi = ProofsPiTarget::new(c);
             let base_wires = BaseCircuit::build(
                 c,
@@ -273,7 +270,7 @@ pub(crate) mod test {
     }
 
     impl ProofsPiTarget {
-        pub(crate) fn new(b: &mut CircuitBuilder<GFp, 2>) -> Self {
+        pub(crate) fn new(b: &mut CircuitBuilder<F, D>) -> Self {
             Self {
                 blocks_pi: b.add_virtual_targets(
                     block_extraction::public_inputs::PublicInputs::<Target>::TOTAL_LEN,
@@ -284,7 +281,7 @@ pub(crate) mod test {
                     .add_virtual_targets(values_extraction::PublicInputs::<Target>::TOTAL_LEN),
             }
         }
-        pub(crate) fn assign(&self, pw: &mut PartialWitness<GFp>, pis: &ProofsPi) {
+        pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, pis: &ProofsPi) {
             pw.set_target_arr(&self.values_pi, &pis.values_pi.as_ref());
             pw.set_target_arr(&self.contract_pi, &pis.contract_pi.as_ref());
             pw.set_target_arr(&self.blocks_pi, &pis.blocks_pi.as_ref());
@@ -293,17 +290,17 @@ pub(crate) mod test {
 
     #[derive(Clone, Debug)]
     pub(crate) struct ProofsPi {
-        pub(crate) blocks_pi: Vec<GFp>,
-        pub(crate) contract_pi: Vec<GFp>,
-        pub(crate) values_pi: Vec<GFp>,
+        pub(crate) blocks_pi: Vec<F>,
+        pub(crate) contract_pi: Vec<F>,
+        pub(crate) values_pi: Vec<F>,
     }
 
     impl ProofsPi {
-        pub(crate) fn contract_inputs(&self) -> contract_extraction::PublicInputs<GFp> {
+        pub(crate) fn contract_inputs(&self) -> contract_extraction::PublicInputs<F> {
             contract_extraction::PublicInputs::from_slice(&self.contract_pi)
         }
 
-        pub(crate) fn value_inputs(&self) -> values_extraction::PublicInputs<GFp> {
+        pub(crate) fn value_inputs(&self) -> values_extraction::PublicInputs<F> {
             values_extraction::PublicInputs::new(&self.values_pi)
         }
 
@@ -370,7 +367,7 @@ pub(crate) mod test {
         }
 
         pub(crate) fn random() -> Self {
-            let value_h = HashOut::<GFp>::rand().to_bytes().pack(Endianness::Little);
+            let value_h = HashOut::<F>::rand().to_bytes().pack(Endianness::Little);
             let key = random_vector(64);
             let ptr = usize::max_value();
             let value_dv = Point::rand();
@@ -388,7 +385,7 @@ pub(crate) mod test {
             let h = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
             let contract_dm = Point::rand();
             let key = &random_vector::<u8>(MAX_KEY_NIBBLE_LEN).to_fields();
-            let ptr = &GFp::NEG_ONE; // simulating end of MPT recursion
+            let ptr = &F::NEG_ONE; // simulating end of MPT recursion
             let s = &value_h.to_fields();
             let contract_pi = contract_extraction::PublicInputs {
                 h,
@@ -399,11 +396,11 @@ pub(crate) mod test {
             }
             .to_vec();
             let block_number = U256::from(F::rand().to_canonical_u64()).to_fields();
-            let block_hash = HashOut::<GFp>::rand()
+            let block_hash = HashOut::<F>::rand()
                 .to_bytes()
                 .pack(Endianness::Little)
                 .to_fields();
-            let parent_block_hash = HashOut::<GFp>::rand()
+            let parent_block_hash = HashOut::<F>::rand()
                 .to_bytes()
                 .pack(Endianness::Little)
                 .to_fields();

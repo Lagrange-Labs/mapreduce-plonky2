@@ -1,7 +1,5 @@
 use plonky2::{
-    field::extension::Extendable,
     gates::noop::NoopGate,
-    hash::hash_types::RichField,
     iop::{target::Target, witness::PartialWitness},
     plonk::{
         circuit_builder::CircuitBuilder,
@@ -70,7 +68,7 @@ pub trait CircuitLogicWires<F: SerializableRichField<D>, const D: usize, const N
 /// either employ the universal verifier or whose proofs needs to be verified by a circuit employing the
 /// universal verifier
 pub struct CircuitWithUniversalVerifierBuilder<
-    F: RichField + Extendable<D>,
+    F: SerializableRichField<D>,
     const D: usize,
     const NUM_PUBLIC_INPUTS: usize,
 > {
@@ -85,7 +83,7 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
     /// employing the configuration `config`. Besides verifying proofs, the universal verifier,
     /// which is a fundamental building block of circuits built with such data structure, also checks
     /// that the verifier data employed for proof verification belongs to a set of admissible verifier data;
-    /// the size of such a set corresponds to `circuit_set_size`, which must be provided as input.  
+    /// the size of such a set corresponds to `circuit_set_size`, which must be provided as input.
     pub fn new<C: GenericConfig<D, F = F> + 'static>(
         config: CircuitConfig,
         circuit_set_size: usize,
@@ -326,7 +324,7 @@ where
     /// This method returns the number of gates of the wrapped circuit, that is the circuit whose proofs
     /// are recursively verified by the wrapping circuit; this is mostly intended to let the caller learn
     /// the size of the wrapped circuit, given that the final wrapping circuit, which is the one whose
-    /// `CircuitData` are accessbiel through the `circuit_data` method has a fixed size  
+    /// `CircuitData` are accessbiel through the `circuit_data` method has a fixed size
     pub fn wrapped_circuit_size(&self) -> usize {
         self.circuit_data.common.degree()
     }
@@ -348,15 +346,18 @@ pub(crate) mod tests {
 
     use plonky2::{
         gates::gate::Gate,
-        hash::{hash_types::NUM_HASH_OUT_ELTS, poseidon::PoseidonHash},
+        hash::hash_types::{RichField, NUM_HASH_OUT_ELTS},
         iop::{target::Target, witness::WitnessWrite},
-        plonk::config::PoseidonGoldilocksConfig,
     };
 
     use plonky2_monolith::{gates::monolith::MonolithGate, monolith_hash::MonolithHash};
 
-    use mp2_common::serialization::{
-        circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array,
+    use mp2_common::{
+        poseidon::H,
+        serialization::{
+            circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array,
+        },
+        C, D, F,
     };
 
     use super::*;
@@ -366,7 +367,7 @@ pub(crate) mod tests {
     pub(crate) const NUM_PUBLIC_INPUTS_TEST_CIRCUITS: usize = NUM_HASH_OUT_ELTS;
 
     pub(crate) type LeafCircuitWires<F, const INPUT_SIZE: usize> =
-        LeafCircuitWithCustomHasherWires<F, INPUT_SIZE, PoseidonHash>;
+        LeafCircuitWithCustomHasherWires<F, INPUT_SIZE, H>;
 
     #[derive(Serialize, Deserialize)]
     pub(crate) struct LeafCircuitWithCustomHasherWires<
@@ -479,7 +480,7 @@ pub(crate) mod tests {
                 .chain(to_be_hashed_payload.iter())
                 .cloned()
                 .collect::<Vec<_>>();
-            let state = builder.hash_n_to_hash_no_pad::<PoseidonHash>(hash_input);
+            let state = builder.hash_n_to_hash_no_pad::<H>(hash_input);
             builder.register_public_inputs(state.elements.as_slice());
 
             Self {
@@ -594,10 +595,6 @@ pub(crate) mod tests {
         recursive_circuit.circuit_data().verify(rec_proof).unwrap();
     }
 
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
-
     fn generate_config_for_monolith() -> CircuitConfig {
         let needed_wires = cmp::max(
             MonolithGate::<F, D>::new().num_wires(),
@@ -613,31 +610,31 @@ pub(crate) mod tests {
     #[test]
     #[serial]
     fn test_circuit_with_one_universal_verifier() {
-        test_circuit_with_universal_verifier::<F, C, D, 1, PoseidonHash>(None);
+        test_circuit_with_universal_verifier::<F, C, D, 1, H>(None);
     }
 
     #[test]
     #[serial]
     fn test_circuit_with_two_universal_verifier() {
-        test_circuit_with_universal_verifier::<F, C, D, 2, PoseidonHash>(None);
+        test_circuit_with_universal_verifier::<F, C, D, 2, H>(None);
     }
 
     #[test]
     #[serial]
     fn test_circuit_with_three_universal_verifier() {
-        test_circuit_with_universal_verifier::<F, C, D, 3, PoseidonHash>(None);
+        test_circuit_with_universal_verifier::<F, C, D, 3, H>(None);
     }
 
     #[test]
     #[serial]
     fn test_circuit_with_four_universal_verifier() {
-        test_circuit_with_universal_verifier::<F, C, D, 4, PoseidonHash>(None);
+        test_circuit_with_universal_verifier::<F, C, D, 4, H>(None);
     }
 
     #[test]
     #[serial]
     fn test_circuit_with_five_universal_verifier() {
-        test_circuit_with_universal_verifier::<F, C, D, 5, PoseidonHash>(None);
+        test_circuit_with_universal_verifier::<F, C, D, 5, H>(None);
     }
 
     #[test]

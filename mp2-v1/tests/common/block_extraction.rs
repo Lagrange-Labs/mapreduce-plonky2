@@ -9,7 +9,7 @@ use mp2_common::{
 };
 use mp2_v1::{api, block_extraction};
 
-use super::{proof_storage::ProofStorage, TestContext};
+use super::TestContext;
 
 pub(crate) fn block_number_to_u256_limbs(number: u64) -> Vec<F> {
     const NUM_LIMBS: usize = u256::NUM_LIMBS;
@@ -17,16 +17,18 @@ pub(crate) fn block_number_to_u256_limbs(number: u64) -> Vec<F> {
     left_pad_generic::<u32, NUM_LIMBS>(&block_number_buff.pack(Endianness::Big)).to_fields()
 }
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     pub(crate) async fn prove_block_extraction(&self) -> Result<Vec<u8>> {
         let block = self.query_current_block().await;
         let buffer = block.rlp();
-        let proof = api::generate_proof(
-            self.params(),
-            api::CircuitInput::BlockExtraction(block_extraction::CircuitInput::from_block_header(
-                buffer.clone(),
-            )),
-        )?;
+        let proof = self.b.bench("indexing::extraction::block", || {
+            api::generate_proof(
+                self.params(),
+                api::CircuitInput::BlockExtraction(
+                    block_extraction::CircuitInput::from_block_header(buffer.clone()),
+                ),
+            )
+        })?;
 
         let pproof = deserialize_proof::<F, C, D>(&proof)?;
         let pi = block_extraction::PublicInputs::from_slice(&pproof.public_inputs);

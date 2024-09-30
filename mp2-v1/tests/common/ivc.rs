@@ -3,16 +3,14 @@ use super::{
     index_tree::MerkleIndexTree,
     proof_storage::{IndexProofIdentifier, ProofKey, ProofStorage},
     table::TableID,
-    TestCase,
 };
 use anyhow::Result;
 use mp2_common::{proof::ProofWithVK, types::HashOutput, F};
 use mp2_v1::{api, indexing::block::BlockPrimaryIndex};
 use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
-use ryhope::tree::TreeTopology;
 use verifiable_db::ivc::PublicInputs;
 
-impl<P: ProofStorage> TestContext<P> {
+impl TestContext {
     pub async fn prove_ivc(
         &mut self,
         table_id: &TableID,
@@ -41,7 +39,11 @@ impl<P: ProofStorage> TestContext<P> {
             Err(_) => verifiable_db::ivc::CircuitInput::new_first_input(root_proof),
         }
         .expect("unable to create ivc circuit inputs");
-        let ivc_proof = api::generate_proof(self.params(), api::CircuitInput::IVC(input))
+        let ivc_proof = self
+            .b
+            .bench("indexing::ivc", || {
+                api::generate_proof(self.params(), api::CircuitInput::IVC(input))
+            })
             .expect("unable to create ivc proof");
         let proof = ProofWithVK::deserialize(&ivc_proof)?;
         let ivc_pi = PublicInputs::from_slice(&proof.proof().public_inputs);

@@ -1,10 +1,10 @@
 //! The revelation circuit handling the queries where we don't need to build the results tree
 
 use crate::{
-    ivc::{PublicInputs as OriginalTreePublicInputs, NUM_IO},
+    ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
         computational_hash_ids::AggregationOperation,
-        public_inputs::PublicInputs as QueryProofPublicInputs, PI_LEN,
+        public_inputs::PublicInputs as QueryProofPublicInputs,
     },
     revelation::{placeholders_check::check_placeholders, PublicInputs},
 };
@@ -14,7 +14,7 @@ use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     default_config,
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::{flatten_poseidon_hash_target, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{
@@ -27,7 +27,6 @@ use mp2_common::{
     C, D, F,
 };
 use plonky2::{
-    hash::poseidon::PoseidonHash,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -35,7 +34,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::VerifierOnlyCircuitData,
-        config::{GenericConfig, Hasher},
+        config::Hasher,
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -153,7 +152,6 @@ where
         original_tree_proof: &OriginalTreePublicInputs<Target>,
     ) -> RevelationWithoutResultsTreeWires<L, S, PH, PP> {
         let zero = b.zero();
-        let one = b.one();
         let u256_zero = b.zero_u256();
 
         let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
@@ -168,8 +166,6 @@ where
         // The operation cannot be ID for aggregation.
         let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
             .map(|op| b.constant(op.to_field()));
-
-        let mut overflow = query_proof.overflow_flag_target().target;
 
         // Convert the entry count to an Uint256.
         let entry_count = query_proof.num_matching_rows_target();
@@ -195,10 +191,6 @@ where
             b.connect(is_divisor_zero.target, is_entry_count_zero.target);
 
             results.push(result);
-
-            // Accumulate overflow.
-            let is_overflow = b.and(is_op_avg, is_divisor_zero);
-            overflow = b.add(overflow, is_overflow.target);
         });
         results.resize(L * S, u256_zero);
 
@@ -250,21 +242,24 @@ where
             .collect_vec();
         let results_slice = results.iter().flat_map(ToTargets::to_targets).collect_vec();
 
-        let overflow = b.is_not_equal(overflow, zero).target;
-
         let num_results = b.not(is_entry_count_zero);
+
+        let flat_computational_hash = flatten_poseidon_hash_target(b, computational_hash);
+
         // Register the public innputs.
         PublicInputs::<_, L, S, PH>::new(
             &original_tree_proof.block_hash(),
-            &computational_hash.to_targets(),
-            &[num_placeholders],
+            &flat_computational_hash,
             &placeholder_values_slice,
-            &[query_proof.num_matching_rows_target()],
-            &[overflow],
+            &results_slice,
+            &[num_placeholders],
             // The aggregation query proof only has one result.
             &[num_results.target],
-            &results_slice,
+            &[query_proof.num_matching_rows_target()],
+            &[query_proof.overflow_flag_target().target],
+            // Query limit
             &[zero],
+            // Query offset
             &[zero],
         )
         .register(b);
@@ -335,7 +330,7 @@ impl<const L: usize, const S: usize, const PH: usize, const PP: usize> CircuitLo
 where
     [(); S - 1]:,
     [(); NUM_QUERY_IO::<S>]:,
-    [(); <PoseidonHash as Hasher<F>>::HASH_SIZE]:,
+    [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     type CircuitBuilderParams = CircuitBuilderParams;
 
@@ -391,24 +386,16 @@ where
 mod tests {
     use super::*;
     use crate::{
-        query::{
-            aggregation::tests::{random_aggregation_operations, random_aggregation_public_inputs},
-            public_inputs::QueryPublicInputs,
-        },
-        revelation::tests::{
-            compute_results_from_query_proof, random_original_tree_proof, TestPlaceholders,
-            ORIGINAL_TREE_PI_LEN,
+        query::public_inputs::QueryPublicInputs,
+        revelation::tests::{compute_results_from_query_proof, TestPlaceholders},
+        test_utils::{
+            random_aggregation_operations, random_aggregation_public_inputs,
+            random_original_tree_proof,
         },
     };
-    use mp2_common::{utils::ToFields, C, D};
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
-    use plonky2::{
-        field::types::{Field, PrimeField64},
-        plonk::config::Hasher,
-    };
+    use mp2_common::{poseidon::flatten_poseidon_hash_value, utils::ToFields, C, D};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::{field::types::Field, plonk::config::Hasher};
     use rand::{prelude::SliceRandom, thread_rng, Rng};
 
     // L: maximum number of results
@@ -455,7 +442,7 @@ mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let query_proof = b.add_virtual_target_arr::<QUERY_PI_LEN>().to_vec();
-            let original_tree_proof = b.add_virtual_target_arr::<ORIGINAL_TREE_PI_LEN>().to_vec();
+            let original_tree_proof = b.add_virtual_target_arr::<NUM_PREPROCESSING_IO>().to_vec();
 
             let query_pi = QueryProofPublicInputs::from_slice(&query_proof);
             let original_tree_pi = OriginalTreePublicInputs::from_slice(&original_tree_proof);
@@ -552,7 +539,10 @@ mod tests {
                 .collect_vec();
             let exp_hash = H::hash_no_pad(&inputs);
 
-            assert_eq!(pi.computational_hash(), exp_hash);
+            assert_eq!(
+                pi.flat_computational_hash(),
+                flatten_poseidon_hash_value(exp_hash),
+            );
         }
         // Number of placeholders
         assert_eq!(
