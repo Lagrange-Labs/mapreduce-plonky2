@@ -71,6 +71,7 @@ impl LengthedCircuit {
             &dv,
             &final_dm.to_targets(),
             &base_wires.bn.to_targets(),
+            &[b._false().target],
         )
         .register_args(b);
         LengthedWires {}

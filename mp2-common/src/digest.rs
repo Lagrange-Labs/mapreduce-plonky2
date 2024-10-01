@@ -155,12 +155,16 @@ impl SplitDigestTarget {
     /// hashes the individual digest first as to look as a single table.
     /// NOTE: it takes care of looking if the multiplier is NEUTRAL. In this case, it simply
     /// returns the individual one. This is to accomodate for single table digest or "merged" table
-    /// digest.
-    pub fn cond_combine_to_row_digest(&self, b: &mut CBuilder) -> DigestTarget {
+    /// digest. A flag is returned to distinguish between single and merged cases: the returned
+    /// falg is true iff the row digest being computed is for a merged table
+    pub fn cond_combine_to_row_digest(&self, b: &mut CBuilder) -> (DigestTarget, BoolTarget) {
         let row_digest_ind = b.map_to_curve_point(&self.individual.to_targets());
         let row_digest_mul = b.map_to_curve_point(&self.multiplier.to_targets());
         let is_merge_case = self.is_merge_case(b);
-        cond_circuit_hashed_scalar_mul(b, is_merge_case, row_digest_mul, row_digest_ind)
+        (
+            cond_circuit_hashed_scalar_mul(b, is_merge_case, row_digest_mul, row_digest_ind),
+            is_merge_case,
+        )
     }
 
     /// Recombine the split and individual target digest into a single one. It does NOT hashes the
@@ -218,9 +222,8 @@ mod test {
                 multiplier: d2,
             };
             let combined = sp.cond_combine_to_row_digest(b);
-            let is_merge = sp.is_merge_case(b);
-            b.register_public_input(is_merge.target);
-            b.register_curve_public_input(combined);
+            b.register_public_input(combined.1.target);
+            b.register_curve_public_input(combined.0);
 
             TestSplitDigestTarget { ind: d1, mul: d2 }
         }

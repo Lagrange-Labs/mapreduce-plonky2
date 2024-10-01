@@ -101,15 +101,18 @@ impl PartialNodeCircuit {
 
         // final_digest = HashToInt(mul_digest) * D(ind_digest)
         let split_digest = tuple.split_and_accumulate_digest(b, cells_pi.split_digest_target());
-        let row_digest = split_digest.cond_combine_to_row_digest(b);
+        let (row_digest, is_merge) = split_digest.cond_combine_to_row_digest(b);
 
         //  and add the digest of the row other rows
         let final_digest = b.curve_add(child_pi.rows_digest(), row_digest);
+        // assert is_merge is the same between this row and `child_pi`
+        b.connect(is_merge.target, child_pi.is_merge_case().target);
         PublicInputs::new(
             &node_hash,
             &final_digest.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
+            &[is_merge.target],
         )
         .register(b);
         PartialNodeWires {
@@ -232,11 +235,42 @@ pub mod test {
 
     #[test]
     fn partial_node_child_left() {
-        partial_node_circuit(true)
+        partial_node_circuit(true, false, false)
     }
+
+    #[test]
+    fn partial_node_child_left_node_multiplier() {
+        partial_node_circuit(true, true, false)
+    }
+
+    #[test]
+    fn partial_node_child_left_cell_multiplier() {
+        partial_node_circuit(true, false, true)
+    }
+
+    #[test]
+    fn partial_node_child_left_all_multipliers() {
+        partial_node_circuit(true, true, true)
+    }
+
     #[test]
     fn partial_node_child_right() {
-        partial_node_circuit(false)
+        partial_node_circuit(false, false, false)
+    }
+
+    #[test]
+    fn partial_node_child_right_node_multiplier() {
+        partial_node_circuit(false, true, false)
+    }
+
+    #[test]
+    fn partial_node_child_right_cell_multiplier() {
+        partial_node_circuit(false, false, true)
+    }
+
+    #[test]
+    fn partial_node_child_right_all_multipliers() {
+        partial_node_circuit(false, true, true)
     }
 
     pub fn partial_safety_check<T: Into<U256>>(
@@ -254,8 +288,7 @@ pub mod test {
         assert!(max_left <= min_right);
     }
 
-    fn partial_node_circuit(child_at_left: bool) {
-        let is_multiplier = false;
+    fn partial_node_circuit(child_at_left: bool, is_multiplier: bool, is_cell_multiplier: bool) {
         let tuple = Cell::new(F::rand(), U256::from(18), is_multiplier);
         let (child_min, child_max) = match child_at_left {
             true => (U256::from(10), U256::from(15)),
@@ -263,11 +296,19 @@ pub mod test {
         };
         partial_safety_check(child_min, child_max, tuple.value, child_at_left);
         let node_circuit = PartialNodeCircuit::new(tuple.clone(), child_at_left);
-        let child_pi = generate_random_pi(child_min.to(), child_max.to());
+        let child_pi = generate_random_pi(
+            child_min.to(),
+            child_max.to(),
+            is_cell_multiplier || is_multiplier,
+        );
         let cells_point = Point::rand();
         let ind_cell_digest = cells_point.to_weierstrass().to_fields();
         let cells_hash = HashOut::rand().to_fields();
-        let mul_cell_digest = Point::NEUTRAL.to_fields();
+        let mul_cell_digest = if is_cell_multiplier {
+            cells_point.to_weierstrass().to_fields()
+        } else {
+            Point::NEUTRAL.to_fields()
+        };
         let cells_pi_struct =
             cells_tree::PublicInputs::new(&cells_hash, &ind_cell_digest, &mul_cell_digest);
         let cells_pi = cells_pi_struct.to_vec();
@@ -308,5 +349,6 @@ pub mod test {
         let res =
             res + weierstrass_to_point(&PublicInputs::from_slice(&child_pi).rows_digest_field());
         assert_eq!(res.to_weierstrass(), pi.rows_digest_field());
+        assert_eq!(split_digest.is_merge_case(), pi.is_merge_flag());
     }
 }

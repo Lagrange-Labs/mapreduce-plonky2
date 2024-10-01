@@ -92,6 +92,7 @@ impl MergeTable {
             &new_dv.to_targets(),
             &base_wires.dm.to_targets(),
             &base_wires.bn.to_targets(),
+            &[b._true().target],
         )
         .register_args(b);
         MergeTableWires {

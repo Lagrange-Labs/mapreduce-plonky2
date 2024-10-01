@@ -49,6 +49,7 @@ impl SimpleCircuit {
             &final_dv.to_targets(),
             &base_wires.dm.to_targets(),
             &base_wires.bn.to_targets(),
+            &[b._false().target],
         )
         .register_args(b);
         SimpleWires(dimension)

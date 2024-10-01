@@ -71,16 +71,20 @@ impl FullNodeCircuit {
 
         // final_digest = HashToInt(mul_digest) * D(ind_digest) + left.digest() + right.digest()
         let split_digest = tuple.split_and_accumulate_digest(b, cells_pi.split_digest_target());
-        let row_digest = split_digest.cond_combine_to_row_digest(b);
+        let (row_digest, is_merge) = split_digest.cond_combine_to_row_digest(b);
 
         // add this row digest with the rest
         let final_digest = b.curve_add(min_child.rows_digest(), max_child.rows_digest());
         let final_digest = b.curve_add(final_digest, row_digest);
+        // assert `is_merge` is the same as the flags in children pis
+        b.connect(min_child.is_merge_case().target, is_merge.target);
+        b.connect(max_child.is_merge_case().target, is_merge.target);
         PublicInputs::new(
             &hash.to_targets(),
             &final_digest.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
+            &[is_merge.target],
         )
         .register(b);
         FullNodeWires(tuple)
@@ -155,7 +159,7 @@ pub(crate) mod test {
         utils::weierstrass_to_point,
     };
     use plonky2::{
-        field::types::Sample,
+        field::types::{Field, Sample},
         hash::hash_types::HashOut,
         iop::{
             target::Target,
@@ -200,25 +204,30 @@ pub(crate) mod test {
         }
     }
 
-    pub(crate) fn generate_random_pi(min: usize, max: usize) -> Vec<F> {
+    pub(crate) fn generate_random_pi(min: usize, max: usize, is_merge: bool) -> Vec<F> {
         let hash = HashOut::rand();
         let digest = Point::rand();
         let min = U256::from(min);
         let max = U256::from(max);
+        let merge = F::from_canonical_usize(is_merge as usize);
         PublicInputs::new(
             &hash.to_fields(),
             &digest.to_weierstrass().to_fields(),
             &min.to_fields(),
             &max.to_fields(),
+            &[merge],
         )
         .to_vec()
     }
 
-    #[test]
-    fn row_tree_full_circuit() {
+    fn test_row_tree_full_circuit(is_multiplier: bool, cells_multiplier: bool) {
         let cells_point = Point::rand();
         let ind_cell_digest = cells_point.to_weierstrass().to_fields();
-        let mul_cell_digest = Point::NEUTRAL.to_fields();
+        let mul_cell_digest = if cells_multiplier {
+            cells_point.to_weierstrass().to_fields()
+        } else {
+            Point::NEUTRAL.to_fields()
+        };
         let cells_hash = HashOut::rand().to_fields();
         let cells_pi_struct =
             cells_tree::PublicInputs::new(&cells_hash, &ind_cell_digest, &mul_cell_digest);
@@ -229,10 +238,10 @@ pub(crate) mod test {
         let (right_min, right_max) = (18, 30);
         let value = U256::from(18); // 15 < 18 < 23
         let identifier = F::rand();
-        let tuple = Cell::new(identifier, value, false);
+        let tuple = Cell::new(identifier, value, is_multiplier);
         let node_circuit = FullNodeCircuit::from(tuple.clone());
-        let left_pi = generate_random_pi(left_min, left_max);
-        let right_pi = generate_random_pi(right_min, right_max);
+        let left_pi = generate_random_pi(left_min, left_max, is_multiplier || cells_multiplier);
+        let right_pi = generate_random_pi(right_min, right_max, is_multiplier || cells_multiplier);
         let test_circuit = TestFullNodeCircuit {
             circuit: node_circuit,
             left_pi: left_pi.clone(),
@@ -270,5 +279,26 @@ pub(crate) mod test {
         let p2dr = weierstrass_to_point(&PublicInputs::from_slice(&right_pi).rows_digest_field());
         let result_digest = p1dr + p2dr + row_digest;
         assert_eq!(result_digest.to_weierstrass(), pi.rows_digest_field());
+        assert_eq!(split_digest.is_merge_case(), pi.is_merge_flag());
+    }
+
+    #[test]
+    fn row_tree_full() {
+        test_row_tree_full_circuit(false, false);
+    }
+
+    #[test]
+    fn row_tree_full_node_multiplier() {
+        test_row_tree_full_circuit(true, false);
+    }
+
+    #[test]
+    fn row_tree_full_cells_multiplier() {
+        test_row_tree_full_circuit(false, true);
+    }
+
+    #[test]
+    fn row_tree_full_all_multipliers() {
+        test_row_tree_full_circuit(true, true);
     }
 }

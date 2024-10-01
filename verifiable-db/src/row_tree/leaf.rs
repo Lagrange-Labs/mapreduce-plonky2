@@ -46,7 +46,7 @@ impl LeafCircuit {
         // final_digest = HashToInt(D(mul_digest)) * D(ind_digest)
         // NOTE This additional digest is necessary since the individual digest is supposed to be a
         // full row, that is how it is extracted from MPT
-        let final_digest = split_digest.cond_combine_to_row_digest(b);
+        let (final_digest, is_merge) = split_digest.cond_combine_to_row_digest(b);
 
         // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
         // in our case, min == max == index_value
@@ -69,6 +69,7 @@ impl LeafCircuit {
             &final_digest.to_targets(),
             &value_fields,
             &value_fields,
+            &[is_merge.target],
         )
         .register(b);
         LeafWires(tuple)
@@ -177,19 +178,21 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_row_tree_leaf_circuit() {
+    fn test_row_tree_leaf_circuit(is_multiplier: bool, cells_multiplier: bool) {
         let mut rng = thread_rng();
         let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let identifier = F::rand();
-        let is_row_multiplier = false;
-        let row_cell = Cell::new(identifier, value, is_row_multiplier);
+        let row_cell = Cell::new(identifier, value, is_multiplier);
         let circuit = LeafCircuit::from(row_cell.clone());
         let tuple = row_cell.clone();
 
         let ind_cells_digest = Point::rand().to_fields();
         // TODO: test with other than neutral
-        let mul_cells_digest = Point::NEUTRAL.to_fields();
+        let mul_cells_digest = if cells_multiplier {
+            Point::rand().to_fields()
+        } else {
+            Point::NEUTRAL.to_fields()
+        };
         let cells_hash = HashOut::rand().to_fields();
         let cells_pi_struct =
             cells_tree::PublicInputs::new(&cells_hash, &ind_cells_digest, &mul_cells_digest);
@@ -216,6 +219,27 @@ mod test {
         let split_digest =
             row_cell.split_and_accumulate_digest(cells_pi_struct.split_digest_point());
         let result = split_digest.cond_combine_to_row_digest();
-        assert_eq!(result.to_weierstrass(), pi.rows_digest_field())
+        assert_eq!(result.to_weierstrass(), pi.rows_digest_field());
+        assert_eq!(split_digest.is_merge_case(), pi.is_merge_flag());
+    }
+
+    #[test]
+    fn row_tree_leaf() {
+        test_row_tree_leaf_circuit(false, false);
+    }
+
+    #[test]
+    fn row_tree_leaf_node_multiplier() {
+        test_row_tree_leaf_circuit(true, false);
+    }
+
+    #[test]
+    fn row_tree_leaf_cells_multiplier() {
+        test_row_tree_leaf_circuit(false, true);
+    }
+
+    #[test]
+    fn row_tree_leaf_all_multipliers() {
+        test_row_tree_leaf_circuit(true, true);
     }
 }
