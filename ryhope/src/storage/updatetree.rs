@@ -15,7 +15,7 @@ use super::TreeStorage;
 
 /// A UpdateTree represent the hierarchy of nodes whose hash will need to be
 /// recomputed, and feature ancillary functions to this purpose.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UpdateTree<K: Clone + Hash + Eq> {
     /// The epoch stemming from the application of this update tree
     epoch: Epoch,
@@ -25,7 +25,7 @@ pub struct UpdateTree<K: Clone + Hash + Eq> {
     idx: HashMap<K, usize>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, Debug)]
 pub struct UpdateTreeNode<K: Clone + Hash + Eq> {
     /// If any, the parent of this node
     parent: Option<usize>,
