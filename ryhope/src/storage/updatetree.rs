@@ -25,7 +25,7 @@ pub struct UpdateTree<K: Clone + Hash + Eq> {
     idx: HashMap<K, usize>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct UpdateTreeNode<K: Clone + Hash + Eq> {
     /// If any, the parent of this node
     parent: Option<usize>,
