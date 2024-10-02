@@ -567,7 +567,7 @@ where
         // closure performing all the operations necessary beofre jumping to the next iteration
         let mut end_iteration = |proven_nodes: &mut HashSet<K>| -> Result<()> {
             proven_nodes.insert(k.clone());
-            workplan.done(&wk)?;
+            workplan.done(wk.k())?;
             Ok(())
         };
         // since epoch starts at genesis now, we can directly give the value of the block

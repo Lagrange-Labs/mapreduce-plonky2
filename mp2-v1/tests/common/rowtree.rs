@@ -238,7 +238,7 @@ impl TestContext {
                 new_proof_key,
                 hex::encode(extract_hash_from_proof(&proof).unwrap().to_bytes())
             );
-            workplan.done(&wk).unwrap();
+            workplan.done(wk.k()).unwrap();
         }
         let root = t.root().await.unwrap();
         let row = table.row.fetch(&root).await;
