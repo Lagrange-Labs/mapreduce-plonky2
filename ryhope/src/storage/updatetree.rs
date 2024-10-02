@@ -396,7 +396,7 @@ impl<K: Clone + Hash + Eq + Debug> WorkplanItem<K> {
 /// process, but their children have not been processed yet. In this case, the
 /// `[done(k)]` method shall be invoked to mark processed, which will allow
 /// `next()` to return their parents on its next invokation.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UpdatePlan<T: Debug + Clone + Hash + Eq> {
     pub t: UpdateTree<T>,
     batch_size: usize,
