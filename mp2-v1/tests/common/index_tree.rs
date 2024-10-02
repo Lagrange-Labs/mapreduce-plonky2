@@ -210,7 +210,7 @@ impl TestContext {
                 .store_proof(ProofKey::Index(proof_key), proof)
                 .expect("unable to store index tree proof");
 
-            workplan.done(&wk).unwrap();
+            workplan.done(wk.k()).unwrap();
         }
         let root = t.root().await?.unwrap();
         let root_proof_key = IndexProofIdentifier {

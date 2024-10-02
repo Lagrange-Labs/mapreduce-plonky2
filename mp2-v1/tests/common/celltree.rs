@@ -185,7 +185,7 @@ impl TestContext {
                         .unwrap()
                 )
             );
-            workplan.done(&wk).unwrap();
+            workplan.done(wk.k()).unwrap();
         }
         let root = tree.root().await?.unwrap();
         let root_proof_key = if let Some(data) = tree.root_data().await? {
