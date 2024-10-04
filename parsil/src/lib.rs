@@ -25,6 +25,9 @@ mod utils;
 mod validate;
 mod visitor;
 
+// required for enforcing the right number of placeholders is given during a query request
+pub use placeholders::validate as validate_placeholders;
+
 /// Given an SQL query textual representation, ensure it satisfies all the
 /// criterion imposed by the current proving architecture.
 pub fn check<C: ContextProvider>(query: &str, settings: &ParsilSettings<C>) -> Result<()> {
