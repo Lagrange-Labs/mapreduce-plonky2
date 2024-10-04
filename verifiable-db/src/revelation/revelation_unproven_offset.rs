@@ -289,7 +289,6 @@ where
 {
     pub(crate) fn new(
         row_paths: [RowPath; L],
-        index_ids: [u64; 2],
         item_ids: &[F],
         results: [Vec<U256>; L],
         limit: u64,
@@ -302,13 +301,9 @@ where
         let mut row_node_info = [NodeInfo::default(); L];
         let mut index_node_info = [NodeInfo::default(); L];
         for (i, row) in row_paths.into_iter().enumerate() {
-            row_tree_paths[i] =
-                MerklePathGadget::new(&row.row_tree_path, &row.row_path_siblings, index_ids[1])?;
-            index_tree_paths[i] = MerklePathGadget::new(
-                &row.index_tree_path,
-                &row.index_path_siblings,
-                index_ids[0],
-            )?;
+            row_tree_paths[i] = MerklePathGadget::new(&row.row_tree_path, &row.row_path_siblings)?;
+            index_tree_paths[i] =
+                MerklePathGadget::new(&row.index_tree_path, &row.index_path_siblings)?;
             row_node_info[i] = row.row_node_info;
             index_node_info[i] = row.index_node_info;
         }
@@ -1263,12 +1258,6 @@ mod tests {
             TestRevelationCircuit::<ROW_TREE_MAX_DEPTH, INDEX_TREE_MAX_DEPTH, L, S, PH, PP> {
                 circuit: RevelationCircuit::new(
                     [row_path_0, row_path_1, row_path_2, row_path_3, row_path_4],
-                    index_ids
-                        .into_iter()
-                        .map(|id| id.to_canonical_u64())
-                        .collect_vec()
-                        .try_into()
-                        .unwrap(),
                     &ids,
                     results.map(|res| res.to_vec()),
                     0,

@@ -1,4 +1,4 @@
-use std::iter::once;
+use std::{array, iter::once};
 
 use alloy::primitives::U256;
 use anyhow::Result;
@@ -7,13 +7,21 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, HashPermutation},
     proof::ProofWithVK,
     serialization::{deserialize_long_array, serialize_long_array},
-    types::HashOutput,
-    utils::{Fieldable, ToFields},
-    F,
+    types::{CBuilder, HashOutput},
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    utils::{Fieldable, ToFields, ToTargets},
+    CHasher, F,
 };
 use plonky2::{
     field::types::Field,
-    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
+    hash::{
+        hash_types::{HashOut, HashOutTarget},
+        hashing::hash_n_to_hash_no_pad,
+    },
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::config::GenericHashOut,
 };
 use serde::{Deserialize, Serialize};
@@ -217,6 +225,83 @@ impl NodeInfo {
         )
     }
 }
+
+#[derive(Clone, Debug)]
+pub(crate) struct NodeInfoTarget {
+    /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
+    /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
+    pub(crate) embedded_tree_hash: HashOutTarget,
+    /// Hashes of the children of the current node, first left child and then right child hash. The hash of left/right child
+    /// is the empty hash (i.e., H("")) if there is no corresponding left/right child for the current node
+    pub(crate) child_hashes: [HashOutTarget; 2],
+    /// value stored in the node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
+    pub(crate) value: UInt256Target,
+    /// minimum value associated to the current node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
+    pub(crate) min: UInt256Target,
+    /// minimum value associated to the current node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
+    pub(crate) max: UInt256Target,
+}
+
+impl NodeInfoTarget {
+    pub(crate) fn build(b: &mut CBuilder) -> Self {
+        let [value, min, max] = b.add_virtual_u256_arr();
+        let [left_child_hash, right_child_hash, embedded_tree_hash] =
+            array::from_fn(|_| b.add_virtual_hash());
+        Self {
+            embedded_tree_hash,
+            child_hashes: [left_child_hash, right_child_hash],
+            value,
+            min,
+            max,
+        }
+    }
+
+    /// Build an instance of `Self` without range-check the `UInt256Target`s
+    pub(crate) fn build_unsafe(b: &mut CBuilder) -> Self {
+        let [value, min, max] = b.add_virtual_u256_arr_unsafe();
+        let [left_child_hash, right_child_hash, embedded_tree_hash] =
+            array::from_fn(|_| b.add_virtual_hash());
+        Self {
+            embedded_tree_hash,
+            child_hashes: [left_child_hash, right_child_hash],
+            value,
+            min,
+            max,
+        }
+    }
+
+    pub(crate) fn compute_node_hash(&self, b: &mut CBuilder, index_id: Target) -> HashOutTarget {
+        let inputs = self.child_hashes[0]
+            .to_targets()
+            .into_iter()
+            .chain(self.child_hashes[1].to_targets())
+            .chain(self.min.to_targets())
+            .chain(self.max.to_targets())
+            .chain(once(index_id))
+            .chain(self.value.to_targets())
+            .chain(self.embedded_tree_hash.to_targets())
+            .collect_vec();
+        b.hash_n_to_hash_no_pad::<CHasher>(inputs)
+    }
+
+    pub(crate) fn set_target(&self, pw: &mut PartialWitness<F>, inputs: &NodeInfo) {
+        [
+            (self.embedded_tree_hash, inputs.embedded_tree_hash),
+            (self.child_hashes[0], inputs.child_hashes[0]),
+            (self.child_hashes[1], inputs.child_hashes[1]),
+        ]
+        .into_iter()
+        .for_each(|(target, value)| pw.set_hash_target(target, value));
+        pw.set_u256_target_arr(
+            &[self.min.clone(), self.max.clone(), self.value.clone()],
+            &[inputs.min, inputs.max, inputs.value],
+        );
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// enum to specify whether a node is the left or right child of another node
 pub enum ChildPosition {

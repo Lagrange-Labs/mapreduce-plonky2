@@ -396,13 +396,8 @@ where
         )?;
         let placeholder_inputs =
             CheckPlaceholderGadget::new(query_bounds, placeholders, placeholder_hash_ids)?;
-        let index_ids = [
-            column_ids.primary.to_canonical_u64(),
-            column_ids.secondary.to_canonical_u64(),
-        ];
         let revelation_circuit = RevelationCircuitUnprovenOffset::new(
             row_paths,
-            index_ids,
             &results_structure.output_ids,
             result_values,
             limit,
