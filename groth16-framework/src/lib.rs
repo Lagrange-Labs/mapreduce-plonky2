@@ -103,7 +103,9 @@ pub type C = PoseidonGoldilocksConfig;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::test_groth16_proving_and_verification;
+    use crate::test_utils::{
+        evm_verify_on_groth16_proof_file, test_groth16_proving_and_verification,
+    };
     use mp2_common::{proof::serialize_proof, D, F};
     use plonky2::{
         field::types::Field,
@@ -116,14 +118,22 @@ mod tests {
     use rand::{thread_rng, Rng};
     use serial_test::serial;
 
+    const ASSET_DIR: &str = "groth16_simple";
+
+    /// Test the verification on a local file of generated Groth16 proof for the simple circuit.
+    #[ignore] // Ignore in CI, since it could only run for local test.
+    #[serial]
+    #[test]
+    fn test_groth16_simple_local_verification() {
+        evm_verify_on_groth16_proof_file(ASSET_DIR);
+    }
+
     /// Test proving and verifying with a simple circuit.
     #[ignore] // Ignore for long running time in CI.
     #[serial]
     #[test]
     fn test_groth16_proving_simple() {
         env_logger::init();
-
-        const ASSET_DIR: &str = "groth16_simple";
 
         // Build for the simple circuit and generate the plonky2 proof.
         let (circuit_data, proof) = plonky2_build_and_prove();

@@ -62,7 +62,7 @@ impl Groth16Prover {
     /// `groth16_proof.proofs + groth16_proof.inputs + plonky2_proof.public_inputs`.
     /// In the combined bytes, each part has number as:
     /// - groth16_proof.proofs: 8 * U256 = 256 bytes
-    /// - groth16_proof.inputs: 3 * U256 = 96 bytes
+    /// - groth16_proof.inputs: 2 * U256 = 64 bytes
     /// - plonky2_proof.public_inputs: the encoded public inputs exported by user
     pub fn prove(&self, plonky2_proof: &[u8]) -> Result<Vec<u8>> {
         // Deserialize the plonky2 proof.
@@ -112,7 +112,7 @@ fn load_circuit_data(asset_dir: &str) -> Result<CircuitData<F, C, D>> {
 /// `groth16_proof.proofs + groth16_proof.inputs + plonky2_proof.public_inputs`.
 /// In the combined bytes, each part has number as:
 /// - groth16_proof.proofs: 8 * U256 = 256 bytes
-/// - groth16_proof.inputs: 3 * U256 = 96 bytes
+/// - groth16_proof.inputs: 2 * U256 = 64 bytes
 /// - plonky2_proof.public_inputs: the encoded public inputs exported by user,
 ///   all fields must be in range of Uint32, it's restricted by `sha256` (in plonky2x).
 pub fn combine_proofs(

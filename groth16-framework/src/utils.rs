@@ -8,9 +8,10 @@ use mp2_common::{
     D, F,
 };
 use plonky2::plonk::circuit_data::CircuitData;
+use serde::Deserialize;
 use std::{
     fs::{create_dir_all, File},
-    io::{Read, Write},
+    io::{BufReader, Read, Write},
     path::Path,
 };
 
@@ -29,6 +30,16 @@ pub fn hex_to_u256(s: &str) -> Result<U256> {
     let u = U256::from_str_radix(s, 16)?;
 
     Ok(u)
+}
+
+/// Deserialize from a JSON file.
+pub fn deserialize_json_file<P: AsRef<Path>, T: for<'de> Deserialize<'de>>(
+    file_path: P,
+) -> Result<T> {
+    let file = File::open(file_path)?;
+    let reader = BufReader::new(file);
+
+    Ok(serde_json::from_reader(reader)?)
 }
 
 /// Read the data from a file.
