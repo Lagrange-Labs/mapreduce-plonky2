@@ -169,7 +169,10 @@ fn extract_value(
             } else {
                 zero
             };
-            let last_part = b.add_lookup_from_index(current_byte, last_bits_lookup_indexes[7 - j]);
+            let last_part = b.add_lookup_from_index(
+                current_byte,
+                last_bits_lookup_indexes[NUM_LAST_BITS_LOOKUP_TABLES - 1 - j],
+            );
             let last_part = b.mul_const(F::from_canonical_u8(1 << (j + 1)), last_part);
             let byte = b.add(first_part, last_part);
             possible_bytes.push(byte);
