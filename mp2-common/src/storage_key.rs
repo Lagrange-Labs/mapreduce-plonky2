@@ -25,10 +25,7 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_crypto::{
-    biguint::{BigUintTarget, CircuitBuilderBiguint},
-    u32::arithmetic_u32::{CircuitBuilderU32, U32Target},
-};
+use plonky2_crypto::u32::arithmetic_u32::{CircuitBuilderU32, U32Target};
 use serde::{Deserialize, Serialize};
 use std::iter::{once, repeat};
 
@@ -253,25 +250,8 @@ impl SimpleSlot {
             .unwrap();
         // Build the Keccak MPT.
         let keccak_mpt = Self::build_keccak_mpt(b, location);
-        // Convert the MPT key to a BigUint.
-        let limbs = keccak_mpt
-            .output_array
-            .to_targets()
-            .into_iter()
-            .map(U32Target)
-            .collect();
-        let mpt_key = BigUintTarget { limbs };
-        // Compute `mpt_key + offset`.
-        let offset = BigUintTarget {
-            limbs: vec![U32Target(offset)],
-        };
-        let mpt_key = b.add_biguint(&mpt_key, &offset);
-        // The last limb is carry, check it's not overflow.
-        assert_eq!(mpt_key.num_limbs(), 9);
-        b.assert_zero(mpt_key.get_limb(8).0);
-        let mpt_key = mpt_key.limbs[..8].try_into().unwrap();
         // Transform the MPT key to nibbles.
-        let mpt_key = MPTKeyWire::init_from_u32_targets(b, &mpt_key);
+        let mpt_key = MPTKeyWire::init_from_u32_targets(b, &keccak_mpt.output_array);
 
         SimpleSlotWires {
             slot,
