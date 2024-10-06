@@ -149,8 +149,8 @@ fn extract_value(
     let zero = b.zero();
 
     // Extract all the bits of the field aligined with bytes.
-    let mut aligned_bytes = Vec::with_capacity(32);
-    for i in 0..32 {
+    let mut aligned_bytes = Vec::with_capacity(MAPPING_LEAF_VALUE_LEN);
+    for i in 0..MAPPING_LEAF_VALUE_LEN {
         // Get the current and next bytes.
         let current_byte = value_bytes[i];
         let next_byte = if i < 31 { value_bytes[i + 1] } else { zero };
@@ -191,8 +191,8 @@ fn extract_value(
 
     // Extract from aligned_bytes[info.byte_offset] to aligned_bytes[last_byte_offset].
     let mut last_byte_found = b._false();
-    let mut result_bytes = Vec::with_capacity(32);
-    for i in 0..32 {
+    let mut result_bytes = Vec::with_capacity(MAPPING_LEAF_VALUE_LEN);
+    for i in 0..MAPPING_LEAF_VALUE_LEN {
         // offset = info.byte_offset + i
         let offset = b.add_const(info.byte_offset, F::from_canonical_u8(i));
         // Set to 0 if found the last byte.
@@ -210,9 +210,9 @@ fn extract_value(
     let real_len = b.add_const(real_len, F::ONE);
     // result_vec = {result_bytes, real_len}
     // result = result_vec.normalize_left()
-    let arr: Array<Target, 32> = result_bytes.try_into().unwrap();
+    let arr: Array<Target, MAPPING_LEAF_VALUE_LEN> = result_bytes.try_into().unwrap();
     let result_vec = VectorWire { arr, real_len };
-    let result: Array<Target, 32> = result_vec.normalize_left(b);
+    let result: Array<Target, MAPPING_LEAF_VALUE_LEN> = result_vec.normalize_left(b);
     let mut result = result.arr;
 
     // At last we need to retain only the first `info.length % 8` bits for
