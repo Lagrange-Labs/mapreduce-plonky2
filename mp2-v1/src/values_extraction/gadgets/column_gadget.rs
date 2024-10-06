@@ -7,6 +7,7 @@ use mp2_common::{
     array::{Array, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
     types::{CBuilder, MAPPING_LEAF_VALUE_LEN},
+    utils::{Endianness, PackerTarget},
     F,
 };
 use plonky2::{
@@ -73,8 +74,10 @@ impl<'a, const MAX_FIELD_PER_EVM: usize> ColumnGadget<'a, MAX_FIELD_PER_EVM> {
 
             // Compute and accumulate to the value digest only if the current field has to be
             // extracted in a column.
-            // digest = D(info.identifier || extracted_value)
-            let inputs = once(info.identifier).chain(extracted_value).collect_vec();
+            // digest = D(info.identifier || pack(extracted_value))
+            let inputs = once(info.identifier)
+                .chain(extracted_value.pack(b, Endianness::Big))
+                .collect_vec();
             let digest = b.map_to_curve_point(&inputs);
             // new_value_digest = value_digest + digest
             let new_value_digest = b.add_curve_point(&[value_digest, digest]);
