@@ -197,7 +197,7 @@ fn extract_value(
     let mut result_bytes = Vec::with_capacity(MAPPING_LEAF_VALUE_LEN);
     for i in 0..MAPPING_LEAF_VALUE_LEN {
         // offset = info.byte_offset + i
-        let offset = b.add_const(info.byte_offset, F::from_canonical_u8(i));
+        let offset = b.add_const(info.byte_offset, F::from_canonical_usize(i));
         // Set to 0 if found the last byte.
         let offset = b.select(last_byte_found, zero, offset);
         let byte = b.random_access(offset, aligned_bytes.clone());
@@ -208,13 +208,14 @@ fn extract_value(
         last_byte_found = b.or(last_byte_found, is_last_byte);
     }
 
-    // real_len = last_byte_offset - byte_offset + 1
-    let real_len = b.sub(last_byte_offset, info.byte_offset);
-    let real_len = b.add_const(real_len, F::ONE);
+    // real_len = last_byte_offset - byte_offset + 1 = length_bytes
     // result_vec = {result_bytes, real_len}
     // result = result_vec.normalize_left()
     let arr: Array<Target, MAPPING_LEAF_VALUE_LEN> = result_bytes.try_into().unwrap();
-    let result_vec = VectorWire { arr, real_len };
+    let result_vec = VectorWire {
+        arr,
+        real_len: length_bytes,
+    };
     let result: Array<Target, MAPPING_LEAF_VALUE_LEN> = result_vec.normalize_left(b);
     let mut result = result.arr;
 
