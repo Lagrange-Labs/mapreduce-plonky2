@@ -174,8 +174,10 @@ where
         )
         .build(b);
 
-        // values_digest += D(key_id || left_pad32(key))
-        let inputs: Vec<_> = iter::once(key_id).chain(slot.mapping_key.arr).collect();
+        // values_digest += D(key_id || pack(left_pad32(key)))
+        let inputs: Vec<_> = iter::once(key_id)
+            .chain(slot.mapping_key.arr.pack(b, Endianness::Big))
+            .collect();
         let values_key_digest = b.map_to_curve_point(&inputs);
         let values_digest = b.add_curve_point(&[values_digest, values_key_digest]);
 
