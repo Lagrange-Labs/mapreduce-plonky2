@@ -3,8 +3,8 @@
 use super::column_info::ColumnInfoTarget;
 use itertools::Itertools;
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing, types::CBuilder, utils::less_than_or_equal_to,
-    CHasher, F,
+    group_hashing::CircuitBuilderGroupHashing, types::CBuilder,
+    utils::less_than_or_equal_to_unsafe, CHasher, F,
 };
 use plonky2::{
     field::types::Field,
@@ -129,7 +129,7 @@ impl<'a, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
         // num_extracted_columns <= MAX_FIELD_PER_EVM
         let max_field_per_evm = b.constant(F::from_canonical_usize(MAX_FIELD_PER_EVM));
         let num_extracted_lt_or_eq_max =
-            less_than_or_equal_to(b, num_extracted_columns, max_field_per_evm, 8);
+            less_than_or_equal_to_unsafe(b, num_extracted_columns, max_field_per_evm, 8);
         b.assert_one(num_extracted_lt_or_eq_max.target);
 
         partial
