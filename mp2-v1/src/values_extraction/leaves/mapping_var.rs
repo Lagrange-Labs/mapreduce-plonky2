@@ -127,11 +127,6 @@ where
 
         let slot = MappingSlot::mpt_key_with_offset(b, evm_word);
 
-        // Range check for the slot to restrict it's an Uint8.
-        b.range_check(slot.mapping_slot, 8);
-        // Range check for the EVM word to restrict it's an Uint32.
-        b.range_check(evm_word, 32);
-
         // Build the node wires.
         let wires =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
