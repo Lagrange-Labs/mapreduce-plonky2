@@ -174,12 +174,15 @@ where
         )
         .build(b);
 
-        // values_digest += D(key_id || pack(left_pad32(key)))
+        // values_digest += evm_word == 0 ? D(key_id || pack(left_pad32(key))) : CURVE_ZERO
         let inputs: Vec<_> = iter::once(key_id)
             .chain(slot.mapping_key.arr.pack(b, Endianness::Big))
             .collect();
         let values_key_digest = b.map_to_curve_point(&inputs);
-        let values_digest = b.add_curve_point(&[values_digest, values_key_digest]);
+        let is_evm_word_zero = b.is_equal(evm_word, zero);
+        let curve_zero = b.curve_zero();
+        let values_key_digest = b.curve_select(is_evm_word_zero, values_key_digest, curve_zero);
+        let new_values_digest = b.add_curve_point(&[values_digest, values_key_digest]);
 
         // Compute the unique data to identify a row is the mapping key.
         // row_unique_data = H(key)
