@@ -9,7 +9,7 @@ use crate::{
     mpt_sequential::{MPTKeyWire, PAD_LEN},
     serialization::circuit_data_serialization::SerializableRichField,
     types::{MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
-    u256::{CircuitBuilderU256, UInt256Target, NUM_LIMBS},
+    u256::{CircuitBuilderU256, UInt256Target},
     utils::{
         keccak256, unpack_u32_to_u8_target, unpack_u32_to_u8_targets, Endianness, PackerTarget,
         ToTargets,
@@ -71,15 +71,10 @@ impl KeccakMPT {
         offset: Target,
     ) -> KeccakMPTWires {
         // location = keccak(inputs) + offset
-        let zero = b.zero();
         let keccak_location = KeccakCircuit::<{ INPUT_PADDED_LEN }>::hash_to_bytes(b, &inputs);
         let location = keccak_location.output.arr.pack(b, Endianness::Big);
         let location = UInt256Target::new_from_be_target_limbs(&location).unwrap();
-        let limbs = repeat(zero)
-            .take(NUM_LIMBS - 1)
-            .chain(once(offset))
-            .collect_vec();
-        let offset = UInt256Target::new_from_be_target_limbs(&limbs).unwrap();
+        let offset = UInt256Target::new_from_target_unsafe(b, offset);
         let (location_offset, overflow) = b.add_u256(&location, &offset);
         b.assert_zero(overflow.0);
         let location_offset =
