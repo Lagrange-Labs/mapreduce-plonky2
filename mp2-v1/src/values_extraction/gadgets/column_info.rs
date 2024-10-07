@@ -8,7 +8,7 @@ use std::array;
 
 /// Column info
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ColumnInfo {
+pub struct ColumnInfo {
     /// Slot information of the variable
     // TODO: Check if it needs to be PACKED_HASH_LEN bytes array instead.
     slot: F,
@@ -29,7 +29,7 @@ pub(crate) struct ColumnInfo {
 
 /// Column info target
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct ColumnInfoTarget {
+pub struct ColumnInfoTarget {
     pub(crate) slot: Target,
     pub(crate) identifier: Target,
     pub(crate) byte_offset: Target,

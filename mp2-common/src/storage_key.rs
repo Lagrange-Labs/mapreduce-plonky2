@@ -43,7 +43,7 @@ const INPUT_PADDED_LEN: usize = PAD_LEN(INPUT_TUPLE_LEN);
 /// Wires associated with the MPT key from the Keccak computation of location
 // It's only used for mapping slot.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct KeccakMPTWires {
+pub struct KeccakMPTWires {
     /// Actual Keccak wires created for the computation of the base for the storage slot
     pub keccak_base: ByteKeccakWires<INPUT_PADDED_LEN>,
     /// Actual Keccak wires created for the computation of the final MPT key

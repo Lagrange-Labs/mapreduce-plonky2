@@ -17,10 +17,10 @@ use std::iter;
 pub mod api;
 mod branch;
 mod extension;
-mod gadgets;
+pub mod gadgets;
 mod leaf_mapping;
+mod leaf_mapping_of_mappings;
 mod leaf_single;
-mod leaves;
 pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
@@ -31,7 +31,8 @@ pub use public_inputs::PublicInputs;
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"KEY";
 pub(crate) const VALUE_ID_PREFIX: &[u8] = b"VAL";
 
-/// gupeng
+/// Constant prefixes for the inner and outer key IDs of mapping slot.
+/// Restrict to one field.
 pub(crate) const INNER_KEY_ID_PREFIX: &[u8] = b"IN_KEY";
 pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"OUT_KEY";
 

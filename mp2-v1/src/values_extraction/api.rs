@@ -3,11 +3,16 @@
 use super::{
     branch::{BranchCircuit, BranchWires},
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
+    gadgets::column_info::ColumnInfo,
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
+    leaf_mapping_of_mappings::{LeafMappingOfMappingsCircuit, LeafMappingOfMappingsWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
 };
-use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
+use crate::{
+    api::InputNode, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM, MAX_BRANCH_NODE_LEN,
+    MAX_LEAF_NODE_LEN,
+};
 use anyhow::{bail, Result};
 use log::debug;
 use mp2_common::{
@@ -30,8 +35,18 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 use std::array;
 
-type LeafSingleWire = LeafSingleWires<MAX_LEAF_NODE_LEN>;
-type LeafMappingWire = LeafMappingWires<MAX_LEAF_NODE_LEN>;
+type LeafSingleInput =
+    LeafSingleCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+type LeafMappingInput =
+    LeafMappingCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+type LeafMappingOfMappingsInput =
+    LeafMappingOfMappingsCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+type LeafSingleWire =
+    LeafSingleWires<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+type LeafMappingWire =
+    LeafMappingWires<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+type LeafMappingOfMappingsWire =
+    LeafMappingOfMappingsWires<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
 type ExtensionInput = ProofInputSerialized<InputNode>;
 type BranchInput = ProofInputSerialized<InputNode>;
 
@@ -41,8 +56,9 @@ const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 /// be used to prove a MPT node recursively.
 #[derive(Serialize, Deserialize)]
 pub enum CircuitInput {
-    LeafSingle(LeafSingleCircuit<MAX_LEAF_NODE_LEN>),
-    LeafMapping(LeafMappingCircuit<MAX_LEAF_NODE_LEN>),
+    LeafSingle(LeafSingleInput),
+    LeafMapping(LeafMappingInput),
+    LeafMappingOfMappings(LeafMappingOfMappingsInput),
     Extension(ExtensionInput),
     BranchSingle(BranchInput),
     BranchMapping(BranchInput),
@@ -50,11 +66,23 @@ pub enum CircuitInput {
 
 impl CircuitInput {
     /// Create a circuit input for proving a leaf MPT node of single variable.
-    pub fn new_single_variable_leaf(node: Vec<u8>, slot: u8, column_id: u64) -> Self {
+    pub fn new_single_variable_leaf(
+        node: Vec<u8>,
+        slot: u8,
+        evm_word: u32,
+        num_actual_columns: usize,
+        num_extracted_columns: usize,
+        table_info: [ColumnInfo; DEFAULT_MAX_COLUMNS],
+    ) -> Self {
+        let slot = SimpleSlot::new(slot);
+
         CircuitInput::LeafSingle(LeafSingleCircuit {
             node,
-            slot: SimpleSlot::new(slot),
-            id: column_id,
+            slot,
+            evm_word,
+            num_actual_columns,
+            num_extracted_columns,
+            table_info,
         })
     }
 
@@ -63,14 +91,51 @@ impl CircuitInput {
         node: Vec<u8>,
         slot: u8,
         mapping_key: Vec<u8>,
-        key_id: u64,
-        value_id: u64,
+        key_id: F,
+        evm_word: u32,
+        num_actual_columns: usize,
+        num_extracted_columns: usize,
+        table_info: [ColumnInfo; DEFAULT_MAX_COLUMNS],
     ) -> Self {
+        let slot = MappingSlot::new(slot, mapping_key);
+
         CircuitInput::LeafMapping(LeafMappingCircuit {
             node,
-            slot: MappingSlot::new(slot, mapping_key),
+            slot,
             key_id,
-            value_id,
+            evm_word,
+            num_actual_columns,
+            num_extracted_columns,
+            table_info,
+        })
+    }
+
+    /// Create a circuit input for proving a leaf MPT node of mappings where the
+    /// value stored in a mapping entry is another mapping.
+    pub fn new_mapping_of_mappings_leaf(
+        node: Vec<u8>,
+        slot: u8,
+        outer_key: Vec<u8>,
+        inner_key: Vec<u8>,
+        outer_key_id: F,
+        inner_key_id: F,
+        evm_word: u32,
+        num_actual_columns: usize,
+        num_extracted_columns: usize,
+        table_info: [ColumnInfo; DEFAULT_MAX_COLUMNS],
+    ) -> Self {
+        let slot = MappingSlot::new(slot, outer_key);
+
+        CircuitInput::LeafMappingOfMappings(LeafMappingOfMappingsCircuit {
+            node,
+            slot,
+            inner_key,
+            outer_key_id,
+            inner_key_id,
+            evm_word,
+            num_actual_columns,
+            num_extracted_columns,
+            table_info,
         })
     }
 
@@ -107,6 +172,7 @@ impl CircuitInput {
 pub struct PublicParameters {
     leaf_single: CircuitWithUniversalVerifier<F, C, D, 0, LeafSingleWire>,
     leaf_mapping: CircuitWithUniversalVerifier<F, C, D, 0, LeafMappingWire>,
+    leaf_mapping_of_mappings: CircuitWithUniversalVerifier<F, C, D, 0, LeafMappingOfMappingsWire>,
     extension: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionNodeWires>,
     #[cfg(not(test))]
     branches: BranchCircuits,
@@ -277,8 +343,8 @@ impl_branch_circuits!(BranchCircuits, 2, 9, 16);
 impl_branch_circuits!(TestBranchCircuits, 1, 4, 9);
 
 /// Number of circuits in the set
-/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping
-const MAPPING_CIRCUIT_SET_SIZE: usize = 6;
+/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 leaf mapping of mappings
+const MAPPING_CIRCUIT_SET_SIZE: usize = 7;
 
 impl PublicParameters {
     /// Generates the circuit parameters for the MPT circuits.
@@ -296,12 +362,14 @@ impl PublicParameters {
         );
 
         debug!("Building leaf single circuit");
-        let leaf_single =
-            circuit_builder.build_circuit::<C, 0, LeafSingleWires<MAX_LEAF_NODE_LEN>>(());
+        let leaf_single = circuit_builder.build_circuit::<C, 0, LeafSingleWire>(());
 
         debug!("Building leaf mapping circuit");
-        let leaf_mapping =
-            circuit_builder.build_circuit::<C, 0, LeafMappingWires<MAX_LEAF_NODE_LEN>>(());
+        let leaf_mapping = circuit_builder.build_circuit::<C, 0, LeafMappingWire>(());
+
+        debug!("Building leaf mapping of mappings circuit");
+        let leaf_mapping_of_mappings =
+            circuit_builder.build_circuit::<C, 0, LeafMappingOfMappingsWire>(());
 
         debug!("Building extension circuit");
         let extension = circuit_builder.build_circuit::<C, 1, ExtensionNodeWires>(());
@@ -314,6 +382,7 @@ impl PublicParameters {
         let mut circuits_set = vec![
             leaf_single.get_verifier_data().circuit_digest,
             leaf_mapping.get_verifier_data().circuit_digest,
+            leaf_mapping_of_mappings.get_verifier_data().circuit_digest,
             extension.get_verifier_data().circuit_digest,
         ];
         circuits_set.extend(branches.circuit_set());
@@ -322,6 +391,7 @@ impl PublicParameters {
         PublicParameters {
             leaf_single,
             leaf_mapping,
+            leaf_mapping_of_mappings,
             extension,
             branches,
             #[cfg(not(test))]
@@ -340,6 +410,9 @@ impl PublicParameters {
             CircuitInput::LeafMapping(leaf) => set
                 .generate_proof(&self.leaf_mapping, [], [], leaf)
                 .map(|p| (p, self.leaf_mapping.get_verifier_data().clone()).into()),
+            CircuitInput::LeafMappingOfMappings(leaf) => set
+                .generate_proof(&self.leaf_mapping_of_mappings, [], [], leaf)
+                .map(|p| (p, self.leaf_mapping_of_mappings.get_verifier_data().clone()).into()),
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
                 let (child_proof, child_vk) = child_proofs
@@ -383,7 +456,6 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod tests {
-
     use super::{
         super::{
             compute_leaf_mapping_metadata_digest, compute_leaf_mapping_values_digest,

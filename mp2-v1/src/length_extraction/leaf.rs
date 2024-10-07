@@ -124,7 +124,7 @@ impl LeafLengthCircuit {
             GFp::from_canonical_u8(self.variable_slot),
         );
 
-        self.length_slot.assign(pw, &wires.length_slot);
+        self.length_slot.assign(pw, &wires.length_slot, 0);
         wires.length_mpt.assign(
             pw,
             &Vector::from_vec(&self.length_node).expect("invalid node length"),

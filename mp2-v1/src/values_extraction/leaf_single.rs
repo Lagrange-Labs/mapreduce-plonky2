@@ -1,63 +1,118 @@
 //! Module handling the single variable inside a storage trie
 
-use crate::MAX_LEAF_NODE_LEN;
-
-use super::public_inputs::{PublicInputs, PublicInputsArgs};
+use crate::{
+    values_extraction::{
+        gadgets::{
+            column_gadget::ColumnGadget,
+            column_info::{
+                CircuitBuilderColumnInfo, ColumnInfo, ColumnInfoTarget, WitnessWriteColumnInfo,
+            },
+            metadata_gadget::MetadataGadget,
+        },
+        public_inputs::{PublicInputs, PublicInputsArgs},
+    },
+    DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM, MAX_LEAF_NODE_LEN,
+};
+use anyhow::Result;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
-    group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires},
     mpt_sequential::{
         utils::left_pad_leaf_value, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN,
     },
+    poseidon::{empty_poseidon_hash, hash_to_int_target},
     public_inputs::PublicInputCommon,
+    serialization::{
+        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+    },
     storage_key::{SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
-    utils::{Endianness, PackerTarget},
-    D,
+    utils::ToTargets,
+    CHasher, D, F,
 };
 use plonky2::{
     field::types::Field,
     iop::{
-        target::Target,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::proof::ProofWithPublicInputsTarget,
 };
+use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
+use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::iter;
+use std::array;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct LeafSingleWires<const NODE_LEN: usize>
-where
+pub struct LeafSingleWires<
+    const NODE_LEN: usize,
+    const MAX_COLUMNS: usize,
+    const MAX_FIELD_PER_EVM: usize,
+> where
     [(); PAD_LEN(NODE_LEN)]:,
 {
+    /// Full node from the MPT proof
     node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
-    root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
-    slot: SimpleSlotWires,
+    /// Leaf value
     value: Array<Target, MAPPING_LEAF_VALUE_LEN>,
-    id: Target,
+    /// MPT root
+    root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
+    /// Storage single variable slot
+    slot: SimpleSlotWires,
+    /// Index denoting which EVM word are we looking at for the given variable
+    pub(crate) evm_word: Target,
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    /// Boolean flags specifying whether the i-th column is a column of the table or not
+    pub(crate) is_actual_columns: [BoolTarget; MAX_COLUMNS],
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    /// Boolean flags specifying whether the i-th field being processed has to be extracted into a column or not
+    pub(crate) is_extracted_columns: [BoolTarget; MAX_COLUMNS],
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    /// Information about all columns of the table
+    pub(crate) table_info: [ColumnInfoTarget; MAX_COLUMNS],
 }
 
 /// Circuit to prove the correct derivation of the MPT key from a simple slot
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LeafSingleCircuit<const NODE_LEN: usize> {
+pub struct LeafSingleCircuit<
+    const NODE_LEN: usize,
+    const MAX_COLUMNS: usize,
+    const MAX_FIELD_PER_EVM: usize,
+> {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: SimpleSlot,
-    pub(crate) id: u64,
+    pub(crate) evm_word: u32,
+    pub(crate) num_actual_columns: usize,
+    pub(crate) num_extracted_columns: usize,
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    pub(crate) table_info: [ColumnInfo; MAX_COLUMNS],
 }
 
-impl<const NODE_LEN: usize> LeafSingleCircuit<NODE_LEN>
+impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
+    LeafSingleCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    pub fn build(b: &mut CBuilder) -> LeafSingleWires<NODE_LEN> {
-        let slot = SimpleSlot::build(b);
-        let id = b.add_virtual_target();
+    pub fn build(b: &mut CBuilder) -> LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM> {
+        let evm_word = b.add_virtual_target();
+        let table_info = array::from_fn(|_| b.add_virtual_column_info());
+        let [is_actual_columns, is_extracted_columns] =
+            array::from_fn(|_| array::from_fn(|_| b.add_virtual_bool_target_safe()));
 
-        // Range check for the slot byte since we don't export it as a public input for now.
-        b.range_check(slot.slot, 8);
+        let slot = SimpleSlot::build_with_offset(b, evm_word);
 
         // Build the node wires.
         let wires =
@@ -69,16 +124,39 @@ where
         let root = wires.root;
 
         // Left pad the leaf value.
-        let value = left_pad_leaf_value(b, &wires.value);
+        let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
 
-        // Compute the metadata digest - D(identifier || slot).
-        let metadata_digest = b.map_to_curve_point(&[id, slot.slot]);
+        // Compute the metadata digest.
+        let metadata_digest = MetadataGadget::<_, MAX_FIELD_PER_EVM>::new(
+            &table_info,
+            &is_actual_columns,
+            &is_extracted_columns,
+            evm_word,
+            slot.slot,
+        )
+        .build(b);
 
-        // Compute the values digest - D(identifier || value).
-        assert_eq!(value.arr.len(), MAPPING_LEAF_VALUE_LEN);
-        let packed_value = value.arr.pack(b, Endianness::Big);
-        let inputs: Vec<_> = iter::once(id).chain(packed_value).collect();
-        let values_digest = b.map_to_curve_point(&inputs);
+        // Compute the values digest.
+        let values_digest = ColumnGadget::<MAX_FIELD_PER_EVM>::new(
+            &value.arr,
+            &table_info[..MAX_FIELD_PER_EVM],
+            &is_extracted_columns[..MAX_FIELD_PER_EVM],
+        )
+        .build(b);
+
+        // row_id = H2int(H("") || metadata_digest)
+        let empty_hash = b.constant_hash(*empty_poseidon_hash());
+        let inputs = empty_hash
+            .to_targets()
+            .into_iter()
+            .chain(metadata_digest.to_targets())
+            .collect();
+        let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
+        let row_id = hash_to_int_target(b, hash);
+
+        // value_digest = value_digest * row_id
+        let row_id = b.biguint_to_nonnative(&row_id);
+        let values_digest = b.curve_scalar_mul(values_digest, &row_id);
 
         // Only one leaf in this node.
         let n = b.one();
@@ -95,56 +173,72 @@ where
 
         LeafSingleWires {
             node,
+            value,
             root,
             slot,
-            value,
-            id,
+            table_info,
+            is_actual_columns,
+            is_extracted_columns,
+            evm_word,
         }
     }
 
-    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &LeafSingleWires<NODE_LEN>) {
-        let pad_node =
-            Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(&self.node).expect("invalid node given");
-        wires.node.assign(pw, &pad_node);
+    pub fn assign(
+        &self,
+        pw: &mut PartialWitness<GFp>,
+        wires: &LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    ) {
+        let padded_node =
+            Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(&self.node).expect("Invalid node");
+        wires.node.assign(pw, &padded_node);
         KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
             pw,
             &wires.root,
-            &InputData::Assigned(&pad_node),
+            &InputData::Assigned(&padded_node),
         );
-        self.slot.assign(pw, &wires.slot);
-        pw.set_target(wires.id, GFp::from_canonical_u64(self.id));
+        self.slot.assign(pw, &wires.slot, self.evm_word);
+        pw.set_target(wires.evm_word, F::from_canonical_u32(self.evm_word));
+        wires
+            .is_actual_columns
+            .iter()
+            .enumerate()
+            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_actual_columns));
+        wires
+            .is_extracted_columns
+            .iter()
+            .enumerate()
+            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_extracted_columns));
+        pw.set_column_info_target_arr(&wires.table_info, &self.table_info);
     }
 }
 
 /// Num of children = 0
-impl CircuitLogicWires<GFp, D, 0> for LeafSingleWires<MAX_LEAF_NODE_LEN> {
+impl CircuitLogicWires<F, D, 0>
+    for LeafSingleWires<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>
+{
     type CircuitBuilderParams = ();
+    type Inputs =
+        LeafSingleCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
 
-    type Inputs = LeafSingleCircuit<MAX_LEAF_NODE_LEN>;
-
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
 
     fn circuit_logic(
-        builder: &mut CircuitBuilder<GFp, D>,
-        _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
+        builder: &mut CBuilder,
+        _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         LeafSingleCircuit::build(builder)
     }
 
-    fn assign_input(
-        &self,
-        inputs: Self::Inputs,
-        pw: &mut PartialWitness<GFp>,
-    ) -> anyhow::Result<()> {
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
         inputs.assign(pw, self);
         Ok(())
     }
 }
 
+/* gupeng
 #[cfg(test)]
 mod tests {
-
     use super::{
         super::{
             compute_leaf_single_metadata_digest, compute_leaf_single_values_digest,
@@ -276,3 +370,4 @@ mod tests {
         assert_eq!(pi.n(), F::ONE);
     }
 }
+*/
