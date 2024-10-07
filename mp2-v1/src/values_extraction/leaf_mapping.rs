@@ -130,7 +130,7 @@ where
             &wires.root,
             &InputData::Assigned(&pad_node),
         );
-        self.slot.assign(pw, &wires.slot);
+        self.slot.assign_mapping_slot(pw, &wires.slot);
         pw.set_target(wires.key_id, GFp::from_canonical_u64(self.key_id));
         pw.set_target(wires.value_id, GFp::from_canonical_u64(self.value_id));
     }

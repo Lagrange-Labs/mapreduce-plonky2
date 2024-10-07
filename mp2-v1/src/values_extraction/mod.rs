@@ -31,6 +31,10 @@ pub use public_inputs::PublicInputs;
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"KEY";
 pub(crate) const VALUE_ID_PREFIX: &[u8] = b"VAL";
 
+/// gupeng
+pub(crate) const INNER_KEY_ID_PREFIX: &[u8] = b"IN_KEY";
+pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"OUT_KEY";
+
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
 pub fn identifier_block_column() -> u64 {
