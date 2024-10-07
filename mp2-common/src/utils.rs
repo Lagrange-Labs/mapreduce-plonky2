@@ -753,18 +753,18 @@ pub(crate) fn unpack_u32_to_u8_target<F: RichField + Extendable<D>, const D: usi
     endianness: Endianness,
 ) -> Vec<Target> {
     let zero = b.zero();
-    let bits = b.split_le(u, u32::BITS as usize);
-    let bytes = bits.chunks(8).map(|chunk| {
-        chunk
-            .iter()
-            .rev()
-            .fold(zero, |acc, bit| b.mul_const_add(F::TWO, acc, bit.target))
-    });
-
+    let mut bits = b.split_le(u, u32::BITS as usize);
     match endianness {
-        Endianness::Big => bytes.rev().collect_vec(),
-        Endianness::Little => bytes.collect(),
-    }
+        Endianness::Big => bits.reverse(),
+        Endianness::Little => (),
+    };
+    bits.chunks(8)
+        .map(|chunk| {
+            chunk
+                .iter()
+                .fold(zero, |acc, bit| b.mul_const_add(F::TWO, acc, bit.target))
+        })
+        .collect()
 }
 
 /// Convert Uint32 targets to Uint8 targets.
