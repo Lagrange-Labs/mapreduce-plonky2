@@ -476,7 +476,7 @@ impl MappingSlot {
         // inputs = left_pad32(inner_key) || inner_mapping_slot
         let mut arr = [b.zero(); MAPPING_INPUT_PADDED_LEN];
         arr[..MAPPING_KEY_LEN].copy_from_slice(&inner_key.arr);
-        arr[MAPPING_KEY_LEN..].copy_from_slice(&inner_mapping_slot.output.arr);
+        arr[MAPPING_KEY_LEN..2 * MAPPING_KEY_LEN].copy_from_slice(&inner_mapping_slot.output.arr);
         let inputs = VectorWire::<Target, MAPPING_INPUT_PADDED_LEN> {
             real_len: b.constant(F::from_canonical_usize(MAPPING_INPUT_TOTAL_LEN)),
             arr: Array { arr },

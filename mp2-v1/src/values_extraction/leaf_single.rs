@@ -236,7 +236,7 @@ impl CircuitLogicWires<F, D, 0>
     }
 }
 
-/* gupeng
+/*
 #[cfg(test)]
 mod tests {
     use super::{

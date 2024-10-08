@@ -104,7 +104,6 @@ mod test {
             block
                 .header
                 .hash
-                .unwrap()
                 // XXX unclear why that fails when one removes the ".0" since we access things
                 // directly underneath when calling pack directly or using as_slice, both fail.
                 // XXX unclear why it is needed here but not for previous hash...
@@ -122,7 +121,7 @@ mod test {
         );
         assert_eq!(
             U256::from_fields(pi.block_number_raw()),
-            U256::from(block.header.number.unwrap())
+            U256::from(block.header.number)
         );
         assert_eq!(
             pi.state_root_raw(),

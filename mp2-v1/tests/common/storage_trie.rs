@@ -224,14 +224,17 @@ impl TrieNode {
                 let slot = *slot as u8;
                 let column_id =
                     identifier_single_var_column(slot, ctx.contract_address, ctx.chain_id, vec![]);
-                (
-                    "indexing::extraction::mpt::leaf::single",
-                    values_extraction::CircuitInput::new_single_variable_leaf(
-                        node.clone(),
-                        slot,
-                        column_id,
-                    ),
-                )
+                todo!()
+                /*
+                                (
+                                    "indexing::extraction::mpt::leaf::single",
+                                    values_extraction::CircuitInput::new_single_variable_leaf(
+                                        node.clone(),
+                                        slot,
+                                        column_id,
+                                    ),
+                                )
+                */
             }
             StorageSlot::Mapping(mapping_key, slot) => {
                 let slot = *slot as u8;
@@ -247,16 +250,19 @@ impl TrieNode {
                     ctx.chain_id,
                     vec![],
                 );
-                (
-                    "indexing::extraction::mpt::leaf::mapping",
-                    values_extraction::CircuitInput::new_mapping_variable_leaf(
-                        node.clone(),
-                        slot,
-                        mapping_key.clone(),
-                        key_id,
-                        value_id,
-                    ),
-                )
+                todo!()
+                /*
+                                (
+                                    "indexing::extraction::mpt::leaf::mapping",
+                                    values_extraction::CircuitInput::new_mapping_variable_leaf(
+                                        node.clone(),
+                                        slot,
+                                        mapping_key.clone(),
+                                        key_id,
+                                        value_id,
+                                    ),
+                                )
+                */
             }
         };
         let input = CircuitInput::ValuesExtraction(input);

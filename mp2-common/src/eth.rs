@@ -266,7 +266,7 @@ fn from_rpc_header_to_consensus(h: &alloy::rpc::types::Header) -> alloy::consens
         withdrawals_root: h.withdrawals_root,
         logs_bloom: h.logs_bloom,
         difficulty: h.difficulty,
-        number: h.number.unwrap(),
+        number: h.number,
         gas_limit: h.gas_limit,
         gas_used: h.gas_used,
         timestamp: h.timestamp,
@@ -556,14 +556,11 @@ mod test {
         let ethers_provider = ethers::providers::Provider::<Http>::try_from(url)
             .expect("could not instantiate HTTP Provider");
         let ethers_block = ethers_provider
-            .get_block_with_txs(BlockNumber::Number(U64::from(block.header.number.unwrap())))
+            .get_block_with_txs(BlockNumber::Number(U64::from(block.header.number)))
             .await?
             .unwrap();
         // sanity check that ethers manual rlp implementation works
-        assert_eq!(
-            block.header.hash.unwrap().as_slice(),
-            ethers_block.block_hash()
-        );
+        assert_eq!(block.header.hash.as_slice(), ethers_block.block_hash());
         let ethers_rlp = ethers_block.rlp();
         let alloy_rlp = from_rpc_header_to_consensus(&block.header).rlp();
         assert_eq!(ethers_rlp, alloy_rlp);
@@ -575,7 +572,7 @@ mod test {
 
         let previous_computed = previous_block.block_hash();
         assert_eq!(&previous_computed, block.header.parent_hash.as_slice());
-        let alloy_given = block.header.hash.unwrap();
+        let alloy_given = block.header.hash;
         assert_eq!(alloy_given, alloy_computed);
         Ok(())
     }

@@ -182,8 +182,8 @@ fn extract_value(
         }
 
         // Get the actual byte.
-        let acutal_byte = b.random_access(info.bit_offset, possible_bytes);
-        aligned_bytes.push(acutal_byte);
+        let actual_byte = b.random_access(info.bit_offset, possible_bytes);
+        aligned_bytes.push(actual_byte);
     }
 
     // Next we need to extract in a vector from aligned_bytes[info.byte_offset] to aligned_bytes[last_byte_offset].
@@ -231,15 +231,229 @@ fn extract_value(
     let mut possible_bytes = Vec::with_capacity(8);
     // byte0 = last_byte
     possible_bytes.push(last_byte);
-    for i in 0..7 {
+    first_bits_lookup_indexes.iter().for_each(|lookup_index| {
         // byte1 = first_bits_1(last_byte)
         // byte2 = first_bits_2(last_byte)
         // ...
         // byte7 = first_bits_7(last_byte)
-        let byte = b.add_lookup_from_index(last_byte, first_bits_lookup_indexes[i]);
+        let byte = b.add_lookup_from_index(last_byte, *lookup_index);
         possible_bytes.push(byte);
-    }
+    });
     result[31] = b.random_access(length_mod_8, possible_bytes);
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        super::column_info::{ColumnInfo, ColumnInfoTarget},
+        *,
+    };
+    use crate::{
+        values_extraction::gadgets::column_info::{
+            CircuitBuilderColumnInfo, WitnessWriteColumnInfo,
+        },
+        DEFAULT_MAX_FIELD_PER_EVM,
+    };
+    use mp2_common::{
+        eth::left_pad32, group_hashing::map_to_curve_point, poseidon::H, utils::Packer, C, D,
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
+    use plonky2::{
+        field::types::{PrimeField64, Sample},
+        iop::witness::{PartialWitness, WitnessWrite},
+        plonk::config::Hasher,
+    };
+    use plonky2_ecgfp5::{curve::curve::Point, gadgets::curve::PartialWitnessCurve};
+    use rand::{thread_rng, Rng};
+    use std::array;
+
+    #[derive(Clone, Debug)]
+    struct ColumnGadgetData<const MAX_FIELD_PER_EVM: usize> {
+        value: [F; MAPPING_LEAF_VALUE_LEN],
+        table_info: [ColumnInfo; MAX_FIELD_PER_EVM],
+        num_extracted_columns: usize,
+    }
+
+    impl<const MAX_FIELD_PER_EVM: usize> ColumnGadgetData<MAX_FIELD_PER_EVM> {
+        fn sample() -> Self {
+            let rng = &mut thread_rng();
+
+            let value = random_vector(MAPPING_LEAF_VALUE_LEN)
+                .into_iter()
+                .map(F::from_canonical_u8)
+                .collect_vec()
+                .try_into()
+                .unwrap();
+            let table_info = array::from_fn(|_| ColumnInfo::sample());
+            let num_extracted_columns = rng.gen_range(1..=MAX_FIELD_PER_EVM);
+
+            Self {
+                value,
+                table_info,
+                num_extracted_columns,
+            }
+        }
+
+        fn digest(&self) -> Point {
+            self.table_info[..self.num_extracted_columns].iter().fold(
+                Point::NEUTRAL,
+                |acc, info| {
+                    let extracted_value = self.extract_value(info);
+
+                    // digest = D(info.identifier || pack(extracted_value))
+                    let inputs = once(info.identifier)
+                        .chain(extracted_value.pack(Endianness::Big))
+                        .collect_vec();
+                    let digest = map_to_curve_point(&inputs);
+
+                    acc + digest
+                },
+            )
+        }
+
+        fn extract_value(&self, info: &ColumnInfo) -> [F; MAPPING_LEAF_VALUE_LEN] {
+            let bit_offset = u8::try_from(info.bit_offset.to_canonical_u64()).unwrap();
+            assert!(bit_offset <= 8);
+            let [byte_offset, length] = [info.byte_offset, info.length]
+                .map(|f| usize::try_from(f.to_canonical_u64()).unwrap());
+
+            let value_bytes = self
+                .value
+                .map(|f| u8::try_from(f.to_canonical_u64()).unwrap());
+
+            // last_byte_offset = info.byte_offset + ceil(info.length / 8) - 1
+            let last_byte_offset = byte_offset + length.div_ceil(8) - 1;
+
+            // Extract all the bits of the field aligined with bytes.
+            let mut result_bytes = Vec::with_capacity(last_byte_offset - byte_offset + 1);
+            for i in byte_offset..=last_byte_offset {
+                // Get the current and next bytes.
+                let current_byte = u16::from(value_bytes[i]);
+                let next_byte = if i < 31 {
+                    u16::from(value_bytes[i + 1])
+                } else {
+                    0
+                };
+
+                // actual_byte = last_bits(current_byte, 8 - bit_offset) * 2^bit_offset + first_bits(next_byte, bit_offset)
+                let actual_byte = (last_bits(current_byte, 8 - bit_offset) << bit_offset)
+                    + first_bits(next_byte, bit_offset);
+
+                result_bytes.push(u8::try_from(actual_byte).unwrap());
+            }
+
+            // At last we need to retain only the first `info.length % 8` bits for
+            // the last byte of result.
+            let last_byte = u16::from(*result_bytes.last().unwrap());
+            let last_byte = first_bits(last_byte, u8::try_from(length % 8).unwrap());
+            *result_bytes.last_mut().unwrap() = u8::try_from(last_byte).unwrap();
+
+            // Normalize left.
+            left_pad32(&result_bytes).map(F::from_canonical_u8)
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct ColumnGadgetTarget<const MAX_FIELD_PER_EVM: usize> {
+        value: [Target; MAPPING_LEAF_VALUE_LEN],
+        table_info: [ColumnInfoTarget; MAX_FIELD_PER_EVM],
+        is_extracted_columns: [BoolTarget; MAX_FIELD_PER_EVM],
+    }
+
+    impl<const MAX_FIELD_PER_EVM: usize> ColumnGadgetTarget<MAX_FIELD_PER_EVM> {
+        fn column_gadget(&self) -> ColumnGadget<MAX_FIELD_PER_EVM> {
+            ColumnGadget::new(&self.value, &self.table_info, &self.is_extracted_columns)
+        }
+    }
+
+    pub trait CircuitBuilderColumnGadget {
+        /// Add a virtual column gadget target.
+        fn add_virtual_column_gadget_target(
+            &mut self,
+        ) -> ColumnGadgetTarget<DEFAULT_MAX_FIELD_PER_EVM>;
+    }
+
+    impl CircuitBuilderColumnGadget for CBuilder {
+        fn add_virtual_column_gadget_target(
+            &mut self,
+        ) -> ColumnGadgetTarget<DEFAULT_MAX_FIELD_PER_EVM> {
+            let value = self.add_virtual_target_arr();
+            let table_info = array::from_fn(|_| self.add_virtual_column_info());
+            let is_extracted_columns = array::from_fn(|_| self.add_virtual_bool_target_safe());
+
+            ColumnGadgetTarget {
+                value,
+                table_info,
+                is_extracted_columns,
+            }
+        }
+    }
+
+    pub trait WitnessWriteColumnGadget {
+        fn set_column_gadget_target(
+            &mut self,
+            target: &ColumnGadgetTarget<DEFAULT_MAX_FIELD_PER_EVM>,
+            value: &ColumnGadgetData<DEFAULT_MAX_FIELD_PER_EVM>,
+        );
+    }
+
+    impl<T: WitnessWrite<F>> WitnessWriteColumnGadget for T {
+        fn set_column_gadget_target(
+            &mut self,
+            target: &ColumnGadgetTarget<DEFAULT_MAX_FIELD_PER_EVM>,
+            data: &ColumnGadgetData<DEFAULT_MAX_FIELD_PER_EVM>,
+        ) {
+            self.set_target_arr(&target.value, &data.value);
+            self.set_column_info_target_arr(&target.table_info, &data.table_info);
+            target
+                .is_extracted_columns
+                .iter()
+                .enumerate()
+                .for_each(|(i, t)| self.set_bool_target(*t, i < data.num_extracted_columns));
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestColumnGadgetCircuit {
+        column_gadget_data: ColumnGadgetData<DEFAULT_MAX_FIELD_PER_EVM>,
+        expected_column_digest: Point,
+    }
+
+    impl UserCircuit<F, D> for TestColumnGadgetCircuit {
+        // Column gadget target + expected column digest
+        type Wires = (ColumnGadgetTarget<DEFAULT_MAX_FIELD_PER_EVM>, CurveTarget);
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let column_gadget_target = b.add_virtual_column_gadget_target();
+            let expected_column_digest = b.add_virtual_curve_target();
+
+            let column_digest = column_gadget_target.column_gadget().build(b);
+            b.curve_eq(column_digest, expected_column_digest);
+
+            (column_gadget_target, expected_column_digest)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_column_gadget_target(&wires.0, &self.column_gadget_data);
+            pw.set_curve_target(wires.1, self.expected_column_digest.to_weierstrass());
+        }
+    }
+
+    #[test]
+    fn test_values_extraction_column_gadget() {
+        let column_gadget_data = ColumnGadgetData::sample();
+        let expected_column_digest = column_gadget_data.digest();
+
+        let test_circuit = TestColumnGadgetCircuit {
+            column_gadget_data,
+            expected_column_digest,
+        };
+
+        let _ = run_circuit::<F, D, C, _>(test_circuit);
+    }
 }

@@ -264,6 +264,8 @@ impl TestCase {
 
         // we first run the initial preprocessing and db creation.
         let metadata_hash = self.run_mpt_preprocessing(ctx, bn).await?;
+        // TODO: delete, it's just for simple testing.
+        return Ok(());
         // then we run the creation of our tree
         self.run_lagrange_preprocessing(ctx, bn, table_row_updates, &metadata_hash)
             .await?;

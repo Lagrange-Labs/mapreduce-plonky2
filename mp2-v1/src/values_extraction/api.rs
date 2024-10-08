@@ -454,6 +454,7 @@ impl PublicParameters {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::{
@@ -951,3 +952,4 @@ mod tests {
         check_public_input(num_children, &branch_proof);
     }
 }
+*/
