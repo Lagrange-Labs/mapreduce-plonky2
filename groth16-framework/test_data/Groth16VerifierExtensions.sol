@@ -2,17 +2,45 @@
 
 pragma solidity ^0.8.0;
 
-import "./verifier.sol";
+import {Verifier} from "./verifier.sol";
+
+// The query input struct passed into the processQuery function
+struct QueryInput {
+    // Query limit parameter
+    uint32 limit;
+    // Query offset parameter
+    uint32 offset;
+    // Minimum block number
+    uint64 minBlockNumber;
+    // Maximum block number
+    uint64 maxBlockNumber;
+    // Block hash
+    bytes32 blockHash;
+    // Computational hash
+    bytes32 computationalHash;
+    // User placeholder values
+    bytes32[] userPlaceholders;
+}
+
+// The query output struct returned from the processQuery function
+struct QueryOutput {
+    // Total number of the all matching rows
+    uint256 totalMatchedRows;
+    // Returned rows of the current cursor
+    bytes[] rows;
+    // Query error, return NoError if none.
+    QueryErrorCode error;
+}
+
+// Query errors
+enum QueryErrorCode {
+    // No error
+    NoError,
+    // A computation overflow error during the query process
+    ComputationOverflow
+}
 
 contract Query is Verifier {
-    // Query errors
-    enum QueryError {
-        // No error
-        NoError,
-        // A computation overflow error during the query process
-        ComputationOverflow
-    }
-
     // Top 3 bits mask.
     uint256 constant TOP_THREE_BIT_MASK = ~(uint256(7) << 253);
 
@@ -24,7 +52,7 @@ contract Query is Verifier {
     // Maximum number of the items per result
     uint32 constant MAX_NUM_ITEMS_PER_OUTPUT = 5;
     // Maximum number of the placeholders
-    uint32 constant MAX_NUM_PLACEHOLDERS = 14;
+    uint32 constant MAX_NUM_PLACEHOLDERS = 10;
 
     // The start uint256 offset of the public inputs in calldata.
     // groth16_proof_number (8) + groth16_input_number (3)
@@ -59,34 +87,6 @@ contract Query is Verifier {
     // The total byte length of public inputs
     uint32 constant PI_LEN = 32 * (PI_REM_OFFSET - PI_OFFSET) + (REM_QUERY_OFFSET_POS + 1) * 4;
 
-    // The query input struct passed into the processQuery function
-    struct QueryInput {
-        // Query limit parameter
-        uint32 limit;
-        // Query offset parameter
-        uint32 offset;
-        // Minimum block number
-        uint64 minBlockNumber;
-        // Maximum block number
-        uint64 maxBlockNumber;
-        // Block hash
-        bytes32 blockHash;
-        // Computational hash
-        bytes32 computationalHash;
-        // User placeholder values
-        uint256[] userPlaceholders;
-    }
-
-    // The query output struct returned from the processQuery function
-    struct QueryOutput {
-        // Total number of the all matching rows
-        uint256 totalMatchedRows;
-        // Returned rows of the current cursor
-        bytes[] rows;
-        // Query error, return NoError if none.
-        QueryError error;
-    }
-
     // The processQuery function does the followings:
     // 1. Parse the Groth16 proofs (8 uint256) and inputs (3 uint256) from the `data`
     //    argument, and call `verifyProof` function for Groth16 verification.
@@ -102,7 +102,7 @@ contract Query is Verifier {
         verifyPublicInputs(data, groth16Inputs);
 
         // 3. Ensure the items of public inputs equal as expected for query.
-        QueryError error = verifyQuery(data, query);
+        QueryErrorCode error = verifyQuery(data, query);
 
         // 4. Parse and return the query output.
         return parseOutput(data, error);
@@ -166,7 +166,7 @@ contract Query is Verifier {
     }
 
     // Verify the public inputs with the expected query.
-    function verifyQuery(bytes32[] calldata data, QueryInput memory query) internal pure returns (QueryError) {
+    function verifyQuery(bytes32[] calldata data, QueryInput memory query) internal pure returns (QueryErrorCode) {
         // Retrieve the last Uint256 of public inputs.
         bytes32 rem = data[PI_REM_OFFSET];
 
@@ -195,27 +195,28 @@ contract Query is Verifier {
         // Check the user placeholders.
         for (uint256 i = 0; i < numPlaceholders - 2; ++i) {
             require(
-                uint256(data[PI_OFFSET + PLACEHOLDER_VALUES_POS + 2 + i]) == query.userPlaceholders[i],
+                data[PI_OFFSET + PLACEHOLDER_VALUES_POS + 2 + i] == query.userPlaceholders[i],
                 "The user placeholder must equal as expected."
             );
         }
 
+        // TODO: Uncomment once limit and offset supported
         // Check the query limit and offset.
-        uint32 limit = uint32(bytes4(rem << (REM_QUERY_LIMIT_POS * 32)));
-        require(limit == query.limit, "Query limit must equal as expected.");
-        uint32 offset = uint32(bytes4(rem << (REM_QUERY_OFFSET_POS * 32)));
-        require(offset == query.offset, "Query limit must equal as expected.");
+        // uint32 limit = uint32(bytes4(rem << (REM_QUERY_LIMIT_POS * 32)));
+        // require(limit == query.limit, "Query limit must equal as expected.");
+        // uint32 offset = uint32(bytes4(rem << (REM_QUERY_OFFSET_POS * 32)));
+        // require(offset == query.offset, "Query offset must equal as expected.");
 
         // Throw an error if overflow.
         uint32 overflow = uint32(bytes4(rem << (REM_OVERFLOW_POS * 32)));
         if (overflow == 0) {
-            return QueryError.NoError;
+            return QueryErrorCode.NoError;
         }
-        return QueryError.ComputationOverflow;
+        return QueryErrorCode.ComputationOverflow;
     }
 
     // Parse the query output from the public inputs.
-    function parseOutput(bytes32[] calldata data, QueryError error) internal pure returns (QueryOutput memory) {
+    function parseOutput(bytes32[] calldata data, QueryErrorCode error) internal pure returns (QueryOutput memory) {
         bytes32 rem = data[PI_REM_OFFSET];
 
         // Retrieve total number of the matched rows.
@@ -225,14 +226,15 @@ contract Query is Verifier {
         uint32 numResults = uint32(bytes4(rem << (REM_NUM_RESULTS_POS * 32)));
         require(numResults <= MAX_NUM_OUTPUTS, "Result number cannot overflow.");
 
-        // TODO: Each result value is an Uint256 and need to confirm this encoding code.
-        // And it encodes the whole row with dummy values, since we don't know the real
-        // number of items per result here.
         uint32 offset = PI_OFFSET + RESULT_VALUES_POS;
         bytes[] memory rows = new bytes[](numResults);
-        for (uint256 i = 0; i < numResults; ++i) {
-            rows[i] =
-                abi.encode(data[offset + i * MAX_NUM_ITEMS_PER_OUTPUT:offset + (i + 1) * MAX_NUM_ITEMS_PER_OUTPUT]);
+
+        for (uint32 i = 0; i < numResults; ++i) {
+            uint256[] memory columns = new uint256[](MAX_NUM_ITEMS_PER_OUTPUT);
+            for (uint32 j = 0; j < MAX_NUM_ITEMS_PER_OUTPUT; ++j) {
+                columns[j] = uint256(data[offset + i * MAX_NUM_ITEMS_PER_OUTPUT + j]);
+            }
+            rows[i] = abi.encodePacked(columns);
         }
 
         QueryOutput memory output = QueryOutput({totalMatchedRows: totalMatchedRows, rows: rows, error: error});
@@ -240,7 +242,7 @@ contract Query is Verifier {
         return output;
     }
 
-    // Revert the bytes of each Uint32 in block hash.
+    // Reverse the bytes of each Uint32 in block hash.
     // Since we pack to little-endian for each Uint32 in block hash.
     function convertToBlockHash(bytes32 original) internal pure returns (bytes32) {
         bytes32 result;
