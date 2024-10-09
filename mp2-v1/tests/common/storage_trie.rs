@@ -264,6 +264,8 @@ impl TrieNode {
                                 )
                 */
             }
+            // TODO
+            _ => unimplemented!(),
         };
         let input = CircuitInput::ValuesExtraction(input);
 
@@ -314,6 +316,8 @@ impl TrieNode {
             StorageSlot::Mapping(_, slot) => {
                 length_extraction::LengthCircuitInput::new_leaf(*slot as u8, node, variable_slot)
             }
+            // TODO
+            _ => unimplemented!(),
         };
         let input = CircuitInput::LengthExtraction(input);
 

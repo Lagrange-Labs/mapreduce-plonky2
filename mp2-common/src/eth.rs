@@ -2,7 +2,7 @@
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use alloy::{
     eips::BlockNumberOrTag,
-    primitives::{Address, B256},
+    primitives::{Address, B256, U256},
     providers::{Provider, RootProvider},
     rlp::Encodable as AlloyEncodable,
     rpc::types::{Block, EIP1186AccountProofResponse},
@@ -11,6 +11,7 @@ use alloy::{
 use anyhow::{bail, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethereum_types::H256;
+use itertools::Itertools;
 use log::warn;
 use rlp::Rlp;
 use serde::{Deserialize, Serialize};
@@ -111,6 +112,42 @@ pub struct ProofQuery {
     pub(crate) slot: StorageSlot,
 }
 
+/// Represent an intermediate or leaf node of a storage slot in contract.
+///
+/// It has a `parent` node, and its ancestor (root) must be a simple or mapping slot.
+/// Any intermediate nodes could be represented as:
+/// - For mapping entry, it has a parent node and the mapping key.
+/// - For Struct entry, it has a parent node and the EVM offset.
+// TODO: This is not strict, as the parent of a mapping node cannot be a Struct.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum StorageSlotNode {
+    /// Mapping entry including a parent node and the mapping key
+    Mapping(Box<StorageSlot>, Vec<u8>),
+    /// Struct entry including a parent node and EVM offset
+    Struct(Box<StorageSlot>, u32),
+}
+
+impl StorageSlotNode {
+    pub fn new_mapping(parent: StorageSlot, mapping_key: Vec<u8>) -> Self {
+        let parent = Box::new(parent);
+
+        Self::Mapping(parent, mapping_key)
+    }
+
+    pub fn new_struct(parent: StorageSlot, evm_offset: u32) -> Self {
+        let parent = Box::new(parent);
+
+        Self::Struct(parent, evm_offset)
+    }
+
+    pub fn parent(&self) -> &StorageSlot {
+        match self {
+            Self::Mapping(parent, _) => parent,
+            Self::Struct(parent, _) => parent,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum StorageSlot {
     /// simple storage slot like a uin256 etc that fits in 32bytes
@@ -121,12 +158,17 @@ pub enum StorageSlot {
     /// Second argument is the slot location inthe contract
     /// (mapping_key, mapping_slot)
     Mapping(Vec<u8>, usize),
+    /// Represent an intermediate or leaf node of a storage slot in contract.
+    /// It has a `parent` node, and its ancestor (root) must be a simple or mapping slot.
+    Node(StorageSlotNode),
 }
+
 impl StorageSlot {
     pub fn slot(&self) -> u8 {
         match self {
             StorageSlot::Simple(slot) => *slot as u8,
             StorageSlot::Mapping(_, slot) => *slot as u8,
+            StorageSlot::Node(node) => node.parent().slot(),
         }
     }
     pub fn location(&self) -> B256 {
@@ -136,11 +178,27 @@ impl StorageSlot {
                 // H( pad32(address), pad32(mapping_slot))
                 let padded_mkey = left_pad32(mapping_key);
                 let padded_slot = left_pad32(&[*mapping_slot as u8]);
-                let concat = padded_mkey
+                let inputs = padded_mkey.into_iter().chain(padded_slot).collect_vec();
+                B256::from_slice(&keccak256(&inputs))
+            }
+            StorageSlot::Node(StorageSlotNode::Mapping(parent, mapping_key)) => {
+                // location = keccak256(left_pad32(mapping_key) || parent_location)
+                let padded_mapping_key = left_pad32(mapping_key);
+                let parent_location = parent.location();
+                let inputs = padded_mapping_key
                     .into_iter()
-                    .chain(padded_slot)
-                    .collect::<Vec<_>>();
-                B256::from_slice(&keccak256(&concat))
+                    .chain(parent_location.0)
+                    .collect_vec();
+                B256::from_slice(&keccak256(&inputs))
+            }
+            StorageSlot::Node(StorageSlotNode::Struct(parent, evm_offset)) => {
+                // location = parent_location + evm_offset
+                let parent_location = U256::from_be_slice(parent.location().as_slice());
+                let location: [_; U256::BYTES] = parent_location
+                    .checked_add(U256::from(*evm_offset))
+                    .unwrap()
+                    .to_be_bytes();
+                B256::from_slice(&location)
             }
         }
     }
@@ -158,6 +216,7 @@ impl StorageSlot {
         match self {
             StorageSlot::Simple(_) => true,
             StorageSlot::Mapping(_, _) => false,
+            StorageSlot::Node(node) => node.parent().is_simple_slot(),
         }
     }
 }
@@ -541,10 +600,7 @@ mod test {
             .await?
             .unwrap();
         let previous_block = provider
-            .get_block_by_number(
-                BlockNumberOrTag::Number(block.header.number.unwrap() - 1),
-                true,
-            )
+            .get_block_by_number(BlockNumberOrTag::Number(block.header.number - 1), true)
             .await?
             .unwrap();
 

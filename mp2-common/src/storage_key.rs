@@ -67,9 +67,9 @@ impl KeccakMPT {
         inputs: VectorWire<Target, INPUT_PADDED_LEN>,
     ) -> KeccakMPTWires {
         let keccak_base = KeccakCircuit::<{ INPUT_PADDED_LEN }>::hash_to_bytes(b, &inputs);
-        let location_offset = keccak_base.output.arr;
+        let location = keccak_base.output.arr;
 
-        Self::build_location(b, keccak_base, location_offset)
+        Self::build_location(b, keccak_base, location)
     }
 
     /// Build the Keccak MPT with a specified offset of Uint32.
@@ -99,9 +99,9 @@ impl KeccakMPT {
     ) -> KeccakMPTWires {
         // keccak(location)
         let zero = b.zero();
-        let arr = repeat(zero)
-            .take(PAD_LEN(HASH_LEN) - HASH_LEN)
-            .chain(location)
+        let arr = location
+            .into_iter()
+            .chain(repeat(zero).take(PAD_LEN(HASH_LEN) - HASH_LEN))
             .collect_vec()
             .try_into()
             .unwrap();
@@ -202,6 +202,7 @@ pub struct SimpleSlotWires {
 // TODO: refactor to extract common functions with MappingSlot.
 impl SimpleSlot {
     /// Derive the MPT key in circuit according to simple storage slot.
+    ///
     /// Remember the rules to get the MPT key is as follow:
     /// * location = pad32(slot)
     /// * mpt_key = keccak256(location)
@@ -349,6 +350,7 @@ pub struct MappingSlotWires {
 
 /// Contains the wires associated with the MPT key derivation logic of mappings where the value
 /// stored in each mapping entry is another mapping (referred to as mapping of mappings).
+///
 /// In this case, we refer to the key for the first-layer mapping entry as the outer key,
 /// while the key for the mapping stored in the entry mapping is referred to as inner key.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -373,6 +375,7 @@ pub(crate) const MAPPING_INPUT_TOTAL_LEN: usize = MAPPING_KEY_LEN + MAPPING_LEAF
 const MAPPING_INPUT_PADDED_LEN: usize = PAD_LEN(MAPPING_INPUT_TOTAL_LEN);
 impl MappingSlot {
     /// Derives the MPT key in circuit according to mapping storage slot
+    ///
     /// Remember the rules to get the mpt key is as follow:
     /// * location = keccak256(pad32(mapping_key), pad32(mapping_slot))
     /// * mpt_key = keccak256(location)
@@ -406,6 +409,7 @@ impl MappingSlot {
     }
 
     /// Derive the MPT key with a specified offset in circuit according to mapping slot
+    ///
     /// The rules to get the mpt key with offset is as follow:
     /// location = keccak256(pad32(mapping_key), pad32(mapping_slot)) + offset
     /// mpt_key = keccak256(location)
@@ -441,6 +445,7 @@ impl MappingSlot {
 
     /// Derive the MPT key with an inner mapping key and offset in circuit according to
     /// mapping slot.
+    ///
     /// The rules to get the mpt key with offset is as follow:
     /// inner_mapping_slot = keccak256(left_pad32(outer_key) || left_pad32(mapping_slot))
     /// location = keccak256(left_pad32(inner_key) || inner_mapping_slot) + offset
@@ -529,6 +534,7 @@ impl MappingSlot {
         wires.inner_key.assign_bytes(pw, &inner_key);
         // left_pad32(outer_key) || left_pad32(slot)
         let inputs = outer_key.into_iter().chain(padded_slot).collect_vec();
+        let inner_mapping_slot = keccak256(&inputs);
         // Assign the keccak values for inner mapping slot.
         KeccakCircuit::<{ INPUT_PADDED_LEN }>::assign_byte_keccak(
             pw,
@@ -540,7 +546,10 @@ impl MappingSlot {
             ),
         );
         // location = keccak(left_pad32(inner_key) || inner_mapping_slot)
-        let inputs = outer_key.into_iter().chain(padded_slot).collect_vec();
+        let inputs = inner_key
+            .into_iter()
+            .chain(inner_mapping_slot)
+            .collect_vec();
         let base = keccak256(&inputs).try_into().unwrap();
         KeccakMPT::assign(pw, &wires.keccak_mpt, inputs, base, offset);
     }
@@ -548,116 +557,28 @@ impl MappingSlot {
 
 #[cfg(test)]
 mod test {
-    use super::{MappingSlot, MappingSlotWires, SimpleSlot, SimpleSlotWires};
+    use super::{
+        MappingOfMappingsSlotWires, MappingSlot, MappingSlotWires, SimpleSlot, SimpleSlotWires,
+    };
     use crate::{
         array::Array,
-        eth::StorageSlot,
-        keccak::{HASH_LEN, PACKED_HASH_LEN},
+        eth::{StorageSlot, StorageSlotNode},
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{keccak256, Endianness, Packer, ToFields},
+        types::CBuilder,
         C, D, F,
     };
-    use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{
-        field::extension::Extendable,
-        hash::hash_types::RichField,
-        iop::{target::Target, witness::PartialWitness},
-        plonk::circuit_builder::CircuitBuilder,
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
     };
-    use plonky2_crypto::u32::arithmetic_u32::U32Target;
-
-    #[derive(Clone, Debug)]
-    struct TestMappingSlot {
-        m: MappingSlot,
-        // 64 nibbles
-        exp_mpt_key_nibbles: Vec<u8>,
-        exp_keccak_location: Vec<u8>,
-    }
-    impl<F, const D: usize> UserCircuit<F, D> for TestMappingSlot
-    where
-        F: RichField + Extendable<D>,
-    {
-        type Wires = (
-            MappingSlotWires,
-            // exp mpt key in nibbles
-            Array<Target, MAX_KEY_NIBBLE_LEN>,
-            // exp keccak location
-            Array<Target, HASH_LEN>,
-            // exp mpt key bytes
-            Array<U32Target, PACKED_HASH_LEN>,
-        );
-
-        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let mapping_slot_wires = MappingSlot::mpt_key(b);
-            let exp_key = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b);
-            let good_key = mapping_slot_wires
-                .keccak_mpt
-                .mpt_key
-                .key
-                .equals(b, &exp_key);
-            let tru = b._true();
-            b.connect(tru.target, good_key.target);
-            let exp_keccak_location = Array::<Target, HASH_LEN>::new(b);
-            let good_keccak_location = mapping_slot_wires
-                .keccak_mpt
-                .keccak_location
-                .output
-                .equals(b, &exp_keccak_location);
-            b.connect(tru.target, good_keccak_location.target);
-            let exp_keccak_mpt = Array::<U32Target, PACKED_HASH_LEN>::new(b);
-            let good_keccak_mpt = mapping_slot_wires
-                .keccak_mpt
-                .keccak_mpt_key
-                .output_array
-                .equals(b, &exp_keccak_mpt);
-            b.connect(tru.target, good_keccak_mpt.target);
-            (
-                mapping_slot_wires,
-                exp_key,
-                exp_keccak_location,
-                exp_keccak_mpt,
-            )
-        }
-
-        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            // assign the expected mpt key we should see
-            wires
-                .1
-                .assign_bytes(pw, &self.exp_mpt_key_nibbles.clone().try_into().unwrap());
-            // assign the  expected location we should see
-            wires
-                .2
-                .assign_bytes(pw, &self.exp_keccak_location.clone().try_into().unwrap());
-            let exp_mpt_key_bytes = keccak256(&self.exp_keccak_location);
-            wires.3.assign(
-                pw,
-                &exp_mpt_key_bytes
-                    .pack(Endianness::Little)
-                    .to_fields()
-                    .try_into()
-                    .unwrap(),
-            );
-            self.m.assign(pw, &wires.0);
-        }
-    }
-
-    #[test]
-    fn test_mapping_slot_key_derivation() {
-        let mapping_key = hex::decode("1234").unwrap();
-        let mapping_slot = 2;
-        let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot);
-        let mpt_key = slot.mpt_key_vec();
-        let circuit = TestMappingSlot {
-            m: MappingSlot {
-                mapping_key,
-                mapping_slot: mapping_slot as u8,
-            },
-            exp_mpt_key_nibbles: bytes_to_nibbles(&mpt_key),
-            exp_keccak_location: slot.location().as_slice().to_vec(),
-        };
-        run_circuit::<F, D, C, _>(circuit);
-    }
+    use plonky2::{
+        field::types::Field,
+        iop::witness::WitnessWrite,
+        iop::{target::Target, witness::PartialWitness},
+    };
+    use rand::{thread_rng, Rng};
+    use std::array;
 
     #[derive(Clone, Debug)]
     struct TestSimpleSlot {
@@ -667,24 +588,257 @@ mod test {
     impl UserCircuit<F, D> for TestSimpleSlot {
         type Wires = (SimpleSlotWires, Array<Target, MAX_KEY_NIBBLE_LEN>);
 
-        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let wires = SimpleSlot::build(c);
-            let exp_key = Array::new(c);
-            wires.mpt_key.key.enforce_equal(c, &exp_key);
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let wires = SimpleSlot::build(b);
+            let exp_key = Array::new(b);
+            wires.mpt_key.key.enforce_equal(b, &exp_key);
+
             (wires, exp_key)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            let eth_slot = StorageSlot::Simple(self.slot as usize);
+            let storage_slot = StorageSlot::Simple(self.slot as usize);
             let circuit = SimpleSlot::new(self.slot);
             circuit.assign(pw, &wires.0, 0);
-            wires.1.assign_bytes(pw, &eth_slot.mpt_nibbles());
+            wires.1.assign_bytes(pw, &storage_slot.mpt_nibbles());
         }
     }
 
     #[test]
-    fn test_simple_slot() {
-        let circuit = TestSimpleSlot { slot: 8 };
+    fn test_simple_slot_no_offset() {
+        let rng = &mut thread_rng();
+        let slot = rng.gen();
+
+        let circuit = TestSimpleSlot { slot };
+        run_circuit::<F, D, C, _>(circuit);
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestSimpleSlotWithOffset {
+        slot: u8,
+        evm_offset: u32,
+    }
+
+    impl UserCircuit<F, D> for TestSimpleSlotWithOffset {
+        // EVM offset + simple slot + expected MPT key
+        type Wires = (Target, SimpleSlotWires, Array<Target, MAX_KEY_NIBBLE_LEN>);
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let evm_offset = b.add_virtual_target();
+            let slot = SimpleSlot::build_with_offset(b, evm_offset);
+            let exp_key = Array::new(b);
+            slot.mpt_key.key.enforce_equal(b, &exp_key);
+
+            (evm_offset, slot, exp_key)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            let circuit = SimpleSlot::new(self.slot);
+
+            let parent = StorageSlot::Simple(self.slot as usize);
+            let storage_slot =
+                StorageSlot::Node(StorageSlotNode::new_struct(parent, self.evm_offset));
+
+            pw.set_target(wires.0, F::from_canonical_u32(self.evm_offset));
+            circuit.assign(pw, &wires.1, self.evm_offset);
+            wires.2.assign_bytes(pw, &storage_slot.mpt_nibbles());
+        }
+    }
+
+    #[test]
+    fn test_simple_slot_with_offset() {
+        let rng = &mut thread_rng();
+        let slot = rng.gen();
+        let evm_offset = rng.gen();
+
+        let circuit = TestSimpleSlotWithOffset { slot, evm_offset };
+        run_circuit::<F, D, C, _>(circuit);
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestMappingSlot {
+        mapping_slot: MappingSlot,
+        exp_mpt_key: Vec<u8>,
+    }
+
+    impl UserCircuit<F, D> for TestMappingSlot {
+        type Wires = (
+            // Mapping slot
+            MappingSlotWires,
+            // Expected MPT key in nibbles
+            Array<Target, MAX_KEY_NIBBLE_LEN>,
+        );
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let mapping_slot = MappingSlot::mpt_key(b);
+            let exp_mpt_key = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b);
+
+            mapping_slot
+                .keccak_mpt
+                .mpt_key
+                .key
+                .enforce_equal(b, &exp_mpt_key);
+
+            (mapping_slot, exp_mpt_key)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.mapping_slot.assign_mapping_slot(pw, &wires.0, 0);
+            wires
+                .1
+                .assign_bytes(pw, &self.exp_mpt_key.clone().try_into().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_mapping_slot_no_offset() {
+        let rng = &mut thread_rng();
+
+        let slot = rng.gen();
+        let mapping_key = random_vector(16);
+        let storage_slot = StorageSlot::Mapping(mapping_key.clone(), slot);
+        let mpt_key = storage_slot.mpt_key_vec();
+
+        let circuit = TestMappingSlot {
+            mapping_slot: MappingSlot {
+                mapping_key,
+                mapping_slot: slot as u8,
+            },
+            exp_mpt_key: bytes_to_nibbles(&mpt_key),
+        };
+        run_circuit::<F, D, C, _>(circuit);
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestMappingSlotWithOffset {
+        evm_offset: u32,
+        mapping_slot: MappingSlot,
+        exp_mpt_key: Vec<u8>,
+    }
+
+    impl UserCircuit<F, D> for TestMappingSlotWithOffset {
+        type Wires = (
+            // EVM offset
+            Target,
+            // Mapping slot
+            MappingSlotWires,
+            // Expected MPT key in nibbles
+            Array<Target, MAX_KEY_NIBBLE_LEN>,
+        );
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let evm_offset = b.add_virtual_target();
+            let mapping_slot = MappingSlot::mpt_key_with_offset(b, evm_offset);
+            let exp_mpt_key = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b);
+
+            mapping_slot
+                .keccak_mpt
+                .mpt_key
+                .key
+                .enforce_equal(b, &exp_mpt_key);
+
+            (evm_offset, mapping_slot, exp_mpt_key)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_target(wires.0, F::from_canonical_u32(self.evm_offset));
+            self.mapping_slot
+                .assign_mapping_slot(pw, &wires.1, self.evm_offset);
+            wires
+                .2
+                .assign_bytes(pw, &self.exp_mpt_key.clone().try_into().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_mapping_slot_with_offset() {
+        let rng = &mut thread_rng();
+
+        let slot = rng.gen();
+        let evm_offset = rng.gen();
+        let mapping_key = random_vector(16);
+        let parent = StorageSlot::Mapping(mapping_key.clone(), slot as usize);
+        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(parent, evm_offset));
+        let mpt_key = storage_slot.mpt_key_vec();
+
+        let circuit = TestMappingSlotWithOffset {
+            evm_offset,
+            mapping_slot: MappingSlot {
+                mapping_key,
+                mapping_slot: slot,
+            },
+            exp_mpt_key: bytes_to_nibbles(&mpt_key),
+        };
+        run_circuit::<F, D, C, _>(circuit);
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestMappingSlotWithInnerOffset {
+        evm_offset: u32,
+        inner_key: Vec<u8>,
+        mapping_slot: MappingSlot,
+        exp_mpt_key: Vec<u8>,
+    }
+
+    impl UserCircuit<F, D> for TestMappingSlotWithInnerOffset {
+        type Wires = (
+            // EVM offset
+            Target,
+            // Mapping of mappings slot
+            MappingOfMappingsSlotWires,
+            // Expected MPT key in nibbles
+            Array<Target, MAX_KEY_NIBBLE_LEN>,
+        );
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let evm_offset = b.add_virtual_target();
+            let mapping_slot = MappingSlot::mpt_key_with_inner_offset(b, evm_offset);
+            let exp_mpt_key = Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b);
+
+            mapping_slot
+                .keccak_mpt
+                .mpt_key
+                .key
+                .enforce_equal(b, &exp_mpt_key);
+
+            (evm_offset, mapping_slot, exp_mpt_key)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_target(wires.0, F::from_canonical_u32(self.evm_offset));
+            self.mapping_slot.assign_mapping_of_mappings(
+                pw,
+                &wires.1,
+                &self.inner_key,
+                self.evm_offset,
+            );
+            wires
+                .2
+                .assign_bytes(pw, &self.exp_mpt_key.clone().try_into().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_mapping_slot_with_inner_offset() {
+        let rng = &mut thread_rng();
+
+        let slot = rng.gen();
+        let evm_offset = rng.gen();
+        let [outer_key, inner_key] = array::from_fn(|_| random_vector(16));
+        let grand = StorageSlot::Mapping(outer_key.clone(), slot as usize);
+        let parent = StorageSlot::Node(StorageSlotNode::new_mapping(grand, inner_key.clone()));
+        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(parent, evm_offset));
+        let mpt_key = storage_slot.mpt_key_vec();
+
+        let circuit = TestMappingSlotWithInnerOffset {
+            evm_offset,
+            inner_key,
+            mapping_slot: MappingSlot {
+                mapping_key: outer_key,
+                mapping_slot: slot,
+            },
+            exp_mpt_key: bytes_to_nibbles(&mpt_key),
+        };
         run_circuit::<F, D, C, _>(circuit);
     }
 }
