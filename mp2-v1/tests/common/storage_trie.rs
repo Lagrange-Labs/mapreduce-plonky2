@@ -258,6 +258,7 @@ impl TrieNode {
                     ),
                 )
             }
+            _ => panic!("not yet"),
         };
         let input = CircuitInput::ValuesExtraction(input);
 
@@ -308,6 +309,7 @@ impl TrieNode {
             StorageSlot::Mapping(_, slot) => {
                 length_extraction::LengthCircuitInput::new_leaf(*slot as u8, node, variable_slot)
             }
+            _ => panic!("not yet"),
         };
         let input = CircuitInput::LengthExtraction(input);
 

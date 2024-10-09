@@ -14,6 +14,14 @@ contract Simple {
         MappingOperation operation;
     }
 
+    struct LargeStruct {
+      // this field should live in one EVM word
+      uint256 field1;
+      // both these fields should live in the same EVM word
+      uint128 field2;
+      uint128 field3;
+    }
+
 
     // Test simple slots (slot 0 - 3)
     bool public s1;
@@ -27,6 +35,9 @@ contract Simple {
     // Test array (slot 5)
     uint256[] public arr1;
 
+    // Test struct slot 6
+    LargeStruct public myStruct;
+
         // Set the simple slots.
     function setSimples(
         bool newS1,
@@ -39,6 +50,13 @@ contract Simple {
         s3 = newS3;
         s4 = newS4;
     }
+
+    function setLargeStruct(uint256 field1, uint128 field2, uint128 field3) public {
+      myStruct.field1 = field1;
+      myStruct.field2 = field2;
+      myStruct.field3 = field3;
+    }
+
     function setS2(uint256 newS2) public {
       s2 = newS2;
     }

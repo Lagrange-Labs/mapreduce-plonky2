@@ -2,7 +2,7 @@
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use alloy::{
     eips::BlockNumberOrTag,
-    primitives::{Address, B256},
+    primitives::{Address, B256, U256},
     providers::{Provider, RootProvider},
     rlp::Encodable as AlloyEncodable,
     rpc::types::{Block, EIP1186AccountProofResponse},
@@ -12,6 +12,7 @@ use anyhow::{bail, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethereum_types::H256;
 use log::warn;
+use num::traits::ToBytes;
 use rlp::Rlp;
 use serde::{Deserialize, Serialize};
 use std::{array::from_fn as create_array, sync::Arc};
@@ -121,12 +122,21 @@ pub enum StorageSlot {
     /// Second argument is the slot location inthe contract
     /// (mapping_key, mapping_slot)
     Mapping(Vec<u8>, usize),
+    Struct(StructSlot),
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StructSlot {
+    pub inner: Box<StorageSlot>,
+    pub evm_word_idx: usize,
+}
+
 impl StorageSlot {
     pub fn slot(&self) -> u8 {
         match self {
             StorageSlot::Simple(slot) => *slot as u8,
             StorageSlot::Mapping(_, slot) => *slot as u8,
+            StorageSlot::Struct(s) => s.inner.slot(),
         }
     }
     pub fn location(&self) -> B256 {
@@ -141,6 +151,13 @@ impl StorageSlot {
                     .chain(padded_slot)
                     .collect::<Vec<_>>();
                 B256::from_slice(&keccak256(&concat))
+            }
+            StorageSlot::Struct(s) => {
+                let inner_location = U256::from_be_slice(s.inner.location().as_slice());
+                let final_location =
+                    inner_location + U256::from_be_slice(&s.evm_word_idx.to_be_bytes());
+                let final_bytes: [u8; 32] = final_location.to_be_bytes();
+                B256::from_slice(&final_bytes)
             }
         }
     }
@@ -158,10 +175,17 @@ impl StorageSlot {
         match self {
             StorageSlot::Simple(_) => true,
             StorageSlot::Mapping(_, _) => false,
+            StorageSlot::Struct(s) => s.inner.is_simple_slot(),
         }
     }
 }
 impl ProofQuery {
+    pub fn new(address: Address, slot: StorageSlot) -> Self {
+        Self {
+            contract: address,
+            slot,
+        }
+    }
     pub fn new_simple_slot(address: Address, slot: usize) -> Self {
         Self {
             contract: address,
@@ -266,7 +290,7 @@ fn from_rpc_header_to_consensus(h: &alloy::rpc::types::Header) -> alloy::consens
         withdrawals_root: h.withdrawals_root,
         logs_bloom: h.logs_bloom,
         difficulty: h.difficulty,
-        number: h.number.unwrap(),
+        number: h.number,
         gas_limit: h.gas_limit,
         gas_used: h.gas_used,
         timestamp: h.timestamp,
@@ -541,10 +565,7 @@ mod test {
             .await?
             .unwrap();
         let previous_block = provider
-            .get_block_by_number(
-                BlockNumberOrTag::Number(block.header.number.unwrap() - 1),
-                true,
-            )
+            .get_block_by_number(BlockNumberOrTag::Number(block.header.number - 1), true)
             .await?
             .unwrap();
 
@@ -556,14 +577,11 @@ mod test {
         let ethers_provider = ethers::providers::Provider::<Http>::try_from(url)
             .expect("could not instantiate HTTP Provider");
         let ethers_block = ethers_provider
-            .get_block_with_txs(BlockNumber::Number(U64::from(block.header.number.unwrap())))
+            .get_block_with_txs(BlockNumber::Number(U64::from(block.header.number)))
             .await?
             .unwrap();
         // sanity check that ethers manual rlp implementation works
-        assert_eq!(
-            block.header.hash.unwrap().as_slice(),
-            ethers_block.block_hash()
-        );
+        assert_eq!(block.header.hash.as_slice(), ethers_block.block_hash());
         let ethers_rlp = ethers_block.rlp();
         let alloy_rlp = from_rpc_header_to_consensus(&block.header).rlp();
         assert_eq!(ethers_rlp, alloy_rlp);
@@ -575,7 +593,7 @@ mod test {
 
         let previous_computed = previous_block.block_hash();
         assert_eq!(&previous_computed, block.header.parent_hash.as_slice());
-        let alloy_given = block.header.hash.unwrap();
+        let alloy_given = block.header.hash;
         assert_eq!(alloy_given, alloy_computed);
         Ok(())
     }

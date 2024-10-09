@@ -1,6 +1,7 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
+use crate::common::cases::indexing::Simple::SimpleInstance;
 use anyhow::Result;
 use log::{debug, info};
 use mp2_v1::{
@@ -16,25 +17,26 @@ use mp2_v1::{
 use rand::{Rng, SeedableRng};
 use ryhope::storage::RoEpochKvStorage;
 
-use crate::common::{
+use crate::{
     bindings::simple::Simple::{self, MappingChange, MappingOperation},
-    cases::{
-        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column, MappingIndex,
+    common::{
+        cases::{
+            identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+            identifier_single_var_column, MappingIndex,
+        },
+        proof_storage::{ProofKey, ProofStorage},
+        rowtree::SecondaryIndexCell,
+        table::{
+            CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TreeRowUpdate,
+            TreeUpdateType,
+        },
+        TestContext,
     },
-    proof_storage::{ProofKey, ProofStorage},
-    rowtree::SecondaryIndexCell,
-    table::{
-        CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TreeRowUpdate,
-        TreeUpdateType,
-    },
-    TestContext,
 };
 
 use super::{
-    super::bindings::simple::Simple::SimpleInstance, ContractExtractionArgs, LengthExtractionArgs,
-    MappingValuesExtractionArgs, SingleValuesExtractionArgs, TableSourceSlot, TestCase,
-    UniqueMappingEntry,
+    ContractExtractionArgs, LengthExtractionArgs, MappingValuesExtractionArgs,
+    SingleValuesExtractionArgs, TableSourceSlot, TestCase, UniqueMappingEntry,
 };
 use alloy::{
     contract::private::{Network, Provider, Transport},

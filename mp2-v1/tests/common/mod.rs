@@ -6,7 +6,6 @@ use mp2_v1::api::{metadata_hash, MetadataHash, SlotInputs};
 use serde::{Deserialize, Serialize};
 use table::TableColumns;
 pub mod benchmarker;
-pub mod bindings;
 mod block_extraction;
 pub mod cases;
 pub mod celltree;
