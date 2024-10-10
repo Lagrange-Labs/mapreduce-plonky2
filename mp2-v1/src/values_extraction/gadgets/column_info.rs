@@ -1,8 +1,15 @@
 //! Column information for values extraction
 
 use itertools::zip_eq;
-use mp2_common::{types::CBuilder, F};
-use plonky2::iop::{target::Target, witness::WitnessWrite};
+use mp2_common::{
+    types::{CBuilder, MAPPING_LEAF_VALUE_LEN},
+    F,
+};
+use plonky2::{
+    field::types::{Field, Sample},
+    iop::{target::Target, witness::WitnessWrite},
+};
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::array;
 
@@ -24,6 +31,31 @@ pub struct ColumnInfo {
     /// this value should always be 0. For structs that spans more than one EVM word
     // that value should be depending on which section of the struct we are in.
     pub(crate) evm_word: F,
+}
+
+impl ColumnInfo {
+    /// Create a sample column info. It could be used in integration tests.
+    pub fn sample() -> Self {
+        let rng = &mut thread_rng();
+
+        let bit_offset = F::from_canonical_u8(rng.gen_range(0..8));
+        // TODO: Fix the issue of curve point decoding from public inputs,
+        // seems inconsistent, but could work in circuit code as `curve_eq`.
+        let length: usize = rng.gen_range(1..=100);
+        let max_byte_offset = MAPPING_LEAF_VALUE_LEN - length.div_ceil(8);
+        let byte_offset = F::from_canonical_usize(rng.gen_range(0..=max_byte_offset));
+        let length = F::from_canonical_usize(length);
+        let [slot, identifier, evm_word] = array::from_fn(|_| F::rand());
+
+        Self {
+            slot,
+            identifier,
+            byte_offset,
+            bit_offset,
+            length,
+            evm_word,
+        }
+    }
 }
 
 /// Column info target
@@ -85,34 +117,11 @@ impl<T: WitnessWrite<F>> WitnessWriteColumnInfo for T {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use mp2_common::{types::MAPPING_LEAF_VALUE_LEN, C, D};
+    use mp2_common::{C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{
-        field::types::{Field, Sample},
-        iop::witness::PartialWitness,
-    };
-    use rand::{thread_rng, Rng};
+    use plonky2::iop::witness::PartialWitness;
 
     impl ColumnInfo {
-        pub(crate) fn sample() -> Self {
-            let rng = &mut thread_rng();
-
-            let bit_offset = F::from_canonical_u8(rng.gen_range(0..8));
-            let length = rng.gen_range(1..=8 * MAPPING_LEAF_VALUE_LEN);
-            let max_byte_offset = MAPPING_LEAF_VALUE_LEN - length.div_ceil(8);
-            let byte_offset = F::from_canonical_usize(rng.gen_range(0..=max_byte_offset));
-            let length = F::from_canonical_usize(length);
-            let [slot, identifier, evm_word] = array::from_fn(|_| F::rand());
-
-            Self {
-                slot,
-                identifier,
-                byte_offset,
-                bit_offset,
-                length,
-                evm_word,
-            }
-        }
         fn to_vec(&self) -> Vec<F> {
             vec![
                 self.slot,

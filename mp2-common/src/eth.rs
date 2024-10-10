@@ -171,6 +171,15 @@ impl StorageSlot {
             StorageSlot::Node(node) => node.parent().slot(),
         }
     }
+    pub fn evm_offset(&self) -> u32 {
+        match self {
+            // Only the Struct storage has the EVM offset.
+            StorageSlot::Node(StorageSlotNode::Struct(_, evm_offset)) => *evm_offset,
+            StorageSlot::Simple(_)
+            | StorageSlot::Mapping(_, _)
+            | StorageSlot::Node(StorageSlotNode::Mapping(_, _)) => 0,
+        }
+    }
     pub fn location(&self) -> B256 {
         match self {
             StorageSlot::Simple(slot) => B256::left_padding_from(&(*slot as u64).to_be_bytes()[..]),

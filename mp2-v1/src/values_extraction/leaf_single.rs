@@ -236,24 +236,21 @@ impl CircuitLogicWires<F, D, 0>
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::{
-        super::{
-            compute_leaf_single_metadata_digest, compute_leaf_single_values_digest,
-            identifier_single_var_column,
-        },
+        super::gadgets::{column_gadget::ColumnGadgetData, metadata_gadget::MetadataGadgetData},
         *,
     };
-    use alloy::primitives::Address;
     use eth_trie::{Nibbles, Trie};
+    use itertools::Itertools;
     use mp2_common::{
         array::Array,
-        eth::StorageSlot,
+        eth::{StorageSlot, StorageSlotNode},
         mpt_sequential::utils::bytes_to_nibbles,
+        poseidon::{hash_to_int_value, H},
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{keccak256, Endianness, Packer},
+        utils::{keccak256, Endianness, Packer, ToFields},
         C, D, F,
     };
     use mp2_test::{
@@ -264,32 +261,28 @@ mod tests {
     use plonky2::{
         field::types::Field,
         iop::{target::Target, witness::PartialWitness},
-        plonk::circuit_builder::CircuitBuilder,
+        plonk::{circuit_builder::CircuitBuilder, config::Hasher},
     };
-    use std::str::FromStr;
+    use plonky2_ecgfp5::curve::scalar_field::Scalar;
 
-    const TEST_CONTRACT_ADDRESS: &str = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
+    type LeafCircuit =
+        LeafSingleCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+    type LeafWires =
+        LeafSingleWires<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
 
     #[derive(Clone, Debug)]
-    struct TestLeafSingleCircuit<const NODE_LEN: usize> {
-        c: LeafSingleCircuit<NODE_LEN>,
+    struct TestLeafSingleCircuit {
+        c: LeafCircuit,
         exp_value: Vec<u8>,
     }
 
-    impl<const NODE_LEN: usize> UserCircuit<F, D> for TestLeafSingleCircuit<NODE_LEN>
-    where
-        [(); PAD_LEN(NODE_LEN)]:,
-    {
+    impl UserCircuit<F, D> for TestLeafSingleCircuit {
         // Leaf wires + expected extracted value
-        type Wires = (
-            LeafSingleWires<NODE_LEN>,
-            Array<Target, MAPPING_LEAF_VALUE_LEN>,
-        );
+        type Wires = (LeafWires, Array<Target, MAPPING_LEAF_VALUE_LEN>);
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            let leaf_wires = LeafCircuit::build(b);
             let exp_value = Array::<Target, MAPPING_LEAF_VALUE_LEN>::new(b);
-
-            let leaf_wires = LeafSingleCircuit::<NODE_LEN>::build(b);
             leaf_wires.value.enforce_equal(b, &exp_value);
 
             (leaf_wires, exp_value)
@@ -303,32 +296,47 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_values_extraction_leaf_single_circuit() {
-        const NODE_LEN: usize = 80;
-
-        let simple_slot = 2_u8;
-        let slot = StorageSlot::Simple(simple_slot as usize);
-        let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let chain_id = 10;
-        let id = identifier_single_var_column(simple_slot, &contract_address, chain_id, vec![]);
-
+    fn test_circuit_for_storage_slot(storage_slot: StorageSlot) {
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);
         let encoded_value: Vec<u8> = rlp::encode(&value).to_vec();
-        // assert we added one byte of RLP header
+        // Ensure we added one byte of RLP header.
         assert_eq!(encoded_value.len(), MAPPING_LEAF_VALUE_LEN + 1);
-        println!("encoded value {:?}", encoded_value);
-        trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
+        trie.insert(&storage_slot.mpt_key(), &encoded_value)
+            .unwrap();
         trie.root_hash().unwrap();
 
-        let proof = trie.get_proof(&slot.mpt_key_vec()).unwrap();
+        let proof = trie.get_proof(&storage_slot.mpt_key_vec()).unwrap();
         let node = proof.last().unwrap().clone();
 
-        let c = LeafSingleCircuit::<NODE_LEN> {
+        let slot = storage_slot.slot();
+        let evm_word = storage_slot.evm_offset();
+        let metadata = MetadataGadgetData::<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>::sample(
+            slot, evm_word,
+        );
+        // Compute the metadata digest.
+        let exp_metadata_digest = metadata.digest();
+        // Compute the values digest.
+        let exp_values_digest = ColumnGadgetData::<DEFAULT_MAX_FIELD_PER_EVM>::new(
+            value
+                .clone()
+                .into_iter()
+                .map(F::from_canonical_u8)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+            array::from_fn(|i| metadata.table_info[i].clone()),
+            metadata.num_extracted_columns,
+        )
+        .digest();
+        let slot = SimpleSlot::new(slot);
+        let c = LeafCircuit {
             node: node.clone(),
-            slot: SimpleSlot::new(simple_slot),
-            id,
+            slot,
+            evm_word,
+            num_actual_columns: metadata.num_actual_columns,
+            num_extracted_columns: metadata.num_extracted_columns,
+            table_info: metadata.table_info,
         };
         let test_circuit = TestLeafSingleCircuit {
             c,
@@ -337,15 +345,16 @@ mod tests {
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::new(&proof.public_inputs);
-
+        // Check root hash
         {
             let exp_hash = keccak256(&node).pack(Endianness::Little);
             assert_eq!(pi.root_hash(), exp_hash);
         }
+        // Check MPT key
         {
             let (key, ptr) = pi.mpt_key_info();
 
-            let exp_key = slot.mpt_key_vec();
+            let exp_key = storage_slot.mpt_key_vec();
             let exp_key: Vec<_> = bytes_to_nibbles(&exp_key)
                 .into_iter()
                 .map(F::from_canonical_u8)
@@ -357,17 +366,40 @@ mod tests {
             let exp_ptr = F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1 - nib.nibbles().len());
             assert_eq!(exp_ptr, ptr);
         }
+        assert_eq!(pi.n(), F::ONE);
+        // Check metadata digest
+        assert_eq!(pi.metadata_digest(), exp_metadata_digest.to_weierstrass());
         // Check values digest
         {
-            let exp_digest = compute_leaf_single_values_digest(id, &value);
-            assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
+            // row_id = H2int(H("") || metadata_digest)
+            let inputs = empty_poseidon_hash()
+                .to_fields()
+                .into_iter()
+                .chain(exp_metadata_digest.to_fields())
+                .collect_vec();
+            let hash = H::hash_no_pad(&inputs);
+            let row_id = hash_to_int_value(hash);
+
+            // value_digest = value_digest * row_id
+            let row_id = Scalar::from_noncanonical_biguint(row_id);
+            let exp_values_digest = exp_values_digest * row_id;
+
+            assert_eq!(pi.values_digest(), exp_values_digest.to_weierstrass());
         }
-        // Check metadata digest
-        {
-            let exp_digest = compute_leaf_single_metadata_digest(id, simple_slot);
-            assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
-        }
-        assert_eq!(pi.n(), F::ONE);
+    }
+
+    #[test]
+    fn test_values_extraction_leaf_single_variable() {
+        let storage_slot = StorageSlot::Simple(2);
+
+        test_circuit_for_storage_slot(storage_slot);
+    }
+
+    #[test]
+    fn test_values_extraction_leaf_single_struct() {
+        let parent = StorageSlot::Simple(5);
+        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(parent, 10));
+
+        test_circuit_for_storage_slot(storage_slot);
     }
 }
-*/
