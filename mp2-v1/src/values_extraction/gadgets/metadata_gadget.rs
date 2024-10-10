@@ -164,7 +164,7 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
         let num_actual_columns = rng.gen_range(1..=MAX_COLUMNS);
         // TODO: Fix the issue of curve point decoding from public inputs,
         // seems inconsistent, but could work in circuit code as `curve_eq`.
-        let num_extracted_columns = rng.gen_range(1..=5);
+        let num_extracted_columns = rng.gen_range(1..=8);
 
         // if is_extracted:
         //      evm_word == info.evm_word && slot == info.slot

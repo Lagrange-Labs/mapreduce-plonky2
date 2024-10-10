@@ -261,7 +261,7 @@ mod tests {
     use plonky2::{
         field::types::Field,
         iop::{target::Target, witness::PartialWitness},
-        plonk::{circuit_builder::CircuitBuilder, config::Hasher},
+        plonk::config::Hasher,
     };
     use plonky2_ecgfp5::curve::scalar_field::Scalar;
 
@@ -280,7 +280,7 @@ mod tests {
         // Leaf wires + expected extracted value
         type Wires = (LeafWires, Array<Target, MAPPING_LEAF_VALUE_LEN>);
 
-        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+        fn build(b: &mut CBuilder) -> Self::Wires {
             let leaf_wires = LeafCircuit::build(b);
             let exp_value = Array::<Target, MAPPING_LEAF_VALUE_LEN>::new(b);
             leaf_wires.value.enforce_equal(b, &exp_value);
@@ -305,7 +305,6 @@ mod tests {
         trie.insert(&storage_slot.mpt_key(), &encoded_value)
             .unwrap();
         trie.root_hash().unwrap();
-
         let proof = trie.get_proof(&storage_slot.mpt_key_vec()).unwrap();
         let node = proof.last().unwrap().clone();
 
@@ -315,9 +314,9 @@ mod tests {
             slot, evm_word,
         );
         // Compute the metadata digest.
-        let exp_metadata_digest = metadata.digest();
+        let metadata_digest = metadata.digest();
         // Compute the values digest.
-        let exp_values_digest = ColumnGadgetData::<DEFAULT_MAX_FIELD_PER_EVM>::new(
+        let mut values_digest = ColumnGadgetData::<DEFAULT_MAX_FIELD_PER_EVM>::new(
             value
                 .clone()
                 .into_iter()
@@ -368,23 +367,24 @@ mod tests {
         }
         assert_eq!(pi.n(), F::ONE);
         // Check metadata digest
-        assert_eq!(pi.metadata_digest(), exp_metadata_digest.to_weierstrass());
+        assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
         // Check values digest
         {
+            // TODO: Move to a common function.
             // row_id = H2int(H("") || metadata_digest)
             let inputs = empty_poseidon_hash()
                 .to_fields()
                 .into_iter()
-                .chain(exp_metadata_digest.to_fields())
+                .chain(metadata_digest.to_fields())
                 .collect_vec();
             let hash = H::hash_no_pad(&inputs);
             let row_id = hash_to_int_value(hash);
 
             // value_digest = value_digest * row_id
             let row_id = Scalar::from_noncanonical_biguint(row_id);
-            let exp_values_digest = exp_values_digest * row_id;
+            values_digest *= row_id;
 
-            assert_eq!(pi.values_digest(), exp_values_digest.to_weierstrass());
+            assert_eq!(pi.values_digest(), values_digest.to_weierstrass());
         }
     }
 

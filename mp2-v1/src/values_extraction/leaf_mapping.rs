@@ -176,18 +176,18 @@ where
         .build(b);
 
         // values_digest += evm_word == 0 ? D(key_id || pack(left_pad32(key))) : CURVE_ZERO
-        let inputs: Vec<_> = iter::once(key_id)
-            .chain(slot.mapping_key.arr.pack(b, Endianness::Big))
-            .collect();
+        let packed_mapping_key = slot.mapping_key.arr.pack(b, Endianness::Big);
+        let inputs = iter::once(key_id)
+            .chain(packed_mapping_key.clone())
+            .collect_vec();
         let values_key_digest = b.map_to_curve_point(&inputs);
         let is_evm_word_zero = b.is_equal(evm_word, zero);
         let curve_zero = b.curve_zero();
         let values_key_digest = b.curve_select(is_evm_word_zero, values_key_digest, curve_zero);
         let values_digest = b.add_curve_point(&[values_digest, values_key_digest]);
-
         // Compute the unique data to identify a row is the mapping key.
-        // row_unique_data = H(key)
-        let row_unique_data = b.hash_n_to_hash_no_pad::<CHasher>(slot.mapping_key.arr.to_vec());
+        // row_unique_data = H(pack(left_pad32(key))
+        let row_unique_data = b.hash_n_to_hash_no_pad::<CHasher>(packed_mapping_key);
         // row_id = H2int(row_unique_data || metadata_digest)
         let inputs = row_unique_data
             .to_targets()
@@ -282,24 +282,25 @@ impl CircuitLogicWires<F, D, 0>
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::{
         super::{
-            compute_leaf_mapping_metadata_digest, compute_leaf_mapping_values_digest,
-            identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+            gadgets::{column_gadget::ColumnGadgetData, metadata_gadget::MetadataGadgetData},
+            left_pad32,
         },
         *,
     };
-    use alloy::primitives::Address;
     use eth_trie::{Nibbles, Trie};
+    use itertools::Itertools;
     use mp2_common::{
         array::Array,
-        eth::StorageSlot,
+        eth::{StorageSlot, StorageSlotNode},
+        group_hashing::map_to_curve_point,
         mpt_sequential::utils::bytes_to_nibbles,
+        poseidon::{hash_to_int_value, H},
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{keccak256, Endianness, Packer},
+        utils::{keccak256, Endianness, Packer, ToFields},
         C, D, F,
     };
     use mp2_test::{
@@ -308,34 +309,30 @@ mod tests {
         utils::random_vector,
     };
     use plonky2::{
-        field::types::Field,
+        field::types::{Field, Sample},
         iop::{target::Target, witness::PartialWitness},
-        plonk::circuit_builder::CircuitBuilder,
+        plonk::config::Hasher,
     };
-    use std::str::FromStr;
+    use plonky2_ecgfp5::curve::scalar_field::Scalar;
 
-    const TEST_CONTRACT_ADDRESS: &str = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
+    type LeafCircuit =
+        LeafMappingCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+    type LeafWires =
+        LeafMappingWires<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
 
     #[derive(Clone, Debug)]
-    struct TestLeafMappingCircuit<const NODE_LEN: usize> {
-        c: LeafMappingCircuit<NODE_LEN>,
+    struct TestLeafMappingCircuit {
+        c: LeafCircuit,
         exp_value: Vec<u8>,
     }
 
-    impl<const NODE_LEN: usize> UserCircuit<F, D> for TestLeafMappingCircuit<NODE_LEN>
-    where
-        [(); PAD_LEN(NODE_LEN)]:,
-    {
+    impl UserCircuit<F, D> for TestLeafMappingCircuit {
         // Leaf wires + expected extracted value
-        type Wires = (
-            LeafMappingWires<NODE_LEN>,
-            Array<Target, MAPPING_LEAF_VALUE_LEN>,
-        );
+        type Wires = (LeafWires, Array<Target, MAPPING_LEAF_VALUE_LEN>);
 
-        fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let leaf_wires = LeafCircuit::build(b);
             let exp_value = Array::<Target, MAPPING_LEAF_VALUE_LEN>::new(b);
-
-            let leaf_wires = LeafMappingCircuit::<NODE_LEN>::build(b);
             leaf_wires.value.enforce_equal(b, &exp_value);
 
             (leaf_wires, exp_value)
@@ -349,32 +346,48 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_values_extraction_leaf_mapping_circuit() {
-        const NODE_LEN: usize = 80;
-
-        let mapping_slot = 2_u8;
-        let mapping_key = hex::decode("1234").unwrap();
-        let slot = StorageSlot::Mapping(mapping_key.clone(), mapping_slot as usize);
-        let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let key_id = identifier_for_mapping_key_column(mapping_slot, &contract_address, 1, vec![]);
-        let value_id =
-            identifier_for_mapping_value_column(mapping_slot, &contract_address, 1, vec![]);
-
+    fn test_circuit_for_storage_slot(mapping_key: Vec<u8>, storage_slot: StorageSlot) {
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);
         let encoded_value: Vec<u8> = rlp::encode(&value).to_vec();
-        trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
+        // Ensure we added one byte of RLP header.
+        assert_eq!(encoded_value.len(), MAPPING_LEAF_VALUE_LEN + 1);
+        trie.insert(&storage_slot.mpt_key(), &encoded_value)
+            .unwrap();
         trie.root_hash().unwrap();
-
-        let proof = trie.get_proof(&slot.mpt_key_vec()).unwrap();
+        let proof = trie.get_proof(&storage_slot.mpt_key_vec()).unwrap();
         let node = proof.last().unwrap().clone();
 
-        let c = LeafMappingCircuit::<NODE_LEN> {
+        let slot = storage_slot.slot();
+        let evm_word = storage_slot.evm_offset();
+        let metadata = MetadataGadgetData::<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>::sample(
+            slot, evm_word,
+        );
+        // Compute the metadata digest.
+        let mut metadata_digest = metadata.digest();
+        // Compute the values digest.
+        let mut values_digest = ColumnGadgetData::<DEFAULT_MAX_FIELD_PER_EVM>::new(
+            value
+                .clone()
+                .into_iter()
+                .map(F::from_canonical_u8)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+            array::from_fn(|i| metadata.table_info[i].clone()),
+            metadata.num_extracted_columns,
+        )
+        .digest();
+        let slot = MappingSlot::new(slot, mapping_key.clone());
+        let key_id = F::rand();
+        let c = LeafCircuit {
             node: node.clone(),
-            slot: MappingSlot::new(mapping_slot, mapping_key.clone()),
+            slot,
             key_id,
-            value_id,
+            evm_word,
+            num_actual_columns: metadata.num_actual_columns,
+            num_extracted_columns: metadata.num_extracted_columns,
+            table_info: metadata.table_info,
         };
         let test_circuit = TestLeafMappingCircuit {
             c,
@@ -383,15 +396,16 @@ mod tests {
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::new(&proof.public_inputs);
-
+        // Check root hash
         {
             let exp_hash = keccak256(&node).pack(Endianness::Little);
             assert_eq!(pi.root_hash(), exp_hash);
         }
+        // Check MPT key
         {
             let (key, ptr) = pi.mpt_key_info();
 
-            let exp_key = slot.mpt_key_vec();
+            let exp_key = storage_slot.mpt_key_vec();
             let exp_key: Vec<_> = bytes_to_nibbles(&exp_key)
                 .into_iter()
                 .map(F::from_canonical_u8)
@@ -403,18 +417,82 @@ mod tests {
             let exp_ptr = F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1 - nib.nibbles().len());
             assert_eq!(exp_ptr, ptr);
         }
-        // Check values digest
-        {
-            let exp_digest =
-                compute_leaf_mapping_values_digest(key_id, value_id, &mapping_key, &value);
-            assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
-        }
+        assert_eq!(pi.n(), F::ONE);
         // Check metadata digest
         {
-            let exp_digest = compute_leaf_mapping_metadata_digest(key_id, value_id, mapping_slot);
-            assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
+            // TODO: Move to a common function.
+            // key_column_md = H( "KEY" || slot)
+            let key_id_prefix = u32::from_be_bytes(
+                once(0_u8)
+                    .chain(KEY_ID_PREFIX.iter().cloned())
+                    .collect_vec()
+                    .try_into()
+                    .unwrap(),
+            );
+            let inputs = vec![
+                F::from_canonical_u32(key_id_prefix),
+                F::from_canonical_u8(storage_slot.slot()),
+            ];
+            let key_column_md = H::hash_no_pad(&inputs);
+            // metadata_digest += D(key_column_md || key_id)
+            let inputs = key_column_md
+                .to_fields()
+                .into_iter()
+                .chain(once(key_id))
+                .collect_vec();
+            let metadata_key_digest = map_to_curve_point(&inputs);
+            metadata_digest += metadata_key_digest;
+
+            assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
         }
-        assert_eq!(pi.n(), F::ONE);
+        // Check values digest
+        {
+            // TODO: Move to a common function.
+            // values_digest += evm_word == 0 ? D(key_id || pack(left_pad32(key))) : CURVE_ZERO
+            let packed_mapping_key = left_pad32(&mapping_key)
+                .pack(Endianness::Big)
+                .into_iter()
+                .map(F::from_canonical_u32);
+            if evm_word == 0 {
+                let inputs = iter::once(key_id)
+                    .chain(packed_mapping_key.clone())
+                    .collect_vec();
+                let values_key_digest = map_to_curve_point(&inputs);
+                values_digest += values_key_digest;
+            }
+            // row_unique_data = H(pack(left_pad32(key))
+            let row_unique_data = H::hash_no_pad(&packed_mapping_key.collect_vec());
+            // row_id = H2int(row_unique_data || metadata_digest)
+            let inputs = row_unique_data
+                .to_fields()
+                .into_iter()
+                .chain(metadata_digest.to_fields())
+                .collect_vec();
+            let hash = H::hash_no_pad(&inputs);
+            let row_id = hash_to_int_value(hash);
+
+            // value_digest = value_digest * row_id
+            let row_id = Scalar::from_noncanonical_biguint(row_id);
+            values_digest *= row_id;
+
+            assert_eq!(pi.values_digest(), values_digest.to_weierstrass());
+        }
+    }
+
+    #[test]
+    fn test_values_extraction_leaf_mapping_variable() {
+        let mapping_key = random_vector(10);
+        let storage_slot = StorageSlot::Mapping(mapping_key.clone(), 2);
+
+        test_circuit_for_storage_slot(mapping_key, storage_slot);
+    }
+
+    #[test]
+    fn test_values_extraction_leaf_mapping_struct() {
+        let mapping_key = random_vector(20);
+        let parent = StorageSlot::Mapping(mapping_key.clone(), 5);
+        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(parent, 20));
+
+        test_circuit_for_storage_slot(mapping_key, storage_slot);
     }
 }
-*/
