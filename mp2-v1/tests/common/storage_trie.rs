@@ -418,14 +418,13 @@ impl TestStorageTrie {
         &mut self,
         ctx: &TestContext,
         contract_address: &Address,
+        bn: BlockNumberOrTag,
         slot: usize,
     ) {
         log::debug!("Querying the simple slot `{slot:?}` of the contract `{contract_address}` from the test context's RPC");
 
         let query = ProofQuery::new_simple_slot(*contract_address, slot);
-        let response = ctx
-            .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
-            .await;
+        let response = ctx.query_mpt_proof(&query, bn).await;
 
         // Get the nodes to prove. Reverse to the sequence from leaf to root.
         let nodes: Vec<_> = response.storage_proof[0]

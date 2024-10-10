@@ -332,8 +332,9 @@ mod tests {
             rng: &mut ThreadRng,
             block_number: U256,
             value_digest: &[F],
+            is_merge_case: bool,
         ) -> Result<ProofWithVK> {
-            let pi = random_extraction_pi(rng, block_number, value_digest);
+            let pi = random_extraction_pi(rng, block_number, value_digest, is_merge_case);
 
             let proof = self
                 .extraction_set
@@ -346,8 +347,9 @@ mod tests {
             &self,
             rng: &mut ThreadRng,
             row_digest: &[F],
+            is_merge_case: bool,
         ) -> Result<ProofWithVK> {
-            let pi = random_rows_tree_pi(rng, row_digest);
+            let pi = random_rows_tree_pi(rng, row_digest, is_merge_case);
 
             let proof = self
                 .rows_tree_set
@@ -364,8 +366,8 @@ mod tests {
         ) -> Result<ProofWithVK> {
             let row_digest = Point::sample(rng).to_weierstrass().to_fields();
             let extraction_proof =
-                self.generate_extraction_proof(rng, block_number, &row_digest)?;
-            let rows_tree_proof = self.generate_rows_tree_proof(rng, &row_digest)?;
+                self.generate_extraction_proof(rng, block_number, &row_digest, true)?;
+            let rows_tree_proof = self.generate_rows_tree_proof(rng, &row_digest, true)?;
             let extraction_pi =
                 extraction::test::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
             let rows_tree_pi =
@@ -458,8 +460,8 @@ mod tests {
         ) -> Result<ProofWithVK> {
             let row_digest = Point::sample(rng).to_weierstrass().to_fields();
             let extraction_proof =
-                self.generate_extraction_proof(rng, block_number, &row_digest)?;
-            let rows_tree_proof = self.generate_rows_tree_proof(rng, &row_digest)?;
+                self.generate_extraction_proof(rng, block_number, &row_digest, false)?;
+            let rows_tree_proof = self.generate_rows_tree_proof(rng, &row_digest, false)?;
             let extraction_pi =
                 extraction::test::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
             let rows_tree_pi =

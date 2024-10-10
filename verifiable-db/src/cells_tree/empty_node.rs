@@ -27,7 +27,7 @@ impl EmptyNodeCircuit {
         let dc = b.curve_zero().to_targets();
 
         // Register the public inputs.
-        PublicInputs::new(&h, &dc).register(b);
+        PublicInputs::new(&h, &dc, &dc).register(b);
 
         EmptyNodeWires
     }
@@ -83,7 +83,7 @@ mod tests {
         }
         // Check the cells digest
         {
-            assert_eq!(pi.digest_point(), WeierstrassPoint::NEUTRAL);
+            assert_eq!(pi.individual_digest_point(), WeierstrassPoint::NEUTRAL);
         }
     }
 }
