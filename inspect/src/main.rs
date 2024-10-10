@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
 
             let payload_fmt = if let Some(column_name) = column_names.as_ref() {
                 RowPayloadFormatter::from_string(column_name)?
-            } else if let Some(column_db) = column_db.as_ref() {
+            } else if let Some(_column_db) = column_db.as_ref() {
                 todo!()
             } else {
                 RowPayloadFormatter::new()

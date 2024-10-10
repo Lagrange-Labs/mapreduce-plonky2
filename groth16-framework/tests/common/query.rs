@@ -25,8 +25,6 @@ impl TestContext {
     /// Generate a testing query proof.
     // The main code is copied from the revelation API test.
     pub(crate) fn generate_query_proof(&self, asset_dir: &str) -> Vec<u8> {
-        let rng = &mut thread_rng();
-
         // Generate the testing data for revelation circuit.
         let min_block_number = 42;
         let max_block_number = 76;

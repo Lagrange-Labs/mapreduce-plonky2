@@ -184,22 +184,6 @@ where
         None
     }
 
-    async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, K)> + Send>(
-        &self,
-        data: I,
-    ) -> Result<Vec<Option<(Epoch, K, V)>>>
-    where
-        <I as IntoIterator>::IntoIter: Send,
-    {
-        let mut r = Vec::new();
-        for (epoch, k) in data.into_iter() {
-            let v = self.try_fetch_at(&k, epoch).await;
-
-            r.push(v.map(|v| (epoch, k, v)));
-        }
-        Ok(r)
-    }
-
     // Expensive, but only used in test context.
     async fn size(&self) -> usize {
         let all_keys = self
@@ -222,7 +206,7 @@ where
         let epoch = epoch - self.epoch_offset;
         let mut keys = HashSet::new();
 
-        for i in (0..=epoch as usize).rev() {
+        for i in 0..=epoch as usize {
             keys.extend(self.mem[i].keys())
         }
 
@@ -234,11 +218,26 @@ where
         let epoch = epoch - self.epoch_offset;
         let mut keys = HashSet::new();
 
-        for i in (0..=epoch as usize).rev() {
+        for i in 0..=epoch as usize {
             keys.extend(self.mem[i].keys())
         }
 
         keys.into_iter().cloned().collect()
+    }
+
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<K, V>> {
+        assert!(epoch >= self.epoch_offset);
+        let mut pairs = HashMap::new();
+        for i in 0..=epoch as usize {
+            for (k, v) in self.mem[i].iter() {
+                if let Some(v) = v.clone() {
+                    pairs.insert(k.clone(), v);
+                } else {
+                    pairs.remove(k);
+                }
+            }
+        }
+        Ok(pairs)
     }
 }
 

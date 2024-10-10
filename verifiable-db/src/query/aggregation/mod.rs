@@ -7,7 +7,7 @@ use mp2_common::{
     types::HashOutput,
     F,
 };
-use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::GenericHashOut};
+use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
 use serde::{Deserialize, Serialize};
 
 pub(crate) mod child_proven_single_path_node;

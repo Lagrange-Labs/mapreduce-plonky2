@@ -5296,11 +5296,13 @@ dependencies = [
  "futures",
  "hex",
  "itertools 0.12.1",
+ "log",
  "postgres-types",
  "rand",
  "serde",
  "serde_json",
  "sha256",
+ "simple_logger",
  "tokio",
  "tokio-postgres",
  "tracing",
@@ -5766,6 +5768,17 @@ dependencies = [
  "num-traits",
  "thiserror",
  "time",
+]
+
+[[package]]
+name = "simple_logger"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8c5dfa5e08767553704aa0ffd9d9794d527103c736aba9854773851fd7497eb"
+dependencies = [
+ "colored",
+ "log",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
