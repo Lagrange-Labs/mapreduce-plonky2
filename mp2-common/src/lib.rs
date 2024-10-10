@@ -9,7 +9,6 @@ use plonky2::plonk::{
     config::GenericConfig,
     proof::ProofWithPublicInputs,
 };
-use poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
 use serde::{Deserialize, Serialize};
 
 pub mod array;
@@ -33,9 +32,9 @@ pub mod utils;
 
 pub const D: usize = 2;
 #[cfg(feature = "original_poseidon")]
-pub type C = PoseidonGoldilocksConfig;
+pub type C = plonky2::plonk::config::PoseidonGoldilocksConfig;
 #[cfg(not(feature = "original_poseidon"))]
-pub type C = Poseidon2GoldilocksConfig;
+pub type C = poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
 pub type F = <C as GenericConfig<D>>::F;
 pub type CHasher = <C as GenericConfig<D>>::Hasher;
 

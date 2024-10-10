@@ -17,7 +17,9 @@ use std::iter;
 pub mod api;
 mod branch;
 mod extension;
+pub mod gadgets;
 mod leaf_mapping;
+mod leaf_mapping_of_mappings;
 mod leaf_single;
 pub mod public_inputs;
 
@@ -28,6 +30,11 @@ pub use public_inputs::PublicInputs;
 /// so `prefix + slot (u8)` could be converted to an U32.
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"KEY";
 pub(crate) const VALUE_ID_PREFIX: &[u8] = b"VAL";
+
+/// Constant prefixes for the inner and outer key IDs of mapping slot.
+/// Restrict to one field.
+pub(crate) const INNER_KEY_ID_PREFIX: &[u8] = b"IN_KEY";
+pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"OUT_KEY";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 

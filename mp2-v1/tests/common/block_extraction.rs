@@ -32,11 +32,10 @@ impl TestContext {
 
         let pproof = deserialize_proof::<F, C, D>(&proof)?;
         let pi = block_extraction::PublicInputs::from_slice(&pproof.public_inputs);
-        let block_number = U256::from(block.header.number.unwrap()).to_fields();
+        let block_number = U256::from(block.header.number).to_fields();
         let block_hash = block
             .header
             .hash
-            .unwrap()
             .as_slice()
             .pack(Endianness::Little)
             .to_fields();

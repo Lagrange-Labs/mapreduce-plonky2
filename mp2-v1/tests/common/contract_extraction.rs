@@ -40,6 +40,8 @@ impl TestContext {
             StorageSlot::Mapping(mapping_key, slot) => {
                 ProofQuery::new_mapping_slot(*contract_address, slot, mapping_key)
             }
+            // TODO
+            _ => unimplemented!(),
         };
         let res = self
             .query_mpt_proof(&query, BlockNumberOrTag::Number(block_number as u64))
