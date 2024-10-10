@@ -40,8 +40,9 @@ impl ColumnInfo {
 
         let bit_offset = F::from_canonical_u8(rng.gen_range(0..8));
         // TODO: Fix the issue of curve point decoding from public inputs,
-        // seems inconsistent, but could work in circuit code as `curve_eq`.
-        let length: usize = rng.gen_range(1..=50);
+        // seems inconsistent, but could work in circuit code with `curve_eq` as
+        // `test_values_extraction_column_gadget`.`
+        let length: usize = 100;
         let max_byte_offset = MAPPING_LEAF_VALUE_LEN - length.div_ceil(8);
         let byte_offset = F::from_canonical_usize(rng.gen_range(0..=max_byte_offset));
         let length = F::from_canonical_usize(length);

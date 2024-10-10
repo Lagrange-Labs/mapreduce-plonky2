@@ -163,8 +163,9 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
         let mut table_info = array::from_fn(|_| ColumnInfo::sample());
         let num_actual_columns = rng.gen_range(1..=MAX_COLUMNS);
         // TODO: Fix the issue of curve point decoding from public inputs,
-        // seems inconsistent, but could work in circuit code as `curve_eq`.
-        let num_extracted_columns = rng.gen_range(1..=8);
+        // seems inconsistent, but could work in circuit code with `curve_eq` as
+        // `test_values_extraction_column_gadget`.`
+        let num_extracted_columns = 10;
 
         // if is_extracted:
         //      evm_word == info.evm_word && slot == info.slot
