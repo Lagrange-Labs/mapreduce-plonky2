@@ -6,7 +6,7 @@ use crate::query::{
     computational_hash_ids::PlaceholderIdentifier,
     universal_circuit::{
         universal_circuit_inputs::{PlaceholderId, Placeholders},
-        universal_query_circuit::QueryBound,
+        universal_query_gadget::QueryBound,
     },
 };
 use alloy::primitives::U256;

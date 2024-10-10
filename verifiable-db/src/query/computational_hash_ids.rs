@@ -36,7 +36,7 @@ use super::{
         universal_circuit_inputs::{
             BasicOperation, InputOperand, OutputItem, PlaceholderIdsSet, ResultStructure,
         },
-        universal_query_circuit::QueryBound,
+        universal_query_gadget::QueryBound,
         ComputationalHash, ComputationalHashTarget,
     },
 };
@@ -256,6 +256,10 @@ impl ColumnIDs {
             .into_iter()
             .chain(self.rest.clone())
             .collect_vec()
+    }
+
+    pub(crate) fn num_columns(&self) -> usize {
+        self.rest.len() + 2
     }
 }
 

@@ -499,11 +499,9 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         left: &UInt256Target,
         right: &UInt256Target,
     ) -> BoolTarget {
-        // left <= right iff left - right requires a borrow or left - right == 0
-        let (res, borrow) = self.sub_u256(left, right);
-        let less_than = BoolTarget::new_unsafe(borrow.0);
-        let is_eq = self.is_zero(&res);
-        self.or(less_than, is_eq)
+        // left <= right iff ! right < left
+        let is_greater = self.is_less_than_u256(right, left);
+        self.not(is_greater)
     }
 
     fn is_zero(&mut self, target: &UInt256Target) -> BoolTarget {

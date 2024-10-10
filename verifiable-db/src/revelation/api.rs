@@ -30,11 +30,8 @@ use crate::{
         aggregation::QueryBounds,
         api::{CircuitInput as QueryCircuitInput, Parameters as QueryParams},
         computational_hash_ids::{ColumnIDs, PlaceholderIdentifier},
-        universal_circuit::{
-            universal_circuit_inputs::{
-                BasicOperation, PlaceholderId, Placeholders, ResultStructure,
-            },
-            universal_query_circuit::QueryBound,
+        universal_circuit::universal_circuit_inputs::{
+            BasicOperation, PlaceholderId, Placeholders, ResultStructure,
         },
         PI_LEN as QUERY_PI_LEN,
     },
@@ -396,13 +393,8 @@ where
         )?;
         let placeholder_inputs =
             CheckPlaceholderGadget::new(query_bounds, placeholders, placeholder_hash_ids)?;
-        let index_ids = [
-            column_ids.primary.to_canonical_u64(),
-            column_ids.secondary.to_canonical_u64(),
-        ];
         let revelation_circuit = RevelationCircuitUnprovenOffset::new(
             row_paths,
-            index_ids,
             &results_structure.output_ids,
             result_values,
             limit,
