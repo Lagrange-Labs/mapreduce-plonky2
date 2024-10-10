@@ -21,12 +21,6 @@ use std::array;
 /// Input wires for the column extraction component
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ColumnExtractionInputWires<const MAX_NUM_COLUMNS: usize> {
-    /// values of the columns for the current row
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    pub(crate) column_values: [UInt256Target; MAX_NUM_COLUMNS],
     /// integer identifier associated to each of the columns
     #[serde(
         serialize_with = "serialize_array",
@@ -42,13 +36,22 @@ pub struct ColumnExtractionInputWires<const MAX_NUM_COLUMNS: usize> {
     )]
     is_real_column: [BoolTarget; MAX_NUM_COLUMNS],
 }
-/// Input + output wires for the column extraction component
-pub(crate) struct ColumnExtractionWires<const MAX_NUM_COLUMNS: usize> {
-    pub(crate) input_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ColumnExtractionValueWires<const MAX_NUM_COLUMNS: usize> {
     /// Hash of the cells tree
     pub(crate) tree_hash: MembershipHashTarget,
+}
+
+pub(crate) struct ColumnExtractionHashWires<const MAX_NUM_COLUMNS: usize> {
+    pub(crate) input_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
     /// Computational hash associated to the extraction of each of the `MAX_NUM_COLUMNS` columns
-    pub(crate) column_hash: [ComputationalHashTarget; MAX_NUM_COLUMNS],
+    pub(crate) column_hash: [ComputationalHashTarget; MAX_NUM_COLUMNS], 
+}
+
+/// Input + output wires for the column extraction component
+pub(crate) struct ColumnExtractionWires<const MAX_NUM_COLUMNS: usize> {
+    pub(crate) value_wires: ColumnExtractionValueWires<MAX_NUM_COLUMNS>,
+    pub(crate) hash_wires: ColumnExtractionHashWires<MAX_NUM_COLUMNS>,
 }
 /// Witness input values for column extraction component
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -58,19 +61,38 @@ pub struct ColumnExtractionInputs<const MAX_NUM_COLUMNS: usize> {
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    pub(crate) column_values: [U256; MAX_NUM_COLUMNS],
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
     pub(crate) column_ids: [F; MAX_NUM_COLUMNS],
 }
 
 impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
-    pub(crate) fn build(b: &mut CBuilder) -> ColumnExtractionWires<MAX_NUM_COLUMNS> {
+    pub(crate) fn build_column_values(b: &mut CBuilder) -> [UInt256Target; MAX_NUM_COLUMNS] {
+        b.add_virtual_u256_arr_unsafe()
+    }
+
+    pub(crate) fn build_tree_hash(
+        b: &mut CBuilder,
+        column_values: &[UInt256Target; MAX_NUM_COLUMNS],
+        input_wires: &ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
+    ) -> ColumnExtractionValueWires<MAX_NUM_COLUMNS> {
+            
+        // Exclude the first 2 indexed columns to build the cells tree.
+        let input_values = &column_values[2..];
+        let input_ids = &input_wires.column_ids[2..];
+        let is_real_value = &input_wires.is_real_column[2..];
+        let tree_hash = build_cells_tree(b, input_values, input_ids, is_real_value);
+
+
+        ColumnExtractionValueWires {
+            tree_hash,
+        }
+
+    }
+
+    pub(crate) fn build_hash(
+        b: &mut CBuilder,
+    ) -> ColumnExtractionHashWires<MAX_NUM_COLUMNS> {
         // Initialize the input wires.
         let input_wires = ColumnExtractionInputWires {
-            column_values: [0; MAX_NUM_COLUMNS].map(|_| b.add_virtual_u256_unsafe()), // should be ok to use unsafe since these values are directly hashed to compute tree hash
             column_ids: b.add_virtual_target_arr(),
             is_real_column: [0; MAX_NUM_COLUMNS].map(|_| b.add_virtual_bool_target_safe()),
         };
@@ -78,16 +100,28 @@ impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
         // Build the column hashes by the input.
         let column_hash = build_column_hash(b, &input_wires);
 
-        // Exclude the first 2 indexed columns to build the cells tree.
-        let input_values = &input_wires.column_values[2..];
-        let input_ids = &input_wires.column_ids[2..];
-        let is_real_value = &input_wires.is_real_column[2..];
-        let tree_hash = build_cells_tree(b, input_values, input_ids, is_real_value);
-
-        ColumnExtractionWires {
-            tree_hash,
-            column_hash,
+        ColumnExtractionHashWires {
             input_wires,
+            column_hash,
+        }
+
+    }
+
+    pub(crate) fn build(
+        b: &mut CBuilder, 
+        column_values: &[UInt256Target; MAX_NUM_COLUMNS],
+    ) -> ColumnExtractionWires<MAX_NUM_COLUMNS> {
+        let hash_wires = Self::build_hash(b);
+        let value_wires = Self::build_tree_hash(
+            b, 
+            column_values,
+            &hash_wires.input_wires
+        );
+
+        
+        ColumnExtractionWires {
+            value_wires,
+            hash_wires,
         }
     }
 
@@ -96,10 +130,6 @@ impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
         pw: &mut PartialWitness<F>,
         wires: &ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
     ) {
-        self.column_values
-            .iter()
-            .zip(wires.column_values.iter())
-            .for_each(|(v, t)| pw.set_u256_target(t, *v));
         pw.set_target_arr(wires.column_ids.as_slice(), self.column_ids.as_slice());
         wires
             .is_real_column
@@ -144,6 +174,7 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TestColumnExtractionCircuit<const MAX_NUM_COLUMNS: usize> {
         inputs: ColumnExtractionInputs<MAX_NUM_COLUMNS>,
+        column_values: [U256; MAX_NUM_COLUMNS],
         column_hash: [ComputationalHash; MAX_NUM_COLUMNS],
         tree_hash: MembershipHash,
     }
@@ -152,40 +183,45 @@ mod tests {
         for TestColumnExtractionCircuit<MAX_NUM_COLUMNS>
     {
         // Column extraction wires
+        // + column values
         // + expected output column hash
         // + expected output tree hash
         type Wires = (
             ColumnExtractionWires<MAX_NUM_COLUMNS>,
+            [UInt256Target; MAX_NUM_COLUMNS],
             [ComputationalHashTarget; MAX_NUM_COLUMNS],
             MembershipHashTarget,
         );
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let wires = ColumnExtractionInputs::build(b);
+            let column_values = ColumnExtractionInputs::build_column_values(b);
+            let wires = ColumnExtractionInputs::build(b, &column_values);
             let column_hash = array::from_fn(|_| b.add_virtual_hash());
             let tree_hash = b.add_virtual_hash();
 
             // Check the output column hash.
             wires
+                .hash_wires
                 .column_hash
                 .iter()
                 .zip(column_hash)
                 .for_each(|(l, r)| b.connect_hashes(*l, r));
 
             // Check the output tree hash.
-            b.connect_hashes(wires.tree_hash, tree_hash);
+            b.connect_hashes(wires.value_wires.tree_hash, tree_hash);
 
-            (wires, column_hash, tree_hash)
+            (wires, column_values, column_hash, tree_hash)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.inputs.assign(pw, &wires.0.input_wires);
+            pw.set_u256_target_arr(&wires.1, &self.column_values);
+            self.inputs.assign(pw, &wires.0.hash_wires.input_wires);
             wires
-                .1
+                .2
                 .iter()
                 .zip(self.column_hash)
                 .for_each(|(t, v)| pw.set_hash_target(*t, v));
-            pw.set_hash_target(wires.2, self.tree_hash);
+            pw.set_hash_target(wires.3, self.tree_hash);
         }
     }
 
@@ -207,12 +243,12 @@ mod tests {
             let column_values = column_values.try_into().unwrap();
             let inputs = ColumnExtractionInputs {
                 real_num_columns,
-                column_values,
                 column_ids,
             };
 
             Self {
                 inputs,
+                column_values,
                 column_hash,
                 tree_hash,
             }

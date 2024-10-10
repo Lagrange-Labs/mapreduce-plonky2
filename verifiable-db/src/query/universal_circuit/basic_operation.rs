@@ -1,3 +1,5 @@
+use std::iter::once;
+
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
@@ -38,13 +40,22 @@ pub struct BasicOperationInputWires {
     /// by this instance of the component, among all the supported operations
     op_selector: Target,
 }
+/// Output wires for the operation performed by the basic operation component
+pub(crate) struct BasicOperationValueWires {
+    pub(crate) output_value: UInt256Target,
+    pub(crate) num_overflows: Target,
+}
+/// Input + output wires for the computational hash of basic operation component
+pub(crate) struct BasicOperationHashWires {
+
+    pub(crate) input_wires: BasicOperationInputWires,
+    pub(crate) output_hash: ComputationalHashTarget,
+}
 
 /// Input + output wires for basic operation component
 pub struct BasicOperationWires {
-    pub(crate) input_wires: BasicOperationInputWires,
-    pub(crate) output_value: UInt256Target,
-    pub(crate) output_hash: ComputationalHashTarget,
-    pub(crate) num_overflows: Target,
+    pub(crate) value_wires: BasicOperationValueWires,
+    pub(crate) hash_wires: BasicOperationHashWires,
 }
 /// Witness input values for basic operation component
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -81,34 +92,25 @@ impl BasicOperationInputs {
         num_inputs_values + 2
     }
 
-    pub(crate) fn build(
-        b: &mut CircuitBuilder<F, D>,
+    pub(crate) fn build_values(
+        b: &mut CircuitBuilder<F, D>, 
         input_values: &[UInt256Target],
-        input_hash: &[ComputationalHashTarget],
+        input_wires: &BasicOperationInputWires,
         num_overflows: Target,
-    ) -> BasicOperationWires {
+    ) -> BasicOperationValueWires 
+    {
         let zero = b.zero();
-        let additional_operands = (0..3)
-            .map(
-                |_| b.add_virtual_u256_unsafe(), // should be ok to use `unsafe` here since these values are directly hashed in computational hash or in placeholder hash
-            )
-            .collect_vec();
-        let constant_operand = &additional_operands[0];
-        let placeholder_values = &additional_operands[1..];
         let possible_input_values = input_values
             .iter()
-            .chain(additional_operands.iter())
+            .chain(once(&input_wires.constant_operand))
+            .chain(input_wires.placeholder_values.iter())
             .cloned()
             .collect_vec();
-        let first_input_selector = b.add_virtual_target();
-        let second_input_selector = b.add_virtual_target();
-        let placeholder_ids = b.add_virtual_target_arr::<2>();
-        let op_selector = b.add_virtual_target();
         //TODO: these 2 random accesses could be done with a single operation, if we add an ad-hoc gate
         let first_input =
-            b.random_access_u256(first_input_selector, possible_input_values.as_slice());
+            b.random_access_u256(input_wires.first_input_selector, possible_input_values.as_slice());
         let second_input =
-            b.random_access_u256(second_input_selector, possible_input_values.as_slice());
+            b.random_access_u256(input_wires.second_input_selector, possible_input_values.as_slice());
 
         // compute results for all the operations
 
@@ -122,8 +124,8 @@ impl BasicOperationInputs {
             // Given the `op_selector` for the actual operation, we compute
             // `prod = (op_selector-div_selector)*(op_selector-mod_selector)`.
             // Then, the operation is division or modulo iff `prod == 0``
-            let div_diff = b.sub(op_selector, div_selector);
-            let mod_diff = b.sub(op_selector, mod_selector);
+            let div_diff = b.sub(input_wires.op_selector, div_selector);
+            let mod_diff = b.sub(input_wires.op_selector, mod_selector);
             let prod = b.mul(div_diff, mod_diff);
             b.is_equal(prod, zero)
         };
@@ -197,24 +199,36 @@ impl BasicOperationInputs {
 
         // choose the proper output values and overflows error occurred depending on the
         // operation to be performed in the current instance of basic operation component
-        let output_value = b.random_access_u256(op_selector, &possible_output_values);
+        let output_value = b.random_access_u256(input_wires.op_selector, &possible_output_values);
 
         assert!(
             possible_overflows_occurred.len() <= 64,
             "random access gadget works only for arrays with at most 64 elements"
         );
-        let overflows_occurred = b.random_access(op_selector, possible_overflows_occurred);
+        let overflows_occurred = b.random_access(input_wires.op_selector, possible_overflows_occurred);
 
-        // compute computational hash associated to the operation being computed
-        let output_hash = Operation::basic_operation_hash_circuit(
-            b,
-            input_hash,
-            constant_operand,
-            placeholder_ids,
-            first_input_selector,
-            second_input_selector,
-            op_selector,
-        );
+        BasicOperationValueWires {
+            output_value, 
+            num_overflows: b.add(num_overflows, overflows_occurred), 
+        }
+    }
+
+    pub(crate) fn build_hash(
+        b: &mut CircuitBuilder<F, D>,
+        input_hash: &[ComputationalHashTarget],
+    ) -> BasicOperationHashWires {
+        let additional_operands = (0..3)
+            .map(
+                |_| b.add_virtual_u256_unsafe(), // should be ok to use `unsafe` here since these values are directly hashed in computational hash or in placeholder hash
+            )
+            .collect_vec();
+        let constant_operand = &additional_operands[0];
+        let placeholder_values = &additional_operands[1..];
+
+        let first_input_selector = b.add_virtual_target();
+        let second_input_selector = b.add_virtual_target();
+        let placeholder_ids = b.add_virtual_target_arr::<2>();
+        let op_selector = b.add_virtual_target();
 
         let input_wires = BasicOperationInputWires {
             constant_operand: constant_operand.clone(),
@@ -225,11 +239,42 @@ impl BasicOperationInputs {
             op_selector,
         };
 
+        // compute computational hash associated to the operation being computed
+        let output_hash = Operation::basic_operation_hash_circuit(
+            b,
+            input_hash,
+            &input_wires.constant_operand,
+            input_wires.placeholder_ids,
+            input_wires.first_input_selector,
+            input_wires.second_input_selector,
+            input_wires.op_selector,
+        );
+
+        BasicOperationHashWires { 
+            input_wires, 
+            output_hash, 
+        }
+    }
+
+    pub(crate) fn build(
+        b: &mut CircuitBuilder<F, D>,
+        input_values: &[UInt256Target],
+        input_hash: &[ComputationalHashTarget],
+        num_overflows: Target,
+    ) -> BasicOperationWires {
+
+        let hash_wires = Self::build_hash(b, input_hash);
+        
+        let value_wires = Self::build_values(
+            b, 
+            input_values, 
+            &hash_wires.input_wires, 
+            num_overflows
+        );
+        
         BasicOperationWires {
-            input_wires,
-            output_value,
-            output_hash,
-            num_overflows: b.add(num_overflows, overflows_occurred),
+            value_wires,
+            hash_wires,
         }
     }
 
@@ -315,14 +360,14 @@ mod tests {
             let expected_hash = c.add_virtual_hash();
             let num_errors = c.add_virtual_target();
 
-            c.enforce_equal_u256(&expected_result, &wires.output_value);
-            c.connect_hashes(expected_hash, wires.output_hash);
-            c.connect(wires.num_overflows, num_errors);
+            c.enforce_equal_u256(&expected_result, &wires.value_wires.output_value);
+            c.connect_hashes(expected_hash, wires.hash_wires.output_hash);
+            c.connect(wires.value_wires.num_overflows, num_errors);
 
             Self::Wires {
                 input_values,
                 input_hash: input_hash.try_into().unwrap(),
-                component_wires: wires.input_wires,
+                component_wires: wires.hash_wires.input_wires,
                 expected_result,
                 expected_hash,
                 num_errors,

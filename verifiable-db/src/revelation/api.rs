@@ -34,7 +34,6 @@ use crate::{
             universal_circuit_inputs::{
                 BasicOperation, PlaceholderId, Placeholders, ResultStructure,
             },
-            universal_query_circuit::QueryBound,
         },
         PI_LEN as QUERY_PI_LEN,
     },

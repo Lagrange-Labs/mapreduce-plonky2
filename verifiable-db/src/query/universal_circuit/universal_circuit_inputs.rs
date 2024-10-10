@@ -9,7 +9,7 @@ use mp2_common::{
     F,
 };
 
-use crate::query::computational_hash_ids::{Operation, Output, PlaceholderIdentifier};
+use crate::query::computational_hash_ids::{ColumnIDs, Operation, Output, PlaceholderIdentifier};
 
 use super::universal_query_circuit::dummy_placeholder_id;
 
@@ -477,5 +477,13 @@ impl RowCells {
             .chain(&self.rest)
             .cloned()
             .collect_vec()
+    }
+
+    pub fn column_ids(&self) -> ColumnIDs {
+        ColumnIDs {
+            primary: self.primary.id,
+            secondary: self.secondary.id,
+            rest: self.rest.iter().map(|cell| cell.id).collect_vec(),
+        } 
     }
 }
