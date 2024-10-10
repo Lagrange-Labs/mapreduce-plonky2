@@ -60,8 +60,7 @@ pub enum CircuitInput {
     LeafMapping(LeafMappingInput),
     LeafMappingOfMappings(LeafMappingOfMappingsInput),
     Extension(ExtensionInput),
-    BranchSingle(BranchInput),
-    BranchMapping(BranchInput),
+    Branch(BranchInput),
 }
 
 impl CircuitInput {
@@ -147,17 +146,9 @@ impl CircuitInput {
         })
     }
 
-    /// Create a circuit input for proving a branch MPT node of single variable.
-    pub fn new_single_variable_branch(node: Vec<u8>, child_proofs: Vec<Vec<u8>>) -> Self {
-        CircuitInput::BranchSingle(ProofInputSerialized {
-            input: InputNode { node },
-            serialized_child_proofs: child_proofs,
-        })
-    }
-
-    /// Create a circuit input for proving a branch MPT node of mapping variable.
-    pub fn new_mapping_variable_branch(node: Vec<u8>, child_proofs: Vec<Vec<u8>>) -> Self {
-        CircuitInput::BranchMapping(ProofInputSerialized {
+    /// Create a circuit input for proving a branch MPT node.
+    pub fn new_branch(node: Vec<u8>, child_proofs: Vec<Vec<u8>>) -> Self {
+        CircuitInput::Branch(ProofInputSerialized {
             input: InputNode { node },
             serialized_child_proofs: child_proofs,
         })
@@ -243,7 +234,6 @@ macro_rules! impl_branch_circuits {
                 set: &RecursiveCircuits<F, C, D>,
                 branch_node: InputNode,
                 child_proofs: Vec<ProofWithVK>,
-                is_simple_aggregation: bool,
             ) -> Result<ProofWithVK> {
                 // first, determine manually the common prefix, the ptr and the mapping slot
                 // from the public inputs of the children proofs.
@@ -302,7 +292,6 @@ macro_rules! impl_branch_circuits {
                                  common_prefix,
                                  expected_pointer: pointer,
                                  n_proof_valid: $i,
-                                 is_simple_aggregation,
                              }
                          ).map(|p| (p, self.[< b $i >].get_verifier_data().clone()).into())
                      },
@@ -326,7 +315,6 @@ macro_rules! impl_branch_circuits {
                                  common_prefix,
                                  expected_pointer: pointer,
                                  n_proof_valid: num_real_proofs,
-                                 is_simple_aggregation,
                              },
                          ).map(|p| (p, self.[< b $i>].get_verifier_data().clone()).into())
                      }
@@ -431,15 +419,10 @@ impl PublicParameters {
                 )
                 .map(|p| (p, self.extension.get_verifier_data().clone()).into())
             }
-            CircuitInput::BranchSingle(branch) => {
+            CircuitInput::Branch(branch) => {
                 let child_proofs = branch.get_child_proofs()?;
                 self.branches
-                    .generate_proof(set, branch.input, child_proofs, true)
-            }
-            CircuitInput::BranchMapping(branch) => {
-                let child_proofs = branch.get_child_proofs()?;
-                self.branches
-                    .generate_proof(set, branch.input, child_proofs, false)
+                    .generate_proof(set, branch.input, child_proofs)
             }
         }
     }
@@ -583,21 +566,11 @@ mod tests {
         }));
     }
 
-    fn generate_storage_trie_and_keys(
-        is_simple_aggregation: bool,
-        slot: u8,
-        num_children: usize,
-    ) -> TestData {
+    fn generate_storage_trie_and_keys(slot: u8, num_children: usize) -> TestData {
         let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
-        let (mapping_key, slot) = if is_simple_aggregation {
-            (None, StorageSlot::Simple(slot as usize))
-        } else {
-            let mapping_key = random_vector(20);
-            (
-                Some(mapping_key.clone()),
-                StorageSlot::Mapping(mapping_key, slot as usize),
-            )
-        };
+        let mapping_key = random_vector(20);
+        let slot = StorageSlot::Simple(slot as usize);
+        // StorageSlot::Mapping(mapping_key, slot as usize),
         let mut mpt = slot.mpt_key_vec();
         let mpt_len = mpt.len();
         let last_byte = mpt[mpt_len - 1];

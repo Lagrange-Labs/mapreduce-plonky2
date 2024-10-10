@@ -167,17 +167,10 @@ impl TrieNode {
             .collect();
 
         // Build the branch circuit input.
-        let (name, input) = if ctx.is_simple_slot() {
-            (
-                "indexing::extraction::mpt::branch::variable",
-                values_extraction::CircuitInput::new_single_variable_branch(node, child_proofs),
-            )
-        } else {
-            (
-                "indexing::extraction::mpt::branch::mapping",
-                values_extraction::CircuitInput::new_mapping_variable_branch(node, child_proofs),
-            )
-        };
+        let (name, input) = (
+            "indexing::extraction::mpt::branch",
+            values_extraction::CircuitInput::new_branch(node, child_proofs),
+        );
         let input = CircuitInput::ValuesExtraction(input);
 
         // Generate the proof.
