@@ -14,13 +14,13 @@ pub(crate) mod output_no_aggregation;
 /// Output component for queries with aggregation operations (i.e., `SUM` or `MIN`) specified in the `SELECT` statement,
 /// described here: https://www.notion.so/lagrangelabs/Queries-Circuits-2695199166a54954bbc44ad9dc398825?pvs=4#3e0a95407a4a474ca8f0fe45b913ea70
 pub(crate) mod output_with_aggregation;
-/// Gadget to process a single row in the DB according to a specific query
-pub(crate) mod universal_query_gadget;
 /// Universal query circuit, employing several instances of the atomic components found in other modules to process
 /// a single row of a table according to a given query. The overall layout of the circuit is described here
 /// https://www.notion.so/lagrangelabs/Queries-Circuits-2695199166a54954bbc44ad9dc398825?pvs=4#5c0d5af8c40f4bf0ae7dd13b20a54dcc
 /// while the detailed specs can be found here https://www.notion.so/lagrangelabs/Queries-Circuits-2695199166a54954bbc44ad9dc398825?pvs=4#22fbb552e11e411e95d426264c94aa46
 pub mod universal_query_circuit;
+/// Gadget to process a single row in the DB according to a specific query
+pub(crate) mod universal_query_gadget;
 
 /// Set of data structures to be provided as input to initialize a universal query circuit to prove
 /// the query computation for a single row. They basically allow to represent in a strucutred format

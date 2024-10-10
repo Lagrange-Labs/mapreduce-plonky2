@@ -21,7 +21,9 @@ use serde::{Deserialize, Serialize};
 use crate::query::computational_hash_ids::{AggregationOperation, Output};
 
 use super::{
-    universal_query_gadget::{OutputComponent, OutputComponentHashWires, OutputComponentValueWires, OutputComponentWires},
+    universal_query_gadget::{
+        OutputComponent, OutputComponentHashWires, OutputComponentValueWires, OutputComponentWires,
+    },
     ComputationalHashTarget,
 };
 
@@ -90,12 +92,12 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentValueWires for ValueWires<MAX_
 
     fn other_output_values(&self) -> &[UInt256Target] {
         &self.output_values[1..]
-    }    
+    }
 }
 
 impl<const MAX_NUM_RESULTS: usize> OutputComponentHashWires for HashWires<MAX_NUM_RESULTS> {
     type InputWires = InputWires<MAX_NUM_RESULTS>;
-    
+
     fn ops_ids(&self) -> &[Target] {
         self.input_wires.agg_ops.as_slice()
     }
@@ -150,7 +152,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
     fn output_variant() -> Output {
         Output::Aggregation
     }
-    
+
     fn build_values<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
         possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
@@ -165,7 +167,8 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
 
         for i in 0..MAX_NUM_RESULTS {
             // TODO: random accesses over different iterations can be done with a single operation if we introduce an ad-hoc gate
-            let output_value = b.random_access_u256(input_wires.selector[i], &possible_output_values);
+            let output_value =
+                b.random_access_u256(input_wires.selector[i], &possible_output_values);
 
             // If `predicate_value` is true, then expose the value to be aggregated;
             // Otherwise use the identity for the aggregation operation.
@@ -182,7 +185,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
             output_values: output_values.try_into().unwrap(),
         }
     }
-    
+
     fn build_hash<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
         possible_output_hash: [ComputationalHashTarget; NUM_OUTPUT_VALUES],

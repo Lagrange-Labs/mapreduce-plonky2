@@ -1,14 +1,43 @@
 use std::iter::once;
 
+use crate::query::{
+    aggregation::QueryBounds, computational_hash_ids::PlaceholderIdentifier,
+    public_inputs::PublicInputs, PI_LEN,
+};
+use anyhow::Result;
 use itertools::Itertools;
-use mp2_common::{array::ToField, poseidon::{empty_poseidon_hash, HashPermutation}, public_inputs::PublicInputCommon, serialization::{deserialize, serialize}, utils::{SelectHashBuilder, ToFields, ToTargets}, CHasher, D, F};
-use plonky2::{hash::hashing::hash_n_to_hash_no_pad, iop::{target::{BoolTarget, Target}, witness::{PartialWitness, WitnessWrite}}, plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget}};
+use mp2_common::{
+    array::ToField,
+    poseidon::{empty_poseidon_hash, HashPermutation},
+    public_inputs::PublicInputCommon,
+    serialization::{deserialize, serialize},
+    utils::{SelectHashBuilder, ToFields, ToTargets},
+    CHasher, D, F,
+};
+use plonky2::{
+    hash::hashing::hash_n_to_hash_no_pad,
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
+    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
+};
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use anyhow::Result;
-use crate::query::{aggregation::QueryBounds, computational_hash_ids::PlaceholderIdentifier, public_inputs::PublicInputs, PI_LEN};
 
-use super::{basic_operation::BasicOperationInputs, output_no_aggregation::Circuit as NoAggOutputCircuit, output_with_aggregation::Circuit as AggOutputCircuit, universal_circuit_inputs::{BasicOperation, PlaceholderId, Placeholders, ResultStructure, RowCells}, universal_query_gadget::{OutputComponent, UniversalQueryHashInputWires, UniversalQueryHashInputs, UniversalQueryValueInputWires, UniversalQueryValueInputs}, universal_query_gadget::QueryBound, PlaceholderHash};
+use super::{
+    basic_operation::BasicOperationInputs,
+    output_no_aggregation::Circuit as NoAggOutputCircuit,
+    output_with_aggregation::Circuit as AggOutputCircuit,
+    universal_circuit_inputs::{
+        BasicOperation, PlaceholderId, Placeholders, ResultStructure, RowCells,
+    },
+    universal_query_gadget::{
+        OutputComponent, QueryBound, UniversalQueryHashInputWires, UniversalQueryHashInputs,
+        UniversalQueryValueInputWires, UniversalQueryValueInputs,
+    },
+    PlaceholderHash,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 /// Input wires for the universal query circuit
@@ -22,7 +51,13 @@ pub struct UniversalQueryCircuitWires<
     /// flag specifying whether the given row is stored in a leaf node of a rows tree or not
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_leaf: BoolTarget,
-    hash_wires: UniversalQueryHashInputWires<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS, T>,
+    hash_wires: UniversalQueryHashInputWires<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+        T,
+    >,
     value_wires: UniversalQueryValueInputWires<MAX_NUM_COLUMNS>,
 }
 
@@ -34,11 +69,21 @@ pub struct UniversalQueryCircuitInputs<
     const MAX_NUM_RESULT_OPS: usize,
     const MAX_NUM_RESULTS: usize,
     T: OutputComponent<MAX_NUM_RESULTS>,
-> 
-{
+> {
     is_leaf: bool,
-    hash_gadget_inputs: UniversalQueryHashInputs<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS, T>,
-    value_gadget_inputs: UniversalQueryValueInputs<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS>,
+    hash_gadget_inputs: UniversalQueryHashInputs<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+        T,
+    >,
+    value_gadget_inputs: UniversalQueryValueInputs<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+    >,
 }
 
 impl<
@@ -77,21 +122,18 @@ where
             predicate_operations,
             placeholders,
             query_bounds,
-            results
+            results,
         )?;
 
-        let value_gadget_inputs = UniversalQueryValueInputs::new(
-            row_cells,
-            true,
-        )?;
-        
+        let value_gadget_inputs = UniversalQueryValueInputs::new(row_cells, true)?;
+
         Ok(Self {
             is_leaf,
             hash_gadget_inputs,
             value_gadget_inputs,
         })
     }
-    
+
     pub(crate) fn build(
         b: &mut CircuitBuilder<F, D>,
     ) -> UniversalQueryCircuitWires<
@@ -139,12 +181,17 @@ where
             .collect();
         let leaf_hash = b.hash_n_to_hash_no_pad::<CHasher>(leaf_hash_inputs);
         let tree_hash = b.select_hash(is_leaf, &leaf_hash, &value_wires.output_wires.tree_hash);
-        
+
         // compute overflow flag
         let overflow = b.is_not_equal(value_wires.output_wires.num_overflows, zero);
 
-        let output_values_targets = value_wires.output_wires.values.into_iter().flatten().collect_vec();
-        
+        let output_values_targets = value_wires
+            .output_wires
+            .values
+            .into_iter()
+            .flatten()
+            .collect_vec();
+
         PublicInputs::<Target, MAX_NUM_RESULTS>::new(
             &tree_hash.to_targets(),
             &output_values_targets,
@@ -381,7 +428,6 @@ where
         ))
     }
 }
-
 
 #[cfg(test)]
 mod tests {

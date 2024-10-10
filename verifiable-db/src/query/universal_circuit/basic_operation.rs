@@ -47,7 +47,6 @@ pub(crate) struct BasicOperationValueWires {
 }
 /// Input + output wires for the computational hash of basic operation component
 pub(crate) struct BasicOperationHashWires {
-
     pub(crate) input_wires: BasicOperationInputWires,
     pub(crate) output_hash: ComputationalHashTarget,
 }
@@ -93,12 +92,11 @@ impl BasicOperationInputs {
     }
 
     pub(crate) fn build_values(
-        b: &mut CircuitBuilder<F, D>, 
+        b: &mut CircuitBuilder<F, D>,
         input_values: &[UInt256Target],
         input_wires: &BasicOperationInputWires,
         num_overflows: Target,
-    ) -> BasicOperationValueWires 
-    {
+    ) -> BasicOperationValueWires {
         let zero = b.zero();
         let possible_input_values = input_values
             .iter()
@@ -107,10 +105,14 @@ impl BasicOperationInputs {
             .cloned()
             .collect_vec();
         //TODO: these 2 random accesses could be done with a single operation, if we add an ad-hoc gate
-        let first_input =
-            b.random_access_u256(input_wires.first_input_selector, possible_input_values.as_slice());
-        let second_input =
-            b.random_access_u256(input_wires.second_input_selector, possible_input_values.as_slice());
+        let first_input = b.random_access_u256(
+            input_wires.first_input_selector,
+            possible_input_values.as_slice(),
+        );
+        let second_input = b.random_access_u256(
+            input_wires.second_input_selector,
+            possible_input_values.as_slice(),
+        );
 
         // compute results for all the operations
 
@@ -205,11 +207,12 @@ impl BasicOperationInputs {
             possible_overflows_occurred.len() <= 64,
             "random access gadget works only for arrays with at most 64 elements"
         );
-        let overflows_occurred = b.random_access(input_wires.op_selector, possible_overflows_occurred);
+        let overflows_occurred =
+            b.random_access(input_wires.op_selector, possible_overflows_occurred);
 
         BasicOperationValueWires {
-            output_value, 
-            num_overflows: b.add(num_overflows, overflows_occurred), 
+            output_value,
+            num_overflows: b.add(num_overflows, overflows_occurred),
         }
     }
 
@@ -250,9 +253,9 @@ impl BasicOperationInputs {
             input_wires.op_selector,
         );
 
-        BasicOperationHashWires { 
-            input_wires, 
-            output_hash, 
+        BasicOperationHashWires {
+            input_wires,
+            output_hash,
         }
     }
 
@@ -262,16 +265,11 @@ impl BasicOperationInputs {
         input_hash: &[ComputationalHashTarget],
         num_overflows: Target,
     ) -> BasicOperationWires {
-
         let hash_wires = Self::build_hash(b, input_hash);
-        
-        let value_wires = Self::build_values(
-            b, 
-            input_values, 
-            &hash_wires.input_wires, 
-            num_overflows
-        );
-        
+
+        let value_wires =
+            Self::build_values(b, input_values, &hash_wires.input_wires, num_overflows);
+
         BasicOperationWires {
             value_wires,
             hash_wires,

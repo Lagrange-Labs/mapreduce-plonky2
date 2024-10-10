@@ -25,7 +25,9 @@ use std::{
 
 use super::{
     cells::build_cells_tree,
-    universal_query_gadget::{OutputComponent, OutputComponentHashWires, OutputComponentValueWires, OutputComponentWires},
+    universal_query_gadget::{
+        OutputComponent, OutputComponentHashWires, OutputComponentValueWires, OutputComponentWires,
+    },
     ComputationalHashTarget,
 };
 
@@ -101,12 +103,12 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentValueWires for ValueWires<MAX_
 
     fn other_output_values(&self) -> &[UInt256Target] {
         &self.output_values
-    }    
+    }
 }
 
 impl<const MAX_NUM_RESULTS: usize> OutputComponentHashWires for HashWires<MAX_NUM_RESULTS> {
     type InputWires = InputWires<MAX_NUM_RESULTS>;
-    
+
     fn ops_ids(&self) -> &[Target] {
         self.ops_ids.as_slice()
     }
@@ -161,7 +163,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
     fn output_variant() -> Output {
         Output::NoAggregation
     }
-    
+
     fn build_values<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
         possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
@@ -170,8 +172,6 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
     ) -> Self::ValueWires {
         let u256_zero = b.zero_u256();
         let curve_zero = b.curve_zero();
-
-
 
         // Build the output items to be returned.
         let output_items: [_; MAX_NUM_RESULTS] = array::from_fn(|i| {
@@ -211,7 +211,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
             output_values,
         }
     }
-    
+
     fn build_hash<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
         possible_output_hash: [ComputationalHashTarget; NUM_OUTPUT_VALUES],
@@ -547,7 +547,10 @@ mod tests {
             );
 
             // Check the first output value and the output hash as expected.
-            b.connect_curve_points(wires.value_wires.first_output_value, expected.first_output_value);
+            b.connect_curve_points(
+                wires.value_wires.first_output_value,
+                expected.first_output_value,
+            );
             b.connect_hashes(wires.hash_wires.output_hash, expected.output_hash);
 
             // Check the remaining output values must be all zeros.

@@ -484,6 +484,6 @@ impl RowCells {
             primary: self.primary.id,
             secondary: self.secondary.id,
             rest: self.rest.iter().map(|cell| cell.id).collect_vec(),
-        } 
+        }
     }
 }

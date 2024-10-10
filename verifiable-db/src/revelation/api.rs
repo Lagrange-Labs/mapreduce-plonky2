@@ -30,10 +30,8 @@ use crate::{
         aggregation::QueryBounds,
         api::{CircuitInput as QueryCircuitInput, Parameters as QueryParams},
         computational_hash_ids::{ColumnIDs, PlaceholderIdentifier},
-        universal_circuit::{
-            universal_circuit_inputs::{
-                BasicOperation, PlaceholderId, Placeholders, ResultStructure,
-            },
+        universal_circuit::universal_circuit_inputs::{
+            BasicOperation, PlaceholderId, Placeholders, ResultStructure,
         },
         PI_LEN as QUERY_PI_LEN,
     },

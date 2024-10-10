@@ -42,7 +42,8 @@ use super::{
         universal_query_circuit::{
             placeholder_hash, UniversalCircuitInput, UniversalQueryCircuitInputs,
             UniversalQueryCircuitWires,
-        }, universal_query_gadget::QueryBound,
+        },
+        universal_query_gadget::QueryBound,
     },
     PI_LEN,
 };

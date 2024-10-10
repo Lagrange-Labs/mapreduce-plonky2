@@ -45,7 +45,7 @@ pub(crate) struct ColumnExtractionValueWires<const MAX_NUM_COLUMNS: usize> {
 pub(crate) struct ColumnExtractionHashWires<const MAX_NUM_COLUMNS: usize> {
     pub(crate) input_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
     /// Computational hash associated to the extraction of each of the `MAX_NUM_COLUMNS` columns
-    pub(crate) column_hash: [ComputationalHashTarget; MAX_NUM_COLUMNS], 
+    pub(crate) column_hash: [ComputationalHashTarget; MAX_NUM_COLUMNS],
 }
 
 /// Input + output wires for the column extraction component
@@ -74,23 +74,16 @@ impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
         column_values: &[UInt256Target; MAX_NUM_COLUMNS],
         input_wires: &ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
     ) -> ColumnExtractionValueWires<MAX_NUM_COLUMNS> {
-            
         // Exclude the first 2 indexed columns to build the cells tree.
         let input_values = &column_values[2..];
         let input_ids = &input_wires.column_ids[2..];
         let is_real_value = &input_wires.is_real_column[2..];
         let tree_hash = build_cells_tree(b, input_values, input_ids, is_real_value);
 
-
-        ColumnExtractionValueWires {
-            tree_hash,
-        }
-
+        ColumnExtractionValueWires { tree_hash }
     }
 
-    pub(crate) fn build_hash(
-        b: &mut CBuilder,
-    ) -> ColumnExtractionHashWires<MAX_NUM_COLUMNS> {
+    pub(crate) fn build_hash(b: &mut CBuilder) -> ColumnExtractionHashWires<MAX_NUM_COLUMNS> {
         // Initialize the input wires.
         let input_wires = ColumnExtractionInputWires {
             column_ids: b.add_virtual_target_arr(),
@@ -104,21 +97,15 @@ impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
             input_wires,
             column_hash,
         }
-
     }
 
     pub(crate) fn build(
-        b: &mut CBuilder, 
+        b: &mut CBuilder,
         column_values: &[UInt256Target; MAX_NUM_COLUMNS],
     ) -> ColumnExtractionWires<MAX_NUM_COLUMNS> {
         let hash_wires = Self::build_hash(b);
-        let value_wires = Self::build_tree_hash(
-            b, 
-            column_values,
-            &hash_wires.input_wires
-        );
+        let value_wires = Self::build_tree_hash(b, column_values, &hash_wires.input_wires);
 
-        
         ColumnExtractionWires {
             value_wires,
             hash_wires,
