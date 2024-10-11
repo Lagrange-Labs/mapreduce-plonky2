@@ -167,15 +167,16 @@ impl TrieNode {
             .collect();
 
         // Build the branch circuit input.
-        let (name, input) = (
-            "indexing::extraction::mpt::branch",
-            values_extraction::CircuitInput::new_branch(node, child_proofs),
-        );
-        let input = CircuitInput::ValuesExtraction(input);
+        let input = CircuitInput::ValuesExtraction(values_extraction::CircuitInput::new_branch(
+            node,
+            child_proofs,
+        ));
 
         // Generate the proof.
         ctx.b
-            .bench(name, || generate_proof(ctx.params, input))
+            .bench("indexing::extraction::mpt::branch", || {
+                generate_proof(ctx.params, input)
+            })
             .unwrap()
     }
 

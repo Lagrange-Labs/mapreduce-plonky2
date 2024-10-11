@@ -178,7 +178,7 @@ fn extract_value(
         // ...
         // byte7 = last_bits_1(current_byte) * 2^7 + first_bits_7(next_byte)
         for j in 0..7 {
-            let first_part = if i < 31 {
+            let first_part = if i < MAPPING_LEAF_VALUE_LEN - 1 {
                 b.add_lookup_from_index(next_byte, first_bits_lookup_indexes[j])
             } else {
                 zero
@@ -240,6 +240,7 @@ fn extract_value(
     let last_byte = result[31];
     // We need to compute `first_bits_{length_mod_8}(last_byte)`.
     let mut possible_bytes = Vec::with_capacity(8);
+    // If length_mod_8 == 0, we don't need to cut any bit.
     // byte0 = last_byte
     possible_bytes.push(last_byte);
     first_bits_lookup_indexes.iter().for_each(|lookup_index| {
@@ -326,7 +327,7 @@ impl<const MAX_FIELD_PER_EVM: usize> ColumnGadgetData<MAX_FIELD_PER_EVM> {
         for i in byte_offset..=last_byte_offset {
             // Get the current and next bytes.
             let current_byte = u16::from(value_bytes[i]);
-            let next_byte = if i < 31 {
+            let next_byte = if i < MAPPING_LEAF_VALUE_LEN - 1 {
                 u16::from(value_bytes[i + 1])
             } else {
                 0
@@ -341,8 +342,12 @@ impl<const MAX_FIELD_PER_EVM: usize> ColumnGadgetData<MAX_FIELD_PER_EVM> {
 
         // At last we need to retain only the first `info.length % 8` bits for
         // the last byte of result.
-        let last_byte = u16::from(*result_bytes.last().unwrap());
-        let last_byte = first_bits(last_byte, u8::try_from(length % 8).unwrap());
+        let mut last_byte = u16::from(*result_bytes.last().unwrap());
+        let length_mod_8 = length % 8;
+        if length_mod_8 > 0 {
+            // If length_mod_8 == 0, we don't need to cut any bit.
+            last_byte = first_bits(last_byte, u8::try_from(length_mod_8).unwrap());
+        }
         *result_bytes.last_mut().unwrap() = u8::try_from(last_byte).unwrap();
 
         // Normalize left.
