@@ -3,7 +3,7 @@
 use super::{
     branch::{BranchCircuit, BranchWires},
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
-    gadgets::column_info::ColumnInfo,
+    gadgets::{column_info::ColumnInfo, metadata_gadget::MetadataGadget},
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
     leaf_mapping_of_mappings::{LeafMappingOfMappingsCircuit, LeafMappingOfMappingsWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
@@ -74,14 +74,17 @@ impl CircuitInput {
         table_info: [ColumnInfo; DEFAULT_MAX_COLUMNS],
     ) -> Self {
         let slot = SimpleSlot::new(slot);
+        let metadata = MetadataGadget::new(
+            table_info,
+            num_actual_columns,
+            num_extracted_columns,
+            evm_word,
+        );
 
         CircuitInput::LeafSingle(LeafSingleCircuit {
             node,
             slot,
-            evm_word,
-            num_actual_columns,
-            num_extracted_columns,
-            table_info,
+            metadata,
         })
     }
 
@@ -97,15 +100,18 @@ impl CircuitInput {
         table_info: [ColumnInfo; DEFAULT_MAX_COLUMNS],
     ) -> Self {
         let slot = MappingSlot::new(slot, mapping_key);
+        let metadata = MetadataGadget::new(
+            table_info,
+            num_actual_columns,
+            num_extracted_columns,
+            evm_word,
+        );
 
         CircuitInput::LeafMapping(LeafMappingCircuit {
             node,
             slot,
             key_id,
-            evm_word,
-            num_actual_columns,
-            num_extracted_columns,
-            table_info,
+            metadata,
         })
     }
 
@@ -124,6 +130,12 @@ impl CircuitInput {
         table_info: [ColumnInfo; DEFAULT_MAX_COLUMNS],
     ) -> Self {
         let slot = MappingSlot::new(slot, outer_key);
+        let metadata = MetadataGadget::new(
+            table_info,
+            num_actual_columns,
+            num_extracted_columns,
+            evm_word,
+        );
 
         CircuitInput::LeafMappingOfMappings(LeafMappingOfMappingsCircuit {
             node,
@@ -131,10 +143,7 @@ impl CircuitInput {
             inner_key,
             outer_key_id,
             inner_key_id,
-            evm_word,
-            num_actual_columns,
-            num_extracted_columns,
-            table_info,
+            metadata,
         })
     }
 

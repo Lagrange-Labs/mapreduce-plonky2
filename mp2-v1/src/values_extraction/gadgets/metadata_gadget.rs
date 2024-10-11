@@ -1,17 +1,25 @@
 //! The metadata gadget is used to ensure the correct extraction from the set of all identifiers.
 
-use super::column_info::{ColumnInfo, ColumnInfoTarget};
+use super::column_info::{
+    CircuitBuilderColumnInfo, ColumnInfo, ColumnInfoTarget, WitnessWriteColumnInfo,
+};
 use itertools::Itertools;
 use mp2_common::{
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
     poseidon::H,
+    serialization::{
+        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+    },
     types::CBuilder,
     utils::less_than_or_equal_to_unsafe,
     CHasher, F,
 };
 use plonky2::{
     field::types::Field,
-    iop::target::{BoolTarget, Target},
+    iop::{
+        target::{BoolTarget, Target},
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::config::Hasher,
 };
 use plonky2_ecgfp5::{
@@ -19,44 +27,163 @@ use plonky2_ecgfp5::{
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
 use rand::{thread_rng, Rng};
+use serde::{Deserialize, Serialize};
 use std::{array, iter::once};
 
-#[derive(Debug)]
-pub(crate) struct MetadataGadget<'a, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MetadataGadget<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
     /// Information about all columns of the table
-    table_info: &'a [ColumnInfoTarget; MAX_COLUMNS],
-    /// Boolean flags specifying whether the i-th column is actual or not
-    is_actual_columns: &'a [BoolTarget; MAX_COLUMNS],
-    /// Boolean flags specifying whether the i-th field being processed has to be extracted into a column or not
-    is_extracted_columns: &'a [BoolTarget; MAX_COLUMNS],
-    /// EVM word that should be the same for all columns we’re extracting here
-    evm_word: Target,
-    /// Slot of the variable from which the columns we are extracting here belongs to
-    slot: Target,
+    pub(crate) table_info: [ColumnInfo; MAX_COLUMNS],
+    /// Actual column number
+    pub(crate) num_actual_columns: usize,
+    /// Column number to be extracted
+    pub(crate) num_extracted_columns: usize,
+    /// EVM word that should be the same for all extracted columns
+    pub(crate) evm_word: u32,
 }
 
-impl<'a, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    MetadataGadget<'a, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
+    MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>
 {
-    pub(crate) fn new(
-        table_info: &'a [ColumnInfoTarget; MAX_COLUMNS],
-        is_actual_columns: &'a [BoolTarget; MAX_COLUMNS],
-        is_extracted_columns: &'a [BoolTarget; MAX_COLUMNS],
-        evm_word: Target,
-        slot: Target,
+    /// Create a new MPT metadata.
+    pub fn new(
+        table_info: [ColumnInfo; MAX_COLUMNS],
+        num_actual_columns: usize,
+        num_extracted_columns: usize,
+        evm_word: u32,
     ) -> Self {
         Self {
+            table_info,
+            num_actual_columns,
+            num_extracted_columns,
+            evm_word,
+        }
+    }
+
+    /// Create a sample MPT metadata. It could be used in integration tests.
+    pub fn sample(slot: u8, evm_word: u32) -> Self {
+        let rng = &mut thread_rng();
+
+        let mut table_info = array::from_fn(|_| ColumnInfo::sample());
+        let num_actual_columns = rng.gen_range(1..=MAX_COLUMNS);
+        let max_extracted_columns = num_actual_columns.min(MAX_FIELD_PER_EVM);
+        let num_extracted_columns = rng.gen_range(1..=max_extracted_columns);
+
+        // if is_extracted:
+        //      evm_word == info.evm_word && slot == info.slot
+        let evm_word_field = F::from_canonical_u32(evm_word);
+        let slot_field = F::from_canonical_u8(slot);
+        table_info[..num_extracted_columns]
+            .iter_mut()
+            .for_each(|column_info| {
+                column_info.evm_word = evm_word_field;
+                column_info.slot = slot_field;
+            });
+
+        Self {
+            table_info,
+            num_actual_columns,
+            num_extracted_columns,
+            evm_word,
+        }
+    }
+
+    /// Compute the metadata digest.
+    pub fn digest(&self) -> Point {
+        self.table_info[..self.num_actual_columns]
+            .iter()
+            .fold(Point::NEUTRAL, |acc, info| {
+                // metadata = H(info.slot || info.evm_word || info.byte_offset || info.bit_offset || info.length)
+                let inputs = vec![
+                    info.slot,
+                    info.evm_word,
+                    info.byte_offset,
+                    info.bit_offset,
+                    info.length,
+                ];
+                let metadata = H::hash_no_pad(&inputs);
+                // digest = D(mpt_metadata || info.identifier)
+                let inputs = metadata
+                    .elements
+                    .into_iter()
+                    .chain(once(info.identifier))
+                    .collect_vec();
+                let digest = map_to_curve_point(&inputs);
+
+                acc + digest
+            })
+    }
+
+    pub(crate) fn build(b: &mut CBuilder) -> MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
+        let table_info = array::from_fn(|_| b.add_virtual_column_info());
+        let [is_actual_columns, is_extracted_columns] =
+            array::from_fn(|_| array::from_fn(|_| b.add_virtual_bool_target_safe()));
+        let evm_word = b.add_virtual_target();
+
+        MetadataTarget {
             table_info,
             is_actual_columns,
             is_extracted_columns,
             evm_word,
-            slot,
         }
     }
 
-    /// Build the metadata and retturn the partial digest which is computed from
-    /// all the indices and identifiers of the table.
-    pub(crate) fn build(&self, b: &mut CBuilder) -> CurveTarget {
+    pub(crate) fn assign(
+        &self,
+        pw: &mut PartialWitness<F>,
+        metadata_target: &MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    ) {
+        pw.set_column_info_target_arr(&metadata_target.table_info, &self.table_info);
+        metadata_target
+            .is_actual_columns
+            .iter()
+            .enumerate()
+            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_actual_columns));
+        metadata_target
+            .is_extracted_columns
+            .iter()
+            .enumerate()
+            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_extracted_columns));
+        pw.set_target(
+            metadata_target.evm_word,
+            F::from_canonical_u32(self.evm_word),
+        );
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub(crate) struct MetadataTarget<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    /// Information about all columns of the table
+    pub(crate) table_info: [ColumnInfoTarget; MAX_COLUMNS],
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    /// Boolean flags specifying whether the i-th column is actual or not
+    pub(crate) is_actual_columns: [BoolTarget; MAX_COLUMNS],
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    /// Boolean flags specifying whether the i-th field being processed has to be extracted into a column or not
+    pub(crate) is_extracted_columns: [BoolTarget; MAX_COLUMNS],
+    /// EVM word that should be the same for all columns we’re extracting here
+    pub(crate) evm_word: Target,
+}
+
+impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
+    MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM>
+{
+    /// Compute the metadata digest.
+    pub(crate) fn digest(&self, b: &mut CBuilder, slot: Target) -> CurveTarget {
         let mut partial = b.curve_zero();
         let mut non_extracted_column_found = b._false();
         let mut num_extracted_columns = b.zero();
@@ -72,7 +199,7 @@ impl<'a, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
             // if is_extracted:
             //      evm_word == info.evm_word && slot == info.slot
             let is_evm_word_eq = b.is_equal(self.evm_word, info.evm_word);
-            let is_slot_eq = b.is_equal(self.slot, info.slot);
+            let is_slot_eq = b.is_equal(slot, info.slot);
             let acc = [is_extracted, is_evm_word_eq, is_slot_eq]
                 .into_iter()
                 .reduce(|acc, flag| b.and(acc, flag))
@@ -144,197 +271,44 @@ impl<'a, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct MetadataGadgetData<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
-    pub(crate) table_info: [ColumnInfo; MAX_COLUMNS],
-    pub(crate) num_actual_columns: usize,
-    pub(crate) num_extracted_columns: usize,
-    pub(crate) evm_word: u32,
-    pub(crate) slot: u8,
-}
-
-impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    MetadataGadgetData<MAX_COLUMNS, MAX_FIELD_PER_EVM>
-{
-    /// Create a sample data. It could be used in integration tests.
-    pub fn sample(slot: u8, evm_word: u32) -> Self {
-        let rng = &mut thread_rng();
-
-        let mut table_info = array::from_fn(|_| ColumnInfo::sample());
-        let num_actual_columns = rng.gen_range(1..=MAX_COLUMNS);
-        let max_extracted_columns = num_actual_columns.min(MAX_FIELD_PER_EVM);
-        let num_extracted_columns = rng.gen_range(1..=max_extracted_columns);
-
-        // if is_extracted:
-        //      evm_word == info.evm_word && slot == info.slot
-        let evm_word_field = F::from_canonical_u32(evm_word);
-        let slot_field = F::from_canonical_u8(slot);
-        table_info[..num_extracted_columns]
-            .iter_mut()
-            .for_each(|column_info| {
-                column_info.evm_word = evm_word_field;
-                column_info.slot = slot_field;
-            });
-
-        Self {
-            table_info,
-            num_actual_columns,
-            num_extracted_columns,
-            evm_word,
-            slot,
-        }
-    }
-
-    /// Compute the metadata digest.
-    pub fn digest(&self) -> Point {
-        self.table_info[..self.num_actual_columns]
-            .iter()
-            .fold(Point::NEUTRAL, |acc, info| {
-                // metadata = H(info.slot || info.evm_word || info.byte_offset || info.bit_offset || info.length)
-                let inputs = vec![
-                    info.slot,
-                    info.evm_word,
-                    info.byte_offset,
-                    info.bit_offset,
-                    info.length,
-                ];
-                let metadata = H::hash_no_pad(&inputs);
-                // digest = D(mpt_metadata || info.identifier)
-                let inputs = metadata
-                    .elements
-                    .into_iter()
-                    .chain(once(info.identifier))
-                    .collect_vec();
-                let digest = map_to_curve_point(&inputs);
-
-                acc + digest
-            })
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::{super::column_info::ColumnInfoTarget, *};
-    use crate::{
-        values_extraction::gadgets::column_info::{
-            CircuitBuilderColumnInfo, WitnessWriteColumnInfo,
-        },
-        DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM,
-    };
+    use super::*;
+    use crate::{DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM};
     use mp2_common::{C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2_ecgfp5::gadgets::curve::PartialWitnessCurve;
 
     #[derive(Clone, Debug)]
-    pub(crate) struct MetadataGadgetTarget<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
-        pub(crate) table_info: [ColumnInfoTarget; MAX_COLUMNS],
-        pub(crate) is_actual_columns: [BoolTarget; MAX_COLUMNS],
-        pub(crate) is_extracted_columns: [BoolTarget; MAX_COLUMNS],
-        pub(crate) evm_word: Target,
-        pub(crate) slot: Target,
-    }
-
-    impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-        MetadataGadgetTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM>
-    {
-        fn metadata_gadget(&self) -> MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
-            MetadataGadget::new(
-                &self.table_info,
-                &self.is_actual_columns,
-                &self.is_extracted_columns,
-                self.evm_word,
-                self.slot,
-            )
-        }
-    }
-
-    pub(crate) trait CircuitBuilderMetadataGadget {
-        /// Add a virtual metadata gadget target.
-        fn add_virtual_metadata_gadget_target(
-            &mut self,
-        ) -> MetadataGadgetTarget<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
-    }
-
-    impl CircuitBuilderMetadataGadget for CBuilder {
-        fn add_virtual_metadata_gadget_target(
-            &mut self,
-        ) -> MetadataGadgetTarget<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM> {
-            let table_info = array::from_fn(|_| self.add_virtual_column_info());
-            let [is_actual_columns, is_extracted_columns] =
-                array::from_fn(|_| array::from_fn(|_| self.add_virtual_bool_target_safe()));
-            let [evm_word, slot] = array::from_fn(|_| self.add_virtual_target());
-
-            MetadataGadgetTarget {
-                table_info,
-                is_actual_columns,
-                is_extracted_columns,
-                evm_word,
-                slot,
-            }
-        }
-    }
-
-    pub(crate) trait WitnessWriteMetadataGadget {
-        fn set_metadata_gadget_target(
-            &mut self,
-            target: &MetadataGadgetTarget<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>,
-            value: &MetadataGadgetData<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>,
-        );
-    }
-
-    impl<T: WitnessWrite<F>> WitnessWriteMetadataGadget for T {
-        fn set_metadata_gadget_target(
-            &mut self,
-            target: &MetadataGadgetTarget<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>,
-            data: &MetadataGadgetData<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>,
-        ) {
-            self.set_column_info_target_arr(&target.table_info, &data.table_info);
-            target
-                .is_actual_columns
-                .iter()
-                .enumerate()
-                .for_each(|(i, t)| self.set_bool_target(*t, i < data.num_actual_columns));
-            target
-                .is_extracted_columns
-                .iter()
-                .enumerate()
-                .for_each(|(i, t)| self.set_bool_target(*t, i < data.num_extracted_columns));
-            [
-                (target.evm_word, F::from_canonical_u32(data.evm_word)),
-                (target.slot, F::from_canonical_u8(data.slot)),
-            ]
-            .into_iter()
-            .for_each(|(t, v)| self.set_target(t, v));
-        }
-    }
-
-    #[derive(Clone, Debug)]
-    struct TestMedataGadgetCircuit {
-        metadata_gadget_data: MetadataGadgetData<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>,
+    struct TestMedataCircuit {
+        metadata_gadget: MetadataGadget<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>,
+        slot: u8,
         expected_metadata_digest: Point,
     }
 
-    impl UserCircuit<F, D> for TestMedataGadgetCircuit {
-        // Metadata gadget target + expected metadata digest
+    impl UserCircuit<F, D> for TestMedataCircuit {
+        // Metadata target + slot + expected metadata digest
         type Wires = (
-            MetadataGadgetTarget<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>,
+            MetadataTarget<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>,
+            Target,
             CurveTarget,
         );
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let metadata_gadget_target = b.add_virtual_metadata_gadget_target();
+            let metadata_target = MetadataGadget::build(b);
+            let slot = b.add_virtual_target();
             let expected_metadata_digest = b.add_virtual_curve_target();
 
-            let metadata_digest = metadata_gadget_target.metadata_gadget().build(b);
+            let metadata_digest = metadata_target.digest(b, slot);
             b.connect_curve_points(metadata_digest, expected_metadata_digest);
 
-            (metadata_gadget_target, expected_metadata_digest)
+            (metadata_target, slot, expected_metadata_digest)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_metadata_gadget_target(&wires.0, &self.metadata_gadget_data);
-            pw.set_curve_target(wires.1, self.expected_metadata_digest.to_weierstrass());
+            self.metadata_gadget.assign(pw, &wires.0);
+            pw.set_target(wires.1, F::from_canonical_u8(self.slot));
+            pw.set_curve_target(wires.2, self.expected_metadata_digest.to_weierstrass());
         }
     }
 
@@ -345,11 +319,12 @@ pub(crate) mod tests {
         let slot = rng.gen();
         let evm_word = rng.gen();
 
-        let metadata_gadget_data = MetadataGadgetData::sample(slot, evm_word);
-        let expected_metadata_digest = metadata_gadget_data.digest();
+        let metadata_gadget = MetadataGadget::sample(slot, evm_word);
+        let expected_metadata_digest = metadata_gadget.digest();
 
-        let test_circuit = TestMedataGadgetCircuit {
-            metadata_gadget_data,
+        let test_circuit = TestMedataCircuit {
+            metadata_gadget,
+            slot,
             expected_metadata_digest,
         };
 

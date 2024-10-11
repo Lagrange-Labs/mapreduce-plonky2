@@ -4,10 +4,7 @@ use crate::{
     values_extraction::{
         gadgets::{
             column_gadget::ColumnGadget,
-            column_info::{
-                CircuitBuilderColumnInfo, ColumnInfo, ColumnInfoTarget, WitnessWriteColumnInfo,
-            },
-            metadata_gadget::MetadataGadget,
+            metadata_gadget::{MetadataGadget, MetadataTarget},
         },
         public_inputs::{PublicInputs, PublicInputsArgs},
         KEY_ID_PREFIX,
@@ -25,9 +22,6 @@ use mp2_common::{
     },
     poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
-    serialization::{
-        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
-    },
     storage_key::{MappingSlot, MappingSlotWires},
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, PackerTarget, ToTargets},
@@ -36,7 +30,7 @@ use mp2_common::{
 use plonky2::{
     field::types::Field,
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::proof::ProofWithPublicInputsTarget,
@@ -45,7 +39,7 @@ use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::{array, iter, iter::once};
+use std::{iter, iter::once};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafMappingWires<
@@ -65,26 +59,8 @@ pub struct LeafMappingWires<
     pub(crate) slot: MappingSlotWires,
     /// Identifier of the column of the table storing the key of the current mapping entry
     pub(crate) key_id: Target,
-    /// Index denoting which EVM word are we looking at for the given variable
-    pub(crate) evm_word: Target,
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    /// Boolean flags specifying whether the i-th column is a column of the table or not
-    pub(crate) is_actual_columns: [BoolTarget; MAX_COLUMNS],
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    /// Boolean flags specifying whether the i-th field being processed has to be extracted into a column or not
-    pub(crate) is_extracted_columns: [BoolTarget; MAX_COLUMNS],
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    /// Information about all columns of the table
-    pub(crate) table_info: [ColumnInfoTarget; MAX_COLUMNS],
+    /// MPT metadata
+    metadata: MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
 }
 
 /// Circuit to prove the correct derivation of the MPT key from a mapping slot
@@ -99,14 +75,7 @@ pub struct LeafMappingCircuit<
     pub(crate) node: Vec<u8>,
     pub(crate) slot: MappingSlot,
     pub(crate) key_id: F,
-    pub(crate) evm_word: u32,
-    pub(crate) num_actual_columns: usize,
-    pub(crate) num_extracted_columns: usize,
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) table_info: [ColumnInfo; MAX_COLUMNS],
+    pub(crate) metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
 }
 
 impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
@@ -118,12 +87,8 @@ where
         let zero = b.zero();
 
         let key_id = b.add_virtual_target();
-        let evm_word = b.add_virtual_target();
-        let table_info = array::from_fn(|_| b.add_virtual_column_info());
-        let [is_actual_columns, is_extracted_columns] =
-            array::from_fn(|_| array::from_fn(|_| b.add_virtual_bool_target_safe()));
-
-        let slot = MappingSlot::mpt_key_with_offset(b, evm_word);
+        let metadata = MetadataGadget::build(b);
+        let slot = MappingSlot::mpt_key_with_offset(b, metadata.evm_word);
 
         // Build the node wires.
         let wires =
@@ -138,14 +103,7 @@ where
         let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
 
         // Compute the metadata digest.
-        let metadata_digest = MetadataGadget::<_, MAX_FIELD_PER_EVM>::new(
-            &table_info,
-            &is_actual_columns,
-            &is_extracted_columns,
-            evm_word,
-            slot.mapping_slot,
-        )
-        .build(b);
+        let metadata_digest = metadata.digest(b, slot.mapping_slot);
 
         // key_column_md = H( "KEY" || slot)
         let key_id_prefix = b.constant(F::from_canonical_u32(u32::from_be_bytes(
@@ -170,8 +128,8 @@ where
         // Compute the values digest.
         let values_digest = ColumnGadget::<MAX_FIELD_PER_EVM>::new(
             &value.arr,
-            &table_info[..MAX_FIELD_PER_EVM],
-            &is_extracted_columns[..MAX_FIELD_PER_EVM],
+            &metadata.table_info[..MAX_FIELD_PER_EVM],
+            &metadata.is_extracted_columns[..MAX_FIELD_PER_EVM],
         )
         .build(b);
 
@@ -181,7 +139,7 @@ where
             .chain(packed_mapping_key.clone())
             .collect_vec();
         let values_key_digest = b.map_to_curve_point(&inputs);
-        let is_evm_word_zero = b.is_equal(evm_word, zero);
+        let is_evm_word_zero = b.is_equal(metadata.evm_word, zero);
         let curve_zero = b.curve_zero();
         let values_key_digest = b.curve_select(is_evm_word_zero, values_key_digest, curve_zero);
         let values_digest = b.add_curve_point(&[values_digest, values_key_digest]);
@@ -220,10 +178,7 @@ where
             root,
             slot,
             key_id,
-            evm_word,
-            is_actual_columns,
-            is_extracted_columns,
-            table_info,
+            metadata,
         }
     }
 
@@ -240,21 +195,10 @@ where
             &wires.root,
             &InputData::Assigned(&padded_node),
         );
-        self.slot
-            .assign_mapping_slot(pw, &wires.slot, self.evm_word);
         pw.set_target(wires.key_id, self.key_id);
-        pw.set_target(wires.evm_word, F::from_canonical_u32(self.evm_word));
-        wires
-            .is_actual_columns
-            .iter()
-            .enumerate()
-            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_actual_columns));
-        wires
-            .is_extracted_columns
-            .iter()
-            .enumerate()
-            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_extracted_columns));
-        pw.set_column_info_target_arr(&wires.table_info, &self.table_info);
+        self.slot
+            .assign_mapping_slot(pw, &wires.slot, self.metadata.evm_word);
+        self.metadata.assign(pw, &wires.metadata);
     }
 }
 
@@ -285,10 +229,7 @@ impl CircuitLogicWires<F, D, 0>
 #[cfg(test)]
 mod tests {
     use super::{
-        super::{
-            gadgets::{column_gadget::ColumnGadgetData, metadata_gadget::MetadataGadgetData},
-            left_pad32,
-        },
+        super::{gadgets::column_gadget::ColumnGadgetData, left_pad32},
         *,
     };
     use eth_trie::{Nibbles, Trie};
@@ -314,6 +255,7 @@ mod tests {
         plonk::config::Hasher,
     };
     use plonky2_ecgfp5::curve::scalar_field::Scalar;
+    use std::array;
 
     type LeafCircuit =
         LeafMappingCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
@@ -360,7 +302,7 @@ mod tests {
 
         let slot = storage_slot.slot();
         let evm_word = storage_slot.evm_offset();
-        let metadata = MetadataGadgetData::<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>::sample(
+        let metadata = MetadataGadget::<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>::sample(
             slot, evm_word,
         );
         // Compute the metadata digest.
@@ -384,10 +326,7 @@ mod tests {
             node: node.clone(),
             slot,
             key_id,
-            evm_word,
-            num_actual_columns: metadata.num_actual_columns,
-            num_extracted_columns: metadata.num_extracted_columns,
-            table_info: metadata.table_info,
+            metadata,
         };
         let test_circuit = TestLeafMappingCircuit {
             c,

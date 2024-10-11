@@ -4,10 +4,7 @@ use crate::{
     values_extraction::{
         gadgets::{
             column_gadget::ColumnGadget,
-            column_info::{
-                CircuitBuilderColumnInfo, ColumnInfo, ColumnInfoTarget, WitnessWriteColumnInfo,
-            },
-            metadata_gadget::MetadataGadget,
+            metadata_gadget::{MetadataGadget, MetadataTarget},
         },
         public_inputs::{PublicInputs, PublicInputsArgs},
     },
@@ -22,27 +19,19 @@ use mp2_common::{
     },
     poseidon::{empty_poseidon_hash, hash_to_int_target},
     public_inputs::PublicInputCommon,
-    serialization::{
-        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
-    },
     storage_key::{SimpleSlot, SimpleSlotWires},
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
     utils::ToTargets,
     CHasher, D, F,
 };
 use plonky2::{
-    field::types::Field,
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::proof::ProofWithPublicInputsTarget,
 };
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::array;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafSingleWires<
@@ -60,26 +49,8 @@ pub struct LeafSingleWires<
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     /// Storage single variable slot
     slot: SimpleSlotWires,
-    /// Index denoting which EVM word are we looking at for the given variable
-    pub(crate) evm_word: Target,
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    /// Boolean flags specifying whether the i-th column is a column of the table or not
-    pub(crate) is_actual_columns: [BoolTarget; MAX_COLUMNS],
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    /// Boolean flags specifying whether the i-th field being processed has to be extracted into a column or not
-    pub(crate) is_extracted_columns: [BoolTarget; MAX_COLUMNS],
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    /// Information about all columns of the table
-    pub(crate) table_info: [ColumnInfoTarget; MAX_COLUMNS],
+    /// MPT metadata
+    metadata: MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
 }
 
 /// Circuit to prove the correct derivation of the MPT key from a simple slot
@@ -91,14 +62,7 @@ pub struct LeafSingleCircuit<
 > {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: SimpleSlot,
-    pub(crate) evm_word: u32,
-    pub(crate) num_actual_columns: usize,
-    pub(crate) num_extracted_columns: usize,
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) table_info: [ColumnInfo; MAX_COLUMNS],
+    pub(crate) metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
 }
 
 impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
@@ -107,12 +71,8 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     pub fn build(b: &mut CBuilder) -> LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM> {
-        let evm_word = b.add_virtual_target();
-        let table_info = array::from_fn(|_| b.add_virtual_column_info());
-        let [is_actual_columns, is_extracted_columns] =
-            array::from_fn(|_| array::from_fn(|_| b.add_virtual_bool_target_safe()));
-
-        let slot = SimpleSlot::build_with_offset(b, evm_word);
+        let metadata = MetadataGadget::build(b);
+        let slot = SimpleSlot::build_with_offset(b, metadata.evm_word);
 
         // Build the node wires.
         let wires =
@@ -127,20 +87,13 @@ where
         let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
 
         // Compute the metadata digest.
-        let metadata_digest = MetadataGadget::<_, MAX_FIELD_PER_EVM>::new(
-            &table_info,
-            &is_actual_columns,
-            &is_extracted_columns,
-            evm_word,
-            slot.slot,
-        )
-        .build(b);
+        let metadata_digest = metadata.digest(b, slot.slot);
 
         // Compute the values digest.
         let values_digest = ColumnGadget::<MAX_FIELD_PER_EVM>::new(
             &value.arr,
-            &table_info[..MAX_FIELD_PER_EVM],
-            &is_extracted_columns[..MAX_FIELD_PER_EVM],
+            &metadata.table_info[..MAX_FIELD_PER_EVM],
+            &metadata.is_extracted_columns[..MAX_FIELD_PER_EVM],
         )
         .build(b);
 
@@ -176,10 +129,7 @@ where
             value,
             root,
             slot,
-            table_info,
-            is_actual_columns,
-            is_extracted_columns,
-            evm_word,
+            metadata,
         }
     }
 
@@ -196,19 +146,8 @@ where
             &wires.root,
             &InputData::Assigned(&padded_node),
         );
-        self.slot.assign(pw, &wires.slot, self.evm_word);
-        pw.set_target(wires.evm_word, F::from_canonical_u32(self.evm_word));
-        wires
-            .is_actual_columns
-            .iter()
-            .enumerate()
-            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_actual_columns));
-        wires
-            .is_extracted_columns
-            .iter()
-            .enumerate()
-            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_extracted_columns));
-        pw.set_column_info_target_arr(&wires.table_info, &self.table_info);
+        self.slot.assign(pw, &wires.slot, self.metadata.evm_word);
+        self.metadata.assign(pw, &wires.metadata);
     }
 }
 
@@ -238,10 +177,7 @@ impl CircuitLogicWires<F, D, 0>
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        super::gadgets::{column_gadget::ColumnGadgetData, metadata_gadget::MetadataGadgetData},
-        *,
-    };
+    use super::{super::gadgets::column_gadget::ColumnGadgetData, *};
     use eth_trie::{Nibbles, Trie};
     use itertools::Itertools;
     use mp2_common::{
@@ -264,6 +200,7 @@ mod tests {
         plonk::config::Hasher,
     };
     use plonky2_ecgfp5::curve::scalar_field::Scalar;
+    use std::array;
 
     type LeafCircuit =
         LeafSingleCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
@@ -310,7 +247,7 @@ mod tests {
 
         let slot = storage_slot.slot();
         let evm_word = storage_slot.evm_offset();
-        let metadata = MetadataGadgetData::<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>::sample(
+        let metadata = MetadataGadget::<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>::sample(
             slot, evm_word,
         );
         // Compute the metadata digest.
@@ -332,10 +269,7 @@ mod tests {
         let c = LeafCircuit {
             node: node.clone(),
             slot,
-            evm_word,
-            num_actual_columns: metadata.num_actual_columns,
-            num_extracted_columns: metadata.num_extracted_columns,
-            table_info: metadata.table_info,
+            metadata,
         };
         let test_circuit = TestLeafSingleCircuit {
             c,
