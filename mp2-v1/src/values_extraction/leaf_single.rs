@@ -1,14 +1,11 @@
 //! Module handling the single variable inside a storage trie
 
-use crate::{
-    values_extraction::{
-        gadgets::{
-            column_gadget::ColumnGadget,
-            metadata_gadget::{MetadataGadget, MetadataTarget},
-        },
-        public_inputs::{PublicInputs, PublicInputsArgs},
+use crate::values_extraction::{
+    gadgets::{
+        column_gadget::ColumnGadget,
+        metadata_gadget::{MetadataGadget, MetadataTarget},
     },
-    DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM, MAX_LEAF_NODE_LEN,
+    public_inputs::{PublicInputs, PublicInputsArgs},
 };
 use anyhow::Result;
 use mp2_common::{
@@ -152,12 +149,13 @@ where
 }
 
 /// Num of children = 0
-impl CircuitLogicWires<F, D, 0>
-    for LeafSingleWires<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>
+impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
+    CircuitLogicWires<F, D, 0> for LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
 {
     type CircuitBuilderParams = ();
-    type Inputs =
-        LeafSingleCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+    type Inputs = LeafSingleCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>;
 
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
 
@@ -178,6 +176,7 @@ impl CircuitLogicWires<F, D, 0>
 #[cfg(test)]
 mod tests {
     use super::{super::gadgets::column_gadget::ColumnGadgetData, *};
+    use crate::{DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM, MAX_LEAF_NODE_LEN};
     use eth_trie::{Nibbles, Trie};
     use itertools::Itertools;
     use mp2_common::{

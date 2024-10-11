@@ -2,16 +2,13 @@
 //! is another mapping. In this case, we refer to the key for the first-layer mapping entry as the
 //! outer key, while the key for the mapping stored in the entry mapping is referred to as inner key.
 
-use crate::{
-    values_extraction::{
-        gadgets::{
-            column_gadget::ColumnGadget,
-            metadata_gadget::{MetadataGadget, MetadataTarget},
-        },
-        public_inputs::{PublicInputs, PublicInputsArgs},
-        INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
+use crate::values_extraction::{
+    gadgets::{
+        column_gadget::ColumnGadget,
+        metadata_gadget::{MetadataGadget, MetadataTarget},
     },
-    DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM, MAX_LEAF_NODE_LEN,
+    public_inputs::{PublicInputs, PublicInputsArgs},
+    INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
 };
 use anyhow::Result;
 use itertools::Itertools;
@@ -247,19 +244,14 @@ where
 }
 
 /// Num of children = 0
-impl CircuitLogicWires<F, D, 0>
-    for LeafMappingOfMappingsWires<
-        MAX_LEAF_NODE_LEN,
-        DEFAULT_MAX_COLUMNS,
-        DEFAULT_MAX_FIELD_PER_EVM,
-    >
+impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
+    CircuitLogicWires<F, D, 0>
+    for LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
 {
     type CircuitBuilderParams = ();
-    type Inputs = LeafMappingOfMappingsCircuit<
-        MAX_LEAF_NODE_LEN,
-        DEFAULT_MAX_COLUMNS,
-        DEFAULT_MAX_FIELD_PER_EVM,
-    >;
+    type Inputs = LeafMappingOfMappingsCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>;
 
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
 
@@ -283,6 +275,7 @@ mod tests {
         super::{gadgets::column_gadget::ColumnGadgetData, left_pad32},
         *,
     };
+    use crate::{DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM, MAX_LEAF_NODE_LEN};
     use eth_trie::{Nibbles, Trie};
     use itertools::Itertools;
     use mp2_common::{
