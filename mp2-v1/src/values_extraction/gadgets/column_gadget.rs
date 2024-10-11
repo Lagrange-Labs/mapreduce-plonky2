@@ -439,7 +439,7 @@ pub(crate) mod tests {
             let expected_column_digest = b.add_virtual_curve_target();
 
             let column_digest = column_gadget_target.column_gadget().build(b);
-            b.curve_eq(column_digest, expected_column_digest);
+            b.connect_curve_points(column_digest, expected_column_digest);
 
             (column_gadget_target, expected_column_digest)
         }
