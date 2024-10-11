@@ -11,7 +11,7 @@ use crate::{
     types::{MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
     u256::{CircuitBuilderU256, UInt256Target},
     utils::{
-        keccak256, unpack_u32_to_u8_target, unpack_u32_to_u8_targets, Endianness, PackerTarget,
+        keccak256, unpack_u32_to_u8_targets, unpack_u32s_to_u8_targets, Endianness, PackerTarget,
         ToTargets,
     },
 };
@@ -85,7 +85,7 @@ impl KeccakMPT {
         let offset = UInt256Target::new_from_target_unsafe(b, offset);
         let (location, overflow) = b.add_u256(&base, &offset);
         b.assert_zero(overflow.0);
-        let location = unpack_u32_to_u8_targets(b, location.to_targets(), Endianness::Big)
+        let location = unpack_u32s_to_u8_targets(b, location.to_targets(), Endianness::Big)
             .try_into()
             .unwrap();
 
@@ -251,7 +251,7 @@ impl SimpleSlot {
         // addition = offset + slot
         let (addition, overflow) = b.add_u32(U32Target(offset), U32Target(slot));
         b.assert_zero(overflow.0);
-        let addition = unpack_u32_to_u8_target(b, addition.0, Endianness::Big);
+        let addition = unpack_u32_to_u8_targets(b, addition.0, Endianness::Big);
         let location = repeat(zero)
             .take(INPUT_ELEMENT_LEN - addition.len())
             .chain(addition)
