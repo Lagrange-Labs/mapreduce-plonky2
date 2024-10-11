@@ -163,7 +163,11 @@ fn extract_value(
     for i in 0..MAPPING_LEAF_VALUE_LEN {
         // Get the current and next bytes.
         let current_byte = value_bytes[i];
-        let next_byte = if i < 31 { value_bytes[i + 1] } else { zero };
+        let next_byte = if i < MAPPING_LEAF_VALUE_LEN - 1 {
+            value_bytes[i + 1]
+        } else {
+            zero
+        };
 
         // Compute the possible bytes.
         let mut possible_bytes = Vec::with_capacity(8);
