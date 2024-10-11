@@ -329,7 +329,7 @@ pub(crate) mod tests {
             let expected_metadata_digest = b.add_virtual_curve_target();
 
             let metadata_digest = metadata_gadget_target.metadata_gadget().build(b);
-            b.curve_eq(metadata_digest, expected_metadata_digest);
+            b.connect_curve_points(metadata_digest, expected_metadata_digest);
 
             (metadata_gadget_target, expected_metadata_digest)
         }
