@@ -22,10 +22,8 @@ use plonky2_ecgfp5::{
 use rand::{thread_rng, Rng};
 use std::{array, iter::once};
 
-/// Number of lookup tables for getting the first bits of a byte as a big-endian integer
-const NUM_FIRST_BITS_LOOKUP_TABLES: usize = 7;
-/// Number of lookup tables for getting the last bits of a byte as a big-endian integer
-const NUM_LAST_BITS_LOOKUP_TABLES: usize = 7;
+/// Number of lookup tables for getting the first bits or last bits of a byte as a big-endian integer
+const NUM_BITS_LOOKUP_TABLES: usize = 7;
 
 #[derive(Debug)]
 pub(crate) struct ColumnGadget<'a, const MAX_FIELD_PER_EVM: usize> {
@@ -56,11 +54,14 @@ impl<'a, const MAX_FIELD_PER_EVM: usize> ColumnGadget<'a, MAX_FIELD_PER_EVM> {
     pub(crate) fn build(&self, b: &mut CBuilder) -> CurveTarget {
         // Initialize the lookup tables for getting the first bits and last bits of a byte
         // as a big-endian integer.
+        let bytes = &(0..=u8::MAX as u16).collect_vec();
+        let mut lookup_inputs = [bytes; NUM_BITS_LOOKUP_TABLES];
+        let last_bits_lookup_indexes = add_last_bits_lookup_tables(b, lookup_inputs);
         // The maxiumn lookup value is `u8::MAX + 8`, since the maxiumn `info.length` is 256,
         // and we need to compute `first_bits_5(info.length + 7)`.
-        let all_bytes = (0..=u8::MAX as u16 + 8).collect_vec();
-        let first_bits_lookup_indexes = add_first_bits_lookup_tables(b, &all_bytes);
-        let last_bits_lookup_indexes = add_last_bits_lookup_tables(b, &all_bytes);
+        let first_bits_5_input = (0..=u8::MAX as u16 + 8).collect_vec();
+        lookup_inputs[4] = &first_bits_5_input;
+        let first_bits_lookup_indexes = add_first_bits_lookup_tables(b, lookup_inputs);
 
         // Accumulate to compute the value digest.
         let mut value_digest = b.curve_zero();
@@ -130,22 +131,22 @@ macro_rules! last_bits_lookup_funs {
 /// as a big-endian integer. And return the indexes of lookup tables.
 fn add_first_bits_lookup_tables(
     b: &mut CBuilder,
-    input_bytes: &[u16],
-) -> [usize; NUM_FIRST_BITS_LOOKUP_TABLES] {
+    inputs: [&Vec<u16>; NUM_BITS_LOOKUP_TABLES],
+) -> [usize; NUM_BITS_LOOKUP_TABLES] {
     let lookup_funs = first_bits_lookup_funs!(1, 2, 3, 4, 5, 6, 7);
 
-    lookup_funs.map(|fun| b.add_lookup_table_from_fn(fun, input_bytes))
+    array::from_fn(|i| b.add_lookup_table_from_fn(lookup_funs[i], inputs[i]))
 }
 
 /// Add the lookup tables for getting the last bits of a byte
 /// as a big-endian integer. And return the indexes of lookup tables.
 fn add_last_bits_lookup_tables(
     b: &mut CBuilder,
-    input_bytes: &[u16],
-) -> [usize; NUM_LAST_BITS_LOOKUP_TABLES] {
+    inputs: [&Vec<u16>; NUM_BITS_LOOKUP_TABLES],
+) -> [usize; NUM_BITS_LOOKUP_TABLES] {
     let lookup_funs = last_bits_lookup_funs!(1, 2, 3, 4, 5, 6, 7);
 
-    lookup_funs.map(|fun| b.add_lookup_table_from_fn(fun, input_bytes))
+    array::from_fn(|i| b.add_lookup_table_from_fn(lookup_funs[i], inputs[i]))
 }
 
 /// Extract the value by the column info.
@@ -153,8 +154,8 @@ fn extract_value(
     b: &mut CBuilder,
     info: &ColumnInfoTarget,
     value_bytes: &[Target; MAPPING_LEAF_VALUE_LEN],
-    first_bits_lookup_indexes: &[usize; NUM_FIRST_BITS_LOOKUP_TABLES],
-    last_bits_lookup_indexes: &[usize; NUM_LAST_BITS_LOOKUP_TABLES],
+    first_bits_lookup_indexes: &[usize; NUM_BITS_LOOKUP_TABLES],
+    last_bits_lookup_indexes: &[usize; NUM_BITS_LOOKUP_TABLES],
 ) -> [Target; MAPPING_LEAF_VALUE_LEN] {
     let zero = b.zero();
 
@@ -185,7 +186,7 @@ fn extract_value(
             };
             let last_part = b.add_lookup_from_index(
                 current_byte,
-                last_bits_lookup_indexes[NUM_LAST_BITS_LOOKUP_TABLES - 1 - j],
+                last_bits_lookup_indexes[NUM_BITS_LOOKUP_TABLES - 1 - j],
             );
             let last_part = b.mul_const(F::from_canonical_u8(1 << (j + 1)), last_part);
             let byte = b.add(first_part, last_part);
