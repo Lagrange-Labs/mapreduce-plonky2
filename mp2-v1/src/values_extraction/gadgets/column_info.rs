@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::array;
 
 /// Column info
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct ColumnInfo {
     /// Slot information of the variable
     pub(crate) slot: F,
@@ -34,6 +34,24 @@ pub struct ColumnInfo {
 }
 
 impl ColumnInfo {
+    pub fn new(
+        slot: F,
+        identifier: F,
+        byte_offset: F,
+        bit_offset: F,
+        length: F,
+        evm_word: F,
+    ) -> Self {
+        Self {
+            slot,
+            identifier,
+            byte_offset,
+            bit_offset,
+            length,
+            evm_word,
+        }
+    }
+
     /// Create a sample column info. It could be used in integration tests.
     pub fn sample() -> Self {
         let rng = &mut thread_rng();
@@ -53,6 +71,30 @@ impl ColumnInfo {
             length,
             evm_word,
         }
+    }
+
+    pub fn slot(&self) -> F {
+        self.slot
+    }
+
+    pub fn identifier(&self) -> F {
+        self.identifier
+    }
+
+    pub fn byte_offset(&self) -> F {
+        self.byte_offset
+    }
+
+    pub fn bit_offset(&self) -> F {
+        self.bit_offset
+    }
+
+    pub fn length(&self) -> F {
+        self.length
+    }
+
+    pub fn evm_word(&self) -> F {
+        self.evm_word
     }
 }
 

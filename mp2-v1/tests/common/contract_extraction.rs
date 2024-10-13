@@ -40,7 +40,6 @@ impl TestContext {
             StorageSlot::Mapping(mapping_key, slot) => {
                 ProofQuery::new_mapping_slot(*contract_address, slot, mapping_key)
             }
-            // TODO
             _ => unimplemented!(),
         };
         let res = self

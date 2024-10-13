@@ -2,7 +2,10 @@
 use alloy::primitives::Address;
 use anyhow::Result;
 use cases::TableSourceSlot;
-use mp2_v1::api::{metadata_hash, MetadataHash, SlotInputs};
+use mp2_v1::{
+    api::{metadata_hash, MetadataHash, SlotInputs},
+    DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM,
+};
 use serde::{Deserialize, Serialize};
 use table::TableColumns;
 pub mod benchmarker;
@@ -32,6 +35,12 @@ use mp2_common::{proof::ProofWithVK, types::HashOutput};
 use plonky2::plonk::config::GenericHashOut;
 
 type ColumnIdentifier = u64;
+type StorageSlotInfo =
+    mp2_v1::values_extraction::StorageSlotInfo<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+type MetadataGadget = mp2_v1::values_extraction::gadgets::metadata_gadget::MetadataGadget<
+    DEFAULT_MAX_COLUMNS,
+    DEFAULT_MAX_FIELD_PER_EVM,
+>;
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
     let root_pi = ProofWithVK::deserialize(&proof)
@@ -79,7 +88,14 @@ impl TableInfo {
         let slots = match &self.source {
             TableSourceSlot::Mapping((mapping, _)) => SlotInputs::Mapping(mapping.slot),
             // mapping with length not tested right now
-            TableSourceSlot::SingleValues(args) => SlotInputs::Simple(args.slots.clone()),
+            TableSourceSlot::SingleValues(args) => {
+                let slots = args
+                    .slots
+                    .iter()
+                    .map(|slot_info| slot_info.slot().slot())
+                    .collect();
+                SlotInputs::Simple(slots)
+            }
         };
         metadata_hash(slots, &self.contract_address, self.chain_id, vec![])
     }

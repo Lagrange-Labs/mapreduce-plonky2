@@ -2,6 +2,7 @@
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
 use anyhow::Result;
+use itertools::Itertools;
 use log::{debug, info};
 use mp2_v1::{
     api::{metadata_hash, SlotInputs},
@@ -11,7 +12,7 @@ use mp2_v1::{
         row::{CellCollection, CellInfo, Row, RowTreeKey},
         ColumnID,
     },
-    values_extraction::identifier_block_column,
+    values_extraction::{gadgets::column_info::ColumnInfo, identifier_block_column},
 };
 use rand::{Rng, SeedableRng};
 use ryhope::storage::RoEpochKvStorage;
@@ -28,7 +29,7 @@ use crate::common::{
         CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TreeRowUpdate,
         TreeUpdateType,
     },
-    TestContext,
+    MetadataGadget, StorageSlotInfo, TestContext,
 };
 
 use super::{
@@ -46,7 +47,9 @@ use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     proof::ProofWithVK,
     types::HashOutput,
+    F,
 };
+use plonky2::field::types::Field;
 use std::{assert_matches::assert_matches, str::FromStr, sync::atomic::AtomicU64};
 
 /// Test slots for single values extraction
@@ -65,6 +68,15 @@ const LENGTH_VALUE: u8 = 2;
 
 /// Test slot for contract extraction
 const CONTRACT_SLOT: usize = 1;
+
+/// Test slot for single Struct extractin
+const SINGLE_STRUCT_SLOT: usize = 6;
+
+/// Test slot for mapping Struct extraction
+const MAPPING_STRUCT_SLOT: usize = 7;
+
+/// Test slot for mapping of mappings extraction
+const MAPPING_OF_MAPPINGS_SLOT: usize = 8;
 
 /// human friendly name about the column containing the block number
 pub(crate) const BLOCK_COLUMN_NAME: &str = "block_number";
@@ -96,15 +108,14 @@ impl TestCase {
             contract.address()
         );
         let contract_address = contract.address();
-
+        let chain_id = ctx.rpc.get_chain_id().await.unwrap();
         let source = TableSourceSlot::SingleValues(SingleValuesExtractionArgs {
-            slots: SINGLE_SLOTS.to_vec(),
+            slots: single_var_slot_info(contract_address, chain_id),
         });
 
         // + 1 because we are going to deploy some update to contract in a transaction, which for
         // Anvil means it's a new block
         let indexing_genesis_block = ctx.block_number().await + 1;
-        let chain_id = ctx.rpc.get_chain_id().await.unwrap();
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their o
         // own way of defining their table.
@@ -118,6 +129,7 @@ impl TestCase {
                 name: "column_value".to_string(),
                 identifier: identifier_single_var_column(
                     INDEX_SLOT,
+                    0,
                     contract_address,
                     chain_id,
                     vec![],
@@ -130,8 +142,14 @@ impl TestCase {
                 .filter_map(|(i, slot)| match i {
                     _ if *slot == INDEX_SLOT => None,
                     _ => {
-                        let identifier =
-                            identifier_single_var_column(*slot, contract_address, chain_id, vec![]);
+                        let identifier = identifier_single_var_column(
+                            *slot,
+                            0,
+                            contract_address,
+                            chain_id,
+                            vec![],
+                        );
+
                         Some(TableColumn {
                             name: format!("column_{}", i),
                             identifier,
@@ -148,7 +166,7 @@ impl TestCase {
             TreeFactory::Load => Table::load("single_table".to_string(), columns).await?,
         };
         Ok(Self {
-            source: source.clone(),
+            source,
             table,
             contract_address: *contract_address,
             contract_extraction: ContractExtractionArgs {
@@ -264,8 +282,6 @@ impl TestCase {
 
         // we first run the initial preprocessing and db creation.
         let metadata_hash = self.run_mpt_preprocessing(ctx, bn).await?;
-        // TODO: delete, it's just for simple testing.
-        return Ok(());
         // then we run the creation of our tree
         self.run_lagrange_preprocessing(ctx, bn, table_row_updates, &metadata_hash)
             .await?;
@@ -540,7 +556,12 @@ impl TestCase {
                         single_values_proof
                     }
                 };
-                let slot_input = SlotInputs::Simple(args.slots.clone());
+                let slots = args
+                    .slots
+                    .iter()
+                    .map(|slot_info| slot_info.slot().slot())
+                    .collect();
+                let slot_input = SlotInputs::Simple(slots);
                 let metadata_hash =
                     metadata_hash(slot_input, &self.contract_address, chain_id, vec![]);
                 // we're just proving a single set of a value
@@ -863,10 +884,12 @@ impl TestCase {
             TableSourceSlot::SingleValues(ref args) => {
                 let mut secondary_cell = None;
                 let mut rest_cells = Vec::new();
-                for slot in args.slots.iter() {
-                    let query = ProofQuery::new_simple_slot(self.contract_address, *slot as usize);
+                for slot_info in args.slots.iter() {
+                    let slot = slot_info.slot().slot();
+                    let query = ProofQuery::new_simple_slot(self.contract_address, slot as usize);
                     let id = identifier_single_var_column(
-                        *slot,
+                        slot,
+                        slot_info.metadata().evm_word(),
                         &self.contract_address,
                         ctx.rpc.get_chain_id().await.unwrap(),
                         vec![],
@@ -881,7 +904,7 @@ impl TestCase {
                         .value;
                     let cell = Cell::new(id, value);
                     // make sure we separate the secondary cells and rest of the cells separately.
-                    if *slot == INDEX_SLOT {
+                    if slot == INDEX_SLOT {
                         // we put 0 since we know there are no other rows with that secondary value since we are dealing
                         // we single values, so only 1 row.
                         secondary_cell = Some(SecondaryIndexCell::new_from(cell, 0));
@@ -1289,4 +1312,55 @@ fn next_value() -> U256 {
     let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let bv: U256 = *BASE_VALUE;
     bv + U256::from(shift)
+}
+
+/// Construct the storage slot information for the simple variable slots.
+// bool public s1
+// uint256 public s2
+// string public s3
+// address public s4
+fn single_var_slot_info(contract_address: &Address, chain_id: u64) -> Vec<StorageSlotInfo> {
+    const NUM_ACTUAL_COLUMNS: usize = 4;
+    const NUM_EXTRACTED_COLUMNS: usize = 1;
+    // bool, uint256, string, address
+    const SINGLE_SLOT_LENGTHS: [usize; 4] = [1, 32, 32, 20];
+
+    let base_table_info = SINGLE_SLOTS
+        .into_iter()
+        .zip_eq(SINGLE_SLOT_LENGTHS)
+        .map(|(slot, length)| {
+            let identifier = F::from_canonical_u64(identifier_single_var_column(
+                slot,
+                0,
+                contract_address,
+                chain_id,
+                vec![],
+            ));
+
+            let slot = F::from_canonical_u8(slot);
+            let length = F::from_canonical_usize(length);
+
+            ColumnInfo::new(slot, identifier, F::ZERO, F::ZERO, length, F::ZERO)
+        })
+        .collect_vec();
+
+    SINGLE_SLOTS
+        .into_iter()
+        .enumerate()
+        .map(|(i, slot)| {
+            // Create the simple slot.
+            let slot = StorageSlot::Simple(slot as usize);
+
+            // Swap the required column information to the first.
+            let mut table_info = base_table_info.clone();
+            table_info[0] = base_table_info[i].clone();
+            table_info[i] = base_table_info[0].clone();
+
+            // Create the metadata gadget.
+            let metadata =
+                MetadataGadget::new(table_info, NUM_ACTUAL_COLUMNS, NUM_EXTRACTED_COLUMNS, 0);
+
+            StorageSlotInfo::new(slot, metadata, F::ZERO, F::ZERO)
+        })
+        .collect_vec()
 }

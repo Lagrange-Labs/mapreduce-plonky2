@@ -71,7 +71,7 @@ impl CircuitInput {
         evm_word: u32,
         num_actual_columns: usize,
         num_extracted_columns: usize,
-        table_info: [ColumnInfo; DEFAULT_MAX_COLUMNS],
+        table_info: Vec<ColumnInfo>,
     ) -> Self {
         let slot = SimpleSlot::new(slot);
         let metadata = MetadataGadget::new(
@@ -97,7 +97,7 @@ impl CircuitInput {
         evm_word: u32,
         num_actual_columns: usize,
         num_extracted_columns: usize,
-        table_info: [ColumnInfo; DEFAULT_MAX_COLUMNS],
+        table_info: Vec<ColumnInfo>,
     ) -> Self {
         let slot = MappingSlot::new(slot, mapping_key);
         let metadata = MetadataGadget::new(
@@ -127,7 +127,7 @@ impl CircuitInput {
         evm_word: u32,
         num_actual_columns: usize,
         num_extracted_columns: usize,
-        table_info: [ColumnInfo; DEFAULT_MAX_COLUMNS],
+        table_info: Vec<ColumnInfo>,
     ) -> Self {
         let slot = MappingSlot::new(slot, outer_key);
         let metadata = MetadataGadget::new(
@@ -464,31 +464,13 @@ mod tests {
     use plonky2_ecgfp5::curve::curve::Point;
     use std::sync::Arc;
 
-    type Metadata = MetadataGadget<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+    type StorageSlotInfo =
+        super::super::StorageSlotInfo<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
 
     #[derive(Debug)]
     struct TestEthTrie {
         trie: EthTrie<MemoryDB>,
         mpt_keys: Vec<Vec<u8>>,
-    }
-
-    #[derive(Debug)]
-    struct TestStorageSlot {
-        slot: StorageSlot,
-        metadata: Metadata,
-        outer_key_id: F,
-        inner_key_id: F,
-    }
-
-    impl TestStorageSlot {
-        fn new(slot: StorageSlot, metadata: Metadata, outer_key_id: F, inner_key_id: F) -> Self {
-            Self {
-                slot,
-                metadata,
-                outer_key_id,
-                inner_key_id,
-            }
-        }
     }
 
     #[test]
@@ -512,8 +494,8 @@ mod tests {
         metadata2.table_info[1] = metadata1.table_info[0].clone();
 
         let test_slots = [
-            TestStorageSlot::new(storage_slot1, metadata1, F::rand(), F::rand()),
-            TestStorageSlot::new(storage_slot2, metadata2, F::rand(), F::rand()),
+            StorageSlotInfo::new(storage_slot1, metadata1, F::rand(), F::rand()),
+            StorageSlotInfo::new(storage_slot2, metadata2, F::rand(), F::rand()),
         ];
 
         test_api(test_slots);
@@ -547,8 +529,8 @@ mod tests {
         metadata2.table_info[1] = metadata1.table_info[0].clone();
 
         let test_slots = [
-            TestStorageSlot::new(storage_slot1, metadata1, F::rand(), F::rand()),
-            TestStorageSlot::new(storage_slot2, metadata2, F::rand(), F::rand()),
+            StorageSlotInfo::new(storage_slot1, metadata1, F::rand(), F::rand()),
+            StorageSlotInfo::new(storage_slot2, metadata2, F::rand(), F::rand()),
         ];
 
         test_api(test_slots);
@@ -576,8 +558,8 @@ mod tests {
 
         let key_id = F::rand();
         let test_slots = [
-            TestStorageSlot::new(storage_slot1, metadata1, key_id, F::rand()),
-            TestStorageSlot::new(storage_slot2, metadata2, key_id, F::rand()),
+            StorageSlotInfo::new(storage_slot1, metadata1, key_id, F::rand()),
+            StorageSlotInfo::new(storage_slot2, metadata2, key_id, F::rand()),
         ];
 
         test_api(test_slots);
@@ -612,8 +594,8 @@ mod tests {
 
         let key_id = F::rand();
         let test_slots = [
-            TestStorageSlot::new(storage_slot1, metadata1, key_id, F::rand()),
-            TestStorageSlot::new(storage_slot2, metadata2, key_id, F::rand()),
+            StorageSlotInfo::new(storage_slot1, metadata1, key_id, F::rand()),
+            StorageSlotInfo::new(storage_slot2, metadata2, key_id, F::rand()),
         ];
 
         test_api(test_slots);
@@ -650,8 +632,8 @@ mod tests {
         let outer_key_id = F::rand();
         let inner_key_id = F::rand();
         let test_slots = [
-            TestStorageSlot::new(storage_slot1, metadata1, outer_key_id, inner_key_id),
-            TestStorageSlot::new(storage_slot2, metadata2, outer_key_id, inner_key_id),
+            StorageSlotInfo::new(storage_slot1, metadata1, outer_key_id, inner_key_id),
+            StorageSlotInfo::new(storage_slot2, metadata2, outer_key_id, inner_key_id),
         ];
 
         test_api(test_slots);
@@ -666,12 +648,12 @@ mod tests {
 
         let storage_slot = StorageSlot::Simple(TEST_SLOT as usize);
         let metadata = MetadataGadget::sample(TEST_SLOT, 0);
-        let test_slot = TestStorageSlot::new(storage_slot, metadata, F::rand(), F::rand());
+        let test_slot = StorageSlotInfo::new(storage_slot, metadata, F::rand(), F::rand());
 
         test_branch_with_multiple_children(NUM_CHILDREN, test_slot);
     }
 
-    fn test_api(test_slots: [TestStorageSlot; 2]) {
+    fn test_api(test_slots: [StorageSlotInfo; 2]) {
         info!("Generating MPT proofs");
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(memdb.clone());
@@ -724,7 +706,7 @@ mod tests {
     }
 
     /// Generate a leaf proof.
-    fn prove_leaf(params: &PublicParameters, node: Vec<u8>, test_slot: TestStorageSlot) -> Vec<u8> {
+    fn prove_leaf(params: &PublicParameters, node: Vec<u8>, test_slot: StorageSlotInfo) -> Vec<u8> {
         let input = match test_slot.slot {
             // Simple variable slot
             StorageSlot::Simple(slot) => CircuitInput::new_single_variable_leaf(
@@ -733,7 +715,7 @@ mod tests {
                 test_slot.metadata.evm_word,
                 test_slot.metadata.num_actual_columns,
                 test_slot.metadata.num_extracted_columns,
-                test_slot.metadata.table_info,
+                test_slot.metadata.table_info.to_vec(),
             ),
             // Mapping variable
             StorageSlot::Mapping(mapping_key, slot) => CircuitInput::new_mapping_variable_leaf(
@@ -744,7 +726,7 @@ mod tests {
                 test_slot.metadata.evm_word,
                 test_slot.metadata.num_actual_columns,
                 test_slot.metadata.num_extracted_columns,
-                test_slot.metadata.table_info,
+                test_slot.metadata.table_info.to_vec(),
             ),
             StorageSlot::Node(StorageSlotNode::Struct(parent, evm_word)) => match *parent {
                 // Simple Struct
@@ -754,7 +736,7 @@ mod tests {
                     evm_word,
                     test_slot.metadata.num_actual_columns,
                     test_slot.metadata.num_extracted_columns,
-                    test_slot.metadata.table_info,
+                    test_slot.metadata.table_info.to_vec(),
                 ),
                 // Mapping Struct
                 StorageSlot::Mapping(mapping_key, slot) => CircuitInput::new_mapping_variable_leaf(
@@ -765,7 +747,7 @@ mod tests {
                     test_slot.metadata.evm_word,
                     test_slot.metadata.num_actual_columns,
                     test_slot.metadata.num_extracted_columns,
-                    test_slot.metadata.table_info,
+                    test_slot.metadata.table_info.to_vec(),
                 ),
                 // Mapping of mappings Struct
                 StorageSlot::Node(StorageSlotNode::Mapping(grand, inner_mapping_key)) => {
@@ -781,7 +763,7 @@ mod tests {
                                 test_slot.metadata.evm_word,
                                 test_slot.metadata.num_actual_columns,
                                 test_slot.metadata.num_extracted_columns,
-                                test_slot.metadata.table_info,
+                                test_slot.metadata.table_info.to_vec(),
                             )
                         }
                         _ => unreachable!(),
@@ -796,7 +778,7 @@ mod tests {
     }
 
     /// Generate a MPT trie with sepcified number of children.
-    fn generate_test_trie(num_children: usize, storage_slot: &TestStorageSlot) -> TestEthTrie {
+    fn generate_test_trie(num_children: usize, storage_slot: &StorageSlotInfo) -> TestEthTrie {
         let (mut trie, _) = generate_random_storage_mpt::<3, 32>();
 
         let mut mpt_key = storage_slot.slot.mpt_key_vec();
@@ -824,7 +806,7 @@ mod tests {
     }
 
     /// Test the proof generation of one branch with the specified number of children.
-    fn test_branch_with_multiple_children(num_children: usize, test_slot: TestStorageSlot) {
+    fn test_branch_with_multiple_children(num_children: usize, test_slot: StorageSlotInfo) {
         info!("Generating test trie");
         let mut test_trie = generate_test_trie(num_children, &test_slot);
 

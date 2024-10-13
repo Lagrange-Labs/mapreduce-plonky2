@@ -87,6 +87,7 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
     single.run(&mut ctx, changes.clone()).await?;
+    // TODO: Fix mapping slot.
     /*
         let mut mapping = TestCase::mapping_test_case(&ctx, TreeFactory::New).await?;
         let changes = vec![

@@ -8,7 +8,7 @@ use plonky2::field::types::Field;
 
 use crate::common::storage_trie::TestStorageTrie;
 
-use super::TestContext;
+use super::{StorageSlotInfo, TestContext};
 
 impl TestContext {
     /// Generate the Values Extraction (C.2) proof for single variables.
@@ -16,17 +16,19 @@ impl TestContext {
         &self,
         contract_address: &Address,
         chain_id: u64,
-        slot: u8,
+        slot_info: StorageSlotInfo,
         value: u8,
     ) -> ProofWithVK {
         // Initialize the test trie.
         let mut trie = TestStorageTrie::new();
         info!("Initialized the test storage trie");
 
+        let slot = slot_info.slot().slot();
+
         // Query the slot and add the node path to the trie.
-        trie.query_proof_and_add_slot(self, contract_address, slot as usize)
+        trie.query_proof_and_add_slot(self, contract_address, slot_info)
             .await;
-        let proof = trie.prove_length(&contract_address, chain_id, value, &self.params(), &self.b);
+        let proof = trie.prove_length(contract_address, chain_id, value, self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::from_slice(&proof.proof().public_inputs);

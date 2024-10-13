@@ -1,9 +1,11 @@
 use alloy::primitives::Address;
+use gadgets::metadata_gadget::MetadataGadget;
+use itertools::Itertools;
 use mp2_common::{
-    eth::left_pad32,
+    eth::{left_pad32, StorageSlot},
     group_hashing::map_to_curve_point,
     poseidon::H,
-    types::{GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
+    types::{MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
     F,
 };
@@ -12,7 +14,8 @@ use plonky2::{
     plonk::config::Hasher,
 };
 use plonky2_ecgfp5::curve::curve::Point as Digest;
-use std::iter;
+use serde::{Deserialize, Serialize};
+use std::iter::once;
 
 pub mod api;
 mod branch;
@@ -38,30 +41,70 @@ pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"OUT_KEY";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
+/// Storage slot information for generating the proof
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct StorageSlotInfo<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
+    slot: StorageSlot,
+    metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    outer_key_id: F,
+    inner_key_id: F,
+}
+
+impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
+    StorageSlotInfo<MAX_COLUMNS, MAX_FIELD_PER_EVM>
+{
+    pub fn new(
+        slot: StorageSlot,
+        metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+        outer_key_id: F,
+        inner_key_id: F,
+    ) -> Self {
+        Self {
+            slot,
+            metadata,
+            outer_key_id,
+            inner_key_id,
+        }
+    }
+
+    pub fn slot(&self) -> &StorageSlot {
+        &self.slot
+    }
+
+    pub fn metadata(&self) -> &MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
+        &self.metadata
+    }
+
+    pub fn outer_key_id(&self) -> F {
+        self.outer_key_id
+    }
+
+    pub fn inner_key_id(&self) -> F {
+        self.inner_key_id
+    }
+}
+
 pub fn identifier_block_column() -> u64 {
     let inputs: Vec<F> = BLOCK_ID_DST.to_fields();
     H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
 }
 
-/// Calculate `id = Poseidon(slot || contract_address)[0]` for single variable.
+/// Compute identifier for single value or Struct.
+/// `id = H(slot || evm_word || contract_address || chain_id)[0]`
 pub fn identifier_single_var_column(
     slot: u8,
+    evm_word: u32,
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
-    let fields = contract_address
-        .0
-        .to_vec()
-        .into_iter()
+    let inputs = once(slot)
+        .chain(evm_word.to_be_bytes())
+        .chain(contract_address.0.to_vec())
         .chain(chain_id.to_be_bytes())
-        .chain(extra.into_iter())
-        .collect::<Vec<u8>>()
-        .to_fields();
-
-    let inputs: Vec<_> = iter::once(GFp::from_canonical_u8(slot))
-        .chain(fields)
-        .collect();
+        .chain(extra)
+        .map(F::from_canonical_u8)
+        .collect_vec();
 
     H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
 }
@@ -97,7 +140,7 @@ fn compute_id_with_prefix(
     let inputs: Vec<F> = prefix
         .iter()
         .cloned()
-        .chain(iter::once(slot))
+        .chain(once(slot))
         .chain(contract_address.0)
         .chain(chain_id.to_be_bytes())
         .chain(extra)
@@ -120,11 +163,11 @@ pub fn compute_leaf_mapping_values_digest(
     let [packed_key, packed_value] =
         [mapping_key, value].map(|arr| left_pad32(arr).pack(Endianness::Big).to_fields());
 
-    let inputs: Vec<_> = iter::once(GFp::from_canonical_u64(key_id))
+    let inputs: Vec<_> = once(F::from_canonical_u64(key_id))
         .chain(packed_key)
         .collect();
     let k_digest = map_to_curve_point(&inputs);
-    let inputs: Vec<_> = iter::once(GFp::from_canonical_u64(value_id))
+    let inputs: Vec<_> = once(F::from_canonical_u64(value_id))
         .chain(packed_value)
         .collect();
     let v_digest = map_to_curve_point(&inputs);
@@ -135,7 +178,7 @@ pub fn compute_leaf_mapping_values_digest(
         .0
         .into_iter()
         .chain(add_digest.y.0)
-        .chain(iter::once(GFp::from_bool(add_digest.is_inf)))
+        .chain(once(F::from_bool(add_digest.is_inf)))
         .collect();
     map_to_curve_point(&inputs)
 }
@@ -146,7 +189,7 @@ pub fn compute_leaf_single_values_digest(id: u64, value: &[u8]) -> Digest {
 
     let packed_value = left_pad32(value).pack(Endianness::Big).to_fields();
 
-    let inputs: Vec<_> = iter::once(GFp::from_canonical_u64(id))
+    let inputs: Vec<_> = once(F::from_canonical_u64(id))
         .chain(packed_value)
         .collect();
     map_to_curve_point(&inputs)
@@ -154,14 +197,14 @@ pub fn compute_leaf_single_values_digest(id: u64, value: &[u8]) -> Digest {
 
 /// Calculate `metadata_digest = D(id || slot)` for single variable leaf.
 pub fn compute_leaf_single_metadata_digest(id: u64, slot: u8) -> Digest {
-    map_to_curve_point(&[GFp::from_canonical_u64(id), GFp::from_canonical_u8(slot)])
+    map_to_curve_point(&[F::from_canonical_u64(id), F::from_canonical_u8(slot)])
 }
 
 /// Calculate `metadata_digest = D(key_id || value_id || slot)` for mapping variable leaf.
 pub fn compute_leaf_mapping_metadata_digest(key_id: u64, value_id: u64, slot: u8) -> Digest {
     map_to_curve_point(&[
-        GFp::from_canonical_u64(key_id),
-        GFp::from_canonical_u64(value_id),
-        GFp::from_canonical_u8(slot),
+        F::from_canonical_u64(key_id),
+        F::from_canonical_u64(value_id),
+        F::from_canonical_u8(slot),
     ])
 }

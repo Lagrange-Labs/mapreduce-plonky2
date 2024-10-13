@@ -30,7 +30,7 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{array, iter::once};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct MetadataGadget<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
     #[serde(
         serialize_with = "serialize_long_array",
@@ -51,11 +51,19 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
 {
     /// Create a new MPT metadata.
     pub fn new(
-        table_info: [ColumnInfo; MAX_COLUMNS],
+        mut table_info: Vec<ColumnInfo>,
         num_actual_columns: usize,
         num_extracted_columns: usize,
         evm_word: u32,
     ) -> Self {
+        assert!(table_info.len() <= MAX_COLUMNS);
+        assert!(num_actual_columns <= MAX_COLUMNS);
+        assert!(num_extracted_columns <= MAX_FIELD_PER_EVM);
+
+        let last_column_info = table_info.last().cloned().unwrap_or(ColumnInfo::default());
+        table_info.resize(MAX_COLUMNS, last_column_info);
+        let table_info = table_info.try_into().unwrap();
+
         Self {
             table_info,
             num_actual_columns,
@@ -116,6 +124,22 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
 
                 acc + digest
             })
+    }
+
+    pub fn table_info(&self) -> &[ColumnInfo; MAX_COLUMNS] {
+        &self.table_info
+    }
+
+    pub fn num_actual_columns(&self) -> usize {
+        self.num_actual_columns
+    }
+
+    pub fn num_extracted_columns(&self) -> usize {
+        self.num_extracted_columns
+    }
+
+    pub fn evm_word(&self) -> u32 {
+        self.evm_word
     }
 
     pub(crate) fn build(b: &mut CBuilder) -> MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM> {

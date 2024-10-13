@@ -119,7 +119,7 @@ pub struct ProofQuery {
 /// - For mapping entry, it has a parent node and the mapping key.
 /// - For Struct entry, it has a parent node and the EVM offset.
 // TODO: This is not strict, as the parent of a mapping node cannot be a Struct.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum StorageSlotNode {
     /// Mapping entry including a parent node and the mapping key
     Mapping(Box<StorageSlot>, Vec<u8>),
@@ -148,7 +148,7 @@ impl StorageSlotNode {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum StorageSlot {
     /// simple storage slot like a uin256 etc that fits in 32bytes
     /// Argument is the slot location in the contract

@@ -1,5 +1,6 @@
 //! Define test cases
 
+use crate::common::StorageSlotInfo;
 use alloy::primitives::{Address, U256};
 use indexing::TableRowValues;
 use log::debug;
@@ -165,7 +166,7 @@ pub(crate) enum TableSourceSlot {
 impl TableSourceSlot {
     pub fn slots(&self) -> Vec<u8> {
         match self {
-            Self::SingleValues(s) => s.slots.clone(),
+            Self::SingleValues(s) => s.slots.iter().map(|slot| slot.slot().slot()).collect(),
             Self::Mapping((mapping, len)) => {
                 let mut slots = vec![mapping.slot];
                 if let Some(l) = len {
@@ -201,8 +202,7 @@ impl TestCase {
 /// Single values extraction arguments (C.1)
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct SingleValuesExtractionArgs {
-    /// Simple slots
-    pub(crate) slots: Vec<u8>,
+    pub(crate) slots: Vec<StorageSlotInfo>,
 }
 
 /// Mapping values extraction arguments (C.1)

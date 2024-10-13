@@ -192,7 +192,8 @@ pub fn metadata_hash(
     };
     let digest = match slot_input {
         SlotInputs::Simple(slots) => slots.iter().fold(Point::NEUTRAL, |acc, &slot| {
-            let id = identifier_single_var_column(slot, contract_address, chain_id, extra.clone());
+            let id =
+                identifier_single_var_column(slot, 0, contract_address, chain_id, extra.clone());
             let digest = compute_leaf_single_metadata_digest(id, slot);
             acc + digest
         }),

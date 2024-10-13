@@ -1,6 +1,7 @@
 //! Test utilities for Values Extraction (C.1)
 
 use super::{storage_trie::TestStorageTrie, TestContext};
+use crate::common::StorageSlotInfo;
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
@@ -22,15 +23,15 @@ impl TestContext {
     pub(crate) async fn prove_single_values_extraction(
         &self,
         contract_address: &Address,
-        slots: &[u8],
+        slots: &[StorageSlotInfo],
     ) -> Vec<u8> {
         // Initialize the test trie.
         let mut trie = TestStorageTrie::new();
         info!("Initialized the test storage trie");
 
         // Query the slot and add the node path to the trie.
-        for slot in slots {
-            trie.query_proof_and_add_slot(self, contract_address, *slot as usize)
+        for slot_info in slots {
+            trie.query_proof_and_add_slot(self, contract_address, slot_info.clone())
                 .await;
         }
 
@@ -43,7 +44,7 @@ impl TestContext {
         assert_eq!(pi.n(), F::from_canonical_usize(slots.len()));
         assert_eq!(pi.root_hash(), trie.root_hash());
         {
-            let exp_key = StorageSlot::Simple(slots[0] as usize).mpt_key_vec();
+            let exp_key = StorageSlot::Simple(slots[0].slot().slot() as usize).mpt_key_vec();
             let exp_key: Vec<_> = bytes_to_nibbles(&exp_key)
                 .into_iter()
                 .map(F::from_canonical_u8)
@@ -97,7 +98,9 @@ impl TestContext {
                 slot
             );
 
-            trie.add_slot(sslot, nodes);
+            // TODO: Fix mapping slot.
+            todo!()
+            // trie.add_slot(sslot, nodes);
         }
 
         let chain_id = self.rpc.get_chain_id().await.unwrap();
