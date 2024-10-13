@@ -2,10 +2,10 @@
 pragma solidity ^0.8.13;
 
 contract Simple {
-  enum MappingOperation {
-      Deletion,
-      Update,
-      Insertion
+    enum MappingOperation {
+        Deletion,
+        Update,
+        Insertion
     }
 
     struct MappingChange {
@@ -14,6 +14,13 @@ contract Simple {
         MappingOperation operation;
     }
 
+    struct LargeStruct {
+        // This field should live in one EVM word
+        uint256 field1;
+        // Both these fields should live in the same EVM word
+        uint128 field2;
+        uint128 field3;
+    }
 
     // Test simple slots (slot 0 - 3)
     bool public s1;
@@ -27,7 +34,17 @@ contract Simple {
     // Test array (slot 5)
     uint256[] public arr1;
 
-        // Set the simple slots.
+    // Test simple struct (slot 6)
+    LargeStruct public simpleStruct;
+
+    // Test mapping struct (slot 7)
+    mapping(uint256 => LargeStruct) public structMapping;
+
+    // Test mapping of mappings (slot 8)
+    mapping(uint256 => mapping(uint256 => LargeStruct))
+        public mappingOfMappings;
+
+    // Set the simple slots.
     function setSimples(
         bool newS1,
         uint256 newS2,
@@ -40,7 +57,7 @@ contract Simple {
         s4 = newS4;
     }
     function setS2(uint256 newS2) public {
-      s2 = newS2;
+        s2 = newS2;
     }
 
     // Set a mapping slot by key and value.
@@ -49,13 +66,16 @@ contract Simple {
     }
 
     function changeMapping(MappingChange[] memory changes) public {
-      for (uint256 i = 0; i < changes.length; i++) {
-        if (changes[i].operation == MappingOperation.Deletion) {
-          delete m1[changes[i].key];
-        } else if (changes[i].operation == MappingOperation.Insertion || changes[i].operation == MappingOperation.Update) {
-          setMapping(changes[i].key,changes[i].value);
-        } 
-      }
+        for (uint256 i = 0; i < changes.length; i++) {
+            if (changes[i].operation == MappingOperation.Deletion) {
+                delete m1[changes[i].key];
+            } else if (
+                changes[i].operation == MappingOperation.Insertion ||
+                changes[i].operation == MappingOperation.Update
+            ) {
+                setMapping(changes[i].key, changes[i].value);
+            }
+        }
     }
 
     // Add a value to the array.
