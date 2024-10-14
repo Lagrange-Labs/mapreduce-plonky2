@@ -487,7 +487,7 @@ mod tests {
         metadata1.num_extracted_columns = 1;
         // Set the second test slot and EVM word.
         metadata1.table_info[1].slot = TEST_SLOTS[1].to_field();
-        metadata1.table_info[1].slot = F::ZERO;
+        metadata1.table_info[1].evm_word = F::ZERO;
         let mut metadata2 = metadata1.clone();
         // Swap the column infos of the two test slots.
         metadata2.table_info[0] = metadata1.table_info[1].clone();
