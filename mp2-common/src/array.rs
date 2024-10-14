@@ -178,8 +178,8 @@ impl<const MAX_LEN: usize> VectorWire<Target, MAX_LEN> {
                 let is_eq = b.is_equal(jt, self.real_len);
                 is_lt = b.or(is_lt, is_eq);
                 let idx = b.sub(self.real_len, jt);
-                let idx = b.select(is_lt, idx, zero); // workaround to always have a in-bound access in 
-                    // the array
+                let idx = b.select(is_lt, idx, zero); // workaround to always have a in-bound access in
+                                                      // the array
                 let val = self.arr.value_at(b, idx);
                 b.select(is_lt, val, zero)
             }),
