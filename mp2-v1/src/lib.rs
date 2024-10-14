@@ -15,11 +15,6 @@ pub const MAX_EXTENSION_NODE_LEN: usize = 69;
 pub const MAX_EXTENSION_NODE_LEN_PADDED: usize = PAD_LEN(69);
 pub const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
 
-/// Default maximum columns
-pub const DEFAULT_MAX_COLUMNS: usize = 32;
-/// Default maximum fields for each EVM word
-pub const DEFAULT_MAX_FIELD_PER_EVM: usize = 32;
-
 pub mod api;
 pub mod block_extraction;
 pub mod contract_extraction;
@@ -27,3 +22,11 @@ pub mod final_extraction;
 pub mod indexing;
 pub mod length_extraction;
 pub mod values_extraction;
+
+#[cfg(test)]
+pub(crate) mod tests {
+    /// Testing maximum columns
+    pub(crate) const TEST_MAX_COLUMNS: usize = 32;
+    /// Testing maximum fields for each EVM word
+    pub(crate) const TEST_MAX_FIELD_PER_EVM: usize = 32;
+}

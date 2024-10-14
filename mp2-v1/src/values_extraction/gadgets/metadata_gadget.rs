@@ -298,14 +298,14 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM};
+    use crate::tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM};
     use mp2_common::{C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2_ecgfp5::gadgets::curve::PartialWitnessCurve;
 
     #[derive(Clone, Debug)]
     struct TestMedataCircuit {
-        metadata_gadget: MetadataGadget<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>,
+        metadata_gadget: MetadataGadget<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>,
         slot: u8,
         expected_metadata_digest: Point,
     }
@@ -313,7 +313,7 @@ pub(crate) mod tests {
     impl UserCircuit<F, D> for TestMedataCircuit {
         // Metadata target + slot + expected metadata digest
         type Wires = (
-            MetadataTarget<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>,
+            MetadataTarget<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>,
             Target,
             CurveTarget,
         );

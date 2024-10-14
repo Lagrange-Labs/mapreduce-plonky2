@@ -1,6 +1,6 @@
 //! Storage trie for proving tests
 
-use super::{benchmarker::Benchmarker, StorageSlotInfo, TestContext};
+use super::{benchmarker::Benchmarker, PublicParameters, StorageSlotInfo, TestContext};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
@@ -13,7 +13,7 @@ use mp2_common::{
     utils::{keccak256, Endianness, Packer},
 };
 use mp2_v1::{
-    api::{generate_proof, CircuitInput, PublicParameters},
+    api::{generate_proof, CircuitInput},
     length_extraction, values_extraction,
 };
 use rlp::{Prototype, Rlp};

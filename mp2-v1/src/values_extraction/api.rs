@@ -9,21 +9,19 @@ use super::{
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
 };
-use crate::{
-    api::InputNode, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM, MAX_BRANCH_NODE_LEN,
-    MAX_LEAF_NODE_LEN,
-};
+use crate::{api::InputNode, MAX_BRANCH_NODE_LEN};
 use anyhow::{bail, Result};
 use log::debug;
 use mp2_common::{
     default_config,
     mpt_sequential::PAD_LEN,
+    poseidon::H,
     proof::{ProofInputSerialized, ProofWithVK},
     storage_key::{MappingSlot, SimpleSlot},
     C, D, F,
 };
 use paste::paste;
-use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut};
+use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::Hasher};
 #[cfg(test)]
 use recursion_framework::framework_testing::{
     new_universal_circuit_builder_for_testing, TestingRecursiveCircuits,
@@ -35,18 +33,6 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 use std::array;
 
-type LeafSingleInput =
-    LeafSingleCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
-type LeafMappingInput =
-    LeafMappingCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
-type LeafMappingOfMappingsInput =
-    LeafMappingOfMappingsCircuit<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
-type LeafSingleWire =
-    LeafSingleWires<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
-type LeafMappingWire =
-    LeafMappingWires<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
-type LeafMappingOfMappingsWire =
-    LeafMappingOfMappingsWires<MAX_LEAF_NODE_LEN, DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
 type ExtensionInput = ProofInputSerialized<InputNode>;
 type BranchInput = ProofInputSerialized<InputNode>;
 
@@ -55,15 +41,25 @@ const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 /// CircuitInput is a wrapper around the different specialized circuits that can
 /// be used to prove a MPT node recursively.
 #[derive(Serialize, Deserialize)]
-pub enum CircuitInput {
-    LeafSingle(LeafSingleInput),
-    LeafMapping(LeafMappingInput),
-    LeafMappingOfMappings(LeafMappingOfMappingsInput),
+pub enum CircuitInput<
+    const NODE_LEN: usize,
+    const MAX_COLUMNS: usize,
+    const MAX_FIELD_PER_EVM: usize,
+> where
+    [(); PAD_LEN(NODE_LEN)]:,
+{
+    LeafSingle(LeafSingleCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
+    LeafMapping(LeafMappingCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
+    LeafMappingOfMappings(LeafMappingOfMappingsCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
     Extension(ExtensionInput),
     Branch(BranchInput),
 }
 
-impl CircuitInput {
+impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
+    CircuitInput<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+{
     /// Create a circuit input for proving a leaf MPT node of single variable.
     pub fn new_single_variable_leaf(
         node: Vec<u8>,
@@ -169,10 +165,34 @@ impl CircuitInput {
 /// Most notably, it holds them in a way to use the recursion framework allowing
 /// us to specialize circuits according to the situation.
 #[derive(Eq, PartialEq, Serialize, Deserialize)]
-pub struct PublicParameters {
-    leaf_single: CircuitWithUniversalVerifier<F, C, D, 0, LeafSingleWire>,
-    leaf_mapping: CircuitWithUniversalVerifier<F, C, D, 0, LeafMappingWire>,
-    leaf_mapping_of_mappings: CircuitWithUniversalVerifier<F, C, D, 0, LeafMappingOfMappingsWire>,
+pub struct PublicParameters<
+    const NODE_LEN: usize,
+    const MAX_COLUMNS: usize,
+    const MAX_FIELD_PER_EVM: usize,
+> where
+    [(); PAD_LEN(NODE_LEN)]:,
+{
+    leaf_single: CircuitWithUniversalVerifier<
+        F,
+        C,
+        D,
+        0,
+        LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    >,
+    leaf_mapping: CircuitWithUniversalVerifier<
+        F,
+        C,
+        D,
+        0,
+        LeafMappingWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    >,
+    leaf_mapping_of_mappings: CircuitWithUniversalVerifier<
+        F,
+        C,
+        D,
+        0,
+        LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    >,
     extension: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionNodeWires>,
     #[cfg(not(test))]
     branches: BranchCircuits,
@@ -186,17 +206,31 @@ pub struct PublicParameters {
 
 /// Public API employed to build the MPT circuits, which are returned in
 /// serialized form.
-pub fn build_circuits_params() -> PublicParameters {
+pub fn build_circuits_params<
+    const NODE_LEN: usize,
+    const MAX_COLUMNS: usize,
+    const MAX_FIELD_PER_EVM: usize,
+>() -> PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+{
     PublicParameters::build()
 }
 
 /// Public API employed to generate a proof for the circuit specified by
 /// `CircuitInput`, employing the `circuit_params` generated with the
 /// `build_circuits_params` API.
-pub fn generate_proof(
-    circuit_params: &PublicParameters,
-    circuit_type: CircuitInput,
-) -> Result<Vec<u8>> {
+pub fn generate_proof<
+    const NODE_LEN: usize,
+    const MAX_COLUMNS: usize,
+    const MAX_FIELD_PER_EVM: usize,
+>(
+    circuit_params: &PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    circuit_type: CircuitInput<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+) -> Result<Vec<u8>>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+{
     circuit_params.generate_proof(circuit_type)?.serialize()
 }
 
@@ -343,7 +377,12 @@ impl_branch_circuits!(TestBranchCircuits, 1, 4, 9);
 /// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 leaf mapping of mappings
 const MAPPING_CIRCUIT_SET_SIZE: usize = 7;
 
-impl PublicParameters {
+impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
+    PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+    [(); <H as Hasher<F>>::HASH_SIZE]:,
+{
     /// Generates the circuit parameters for the MPT circuits.
     fn build() -> Self {
         let config = default_config();
@@ -359,14 +398,21 @@ impl PublicParameters {
         );
 
         debug!("Building leaf single circuit");
-        let leaf_single = circuit_builder.build_circuit::<C, 0, LeafSingleWire>(());
+        let leaf_single = circuit_builder
+            .build_circuit::<C, 0, LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>>(());
 
         debug!("Building leaf mapping circuit");
-        let leaf_mapping = circuit_builder.build_circuit::<C, 0, LeafMappingWire>(());
+        let leaf_mapping = circuit_builder.build_circuit::<C, 0, LeafMappingWires<
+            NODE_LEN,
+            MAX_COLUMNS,
+            MAX_FIELD_PER_EVM,
+        >>(());
 
         debug!("Building leaf mapping of mappings circuit");
         let leaf_mapping_of_mappings =
-            circuit_builder.build_circuit::<C, 0, LeafMappingOfMappingsWire>(());
+                        circuit_builder.build_circuit::<C, 0,
+                LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+                        >(());
 
         debug!("Building extension circuit");
         let extension = circuit_builder.build_circuit::<C, 1, ExtensionNodeWires>(());
@@ -398,7 +444,10 @@ impl PublicParameters {
         }
     }
 
-    fn generate_proof(&self, circuit_type: CircuitInput) -> Result<ProofWithVK> {
+    fn generate_proof(
+        &self,
+        circuit_type: CircuitInput<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    ) -> Result<ProofWithVK> {
         let set = &self.get_circuit_set();
         match circuit_type {
             CircuitInput::LeafSingle(leaf) => set
@@ -435,7 +484,6 @@ impl PublicParameters {
             }
         }
     }
-
     pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
         #[cfg(not(test))]
         let set = &self.set;
@@ -449,6 +497,10 @@ impl PublicParameters {
 #[cfg(test)]
 mod tests {
     use super::{super::public_inputs, *};
+    use crate::{
+        tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
+        MAX_LEAF_NODE_LEN,
+    };
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use itertools::Itertools;
     use log::info;
@@ -464,8 +516,9 @@ mod tests {
     use plonky2_ecgfp5::curve::curve::Point;
     use std::sync::Arc;
 
-    type StorageSlotInfo =
-        super::super::StorageSlotInfo<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+    type StorageSlotInfo = super::super::StorageSlotInfo<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
+    type PublicParameters =
+        super::PublicParameters<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
 
     #[derive(Debug)]
     struct TestEthTrie {

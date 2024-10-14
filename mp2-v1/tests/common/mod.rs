@@ -4,7 +4,7 @@ use anyhow::Result;
 use cases::TableSourceSlot;
 use mp2_v1::{
     api::{metadata_hash, MetadataHash, SlotInputs},
-    DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM,
+    MAX_LEAF_NODE_LEN,
 };
 use serde::{Deserialize, Serialize};
 use table::TableColumns;
@@ -34,13 +34,20 @@ pub(crate) use context::TestContext;
 use mp2_common::{proof::ProofWithVK, types::HashOutput};
 use plonky2::plonk::config::GenericHashOut;
 
+/// Testing maximum columns
+const TEST_MAX_COLUMNS: usize = 32;
+/// Testing maximum fields for each EVM word
+const TEST_MAX_FIELD_PER_EVM: usize = 32;
+
 type ColumnIdentifier = u64;
 type StorageSlotInfo =
-    mp2_v1::values_extraction::StorageSlotInfo<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>;
+    mp2_v1::values_extraction::StorageSlotInfo<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
 type MetadataGadget = mp2_v1::values_extraction::gadgets::metadata_gadget::MetadataGadget<
-    DEFAULT_MAX_COLUMNS,
-    DEFAULT_MAX_FIELD_PER_EVM,
+    TEST_MAX_COLUMNS,
+    TEST_MAX_FIELD_PER_EVM,
 >;
+type PublicParameters =
+    mp2_v1::api::PublicParameters<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
     let root_pi = ProofWithVK::deserialize(&proof)

@@ -360,10 +360,10 @@ impl<const MAX_FIELD_PER_EVM: usize> ColumnGadgetData<MAX_FIELD_PER_EVM> {
 pub(crate) mod tests {
     use super::{super::column_info::ColumnInfoTarget, *};
     use crate::{
+        tests::TEST_MAX_FIELD_PER_EVM,
         values_extraction::gadgets::column_info::{
             CircuitBuilderColumnInfo, WitnessWriteColumnInfo,
         },
-        DEFAULT_MAX_FIELD_PER_EVM,
     };
     use mp2_common::{C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
@@ -387,13 +387,13 @@ pub(crate) mod tests {
         /// Add a virtual column gadget target.
         fn add_virtual_column_gadget_target(
             &mut self,
-        ) -> ColumnGadgetTarget<DEFAULT_MAX_FIELD_PER_EVM>;
+        ) -> ColumnGadgetTarget<TEST_MAX_FIELD_PER_EVM>;
     }
 
     impl CircuitBuilderColumnGadget for CBuilder {
         fn add_virtual_column_gadget_target(
             &mut self,
-        ) -> ColumnGadgetTarget<DEFAULT_MAX_FIELD_PER_EVM> {
+        ) -> ColumnGadgetTarget<TEST_MAX_FIELD_PER_EVM> {
             let value = self.add_virtual_target_arr();
             let table_info = array::from_fn(|_| self.add_virtual_column_info());
             let is_extracted_columns = array::from_fn(|_| self.add_virtual_bool_target_safe());
@@ -409,16 +409,16 @@ pub(crate) mod tests {
     pub(crate) trait WitnessWriteColumnGadget {
         fn set_column_gadget_target(
             &mut self,
-            target: &ColumnGadgetTarget<DEFAULT_MAX_FIELD_PER_EVM>,
-            value: &ColumnGadgetData<DEFAULT_MAX_FIELD_PER_EVM>,
+            target: &ColumnGadgetTarget<TEST_MAX_FIELD_PER_EVM>,
+            value: &ColumnGadgetData<TEST_MAX_FIELD_PER_EVM>,
         );
     }
 
     impl<T: WitnessWrite<F>> WitnessWriteColumnGadget for T {
         fn set_column_gadget_target(
             &mut self,
-            target: &ColumnGadgetTarget<DEFAULT_MAX_FIELD_PER_EVM>,
-            data: &ColumnGadgetData<DEFAULT_MAX_FIELD_PER_EVM>,
+            target: &ColumnGadgetTarget<TEST_MAX_FIELD_PER_EVM>,
+            data: &ColumnGadgetData<TEST_MAX_FIELD_PER_EVM>,
         ) {
             self.set_target_arr(&target.value, &data.value);
             self.set_column_info_target_arr(&target.table_info, &data.table_info);
@@ -432,13 +432,13 @@ pub(crate) mod tests {
 
     #[derive(Clone, Debug)]
     struct TestColumnGadgetCircuit {
-        column_gadget_data: ColumnGadgetData<DEFAULT_MAX_FIELD_PER_EVM>,
+        column_gadget_data: ColumnGadgetData<TEST_MAX_FIELD_PER_EVM>,
         expected_column_digest: Point,
     }
 
     impl UserCircuit<F, D> for TestColumnGadgetCircuit {
         // Column gadget target + expected column digest
-        type Wires = (ColumnGadgetTarget<DEFAULT_MAX_FIELD_PER_EVM>, CurveTarget);
+        type Wires = (ColumnGadgetTarget<TEST_MAX_FIELD_PER_EVM>, CurveTarget);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let column_gadget_target = b.add_virtual_column_gadget_target();

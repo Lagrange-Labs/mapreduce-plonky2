@@ -275,7 +275,10 @@ mod tests {
         super::{gadgets::column_gadget::ColumnGadgetData, left_pad32},
         *,
     };
-    use crate::{DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM, MAX_LEAF_NODE_LEN};
+    use crate::{
+        tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
+        MAX_LEAF_NODE_LEN,
+    };
     use eth_trie::{Nibbles, Trie};
     use itertools::Itertools;
     use mp2_common::{
@@ -301,16 +304,10 @@ mod tests {
     use plonky2_ecgfp5::curve::scalar_field::Scalar;
     use std::array;
 
-    type LeafCircuit = LeafMappingOfMappingsCircuit<
-        MAX_LEAF_NODE_LEN,
-        DEFAULT_MAX_COLUMNS,
-        DEFAULT_MAX_FIELD_PER_EVM,
-    >;
-    type LeafWires = LeafMappingOfMappingsWires<
-        MAX_LEAF_NODE_LEN,
-        DEFAULT_MAX_COLUMNS,
-        DEFAULT_MAX_FIELD_PER_EVM,
-    >;
+    type LeafCircuit =
+        LeafMappingOfMappingsCircuit<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
+    type LeafWires =
+        LeafMappingOfMappingsWires<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
 
     #[derive(Clone, Debug)]
     struct TestLeafMappingOfMappingsCircuit {
@@ -356,13 +353,12 @@ mod tests {
 
         let slot = storage_slot.slot();
         let evm_word = storage_slot.evm_offset();
-        let metadata = MetadataGadget::<DEFAULT_MAX_COLUMNS, DEFAULT_MAX_FIELD_PER_EVM>::sample(
-            slot, evm_word,
-        );
+        let metadata =
+            MetadataGadget::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
         let mut metadata_digest = metadata.digest();
         // Compute the values digest.
-        let mut values_digest = ColumnGadgetData::<DEFAULT_MAX_FIELD_PER_EVM>::new(
+        let mut values_digest = ColumnGadgetData::<TEST_MAX_FIELD_PER_EVM>::new(
             value
                 .clone()
                 .into_iter()
