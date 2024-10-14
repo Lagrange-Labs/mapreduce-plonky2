@@ -7,13 +7,18 @@ use alloy::{
     primitives::{Address, U256},
     providers::Provider,
 };
+use itertools::Itertools;
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     mpt_sequential::utils::bytes_to_nibbles,
     F,
 };
-use mp2_v1::values_extraction::public_inputs::PublicInputs;
+use mp2_v1::values_extraction::{
+    gadgets::{column_info::ColumnInfo, metadata_gadget::MetadataGadget},
+    identifier_for_mapping_key_column,
+    public_inputs::PublicInputs,
+};
 use plonky2::field::types::Field;
 
 type MappingKey = Vec<u8>;
@@ -62,11 +67,12 @@ impl TestContext {
     pub(crate) async fn prove_mapping_values_extraction(
         &self,
         contract_address: &Address,
+        chain_id: u64,
         slot: u8,
+        evm_word: u32,
+        length: usize,
         mapping_keys: Vec<MappingKey>,
     ) -> Vec<u8> {
-        let slot = slot as usize;
-
         let first_mapping_key = mapping_keys[0].clone();
         let storage_slot_number = mapping_keys.len();
 
@@ -74,7 +80,27 @@ impl TestContext {
         let mut trie = TestStorageTrie::new();
         info!("mapping mpt proving: Initialized the test storage trie");
 
+        // Compute the column identifier. It's only one column for simple mapping values.
+        let column_identifier = F::from_canonical_u64(identifier_for_mapping_key_column(
+            slot,
+            evm_word,
+            contract_address,
+            chain_id,
+            vec![],
+        ));
+        // Compute the table metadata information.
+        let table_info = vec![ColumnInfo::new(
+            F::from_canonical_u8(slot),
+            column_identifier,
+            F::ZERO,
+            F::ZERO,
+            F::from_canonical_usize(length),
+            F::from_canonical_u32(evm_word),
+        )];
+        let metadata = MetadataGadget::new(table_info, 1, 1, evm_word);
+
         // Query the slot and add the node path to the trie.
+        let slot = slot as usize;
         for mapping_key in mapping_keys {
             let query =
                 ProofQuery::new_mapping_slot(contract_address.clone(), slot, mapping_key.clone());
@@ -98,14 +124,21 @@ impl TestContext {
                 slot
             );
 
-            // TODO: Fix mapping slot.
-            todo!()
-            // trie.add_slot(sslot, nodes);
+            // TODO: Check if we could use the column identifier as the
+            // outer key ID for mapping values.
+            let outer_key_id = column_identifier;
+            let slot_info = StorageSlotInfo::new(
+                sslot,
+                metadata.clone(),
+                outer_key_id,
+                F::from_canonical_u32(evm_word),
+            );
+            trie.add_slot(slot_info, nodes);
         }
 
         let chain_id = self.rpc.get_chain_id().await.unwrap();
         info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
-        let proof = trie.prove_value(&contract_address, chain_id, &self.params(), &self.b);
+        let proof = trie.prove_value(contract_address, chain_id, self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof.proof().public_inputs);

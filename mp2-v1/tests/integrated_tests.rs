@@ -87,20 +87,17 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
     single.run(&mut ctx, changes.clone()).await?;
-    // TODO: Fix mapping slot.
-    /*
-        let mut mapping = TestCase::mapping_test_case(&ctx, TreeFactory::New).await?;
-        let changes = vec![
-            ChangeType::Insertion,
-            ChangeType::Update(UpdateType::Rest),
-            ChangeType::Silent,
-            ChangeType::Update(UpdateType::SecondaryIndex),
-            ChangeType::Deletion,
-        ];
-        mapping.run(&mut ctx, changes).await?;
-        // save columns information and table information in JSON so querying test can pick up
-        write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
-    */
+    let mut mapping = TestCase::mapping_test_case(&ctx, TreeFactory::New).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
+        ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
+    ];
+    mapping.run(&mut ctx, changes).await?;
+    // save columns information and table information in JSON so querying test can pick up
+    write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
     Ok(())
 }
 

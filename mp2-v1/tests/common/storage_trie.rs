@@ -190,14 +190,6 @@ impl TrieNode {
             .unwrap()
     }
 
-    /*
-        fn prove_leaf(params: &PublicParameters, node: Vec<u8>, test_slot: TestStorageSlot) -> Vec<u8> {
-            let input = match test_slot.slot {
-
-            generate_proof(params, input).unwrap()
-        }
-    */
-
     /// Prove a leaf node.
     fn prove_value_leaf(&self, ctx: ProvingContext) -> SerializedProof {
         // Has no child for the leaf node.

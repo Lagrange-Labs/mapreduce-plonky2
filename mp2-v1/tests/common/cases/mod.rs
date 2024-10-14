@@ -92,6 +92,7 @@ impl UniqueMappingEntry {
         // for this mapping.
         let extract_key = MappingIndex::Key(identifier_for_mapping_key_column(
             slot,
+            0,
             contract,
             chain_id,
             vec![],
@@ -99,6 +100,7 @@ impl UniqueMappingEntry {
         let key_cell = self.to_cell(extract_key);
         let extract_key = MappingIndex::Value(identifier_for_mapping_value_column(
             slot,
+            0,
             contract,
             chain_id,
             vec![],
@@ -210,6 +212,8 @@ pub(crate) struct SingleValuesExtractionArgs {
 pub(crate) struct MappingValuesExtractionArgs {
     /// Mapping slot number
     pub(crate) slot: u8,
+    pub(crate) evm_word: u32,
+    pub(crate) length: usize,
     pub(crate) index: MappingIndex,
     /// Mapping keys: they are useful for two things:
     ///     * doing some controlled changes on the smart contract, since if we want to do an update we

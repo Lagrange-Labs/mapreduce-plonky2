@@ -46,7 +46,7 @@ use alloy::{
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     proof::ProofWithVK,
-    types::HashOutput,
+    types::{HashOutput, ADDRESS_LEN},
     F,
 };
 use plonky2::field::types::Field;
@@ -197,17 +197,25 @@ impl TestCase {
         let index_genesis_block = ctx.block_number().await + 1;
         // to toggle off and on
         let value_as_index = true;
-        let value_id =
-            identifier_for_mapping_value_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
+        let value_id = identifier_for_mapping_value_column(
+            MAPPING_SLOT,
+            0,
+            contract_address,
+            chain_id,
+            vec![],
+        );
         let key_id =
-            identifier_for_mapping_key_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
+            identifier_for_mapping_key_column(MAPPING_SLOT, 0, contract_address, chain_id, vec![]);
         let (index_identifier, mapping_index, cell_identifier) = match value_as_index {
             true => (value_id, MappingIndex::Value(value_id), key_id),
             false => (key_id, MappingIndex::Key(key_id), value_id),
         };
 
+        // mapping(uint256 => address) public m1
         let mapping_args = MappingValuesExtractionArgs {
             slot: MAPPING_SLOT,
+            evm_word: 0,
+            length: ADDRESS_LEN,
             index: mapping_index,
             // at the beginning there is no mapping key inserted
             // NOTE: This array is a convenience to handle smart contract updates
@@ -512,7 +520,10 @@ impl TestCase {
                         let mapping_values_proof = ctx
                             .prove_mapping_values_extraction(
                                 &self.contract_address,
+                                chain_id,
                                 mapping.slot,
+                                mapping.evm_word,
+                                mapping.length,
                                 mapping.mapping_keys.clone(),
                             )
                             .await;
