@@ -66,7 +66,7 @@ const PROOF_STORE_FILE: &str = "test_proofs.store";
 const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
 
 #[test(tokio::test)]
-#[ignore]
+// #[ignore]
 async fn integrated_indexing() -> Result<()> {
     // Create the test context for mainnet.
     // let ctx = &mut TestContext::new_mainet();
@@ -78,8 +78,9 @@ async fn integrated_indexing() -> Result<()> {
     info!("Initial Anvil block: {}", ctx.block_number().await);
     info!("Building indexing params");
     ctx.build_params(ParamsType::Indexing).unwrap();
-
     info!("Params built");
+
+    info!("Running simple value test case");
     let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
     let changes = vec![
         ChangeType::Update(UpdateType::Rest),
@@ -87,7 +88,10 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
     single.run(&mut ctx, changes.clone()).await?;
-    let mut mapping = TestCase::mapping_test_case(&ctx, TreeFactory::New).await?;
+    info!("simple value test case succeeded");
+
+    info!("Running mapping value test case");
+    let mut mapping = TestCase::mapping_value_test_case(&ctx, TreeFactory::New).await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
@@ -98,6 +102,20 @@ async fn integrated_indexing() -> Result<()> {
     mapping.run(&mut ctx, changes).await?;
     // save columns information and table information in JSON so querying test can pick up
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
+    info!("Mapping value test case succeeded");
+
+    /*
+        info!("Running simple Struct test case");
+        let mut single = TestCase::single_struct_test_case(&ctx, TreeFactory::New).await?;
+        let changes = vec![
+            ChangeType::Update(UpdateType::Rest),
+            ChangeType::Silent,
+            ChangeType::Update(UpdateType::SecondaryIndex),
+        ];
+        single.run(&mut ctx, changes.clone()).await?;
+        info!("simple Struct test case succeeded");
+    */
+
     Ok(())
 }
 

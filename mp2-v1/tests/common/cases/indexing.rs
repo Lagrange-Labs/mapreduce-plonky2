@@ -176,7 +176,10 @@ impl TestCase {
         })
     }
 
-    pub(crate) async fn mapping_test_case(ctx: &TestContext, factory: TreeFactory) -> Result<Self> {
+    pub(crate) async fn mapping_value_test_case(
+        ctx: &TestContext,
+        factory: TreeFactory,
+    ) -> Result<Self> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
