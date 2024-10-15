@@ -814,9 +814,9 @@ mod tests {
             Some(outer_key_id),
             Some(inner_key_id),
         );
-        let mut test_trie = generate_test_trie(1, &test_slot);
+        let mut test_trie = generate_test_trie(2, &test_slot);
         let proof = test_trie.trie.get_proof(&test_trie.mpt_keys[0]).unwrap();
-        test_circuit_input(CircuitInput::new_mapping_of_mappings_leaf(
+        let encoded = test_circuit_input(CircuitInput::new_mapping_of_mappings_leaf(
             proof.last().unwrap().to_vec(),
             TEST_SLOT,
             TEST_OUTER_KEY.to_vec(),
