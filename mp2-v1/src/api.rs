@@ -14,12 +14,12 @@ use crate::{
         gadgets::column_info::ColumnInfo, identifier_block_column,
         identifier_for_mapping_key_column, identifier_single_var_column,
     },
+    MAX_LEAF_NODE_LEN,
 };
 use alloy::primitives::Address;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
-    mpt_sequential::PAD_LEN,
     poseidon::H,
     types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Fieldable, ToFields},
@@ -39,21 +39,25 @@ pub struct InputNode {
     pub node: Vec<u8>,
 }
 
+// TODO: Specify `NODE_LEN = MAX_LEAF_NODE_LEN` in the generic parameter,
+// but it could not work for using `MAPPING_LEAF_NODE_LEN` constant directly.
+type ValuesExtractionInput<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> =
+    values_extraction::CircuitInput<69, MAX_COLUMNS, MAX_FIELD_PER_EVM>;
+type ValuesExtractionParameters<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> =
+    values_extraction::PublicParameters<69, MAX_COLUMNS, MAX_FIELD_PER_EVM>;
+fn sanity_check() {
+    assert_eq!(MAX_LEAF_NODE_LEN, 69);
+}
+
 /// Set of inputs necessary to generate proofs for each circuit employed in the
 /// pre-processing stage of LPN
-pub enum CircuitInput<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
-> where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
+pub enum CircuitInput<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
     /// Contract extraction input
     ContractExtraction(contract_extraction::CircuitInput),
     /// Length extraction input
     LengthExtraction(LengthCircuitInput),
     /// Values extraction input
-    ValuesExtraction(values_extraction::CircuitInput<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
+    ValuesExtraction(ValuesExtractionInput<MAX_COLUMNS, MAX_FIELD_PER_EVM>),
     /// Block extraction necessary input
     BlockExtraction(block_extraction::CircuitInput),
     /// Final extraction input
@@ -70,26 +74,17 @@ pub enum CircuitInput<
 
 #[derive(Serialize, Deserialize)]
 /// Parameters defining all the circuits employed for the pre-processing stage of LPN
-pub struct PublicParameters<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
-> where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
+pub struct PublicParameters<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
     contract_extraction: contract_extraction::PublicParameters,
     length_extraction: length_extraction::PublicParameters,
-    values_extraction:
-        values_extraction::PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    values_extraction: ValuesExtractionParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
     block_extraction: block_extraction::PublicParameters,
     final_extraction: final_extraction::PublicParameters,
     tree_creation:
         verifiable_db::api::PublicParameters<final_extraction::PublicInputs<'static, Target>>,
 }
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
+impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
+    PublicParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM>
 {
     pub fn get_params_info(&self) -> Result<Vec<u8>> {
         self.tree_creation.get_params_info()
@@ -98,14 +93,10 @@ where
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
-pub fn build_circuits_params<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
->() -> PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
+pub fn build_circuits_params<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+) -> PublicParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
+    sanity_check();
+
     log::info!("Building contract_extraction parameters...");
     let contract_extraction = contract_extraction::build_circuits_params();
     log::info!("Building length_extraction parameters...");
@@ -138,17 +129,10 @@ where
 /// Generate a proof for a circuit in the set of circuits employed in the
 /// pre-processing stage of LPN, employing `CircuitInput` to specify for which
 /// circuit the proof should be generated
-pub fn generate_proof<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
->(
-    params: &PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    input: CircuitInput<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-) -> Result<Vec<u8>>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
+pub fn generate_proof<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+    params: &PublicParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    input: CircuitInput<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+) -> Result<Vec<u8>> {
     match input {
         CircuitInput::ContractExtraction(input) => {
             contract_extraction::generate_proof(&params.contract_extraction, input)
