@@ -4,8 +4,9 @@ use super::{
     TransactionalStorage, TreeStorage, WideLineage,
 };
 use crate::{
-    storage::pgsql::storages::DBPool, tree::TreeTopology, Epoch, InitSettings, KEY, PAYLOAD,
-    VALID_FROM, VALID_UNTIL,
+    storage::pgsql::storages::DBPool,
+    tree::{NodeContext, TreeTopology},
+    Epoch, InitSettings, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL,
 };
 use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     fmt::Debug,
+    future::Future,
     sync::{Arc, Mutex},
 };
 use storages::{NodeProjection, PayloadProjection};
@@ -49,6 +51,16 @@ impl ToFromBytea for String {
 
     fn from_bytea(bytes: Vec<u8>) -> Self {
         String::from_utf8(bytes).unwrap()
+    }
+}
+
+impl ToFromBytea for Vec<u8> {
+    fn to_bytea(&self) -> Vec<u8> {
+        self.clone()
+    }
+
+    fn from_bytea(bytes: Vec<u8>) -> Self {
+        bytes
     }
 }
 
@@ -697,7 +709,45 @@ where
             .await
             .expect("unable to create DB transaction");
 
-        self.commit_in_transaction(&mut db_tx).await?;
+        self.commit_in_transaction(&mut db_tx)
+            .await
+            .with_context(|| {
+                let mut cached_keys = HashSet::new();
+                {
+                    cached_keys.extend(self.tree_store.lock().unwrap().nodes_cache.keys().cloned());
+                }
+                {
+                    cached_keys.extend(
+                        self.tree_store
+                            .lock()
+                            .unwrap()
+                            .payload_cache
+                            .keys()
+                            .cloned(),
+                    );
+
+                    let mut r = String::new();
+
+                    for k in cached_keys {
+                        let node_value =
+                            { self.tree_store.lock().unwrap().nodes_cache.get(&k).cloned() };
+                        let data_value = {
+                            self.tree_store
+                                .lock()
+                                .unwrap()
+                                .payload_cache
+                                .get(&k)
+                                .cloned()
+                        };
+                        r.push_str(&format!(
+                            "{:?}: node = {:?} data = {:?}  ",
+                            k, node_value, data_value
+                        ))
+                    }
+
+                    anyhow!("internal caches at failure time: {r}")
+                }
+            })?;
 
         // Atomically execute the PgSQL transaction
         let err = db_tx.commit().await.context("while committing transaction");
@@ -720,7 +770,43 @@ where
 {
     async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()> {
         trace!("[{self}] API-facing commit_in called");
-        self.commit_in_transaction(tx).await
+        self.commit_in_transaction(tx).await.with_context(|| {
+            let mut cached_keys = HashSet::new();
+            {
+                cached_keys.extend(self.tree_store.lock().unwrap().nodes_cache.keys().cloned());
+            }
+            {
+                cached_keys.extend(
+                    self.tree_store
+                        .lock()
+                        .unwrap()
+                        .payload_cache
+                        .keys()
+                        .cloned(),
+                );
+
+                let mut r = String::new();
+
+                for k in cached_keys {
+                    let node_value =
+                        { self.tree_store.lock().unwrap().nodes_cache.get(&k).cloned() };
+                    let data_value = {
+                        self.tree_store
+                            .lock()
+                            .unwrap()
+                            .payload_cache
+                            .get(&k)
+                            .cloned()
+                    };
+                    r.push_str(&format!(
+                        "{:?}: node = {:?} data = {:?}  ",
+                        k, node_value, data_value
+                    ))
+                }
+
+                anyhow!("internal caches at failure time: {r}")
+            }
+        })
     }
 
     fn commit_success(&mut self) {
@@ -831,16 +917,29 @@ where
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
     ) -> Result<WideLineage<T::Key, V>> {
-        let r = T::wide_lineage_between(
-            t,
-            &self.view_at(at),
-            self.db.clone(),
-            &self.table,
-            &keys,
-            bounds,
-        )
-        .await?;
+        let r = t
+            .wide_lineage_between(
+                &self.view_at(at),
+                self.db.clone(),
+                &self.table,
+                keys,
+                bounds,
+            )
+            .await?;
 
         Ok(r)
+    }
+
+    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, <T as TreeTopology>::Key)> + Send>(
+        &self,
+        t: &T,
+        data: I,
+    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<T::Key>, V)>>> + Send
+    where
+        <I as IntoIterator>::IntoIter: Send,
+    {
+        trace!("[{self}] fetching many contexts & payloads",);
+        let table = self.table.to_owned();
+        async move { t.fetch_many_at(self, self.db.clone(), &table, data).await }
     }
 }

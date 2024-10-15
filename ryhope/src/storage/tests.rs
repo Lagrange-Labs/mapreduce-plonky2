@@ -1051,18 +1051,16 @@ async fn fetch_many() {
         .await
         .unwrap()
         .into_iter()
+        .map(|(epoch, ctx, v)| (epoch, ctx.node_id, v))
         .collect::<HashSet<_>>();
 
     // using sets here, for PgSQL does not guarantee ordering
     assert_eq!(
         many,
         [
-            Some((1, "restera".to_string(), 12)),
-            Some((2, "restera".to_string(), 12)),
-            None,
-            Some((2, "car".to_string(), 0)),
-            None,
-            None
+            (1i64, "restera".to_string(), 12),
+            (2i64, "restera".to_string(), 12),
+            (2i64, "car".to_string(), 0),
         ]
         .into_iter()
         .collect::<HashSet<_>>()
@@ -1128,4 +1126,145 @@ WHERE {KEY} = ANY(ARRAY['\\x72657374657261'::bytea,'\\x706c7573'::bytea, '\\x636
         println!("{}:", t.epoch());
         t.print();
     }
+}
+
+#[tokio::test]
+async fn all_pgsql() {
+    type K = String;
+    type V = usize;
+    type Tree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<Tree, V>;
+
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
+        SqlStorageSettings {
+            source: SqlServerConnection::NewConnection(db_url()),
+            table: "fetch_all".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    const TEXT1: &str = "nature berce le il a froid";
+    const TEXT2: &str = "dort tranquille deux trous rouges cote";
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT1.split(' ').enumerate() {
+                s.store(word.to_string(), i.try_into().unwrap()).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            s.remove("il".to_string()).await?;
+            s.remove("nature".to_string()).await?;
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT2.split(' ').enumerate() {
+                s.store(word.to_string(), i.try_into().unwrap()).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    let pairs_1 = s.pairs_at(1).await.unwrap();
+    let pairs_2 = s.pairs_at(2).await.unwrap();
+    let pairs_3 = s.pairs_at(3).await.unwrap();
+
+    assert!(s.pairs_at(0).await.unwrap().is_empty());
+
+    assert!(!pairs_1.contains_key("tranquille"));
+    assert!(!pairs_1.contains_key("rouges"));
+    assert!(pairs_1.contains_key("nature"));
+    assert!(pairs_1.contains_key("froid"));
+
+    assert!(!pairs_2.contains_key("rouges"));
+    assert!(!pairs_2.contains_key("nature"));
+
+    assert!(pairs_3.contains_key("tranquille"));
+    assert!(pairs_3.contains_key("rouges"));
+    assert!(!pairs_3.contains_key("nature"));
+    assert!(pairs_3.contains_key("froid"));
+}
+
+#[tokio::test]
+async fn all_memory() {
+    type K = String;
+    type V = usize;
+    type Tree = scapegoat::Tree<K>;
+    type Storage = InMemory<Tree, V>;
+
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
+        (),
+    )
+    .await
+    .unwrap();
+
+    const TEXT1: &str = "nature berce le il a froid";
+    const TEXT2: &str = "dort tranquille deux trous rouges cote";
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT1.split(' ').enumerate() {
+                s.store(word.to_string(), i.try_into().unwrap()).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            s.remove("il".to_string()).await?;
+            s.remove("nature".to_string()).await?;
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT2.split(' ').enumerate() {
+                s.store(word.to_string(), i.try_into().unwrap()).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    let pairs_1 = s.pairs_at(1).await.unwrap();
+    let pairs_2 = s.pairs_at(2).await.unwrap();
+    let pairs_3 = s.pairs_at(3).await.unwrap();
+
+    assert!(s.pairs_at(0).await.unwrap().is_empty());
+
+    assert!(!pairs_1.contains_key("tranquille"));
+    assert!(!pairs_1.contains_key("rouges"));
+    assert!(pairs_1.contains_key("nature"));
+    assert!(pairs_1.contains_key("froid"));
+
+    assert!(!pairs_2.contains_key("rouges"));
+    assert!(!pairs_2.contains_key("nature"));
+
+    assert!(pairs_3.contains_key("tranquille"));
+    assert!(pairs_3.contains_key("rouges"));
+    assert!(!pairs_3.contains_key("nature"));
+    assert!(pairs_3.contains_key("froid"));
 }

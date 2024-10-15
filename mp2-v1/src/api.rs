@@ -19,6 +19,7 @@ use alloy::primitives::Address;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
+    digest::Digest,
     poseidon::H,
     types::HashOutput,
     utils::{Fieldable, ToFields},
@@ -128,6 +129,9 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                 final_extraction::CircuitInput::Simple(input) => params
                     .final_extraction
                     .generate_simple_proof(input, contract_circuit_set, value_circuit_set),
+                final_extraction::CircuitInput::MergeTable(input) => params
+                    .final_extraction
+                    .generate_merge_proof(input, contract_circuit_set, value_circuit_set),
                 final_extraction::CircuitInput::Lengthed(input) => {
                     let length_circuit_set = params.length_extraction.get_circuit_set();
                     params.final_extraction.generate_lengthed_proof(
@@ -174,6 +178,56 @@ pub enum SlotInputs {
     MappingWithLength(u8, u8),
 }
 
+/// Compute metadata hash for a "merge" table. Right now it supports only merging tables from the
+/// same address.
+pub fn merge_metadata_hash(
+    contract: Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+    table_a: SlotInputs,
+    table_b: SlotInputs,
+) -> MetadataHash {
+    let md_a = value_metadata(table_a, &contract, chain_id, extra.clone());
+    let md_b = value_metadata(table_b, &contract, chain_id, extra);
+    let combined = md_a + md_b;
+    let contract_digest = contract_metadata_digest(&contract);
+    // the block id is only added at the index tree level, the rest is combined at the final
+    // extraction level.
+    combine_digest_and_block(combined + contract_digest)
+}
+
+// NOTE: the block id is added at the end of the digest computation only once - this returns only
+// the part without the block id
+fn value_metadata(inputs: SlotInputs, contract: &Address, chain_id: u64, extra: Vec<u8>) -> Digest {
+    match inputs {
+        SlotInputs::Simple(slots) => slots.iter().fold(Point::NEUTRAL, |acc, &slot| {
+            let id = identifier_single_var_column(slot, contract, chain_id, extra.clone());
+            let digest = compute_leaf_single_metadata_digest(id, slot);
+            acc + digest
+        }),
+        SlotInputs::Mapping(slot) => metadata_digest_mapping(contract, chain_id, extra, slot),
+        SlotInputs::MappingWithLength(mapping_slot, length_slot) => {
+            let mapping_digest = metadata_digest_mapping(contract, chain_id, extra, mapping_slot);
+            let length_digest = length_metadata_digest(length_slot, mapping_slot);
+            mapping_digest + length_digest
+        }
+    }
+}
+fn metadata_digest_mapping(address: &Address, chain_id: u64, extra: Vec<u8>, slot: u8) -> Digest {
+    let key_id = identifier_for_mapping_key_column(slot, address, chain_id, extra.clone());
+    let value_id = identifier_for_mapping_value_column(slot, address, chain_id, extra.clone());
+    compute_leaf_mapping_metadata_digest(key_id, value_id, slot)
+}
+
+fn combine_digest_and_block(digest: Digest) -> HashOutput {
+    let block_id = identifier_block_column();
+    let inputs = digest
+        .to_fields()
+        .into_iter()
+        .chain(once(block_id.to_field()))
+        .collect_vec();
+    HashOutput::try_from(H::hash_no_pad(&inputs).to_bytes()).unwrap()
+}
 /// Compute metadata hash for a table related to the provided inputs slots of the contract with
 /// address `contract_address`
 pub fn metadata_hash(
@@ -183,35 +237,9 @@ pub fn metadata_hash(
     extra: Vec<u8>,
 ) -> MetadataHash {
     // closure to compute the metadata digest associated to a mapping variable
-    let metadata_digest_mapping = |slot| {
-        let key_id =
-            identifier_for_mapping_key_column(slot, contract_address, chain_id, extra.clone());
-        let value_id =
-            identifier_for_mapping_value_column(slot, contract_address, chain_id, extra.clone());
-        compute_leaf_mapping_metadata_digest(key_id, value_id, slot)
-    };
-    let digest = match slot_input {
-        SlotInputs::Simple(slots) => slots.iter().fold(Point::NEUTRAL, |acc, &slot| {
-            let id = identifier_single_var_column(slot, contract_address, chain_id, extra.clone());
-            let digest = compute_leaf_single_metadata_digest(id, slot);
-            acc + digest
-        }),
-        SlotInputs::Mapping(slot) => metadata_digest_mapping(slot),
-        SlotInputs::MappingWithLength(mapping_slot, length_slot) => {
-            let mapping_digest = metadata_digest_mapping(mapping_slot);
-            let length_digest = length_metadata_digest(length_slot, mapping_slot);
-            mapping_digest + length_digest
-        }
-    };
+    let value_digest = value_metadata(slot_input, contract_address, chain_id, extra);
     // add contract digest
     let contract_digest = contract_metadata_digest(contract_address);
-    let final_digest = contract_digest + digest;
     // compute final hash
-    let block_id = identifier_block_column();
-    let inputs = final_digest
-        .to_fields()
-        .into_iter()
-        .chain(once(block_id.to_field()))
-        .collect_vec();
-    HashOutput::try_from(H::hash_no_pad(&inputs).to_bytes()).unwrap()
+    combine_digest_and_block(contract_digest + value_digest)
 }

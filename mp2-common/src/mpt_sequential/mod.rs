@@ -39,6 +39,7 @@ pub use leaf_or_extension::{MPTLeafOrExtensionNode, MPTLeafOrExtensionWires};
 /// Number of items in the RLP encoded list in a leaf node.
 const NB_ITEMS_LEAF: usize = 2;
 /// Currently a constant set to denote the length of the value we are extracting from the MPT trie.
+///
 /// This can later be also be done in a generic way to allow different sizes.
 /// Given we target MPT storage proof, the value is 32 bytes + 1 byte for RLP encoding.
 pub const MAX_LEAF_VALUE_LEN: usize = 33;
@@ -56,9 +57,10 @@ pub const fn PAD_LEN(d: usize) -> usize {
     compute_size_with_padding(d)
 }
 /// Circuit that simoply proves the inclusion of a value inside a MPT tree.
-/// * DEPTH is the maximal depth of the tree. If the tree is smaller, the circuit
+///
+/// . DEPTH is the maximal depth of the tree. If the tree is smaller, the circuit
 /// will continue proving for "imaginary" nodes
-/// * NODE_LEN is the max length of a node in the list of MPT nodes that form
+/// . NODE_LEN is the max length of a node in the list of MPT nodes that form
 /// the MPT proof. For example, in storage trie, a leaf is 32 bytes max, and a
 /// branch node can be up to 32 * 17 = 544 bytes.
 ///     - Note since it uses keccak, the array being hashed is larger because
@@ -543,7 +545,7 @@ mod test {
         [(); DEPTH - 1]:,
         [(); PAD_LEN(NODE_LEN) / 4]:,
     {
-        ProofQuery::verify_storage_proof(&res)?;
+        ProofQuery::verify_storage_proof(res)?;
 
         let value = res.storage_proof[0].value;
         let encoded_value = rlp::encode(&value.to_be_bytes_vec()).to_vec();
@@ -582,7 +584,7 @@ mod test {
         query: &ProofQuery,
         res: &EIP1186AccountProofResponse,
     ) -> Result<()> {
-        query.verify_state_proof(&res)?;
+        query.verify_state_proof(res)?;
 
         let mpt_proof = res
             .account_proof
@@ -591,7 +593,7 @@ mod test {
             .map(|b| b.to_vec())
             .collect::<Vec<Vec<u8>>>();
         let root = keccak256(mpt_proof.last().unwrap());
-        let mpt_key = keccak256(&query.contract.0.as_slice());
+        let mpt_key = keccak256(query.contract.0.as_slice());
         println!("Account proof depth : {}", mpt_proof.len());
         println!(
             "Account proof max len node : {}",

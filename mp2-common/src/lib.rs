@@ -4,15 +4,19 @@
 #![feature(generic_arg_infer)]
 #![feature(const_for)]
 #![feature(generic_const_items)]
+#[cfg(feature = "original_poseidon")]
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
 use plonky2::plonk::{
     circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
     config::GenericConfig,
     proof::ProofWithPublicInputs,
 };
+#[cfg(not(feature = "original_poseidon"))]
 use poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
 use serde::{Deserialize, Serialize};
 
 pub mod array;
+pub mod digest;
 pub mod eth;
 pub mod group_hashing;
 pub mod hash;

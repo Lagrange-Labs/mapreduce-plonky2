@@ -52,6 +52,10 @@ impl<'a> PublicInputs<'a, GFp> {
     pub fn metadata_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.dm)
     }
+    pub fn root_hash_field(&self) -> Vec<u32> {
+        let hash = self.h_raw();
+        hash.iter().map(|t| t.0 as u32).collect()
+    }
 }
 
 impl<'a> PublicInputs<'a, Target> {

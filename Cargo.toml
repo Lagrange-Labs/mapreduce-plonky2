@@ -2,6 +2,7 @@
 members = [
   "gnark-utils",
   "groth16-framework",
+  "inspect",
   "mp2-common",
   "mp2-test",
   "mp2-v1",

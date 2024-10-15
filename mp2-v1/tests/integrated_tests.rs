@@ -1,6 +1,7 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
+#![feature(let_chains)]
 #![feature(async_closure)]
 #![feature(assert_matches)]
 #![feature(associated_type_defaults)]
@@ -16,17 +17,18 @@ use anyhow::{Context, Result};
 
 use common::{
     cases::{
-        indexing::{ChangeType, TreeFactory, UpdateType},
+        indexing::{ChangeType, UpdateType},
         query::{
             test_query, GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput,
             MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
             MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
         },
+        TableIndexing,
     },
     context::{self, ParamsType, TestContextConfig},
     proof_storage::{ProofKV, DEFAULT_PROOF_STORE_FOLDER},
     table::Table,
-    TableInfo, TestCase,
+    TableInfo,
 };
 use envconfig::Envconfig;
 use log::info;
@@ -64,6 +66,7 @@ pub(crate) mod common;
 
 const PROOF_STORE_FILE: &str = "test_proofs.store";
 const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
+const MERGE_TABLE_INFO_FILE: &str = "merge_column_info.json";
 
 #[test(tokio::test)]
 #[ignore]
@@ -80,14 +83,15 @@ async fn integrated_indexing() -> Result<()> {
     ctx.build_params(ParamsType::Indexing).unwrap();
 
     info!("Params built");
-    let mut single = TestCase::single_value_test_case(&ctx, TreeFactory::New).await?;
+    // NOTE: to comment to avoid very long tests...
+    let (mut single, genesis) = TableIndexing::single_value_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Update(UpdateType::Rest),
         ChangeType::Silent,
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
-    single.run(&mut ctx, changes.clone()).await?;
-    let mut mapping = TestCase::mapping_test_case(&ctx, TreeFactory::New).await?;
+    single.run(&mut ctx, genesis, changes.clone()).await?;
+    let (mut mapping, genesis) = TableIndexing::mapping_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
@@ -95,18 +99,25 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Update(UpdateType::SecondaryIndex),
         ChangeType::Deletion,
     ];
-    mapping.run(&mut ctx, changes).await?;
+    mapping.run(&mut ctx, genesis, changes).await?;
+
+    let (mut merged, genesis) = TableIndexing::merge_table_test_case(&mut ctx).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
+        ChangeType::Deletion,
+    ];
+    merged.run(&mut ctx, genesis, changes).await?;
+
     // save columns information and table information in JSON so querying test can pick up
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
+    write_table_info(MERGE_TABLE_INFO_FILE, merged.table_info())?;
     Ok(())
 }
 
-#[test(tokio::test)]
-#[ignore]
-async fn integrated_querying() -> Result<()> {
-    let _ = env_logger::try_init();
-    info!("Running QUERY test");
-    let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
+async fn integrated_querying(table_info: TableInfo) -> Result<()> {
     let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
     info!("Loading Anvil and contract");
     let mut ctx = context::new_local_chain(storage).await;
@@ -117,6 +128,24 @@ async fn integrated_querying() -> Result<()> {
     dbg!(&table.public_name);
     test_query(&mut ctx, table, table_info).await?;
     Ok(())
+}
+
+#[test(tokio::test)]
+#[ignore]
+async fn integrated_querying_mapping_table() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test for mapping table");
+    let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
+    integrated_querying(table_info).await
+}
+
+#[test(tokio::test)]
+#[ignore]
+async fn integrated_querying_merged_table() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test for merged table");
+    let table_info = read_table_info(MERGE_TABLE_INFO_FILE)?;
+    integrated_querying(table_info).await
 }
 
 fn table_info_path(f: &str) -> PathBuf {
