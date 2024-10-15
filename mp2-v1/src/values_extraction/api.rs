@@ -517,6 +517,8 @@ mod tests {
     use std::{slice, sync::Arc};
 
     type StorageSlotInfo = super::super::StorageSlotInfo<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
+    type CircuitInput =
+        super::CircuitInput<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
     type PublicParameters =
         super::PublicParameters<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
 
@@ -711,6 +713,130 @@ mod tests {
         let test_slot = StorageSlotInfo::new(storage_slot, metadata, None, None);
 
         test_branch_with_multiple_children(NUM_CHILDREN, test_slot);
+    }
+
+    #[test]
+    fn test_values_extraction_api_serialization() {
+        const TEST_SLOT: u8 = 10;
+        const TEST_EVM_WORD: u32 = 5;
+        const TEST_OUTER_KEY: [u8; 2] = [10, 20];
+        const TEST_INNER_KEY: [u8; 3] = [30, 40, 50];
+
+        let _ = env_logger::try_init();
+
+        // Test serialization for public parameters.
+        let params = PublicParameters::build();
+        let encoded = bincode::serialize(&params).unwrap();
+        let decoded_params: PublicParameters = bincode::deserialize(&encoded).unwrap();
+        assert!(decoded_params == params);
+
+        let test_circuit_input = |input: CircuitInput| {
+            // Test circuit input serialization.
+            let encoded_input = bincode::serialize(&input).unwrap();
+            let decoded_input: CircuitInput = bincode::deserialize(&encoded_input).unwrap();
+
+            // Test proof serialization.
+            let proof = params.generate_proof(decoded_input).unwrap();
+            let encoded_proof = bincode::serialize(&proof).unwrap();
+            let decoded_proof: ProofWithVK = bincode::deserialize(&encoded_proof).unwrap();
+            assert_eq!(proof, decoded_proof);
+
+            encoded_proof
+        };
+
+        // Test for single variable leaf.
+        let parent_slot = StorageSlot::Simple(TEST_SLOT as usize);
+        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(
+            parent_slot.clone(),
+            TEST_EVM_WORD,
+        ));
+        let mut metadata = MetadataGadget::sample(TEST_SLOT, 0);
+        // We only extract the first column for simple slot.
+        metadata.num_extracted_columns = 1;
+        let table_info = metadata.table_info.to_vec();
+        let column_identifier = table_info[0].identifier;
+        let test_slot = StorageSlotInfo::new(storage_slot, metadata, None, None);
+        let mut test_trie = generate_test_trie(1, &test_slot);
+        let proof = test_trie.trie.get_proof(&test_trie.mpt_keys[0]).unwrap();
+        test_circuit_input(CircuitInput::new_single_variable_leaf(
+            proof.last().unwrap().to_vec(),
+            TEST_SLOT,
+            0,
+            1,
+            slice::from_ref(&column_identifier),
+            table_info,
+        ));
+
+        // Test for mapping variable leaf.
+        let parent_slot = StorageSlot::Mapping(TEST_OUTER_KEY.to_vec(), TEST_SLOT as usize);
+        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(
+            parent_slot.clone(),
+            TEST_EVM_WORD,
+        ));
+        let mut metadata = MetadataGadget::sample(TEST_SLOT, TEST_EVM_WORD);
+        // We only extract the first column.
+        metadata.num_extracted_columns = 1;
+        let table_info = metadata.table_info.to_vec();
+        let column_identifier = table_info[0].identifier;
+        let key_id = F::rand();
+        let test_slot = StorageSlotInfo::new(storage_slot, metadata, Some(key_id), None);
+        let mut test_trie = generate_test_trie(1, &test_slot);
+        let proof = test_trie.trie.get_proof(&test_trie.mpt_keys[0]).unwrap();
+        test_circuit_input(CircuitInput::new_mapping_variable_leaf(
+            proof.last().unwrap().to_vec(),
+            TEST_SLOT,
+            TEST_OUTER_KEY.to_vec(),
+            key_id,
+            TEST_EVM_WORD,
+            1,
+            slice::from_ref(&column_identifier),
+            table_info,
+        ));
+
+        // Test for mapping of mappings leaf.
+        let grand_slot = StorageSlot::Mapping(TEST_OUTER_KEY.to_vec(), TEST_SLOT as usize);
+        let parent_slot = StorageSlot::Node(StorageSlotNode::new_mapping(
+            grand_slot,
+            TEST_INNER_KEY.to_vec(),
+        ));
+        let storage_slot =
+            StorageSlot::Node(StorageSlotNode::new_struct(parent_slot, TEST_EVM_WORD));
+        let mut metadata = MetadataGadget::sample(TEST_SLOT, TEST_EVM_WORD);
+        // We only extract the first column.
+        metadata.num_extracted_columns = 1;
+        let table_info = metadata.table_info.to_vec();
+        let column_identifier = table_info[0].identifier;
+        let outer_key_id = F::rand();
+        let inner_key_id = F::rand();
+        let test_slot = StorageSlotInfo::new(
+            storage_slot,
+            metadata,
+            Some(outer_key_id),
+            Some(inner_key_id),
+        );
+        let mut test_trie = generate_test_trie(1, &test_slot);
+        let proof = test_trie.trie.get_proof(&test_trie.mpt_keys[0]).unwrap();
+        test_circuit_input(CircuitInput::new_mapping_of_mappings_leaf(
+            proof.last().unwrap().to_vec(),
+            TEST_SLOT,
+            TEST_OUTER_KEY.to_vec(),
+            TEST_INNER_KEY.to_vec(),
+            outer_key_id,
+            inner_key_id,
+            TEST_EVM_WORD,
+            1,
+            slice::from_ref(&column_identifier),
+            table_info,
+        ));
+
+        // Test for branch.
+        let branch_node = proof[proof.len() - 2].to_vec();
+        test_circuit_input(CircuitInput::Branch(BranchInput {
+            input: InputNode {
+                node: branch_node.clone(),
+            },
+            serialized_child_proofs: vec![encoded],
+        }));
     }
 
     fn test_api(test_slots: [StorageSlotInfo; 2]) {
