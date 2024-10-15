@@ -7,7 +7,6 @@ use alloy::{
     primitives::{Address, U256},
     providers::Provider,
 };
-use itertools::Itertools;
 use log::info;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot},

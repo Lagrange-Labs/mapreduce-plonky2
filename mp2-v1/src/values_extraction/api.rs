@@ -499,6 +499,10 @@ mod tests {
     use super::{super::public_inputs, *};
     use crate::{
         tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
+        values_extraction::{
+            compute_leaf_mapping_metadata_digest, compute_leaf_mapping_of_mappings_metadata_digest,
+            compute_leaf_single_metadata_digest, compute_leaf_single_values_digest,
+        },
         MAX_LEAF_NODE_LEN,
     };
     use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -893,70 +897,148 @@ mod tests {
 
     /// Generate a leaf proof.
     fn prove_leaf(params: &PublicParameters, node: Vec<u8>, test_slot: StorageSlotInfo) -> Vec<u8> {
-        let table_info = test_slot.metadata.table_info.to_vec();
-        let extracted_column_identifiers = table_info[..test_slot.metadata.num_extracted_columns]
+        let metadata = test_slot.metadata();
+        let evm_word = metadata.evm_word;
+        let num_actual_columns = metadata.num_actual_columns;
+        let table_info = metadata.table_info.to_vec();
+        let extracted_column_identifiers = table_info[..metadata.num_extracted_columns]
             .iter()
             .map(|column_info| column_info.identifier)
             .collect_vec();
 
-        let input = match test_slot.slot {
+        let (expected_metadata_digest, circuit_input) = match test_slot.slot {
             // Simple variable slot
-            StorageSlot::Simple(slot) => CircuitInput::new_single_variable_leaf(
-                node,
-                slot as u8,
-                test_slot.metadata.evm_word,
-                test_slot.metadata.num_actual_columns,
-                &extracted_column_identifiers,
-                table_info,
-            ),
-            // Mapping variable
-            StorageSlot::Mapping(mapping_key, slot) => CircuitInput::new_mapping_variable_leaf(
-                node,
-                slot as u8,
-                mapping_key,
-                test_slot.outer_key_id,
-                test_slot.metadata.evm_word,
-                test_slot.metadata.num_actual_columns,
-                &extracted_column_identifiers,
-                table_info,
-            ),
-            StorageSlot::Node(StorageSlotNode::Struct(parent, evm_word)) => match *parent {
-                // Simple Struct
-                StorageSlot::Simple(slot) => CircuitInput::new_single_variable_leaf(
+            StorageSlot::Simple(slot) => {
+                let metadata_digest = compute_leaf_single_metadata_digest::<
+                    TEST_MAX_COLUMNS,
+                    TEST_MAX_FIELD_PER_EVM,
+                >(
+                    table_info.clone(),
+                    &extracted_column_identifiers,
+                    num_actual_columns,
+                    evm_word,
+                );
+
+                let circuit_input = CircuitInput::new_single_variable_leaf(
                     node,
                     slot as u8,
                     evm_word,
-                    test_slot.metadata.num_actual_columns,
+                    num_actual_columns,
                     &extracted_column_identifiers,
                     table_info,
-                ),
-                // Mapping Struct
-                StorageSlot::Mapping(mapping_key, slot) => CircuitInput::new_mapping_variable_leaf(
+                );
+
+                (metadata_digest, circuit_input)
+            }
+            // Mapping variable
+            StorageSlot::Mapping(mapping_key, slot) => {
+                let metadata_digest = compute_leaf_mapping_metadata_digest::<
+                    TEST_MAX_COLUMNS,
+                    TEST_MAX_FIELD_PER_EVM,
+                >(
+                    table_info.clone(),
+                    &extracted_column_identifiers,
+                    num_actual_columns,
+                    evm_word,
+                    slot as u8,
+                    test_slot.outer_key_id,
+                );
+
+                let circuit_input = CircuitInput::new_mapping_variable_leaf(
                     node,
                     slot as u8,
                     mapping_key,
                     test_slot.outer_key_id,
-                    test_slot.metadata.evm_word,
-                    test_slot.metadata.num_actual_columns,
+                    evm_word,
+                    num_actual_columns,
                     &extracted_column_identifiers,
                     table_info,
-                ),
+                );
+
+                (metadata_digest, circuit_input)
+            }
+            StorageSlot::Node(StorageSlotNode::Struct(parent, evm_word)) => match *parent {
+                // Simple Struct
+                StorageSlot::Simple(slot) => {
+                    let metadata_digest = compute_leaf_single_metadata_digest::<
+                        TEST_MAX_COLUMNS,
+                        TEST_MAX_FIELD_PER_EVM,
+                    >(
+                        table_info.clone(),
+                        &extracted_column_identifiers,
+                        num_actual_columns,
+                        evm_word,
+                    );
+
+                    let circuit_input = CircuitInput::new_single_variable_leaf(
+                        node,
+                        slot as u8,
+                        evm_word,
+                        num_actual_columns,
+                        &extracted_column_identifiers,
+                        table_info,
+                    );
+
+                    (metadata_digest, circuit_input)
+                }
+                // Mapping Struct
+                StorageSlot::Mapping(mapping_key, slot) => {
+                    let metadata_digest = compute_leaf_mapping_metadata_digest::<
+                        TEST_MAX_COLUMNS,
+                        TEST_MAX_FIELD_PER_EVM,
+                    >(
+                        table_info.clone(),
+                        &extracted_column_identifiers,
+                        num_actual_columns,
+                        evm_word,
+                        slot as u8,
+                        test_slot.outer_key_id,
+                    );
+
+                    let circuit_input = CircuitInput::new_mapping_variable_leaf(
+                        node,
+                        slot as u8,
+                        mapping_key,
+                        test_slot.outer_key_id,
+                        evm_word,
+                        num_actual_columns,
+                        &extracted_column_identifiers,
+                        table_info,
+                    );
+
+                    (metadata_digest, circuit_input)
+                }
                 // Mapping of mappings Struct
                 StorageSlot::Node(StorageSlotNode::Mapping(grand, inner_mapping_key)) => {
                     match *grand {
                         StorageSlot::Mapping(outer_mapping_key, slot) => {
-                            CircuitInput::new_mapping_of_mappings_leaf(
+                            let metadata_digest = compute_leaf_mapping_of_mappings_metadata_digest::<
+                                TEST_MAX_COLUMNS,
+                                TEST_MAX_FIELD_PER_EVM,
+                            >(
+                                table_info.clone(),
+                                &extracted_column_identifiers,
+                                num_actual_columns,
+                                evm_word,
+                                slot as u8,
+                                test_slot.outer_key_id,
+                                test_slot.inner_key_id,
+                            );
+
+                            let circuit_input = CircuitInput::new_mapping_of_mappings_leaf(
                                 node,
                                 slot as u8,
                                 outer_mapping_key,
                                 inner_mapping_key,
                                 test_slot.outer_key_id,
                                 test_slot.inner_key_id,
-                                test_slot.metadata.evm_word,
-                                test_slot.metadata.num_actual_columns,
+                                evm_word,
+                                num_actual_columns,
                                 &extracted_column_identifiers,
                                 table_info,
-                            )
+                            );
+
+                            (metadata_digest, circuit_input)
                         }
                         _ => unreachable!(),
                     }
@@ -966,7 +1048,17 @@ mod tests {
             _ => unreachable!(),
         };
 
-        generate_proof(params, input).unwrap()
+        let proof = generate_proof(params, circuit_input).unwrap();
+
+        // Check the metadata digest of public inputs.
+        let decoded_proof = ProofWithVK::deserialize(&proof).unwrap();
+        let pi = PublicInputs::new(&decoded_proof.proof.public_inputs);
+        assert_eq!(
+            pi.metadata_digest(),
+            expected_metadata_digest.to_weierstrass()
+        );
+
+        proof
     }
 
     /// Generate a MPT trie with sepcified number of children.
