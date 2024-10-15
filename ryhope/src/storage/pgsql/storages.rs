@@ -26,7 +26,7 @@ use tokio::sync::RwLock;
 use tokio_postgres::{self, NoTls, Row, Transaction};
 use tracing::*;
 
-use super::{CachedValue, PayloadInDb, ToFromBytea};
+use super::{CachedValue, PayloadInDb, ToFromBytea, MAX_PGSQL_BIGINT};
 
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 
@@ -254,10 +254,10 @@ where
                 &format!(
                     "INSERT INTO
                      {} ({KEY}, {VALID_FROM}, {VALID_UNTIL})
-                     VALUES ($1, $2, $2)",
+                     VALUES ($1, $2, $3)",
                     table
                 ),
-                &[&k.to_bytea(), &birth_epoch],
+                &[&k.to_bytea(), &birth_epoch, &MAX_PGSQL_BIGINT],
             )
             .await
             .map_err(|e| anyhow!("failed to insert new node row: {e:?}"))
@@ -480,12 +480,13 @@ where
                 &format!(
                     "INSERT INTO
                      {} ({KEY}, {VALID_FROM}, {VALID_UNTIL}, {SUBTREE_SIZE}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD})
-                     VALUES ($1, $2, $2, $3, $4, $5, $6)",
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)",
                     table
                 ),
                 &[
                     &k.to_bytea(),
                     &birth_epoch,
+                    &MAX_PGSQL_BIGINT,
                     &(n.subtree_size as i64),
                     &n.parent.as_ref().map(ToFromBytea::to_bytea),
                     &n.left.as_ref().map(ToFromBytea::to_bytea),
@@ -598,34 +599,45 @@ where
 
             let mut r = Vec::new();
             for row in connection
-            .query(
-                &dbg!(format!(
-                    "SELECT
-                       batch.key, batch.epoch, {table}.{PAYLOAD},
-                       {table}.{PARENT}, {table}.{LEFT_CHILD}, {table}.{RIGHT_CHILD}
-                     FROM
-                       (VALUES {}) AS batch (epoch, key)
-                     LEFT JOIN {table} ON
-                       batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
-                   immediate_table
-               )),
-                &[],
-            )
-               .await
-               .context("while fetching payload from database")?
-                .iter() {
-                   let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
-                   let epoch = row.get::<_, Epoch>(1);
-                    let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
-                    if let Some(v) = v {
-                        r.push((epoch, NodeContext{ node_id: k, parent: row.get::<_, Option<Vec<u8>>>(3).map(K::from_bytea), left: row.get::<_, Option<Vec<u8>>>(4).map(K::from_bytea), right: row.get::<_, Option<Vec<u8>>>(5).map(K::from_bytea) }, v));
-                    }
+                .query(
+                     &format!(
+                         "SELECT
+                            batch.key, batch.epoch, {table}.{PAYLOAD},
+                            {table}.{PARENT}, {table}.{LEFT_CHILD}, {table}.{RIGHT_CHILD}
+                          FROM
+                            (VALUES {}) AS batch (epoch, key)
+                          LEFT JOIN {table} ON
+                            batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
+                        immediate_table
+                    ),
+                    &[],
+                )
+                .await
+                .context("while fetching payload from database")?
+                .iter()
+            {
+                let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
+                let epoch = row.get::<_, Epoch>(1);
+                let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
+                if let Some(v) = v {
+                    r.push((
+                        epoch,
+                        NodeContext {
+                            node_id: k,
+                            parent: row.get::<_, Option<Vec<u8>>>(3).map(K::from_bytea),
+                            left: row.get::<_, Option<Vec<u8>>>(4).map(K::from_bytea),
+                            right: row.get::<_, Option<Vec<u8>>>(5).map(K::from_bytea),
+                        },
+                        v,
+                    ));
                 }
+            }
             Ok(r)
         }
     }
 }
 
+/// Stores the chronological evolution of a single value in a CoW manner.
 pub struct CachedDbStore<V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> {
     /// A pointer to the DB client
     db: DBPool,
@@ -859,7 +871,7 @@ where
             .transaction()
             .await
             .expect("unable to create DB transaction");
-        // Roll back all living nodes by 1
+        // Roll back all the nodes that would still have been alive
         db_tx
             .query(
                 &format!(
@@ -997,7 +1009,7 @@ where
             .transaction()
             .await
             .expect("unable to create DB transaction");
-        // Roll back all living nodes by 1
+        // Roll back all the nodes that would still have been alive
         db_tx
             .query(
                 &format!(
