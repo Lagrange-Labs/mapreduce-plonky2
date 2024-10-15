@@ -310,7 +310,6 @@ impl TrieNode {
 
     /// Prove a trie node recursively for length extraction.
     fn prove_length(&self, ctx: ProvingContext) -> SerializedProof {
-        // gupeng
         match self.node_type() {
             TrieNodeType::Branch => self.prove_length_branch(ctx),
             TrieNodeType::Extension => self.prove_length_extension(ctx),
