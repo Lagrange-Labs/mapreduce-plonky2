@@ -42,7 +42,10 @@ use crate::common::{
             },
             GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, SqlReturn, SqlType,
         },
-    }, proof_storage::{ProofKey, ProofStorage}, table::Table, TableInfo, TestContext
+    },
+    proof_storage::{ProofKey, ProofStorage},
+    table::Table,
+    TableInfo, TestContext,
 };
 
 use super::QueryCooking;
@@ -253,7 +256,10 @@ where
 
 /// Cook a query where the number of matching rows is the same as the maximum number of
 /// outputs allowed
-pub(crate) async fn cook_query_with_max_num_matching_rows(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_with_max_num_matching_rows(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -294,7 +300,10 @@ pub(crate) async fn cook_query_with_max_num_matching_rows(table: &Table, info: &
     })
 }
 
-pub(crate) async fn cook_query_with_matching_rows(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_with_matching_rows(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -303,7 +312,7 @@ pub(crate) async fn cook_query_with_matching_rows(table: &Table, info: &TableInf
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
-    let value_column = &info.value_column; 
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
 
     let added_placeholder = U256::from(42);
@@ -336,7 +345,10 @@ pub(crate) async fn cook_query_with_matching_rows(table: &Table, info: &TableInf
 }
 
 /// Cook a query where the offset is big enough to have no matching rows
-pub(crate) async fn cook_query_too_big_offset(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_too_big_offset(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -377,7 +389,10 @@ pub(crate) async fn cook_query_too_big_offset(table: &Table, info: &TableInfo) -
     })
 }
 
-pub(crate) async fn cook_query_no_matching_rows(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_no_matching_rows(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let initial_epoch = table.index.initial_epoch();
     let current_epoch = table.index.current_epoch();
     let min_block = initial_epoch as BlockPrimaryIndex;
@@ -421,7 +436,10 @@ pub(crate) async fn cook_query_no_matching_rows(table: &Table, info: &TableInfo)
     })
 }
 
-pub(crate) async fn cook_query_with_distinct(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_with_distinct(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -518,10 +536,16 @@ pub(crate) async fn cook_query_with_wildcard(
     })
 }
 
-pub(crate) async fn cook_query_with_wildcard_no_distinct(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_with_wildcard_no_distinct(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     cook_query_with_wildcard(table, false, info).await
 }
 
-pub(crate) async fn cook_query_with_wildcard_and_distinct(table: &Table , info: &TableInfo) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_with_wildcard_and_distinct(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     cook_query_with_wildcard(table, true, info).await
 }

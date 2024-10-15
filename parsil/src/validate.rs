@@ -403,6 +403,34 @@ impl<'a, C: ContextProvider> AstVisitor for SqlValidator<'a, C> {
         Ok(())
     }
 }
+
+// Determine if the query does not aggregate values across different matching rows
+pub(crate) fn is_query_with_no_aggregation(select: &Select) -> bool {
+    select.projection.iter().all(|s| {
+        !matches!(
+            s,
+            SelectItem::UnnamedExpr(Expr::Function(_))
+                | SelectItem::ExprWithAlias {
+                    expr: Expr::Function(_),
+                    ..
+                }
+        )
+    })
+}
+// Determine if the query does aggregates values across different matching rows
+pub(crate) fn is_query_with_aggregation(select: &Select) -> bool {
+    select.projection.iter().all(|s| {
+        matches!(
+            s,
+            SelectItem::UnnamedExpr(Expr::Function(_))
+                | SelectItem::ExprWithAlias {
+                    expr: Expr::Function(_),
+                    ..
+                }
+        )
+    })
+}
+
 /// Instantiate a new [`Validator`] and validate this query with it.
 pub fn validate<C: ContextProvider>(
     settings: &ParsilSettings<C>,
@@ -410,21 +438,7 @@ pub fn validate<C: ContextProvider>(
 ) -> Result<(), ValidationError> {
     if let SetExpr::Select(ref select) = *query.body {
         ensure!(
-            select.projection.iter().all(|s| !matches!(
-                s,
-                SelectItem::UnnamedExpr(Expr::Function(_))
-                    | SelectItem::ExprWithAlias {
-                        expr: Expr::Function(_),
-                        ..
-                    }
-            )) || select.projection.iter().all(|s| matches!(
-                s,
-                SelectItem::UnnamedExpr(Expr::Function(_))
-                    | SelectItem::ExprWithAlias {
-                        expr: Expr::Function(_),
-                        ..
-                    }
-            )),
+            is_query_with_aggregation(select) || is_query_with_no_aggregation(select),
             ValidationError::MixedQuery
         );
     } else {

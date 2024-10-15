@@ -84,11 +84,7 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Re
     Ok(())
 }
 
-async fn query_mapping(
-    ctx: &mut TestContext,
-    table: &Table,
-    info: &TableInfo,
-) -> Result<()> {
+async fn query_mapping(ctx: &mut TestContext, table: &Table, info: &TableInfo) -> Result<()> {
     let table_hash = info.metadata_hash();
     let query_info = cook_query_between_blocks(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;

@@ -16,7 +16,8 @@ use crate::common::{
     },
     proof_storage::{ProofKey, ProofStorage},
     rowtree::MerkleRowTree,
-    table::{Table, TableColumns}, TableInfo,
+    table::{Table, TableColumns},
+    TableInfo,
 };
 
 use crate::context::TestContext;
@@ -1171,7 +1172,10 @@ pub async fn prove_single_row<T: TreeInfo<RowTreeKey, RowPayload<BlockPrimaryInd
 
 type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
 
-pub(crate) async fn cook_query_between_blocks(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_between_blocks(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let max = table.row.current_epoch();
     let min = max - 1;
 
@@ -1364,7 +1368,10 @@ pub(crate) async fn cook_query_unique_secondary_index(
     })
 }
 
-pub(crate) async fn cook_query_partial_block_range(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_partial_block_range(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1397,7 +1404,10 @@ pub(crate) async fn cook_query_partial_block_range(table: &Table, info: &TableIn
     })
 }
 
-pub(crate) async fn cook_query_no_matching_entries(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
+pub(crate) async fn cook_query_no_matching_entries(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let initial_epoch = table.row.initial_epoch();
     // choose query bounds outside of the range [initial_epoch, last_epoch]
     let min_block = 0;
