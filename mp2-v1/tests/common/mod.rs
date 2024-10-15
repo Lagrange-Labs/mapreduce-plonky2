@@ -46,8 +46,7 @@ type MetadataGadget = mp2_v1::values_extraction::gadgets::metadata_gadget::Metad
     TEST_MAX_COLUMNS,
     TEST_MAX_FIELD_PER_EVM,
 >;
-type PublicParameters =
-    mp2_v1::api::PublicParameters<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
+type PublicParameters = mp2_v1::api::PublicParameters<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
     let root_pi = ProofWithVK::deserialize(&proof)
