@@ -1,8 +1,6 @@
 use alloy::primitives::U256;
 use anyhow::*;
-use sqlparser::ast::{
-    BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Query, UnaryOperator, Value,
-};
+use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
 use std::str::FromStr;
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
 

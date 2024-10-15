@@ -25,8 +25,6 @@ impl TestContext {
     /// Generate a testing query proof.
     // The main code is copied from the revelation API test.
     pub(crate) fn generate_query_proof(&self, asset_dir: &str) -> Vec<u8> {
-        let rng = &mut thread_rng();
-
         // Generate the testing data for revelation circuit.
         let min_block_number = 42;
         let max_block_number = 76;
@@ -138,6 +136,8 @@ impl TestContext {
         write_query_input(asset_dir, &query_input);
 
         // Save the testing query output.
+        let overflow = revelation_pi.overflow_flag();
+        let error = if overflow { 1 } else { 0 };
         let entry_count = revelation_pi.entry_count().to_canonical_u64();
         let num_results = revelation_pi.num_results().to_canonical_u64();
         assert!(entry_count <= u32::MAX as u64);
@@ -147,6 +147,7 @@ impl TestContext {
         let query_output = TestQueryOutput {
             total_matched_rows,
             rows,
+            error,
         };
         write_query_output(asset_dir, &query_output);
 

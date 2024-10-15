@@ -167,8 +167,6 @@ where
         let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
             .map(|op| b.constant(op.to_field()));
 
-        let mut overflow = query_proof.overflow_flag_target().target;
-
         // Convert the entry count to an Uint256.
         let entry_count = query_proof.num_matching_rows_target();
         let entry_count = UInt256Target::new_from_target(b, entry_count);
@@ -193,10 +191,6 @@ where
             b.connect(is_divisor_zero.target, is_entry_count_zero.target);
 
             results.push(result);
-
-            // Accumulate overflow.
-            let is_overflow = b.and(is_op_avg, is_divisor_zero);
-            overflow = b.add(overflow, is_overflow.target);
         });
         results.resize(L * S, u256_zero);
 
@@ -248,8 +242,6 @@ where
             .collect_vec();
         let results_slice = results.iter().flat_map(ToTargets::to_targets).collect_vec();
 
-        let overflow = b.is_not_equal(overflow, zero).target;
-
         let num_results = b.not(is_entry_count_zero);
 
         let flat_computational_hash = flatten_poseidon_hash_target(b, computational_hash);
@@ -264,7 +256,7 @@ where
             // The aggregation query proof only has one result.
             &[num_results.target],
             &[query_proof.num_matching_rows_target()],
-            &[overflow],
+            &[query_proof.overflow_flag_target().target],
             // Query limit
             &[zero],
             // Query offset

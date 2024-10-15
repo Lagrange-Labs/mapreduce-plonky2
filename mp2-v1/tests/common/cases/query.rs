@@ -9,8 +9,9 @@ use std::{
 
 use crate::common::{
     cases::{
-        indexing::{BASE_VALUE, BLOCK_COLUMN_NAME},
+        indexing::BLOCK_COLUMN_NAME,
         planner::{IndexInfo, RowInfo},
+        table_source::BASE_VALUE,
     },
     proof_storage::ProofKey,
     rowtree::MerkleRowTree,
@@ -24,9 +25,9 @@ use super::{
 };
 use alloy::primitives::U256;
 use anyhow::{bail, Context, Result};
-use futures::{stream, FutureExt, StreamExt};
+use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
 
-use super::TableSourceSlot;
+use super::TableSource;
 use itertools::Itertools;
 use log::*;
 use mp2_common::{
@@ -57,7 +58,7 @@ use parsil::{
 use ryhope::{
     storage::{
         pgsql::ToFromBytea,
-        updatetree::{Next, UpdateTree},
+        updatetree::{Next, UpdateTree, WorkplanItem},
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage, WideLineage,
     },
     tree::NodeContext,
@@ -75,6 +76,7 @@ use verifiable_db::{
         },
     },
     revelation::PublicInputs,
+    row_tree,
 };
 
 pub const MAX_NUM_RESULT_OPS: usize = 20;
@@ -113,33 +115,33 @@ pub type RevelationPublicInputs<'a> =
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
     match &t.source {
-        TableSourceSlot::Mapping(_) => query_mapping(ctx, &table, t.metadata_hash()).await?,
+        TableSource::Mapping(_) | TableSource::Merge(_) => query_mapping(ctx, &table, t).await?,
         _ => unimplemented!("yet"),
     }
     Ok(())
 }
 
-async fn query_mapping(
-    ctx: &mut TestContext,
-    table: &Table,
-    table_hash: MetadataHash,
-) -> Result<()> {
-    let query_info = cook_query_between_blocks(table).await?;
+async fn query_mapping(ctx: &mut TestContext, table: &Table, info: TableInfo) -> Result<()> {
+    let table_hash = info.metadata_hash();
+    let query_info = cook_query_between_blocks(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
 
-    let query_info = cook_query_unique_secondary_index(table).await?;
+    let query_info = cook_query_unique_secondary_index(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     //// cook query with custom placeholders
-    let query_info = cook_query_secondary_index_placeholder(table).await?;
+    let query_info = cook_query_secondary_index_placeholder(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    let query_info = cook_query_secondary_index_nonexisting_placeholder(table, &info).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+
     // cook query filtering over a secondary index value not valid in all the blocks
-    let query_info = cook_query_non_matching_entries_some_blocks(table).await?;
+    let query_info = cook_query_non_matching_entries_some_blocks(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with no valid blocks
-    let query_info = cook_query_no_matching_entries(table).await?;
+    let query_info = cook_query_no_matching_entries(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with block query range partially overlapping with blocks in the DB
-    let query_info = cook_query_partial_block_range(table).await?;
+    let query_info = cook_query_partial_block_range(table, &info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     Ok(())
 }
@@ -224,7 +226,7 @@ async fn prove_query(
     ctx: &mut TestContext,
     table: &Table,
     query: QueryCooking,
-    parsed: Query,
+    mut parsed: Query,
     settings: &ParsilSettings<&Table>,
     row_cache: &WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     res: Vec<PsqlRow>,
@@ -321,9 +323,9 @@ async fn prove_query(
             .await?;
         // since we only analyze the index tree for one epoch
         assert_eq!(big_index_cache.keys_by_epochs().len(), 1);
-        /// This is ok because the cache only have the block that are in the range so the
-        /// filter_check is gonna return the same thing
-        /// TOOD: @franklin is that correct ?
+        // This is ok because the cache only have the block that are in the range so the
+        // filter_check is gonna return the same thing
+        // TOOD: @franklin is that correct ?
         let up = big_index_cache
             // this is the epoch we choose how to prove
             .update_tree_for(current_epoch as Epoch)
@@ -344,6 +346,19 @@ async fn prove_query(
     // to check the public inputs
     let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
 
+    // get number of matching rows
+    let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
+    let query_params = exec_query.convert_placeholders(&query.placeholders);
+    let num_touched_rows = table
+        .execute_row_query(
+            &exec_query
+                .normalize_placeholder_names()
+                .to_pgsql_string_with_placeholder(),
+            &query_params,
+        )
+        .await?
+        .len();
+
     check_final_outputs(
         proof,
         ctx,
@@ -351,7 +366,7 @@ async fn prove_query(
         &query,
         &pis,
         table.index.current_epoch(),
-        row_cache.num_touched_rows(),
+        num_touched_rows,
         res,
         metadata,
     )?;
@@ -369,7 +384,11 @@ async fn prove_revelation(
     // load the query proof, which is at the root of the tree
     let query_proof = {
         let root_key = table.index.root_at(tree_epoch).await.unwrap();
-        let proof_key = ProofKey::QueryAggregateIndex((query.query.clone(), root_key));
+        let proof_key = ProofKey::QueryAggregateIndex((
+            query.query.clone(),
+            query.placeholders.placeholder_values(),
+            root_key,
+        ));
         ctx.storage.get_proof_exact(&proof_key)?
     };
     // load the preprocessing proof at the same epoch
@@ -519,6 +538,7 @@ where
     K: Debug + Hash + Clone + Eq + Sync + Send,
 {
     let query_id = planner.query.query.clone();
+    let placeholder_values = planner.query.placeholders.placeholder_values();
     let mut workplan = update.into_workplan();
     let mut proven_nodes = HashSet::new();
     let fetch_only_proven_child = |nctx: NodeContext<K>,
@@ -542,12 +562,18 @@ where
             _ => panic!("stg's wrong in the tree"),
         };
         let child_proof = info
-            .load_proof(cctx, &query_id, primary, &child_key)
+            .load_proof(
+                cctx,
+                &query_id,
+                primary,
+                &child_key,
+                placeholder_values.clone(),
+            )
             .expect("key should already been proven");
         (pos, child_proof)
     };
     while let Some(Next::Ready(wk)) = workplan.next() {
-        let k = wk.k.clone();
+        let k = wk.k();
         // closure performing all the operations necessary beofre jumping to the next iteration
         let mut end_iteration = |proven_nodes: &mut HashSet<K>| -> Result<()> {
             proven_nodes.insert(k.clone());
@@ -557,27 +583,33 @@ where
         // since epoch starts at genesis now, we can directly give the value of the block
         // number as epoch number
         let (node_ctx, node_payload) = info
-            .fetch_ctx_and_payload_at(primary as Epoch, &k)
+            .fetch_ctx_and_payload_at(primary as Epoch, k)
             .await
             .expect("cache is not full");
-        let is_satisfying_query = info.is_satisfying_query(&k);
+        let is_satisfying_query = info.is_satisfying_query(k);
         let embedded_proof = info
-            .load_or_prove_embedded(&mut planner, primary, &k, &node_payload)
+            .load_or_prove_embedded(&mut planner, primary, k, &node_payload)
             .await;
         if node_ctx.is_leaf() && info.is_row_tree() {
             // NOTE: if it is a leaf of the row tree, then there is no need to prove anything,
-            // since we're not "aggregating" any from below. So in this test, we just copy the
-            // proof to the expected aggregation location and move on.
-            // For the index tree however, we need to always generate an aggregate proof
-            // unwrap is safe since we are a leaf and therefore there is an embedded proof since we
-            // are guaranteed the row is satisfying the query
-            info.save_proof(
-                &mut planner.ctx,
-                &query_id,
-                primary,
-                &k,
-                embedded_proof?.unwrap(),
-            )?;
+            // since we're not "aggregating" any from below. For the index tree however, we
+            // need to always generate an aggregate proof. Therefore, in this test, we just copy the
+            // proof to the expected aggregation location and move on. Note that we need to
+            // save the proof only if the current row is satisfying the query: indeed, if
+            // this not the case, then the proof should have already been generated and stored
+            // with the non-existence circuit
+            if is_satisfying_query {
+                // unwrap is safe since we are guaranteed the row is satisfying the query
+                info.save_proof(
+                    &mut planner.ctx,
+                    &query_id,
+                    primary,
+                    &k,
+                    placeholder_values.clone(),
+                    embedded_proof?.unwrap(),
+                )?;
+            }
+
             end_iteration(&mut proven_nodes)?;
             continue;
         }
@@ -586,7 +618,13 @@ where
         // It is sufficient to check if this node is one of the leaves we in this update tree.Note
         // it is not the same meaning as a "leaf of a tree", here it just means is it the first
         // node in the merkle path.
-        let (name, input) = if wk.is_path_end {
+        let (k, is_path_end) = if let WorkplanItem::Node { k, is_path_end } = &wk {
+            (k, *is_path_end)
+        } else {
+            unreachable!("this update tree has been created with a batch size of 1")
+        };
+
+        let (name, input) = if is_path_end {
             info!("node {primary} -> {k:?} is at path end");
             if !is_satisfying_query {
                 // if the node of the key does not satisfy the query, but this node is at the end of
@@ -661,12 +699,14 @@ where
                         &query_id,
                         primary,
                         node_ctx.left.as_ref().unwrap(),
+                        placeholder_values.clone(),
                     )?;
                     let right_proof = info.load_proof(
                         planner.ctx,
                         &query_id,
                         primary,
                         node_ctx.right.as_ref().unwrap(),
+                        placeholder_values.clone(),
                     )?;
                     (
                         "querying::aggregation::full",
@@ -708,7 +748,14 @@ where
         let proof = planner
             .ctx
             .run_query_proof(name, GlobalCircuitInput::Query(input))?;
-        info.save_proof(planner.ctx, &query_id, primary, &k, proof)?;
+        info.save_proof(
+            planner.ctx,
+            &query_id,
+            primary,
+            &k,
+            placeholder_values.clone(),
+            proof,
+        )?;
         info!("query proof DONE for {primary} -> {k:?} ");
         end_iteration(&mut proven_nodes)?;
     }
@@ -859,7 +906,11 @@ async fn prove_non_existence_index<'a>(
         current_epoch,
     )
     .await;
-    let proof_key = ProofKey::QueryAggregateIndex((planner.query.query.clone(), primary));
+    let proof_key = ProofKey::QueryAggregateIndex((
+        planner.query.query.clone(),
+        planner.query.placeholders.placeholder_values(),
+        primary,
+    ));
     info!("Non-existence circuit proof RUNNING for {current_epoch} -> {primary} ");
     let proof = generate_non_existence_proof(
         node_info,
@@ -890,7 +941,182 @@ pub async fn prove_non_existence_row<'a>(
         &planner.pis.bounds,
     );
 
-    let find_node_for_proof = async |query: Option<String>| -> Result<Option<RowTreeKey>> {
+    // this method returns the `NodeContext` of the successor of the node provided as input,
+    // if the successor exists in the row tree and it stores the same value of the input node (i.e., `value`);
+    // returns `None` otherwise, as it means that the input node can be used to prove non-existence
+    async fn get_successor_node_with_same_value(
+        node_ctx: &NodeContext<RowTreeKey>,
+        value: U256,
+        table: &Table,
+        primary: BlockPrimaryIndex,
+    ) -> Option<NodeContext<RowTreeKey>> {
+        let row_tree = &table.row;
+        if node_ctx.right.is_some() {
+            let (right_child_ctx, payload) = row_tree
+                .fetch_with_context_at(node_ctx.right.as_ref().unwrap(), primary as Epoch)
+                .await;
+            // the value of the successor in this case is `payload.min`, since the successor is the
+            // minimum of the subtree rooted in the right child
+            if payload.min() != value {
+                // the value of successor is different from `value`, so we don't return the
+                // successor node
+                return None;
+            }
+            // find successor in the subtree rooted in the right child: it is
+            // the leftmost node in such a subtree
+            let mut successor_ctx = right_child_ctx;
+            while successor_ctx.left.is_some() {
+                successor_ctx = row_tree
+                    .node_context_at(successor_ctx.left.as_ref().unwrap(), primary as Epoch)
+                    .await
+                    .expect(
+                        format!(
+                            "Node context not found for left child of node {:?}",
+                            successor_ctx.node_id
+                        )
+                        .as_str(),
+                    );
+            }
+            Some(successor_ctx)
+        } else {
+            // find successor among the ancestors of current node: we go up in the path
+            // until we either found a node whose left child is the previous node in the
+            // path, or we get to the root of the tree
+            let (mut candidate_successor_ctx, mut candidate_successor_val) =
+                (node_ctx.clone(), value);
+            let mut successor_found = false;
+            while candidate_successor_ctx.parent.is_some() {
+                let (parent_ctx, parent_payload) = row_tree
+                    .fetch_with_context_at(
+                        candidate_successor_ctx.parent.as_ref().unwrap(),
+                        primary as Epoch,
+                    )
+                    .await;
+                candidate_successor_val = parent_payload.value();
+                if parent_ctx
+                    .iter_children()
+                    .find_position(|child| {
+                        child.is_some() && child.unwrap().clone() == candidate_successor_ctx.node_id
+                    })
+                    .unwrap()
+                    .0
+                    == 0
+                {
+                    // successor_ctx.node_id is left child of parent_ctx node, so parent_ctx is
+                    // the successor
+                    candidate_successor_ctx = parent_ctx;
+                    successor_found = true;
+                    break;
+                } else {
+                    candidate_successor_ctx = parent_ctx;
+                }
+            }
+            if successor_found {
+                if candidate_successor_val != value {
+                    // the value of successor is different from `value`, so we don't return the
+                    // successor node
+                    return None;
+                }
+                Some(candidate_successor_ctx)
+            } else {
+                // We got up to the root of the tree without finding the successor,
+                // which means that the input node has no successor;
+                // so we don't return any node
+                None
+            }
+        }
+    }
+
+    // this method returns the `NodeContext` of the predecessor of the node provided as input,
+    // if the predecessor exists in the row tree and it stores the same value of the input node (i.e., `value`);
+    // returns `None` otherwise, as it means that the input node can be used to prove non-existence
+    async fn get_predecessor_node_with_same_value(
+        node_ctx: &NodeContext<RowTreeKey>,
+        value: U256,
+        table: &Table,
+        primary: BlockPrimaryIndex,
+    ) -> Option<NodeContext<RowTreeKey>> {
+        let row_tree = &table.row;
+        if node_ctx.left.is_some() {
+            let (left_child_ctx, payload) = row_tree
+                .fetch_with_context_at(node_ctx.right.as_ref().unwrap(), primary as Epoch)
+                .await;
+            // the value of the predecessor in this case is `payload.max`, since the predecessor is the
+            // maximum of the subtree rooted in the left child
+            if payload.max() != value {
+                // the value of predecessor is different from `value`, so we don't return the
+                // predecessor node
+                return None;
+            }
+            // find predecessor in the subtree rooted in the left child: it is
+            // the rightmost node in such a subtree
+            let mut predecessor_ctx = left_child_ctx;
+            while predecessor_ctx.right.is_some() {
+                predecessor_ctx = row_tree
+                    .node_context_at(predecessor_ctx.right.as_ref().unwrap(), primary as Epoch)
+                    .await
+                    .expect(
+                        format!(
+                            "Node context not found for right child of node {:?}",
+                            predecessor_ctx.node_id
+                        )
+                        .as_str(),
+                    );
+            }
+            Some(predecessor_ctx)
+        } else {
+            // find successor among the ancestors of current node: we go up in the path
+            // until we either found a node whose right child is the previous node in the
+            // path, or we get to the root of the tree
+            let (mut candidate_predecessor_ctx, mut candidate_predecessor_val) =
+                (node_ctx.clone(), value);
+            let mut predecessor_found = false;
+            while candidate_predecessor_ctx.parent.is_some() {
+                let (parent_ctx, parent_payload) = row_tree
+                    .fetch_with_context_at(
+                        candidate_predecessor_ctx.parent.as_ref().unwrap(),
+                        primary as Epoch,
+                    )
+                    .await;
+                candidate_predecessor_val = parent_payload.value();
+                if parent_ctx
+                    .iter_children()
+                    .find_position(|child| {
+                        child.is_some()
+                            && child.unwrap().clone() == candidate_predecessor_ctx.node_id
+                    })
+                    .unwrap()
+                    .0
+                    == 1
+                {
+                    // predecessor_ctx.node_id is right child of parent_ctx node, so parent_ctx is
+                    // the predecessor
+                    candidate_predecessor_ctx = parent_ctx;
+                    predecessor_found = true;
+                    break;
+                } else {
+                    candidate_predecessor_ctx = parent_ctx;
+                }
+            }
+            if predecessor_found {
+                if candidate_predecessor_val != value {
+                    // the value of predecessor is different from `value`, so we don't return the
+                    // predecessor node
+                    return None;
+                }
+                Some(candidate_predecessor_ctx)
+            } else {
+                // We got up to the root of the tree without finding the predecessor,
+                // which means that the input node has no predecessor;
+                // so we don't return any node
+                None
+            }
+        }
+    }
+
+    let find_node_for_proof = async |query: Option<String>,
+                                     is_min_query: bool|
+           -> Result<Option<RowTreeKey>> {
         if query.is_none() {
             return Ok(None);
         }
@@ -909,34 +1135,63 @@ pub async fn prove_non_existence_row<'a>(
             .context("unable to parse row key tree")
             .expect("");
         // among the nodes with the same index value of the node with `row_key`, we need to find
-        // the one in the highest place in the tree, i.e., a node whose parent has not the same
-        // index value
+        // the one that satisfies the following property: all its successor nodes have values bigger
+        // than `max_query_secondary`, and all its predecessor nodes have values smaller than
+        // `min_query_secondary`. Such a node can be found differently, depending on the case:
+        // - if `is_min_query = true`, then we are looking among nodes with the highest value smaller
+        //   than `min_query_secondary` bound (call this value `min_value`);
+        //   therefore, we need to find the "last" node among the nodes with value `min_value`, that
+        //   is the node whose successor (if exists) has a value bigger than `min_value`. Since there
+        //   are no nodes in the tree in the range [`min_query_secondary, max_query_secondary`], then
+        //   the value of the successor of the "last" node is necessarily bigger than `max_query_secondary`,
+        //   and so it implies that we found the node satisfying the property mentioned above
+        // - if `is_min_query = false`, then we are looking among nodes with the smallest value higher
+        //   than `max_query_secondary` bound (call this value `max_value`);
+        //   therefore, we need to find the "first" node among the nodes with value `max_value`, that
+        //   is the node whose predecessor (if exists) has a value smaller than `max_value`. Since there
+        //   are no nodes in the tree in the range [`min_query_secondary, max_query_secondary`], then
+        //   the value of the predecessor of the "first" node is necessarily smaller than `min_query_secondary`,
+        //   and so it implies that we found the node satisfying the property mentioned above
         let (mut node_ctx, node_value) = row_tree
             .fetch_with_context_at(&row_key, primary as Epoch)
             .await;
         let value = node_value.value();
-        let get_parent_data = async |node_ctx: &NodeContext<RowTreeKey>| {
-            if node_ctx.parent.is_some() {
-                let parent_key = node_ctx.parent.as_ref().unwrap();
-                let (ctx, value) = row_tree
-                    .fetch_with_context_at(parent_key, primary as Epoch)
-                    .await;
-                Some((ctx, value))
-            } else {
-                None
+
+        if is_min_query {
+            // starting from the node with key `row_key`, we iterate over its successor nodes in the tree,
+            // until we found a node that either has no successor or whose successor stores a value different
+            // from the value `value` stored in the node with key `row_key`; the node found is the one to be
+            // employed to generate the non-existence proof
+            let mut successor_ctx =
+                get_successor_node_with_same_value(&node_ctx, value, &planner.table, primary).await;
+            while successor_ctx.is_some() {
+                node_ctx = successor_ctx.unwrap();
+                successor_ctx =
+                    get_successor_node_with_same_value(&node_ctx, value, &planner.table, primary)
+                        .await;
             }
-        };
-        let mut parent_data = get_parent_data(&node_ctx).await;
-        while parent_data.is_some() && parent_data.as_ref().unwrap().1.value() == value {
-            node_ctx = parent_data.unwrap().0;
-            parent_data = get_parent_data(&node_ctx).await;
+        } else {
+            // starting from the node with key `row_key`, we iterate over its predecessor nodes in the tree,
+            // until we found a node that either has no predecessor or whose predecessor stores a value different
+            // from the value `value` stored in the node with key `row_key`; the node found is the one to be
+            // employed to generate the non-existence proof
+            let mut predecessor_ctx =
+                get_predecessor_node_with_same_value(&node_ctx, value, &planner.table, primary)
+                    .await;
+            while predecessor_ctx.is_some() {
+                node_ctx = predecessor_ctx.unwrap();
+                predecessor_ctx =
+                    get_predecessor_node_with_same_value(&node_ctx, value, &planner.table, primary)
+                        .await;
+            }
         }
+
         Ok(Some(node_ctx.node_id))
     };
     // try first with lower node than secondary min query bound
-    let to_be_proven_node = match find_node_for_proof(query_for_min).await? {
+    let to_be_proven_node = match find_node_for_proof(query_for_min, true).await? {
         Some(node) => node,
-        None => find_node_for_proof(query_for_max)
+        None => find_node_for_proof(query_for_max, false)
             .await?
             .expect("No valid node found to prove non-existence, something is wrong"),
     };
@@ -949,6 +1204,7 @@ pub async fn prove_non_existence_row<'a>(
 
     let proof_key = ProofKey::QueryAggregateRow((
         planner.query.query.clone(),
+        planner.query.placeholders.placeholder_values(),
         primary,
         to_be_proven_node.clone(),
     ));
@@ -1041,7 +1297,12 @@ pub async fn prove_single_row<T: TreeInfo<RowTreeKey, RowPayload<BlockPrimaryInd
     )
     .expect("unable to create universal query circuit inputs");
     // 3. run proof if not ran already
-    let proof_key = ProofKey::QueryUniversal((query.query.clone(), primary, row_key.clone()));
+    let proof_key = ProofKey::QueryUniversal((
+        query.query.clone(),
+        query.placeholders.placeholder_values(),
+        primary,
+        row_key.clone(),
+    ));
     let proof = {
         info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
         let proof = ctx
@@ -1064,11 +1325,11 @@ pub struct QueryCooking {
 
 type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
 
-async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_between_blocks(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
     let max = table.row.current_epoch();
     let min = max - 1;
 
-    let value_column = &table.columns.rest[0].name;
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
     let placeholders = Placeholders::new_empty(U256::from(min), U256::from(max));
 
@@ -1086,10 +1347,10 @@ async fn cook_query_between_blocks(table: &Table) -> Result<QueryCooking> {
     })
 }
 
-// cook up a SQL query on the secondary index and with a predicate on the non-indexed column.
-// we just iterate on mapping keys and take the one that exist for most blocks. We also choose
-// a value to filter over the non-indexed column
-async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_secondary_index_nonexisting_placeholder(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1099,7 +1360,52 @@ async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCo
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
     // Assuming this is mapping with only two columns !
-    let value_column = &table.columns.rest[0].name;
+    let value_column = &info.value_column;
+    let table_name = &table.public_name;
+
+    let filtering_value = *BASE_VALUE + U256::from(5);
+
+    let random_value = U256::from(1234567890);
+    let placeholders = Placeholders::from((
+        vec![
+            (PlaceholderId::Generic(1), random_value),
+            (PlaceholderId::Generic(2), filtering_value),
+        ],
+        U256::from(min_block),
+        U256::from(max_block),
+    ));
+
+    let query_str = format!(
+        "SELECT AVG({value_column})
+                FROM {table_name}
+                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
+                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
+                AND {key_column} = $1 AND {value_column} >= $2;"
+    );
+    Ok(QueryCooking {
+        min_block: min_block as BlockPrimaryIndex,
+        max_block: max_block as BlockPrimaryIndex,
+        query: query_str,
+        placeholders,
+    })
+}
+
+// cook up a SQL query on the secondary index and with a predicate on the non-indexed column.
+// we just iterate on mapping keys and take the one that exist for most blocks. We also choose
+// a value to filter over the non-indexed column
+async fn cook_query_secondary_index_placeholder(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
+    let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
+    let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
+    info!(
+        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
+        min_block, max_block, key_value
+    );
+    // now we can fetch the key that we want
+    let key_column = table.columns.secondary.name.clone();
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
 
     let filtering_value = *BASE_VALUE + U256::from(5);
@@ -1130,7 +1436,10 @@ async fn cook_query_secondary_index_placeholder(table: &Table) -> Result<QueryCo
 
 // cook up a SQL query on the secondary index. For that we just iterate on mapping keys and
 // take the one that exist for most blocks
-async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_unique_secondary_index(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1139,8 +1448,7 @@ async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
-    // Assuming this is mapping with only two columns !
-    let value_column = &table.columns.rest[0].name;
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
     let max_block = min_block + 1;
     // primary_min_placeholder = ".."
@@ -1202,7 +1510,7 @@ async fn cook_query_unique_secondary_index(table: &Table) -> Result<QueryCooking
     })
 }
 
-async fn cook_query_partial_block_range(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_partial_block_range(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1211,8 +1519,7 @@ async fn cook_query_partial_block_range(table: &Table) -> Result<QueryCooking> {
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
-    // Assuming this is mapping with only two columns !
-    let value_column = table.columns.rest[0].name.clone();
+    let value_column = info.value_column.clone();
     let table_name = &table.public_name;
     let initial_epoch = table.row.initial_epoch();
     // choose a min query bound smaller than initial epoch
@@ -1234,14 +1541,13 @@ async fn cook_query_partial_block_range(table: &Table) -> Result<QueryCooking> {
     })
 }
 
-async fn cook_query_no_matching_entries(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_no_matching_entries(table: &Table, info: &TableInfo) -> Result<QueryCooking> {
     let initial_epoch = table.row.initial_epoch();
     // choose query bounds outside of the range [initial_epoch, last_epoch]
     let min_block = 0;
     let max_block = initial_epoch - 1;
     // now we can fetch the key that we want
-    // Assuming this is mapping with only two columns !
-    let value_column = &table.columns.rest[0].name;
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
 
@@ -1262,7 +1568,10 @@ async fn cook_query_no_matching_entries(table: &Table) -> Result<QueryCooking> {
 
 /// Cook a query where there are no entries satisying the secondary query bounds only for some
 /// blocks of the primary index bounds (not for all the blocks)
-async fn cook_query_non_matching_entries_some_blocks(table: &Table) -> Result<QueryCooking> {
+async fn cook_query_non_matching_entries_some_blocks(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, true).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1271,8 +1580,7 @@ async fn cook_query_non_matching_entries_some_blocks(table: &Table) -> Result<Qu
     );
     // now we can fetch the key that we want
     let key_column = &table.columns.secondary.name;
-    // Assuming this is mapping with only two columns !
-    let value_column = &table.columns.rest[0].name;
+    let value_column = &info.value_column;
     let table_name = &table.public_name;
     // in this query we set query bounds on block numbers to the widest range, so that we
     // are sure that there are blocks where the chosen key is not alive
