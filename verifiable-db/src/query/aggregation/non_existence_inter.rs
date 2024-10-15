@@ -3,7 +3,7 @@
 use crate::query::{
     aggregation::output_computation::compute_dummy_output_targets,
     public_inputs::PublicInputs,
-    universal_circuit::universal_query_circuit::{
+    universal_circuit::universal_query_gadget::{
         QueryBound, QueryBoundTarget, QueryBoundTargetInputs,
     },
 };
