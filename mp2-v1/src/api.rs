@@ -220,9 +220,9 @@ pub fn metadata_hash(
     // closure to compute the metadata digest associated to a mapping variable
     let metadata_digest_mapping = |slot| {
         let key_id =
-            identifier_for_mapping_key_column(slot, 0, contract_address, chain_id, extra.clone());
+            identifier_for_mapping_key_column(slot, contract_address, chain_id, extra.clone());
         let value_id =
-            identifier_for_mapping_value_column(slot, 0, contract_address, chain_id, extra.clone());
+            identifier_for_mapping_value_column(slot, contract_address, chain_id, extra.clone());
         compute_leaf_mapping_metadata_digest(key_id, value_id, slot)
     };
     let digest = match slot_input {

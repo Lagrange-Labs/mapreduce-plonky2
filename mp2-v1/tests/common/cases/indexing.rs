@@ -199,15 +199,10 @@ impl TestCase {
         let index_genesis_block = ctx.block_number().await + 1;
         // to toggle off and on
         let value_as_index = true;
-        let value_id = identifier_for_mapping_value_column(
-            MAPPING_SLOT,
-            0,
-            contract_address,
-            chain_id,
-            vec![],
-        );
+        let value_id =
+            identifier_for_mapping_value_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
         let key_id =
-            identifier_for_mapping_key_column(MAPPING_SLOT, 0, contract_address, chain_id, vec![]);
+            identifier_for_mapping_key_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
         let (index_identifier, mapping_index, cell_identifier) = match value_as_index {
             true => (value_id, MappingIndex::Value(value_id), key_id),
             false => (key_id, MappingIndex::Key(key_id), value_id),

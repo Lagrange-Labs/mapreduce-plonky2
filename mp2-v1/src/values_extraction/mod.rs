@@ -112,87 +112,54 @@ pub fn identifier_single_var_column(
 }
 
 /// Compute key indetifier for mapping variable.
-/// `key_id = H(KEY || slot || evm_word || contract_address || chain_id)[0]`
+/// `key_id = H(KEY || slot || contract_address || chain_id)[0]`
 pub fn identifier_for_mapping_key_column(
     slot: u8,
-    evm_word: u32,
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
-    compute_id_with_prefix(
-        KEY_ID_PREFIX,
-        slot,
-        evm_word,
-        contract_address,
-        chain_id,
-        extra,
-    )
+    compute_id_with_prefix(KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
 /// Compute outer key indetifier for mapping of mappings variable.
-/// `outer_key_id = H(OUT_KEY || slot || evm_word || contract_address || chain_id)[0]`
+/// `outer_key_id = H(OUT_KEY || slot || contract_address || chain_id)[0]`
 pub fn identifier_for_outer_mapping_key_column(
     slot: u8,
-    evm_word: u32,
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
-    compute_id_with_prefix(
-        OUTER_KEY_ID_PREFIX,
-        slot,
-        evm_word,
-        contract_address,
-        chain_id,
-        extra,
-    )
+    compute_id_with_prefix(OUTER_KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
 /// Compute inner key indetifier for mapping of mappings variable.
-/// `inner_key_id = H(OUT_KEY || slot || evm_word || contract_address || chain_id)[0]`
+/// `inner_key_id = H(OUT_KEY || slot || contract_address || chain_id)[0]`
 pub fn identifier_for_inner_mapping_key_column(
     slot: u8,
-    evm_word: u32,
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
-    compute_id_with_prefix(
-        INNER_KEY_ID_PREFIX,
-        slot,
-        evm_word,
-        contract_address,
-        chain_id,
-        extra,
-    )
+    compute_id_with_prefix(INNER_KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
 /// Compute value indetifier for mapping variable.
-/// `value_id = H(VAL || slot || evm_word || contract_address || chain_id)[0]`
+/// `value_id = H(VAL || slot || contract_address || chain_id)[0]`
 #[deprecated]
 pub fn identifier_for_mapping_value_column(
     slot: u8,
-    evm_word: u32,
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
-    compute_id_with_prefix(
-        VALUE_ID_PREFIX,
-        slot,
-        evm_word,
-        contract_address,
-        chain_id,
-        extra,
-    )
+    compute_id_with_prefix(VALUE_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
 /// Calculate ID with prefix.
 fn compute_id_with_prefix(
     prefix: &[u8],
     slot: u8,
-    evm_word: u32,
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
@@ -201,7 +168,6 @@ fn compute_id_with_prefix(
         .iter()
         .cloned()
         .chain(once(slot))
-        .chain(evm_word.to_be_bytes())
         .chain(contract_address.0)
         .chain(chain_id.to_be_bytes())
         .chain(extra)

@@ -92,7 +92,6 @@ impl UniqueMappingEntry {
         // for this mapping.
         let extract_key = MappingIndex::Key(identifier_for_mapping_key_column(
             slot,
-            0,
             contract,
             chain_id,
             vec![],
@@ -100,7 +99,6 @@ impl UniqueMappingEntry {
         let key_cell = self.to_cell(extract_key);
         let extract_key = MappingIndex::Value(identifier_for_mapping_value_column(
             slot,
-            0,
             contract,
             chain_id,
             vec![],
