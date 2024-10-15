@@ -1061,6 +1061,9 @@ async fn fetch_many() {
             (1i64, "restera".to_string(), 12),
             (2i64, "restera".to_string(), 12),
             (2i64, "car".to_string(), 0),
+            // This should not exist, but as we use infinity to mark alive
+            // nodes, it will still appear
+            (4i64, "restera".to_string(), 12),
         ]
         .into_iter()
         .collect::<HashSet<_>>()
