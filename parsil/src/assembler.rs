@@ -729,7 +729,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
 /// place them in a [`CircuitPis`] that may be either build in static mode (i.e.
 /// no reference to runtime value) at query registration time, or in dynamic
 /// mode at query execution time.
-trait BuildableBounds: Sized {
+pub trait BuildableBounds: Sized {
     fn without_values(low: Option<QueryBoundSource>, high: Option<QueryBoundSource>) -> Self;
 
     fn with_values(

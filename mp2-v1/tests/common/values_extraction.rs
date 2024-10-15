@@ -27,6 +27,7 @@ impl TestContext {
     pub(crate) async fn prove_single_values_extraction(
         &self,
         contract_address: &Address,
+        bn: BlockNumberOrTag,
         slots: &[StorageSlotInfo],
     ) -> Vec<u8> {
         // Initialize the test trie.
@@ -35,7 +36,7 @@ impl TestContext {
 
         // Query the slot and add the node path to the trie.
         for slot_info in slots {
-            trie.query_proof_and_add_slot(self, contract_address, slot_info.clone())
+            trie.query_proof_and_add_slot(self, contract_address, bn, slot_info.clone())
                 .await;
         }
 

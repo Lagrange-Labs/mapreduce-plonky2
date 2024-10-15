@@ -35,7 +35,6 @@ use std::array;
 
 type ExtensionInput = ProofInputSerialized<InputNode>;
 type BranchInput = ProofInputSerialized<InputNode>;
-
 const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 
 /// CircuitInput is a wrapper around the different specialized circuits that can
@@ -422,6 +421,7 @@ where
         let branches = BranchCircuits::new(&circuit_builder);
         #[cfg(test)]
         let branches = TestBranchCircuits::new(&circuit_builder);
+
         let mut circuits_set = vec![
             leaf_single.get_verifier_data().circuit_digest,
             leaf_mapping.get_verifier_data().circuit_digest,

@@ -4,11 +4,12 @@
 use crate::{
     symbols::ContextProvider,
     utils::val_to_expr,
+    validate::is_query_with_no_aggregation,
     visitor::{AstMutator, VisitMut},
     ParsilSettings,
 };
 use alloy::primitives::U256;
-use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
+use sqlparser::ast::{BinaryOperator, Expr, Query, SetExpr, UnaryOperator, Value};
 
 struct Expander<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
@@ -142,8 +143,15 @@ impl<'a, C: ContextProvider> AstMutator for Expander<'a, C> {
     }
 
     fn pre_query(&mut self, query: &mut Query) -> anyhow::Result<()> {
+        // we add LIMIT to the query if not specified by the user
         if query.limit.is_none() {
-            query.limit = Some(val_to_expr(U256::from(C::MAX_NUM_OUTPUTS)));
+            // note that we need to do it only in queries that don't aggregate
+            // results across rows
+            if let SetExpr::Select(ref select) = *query.body {
+                if is_query_with_no_aggregation(select) {
+                    query.limit = Some(val_to_expr(U256::from(C::MAX_NUM_OUTPUTS)));
+                }
+            }
         }
         Ok(())
     }

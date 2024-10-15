@@ -1,4 +1,4 @@
-use alloy::primitives::Address;
+use alloy::{eips::BlockNumberOrTag, primitives::Address};
 use log::info;
 use mp2_common::{
     eth::StorageSlot, mpt_sequential::utils::bytes_to_nibbles, proof::ProofWithVK, types::GFp,
@@ -15,6 +15,7 @@ impl TestContext {
     pub(crate) async fn prove_length_extraction(
         &self,
         contract_address: &Address,
+        bn: BlockNumberOrTag,
         chain_id: u64,
         slot_info: StorageSlotInfo,
         value: u8,
@@ -26,7 +27,7 @@ impl TestContext {
         let slot = slot_info.slot().slot();
 
         // Query the slot and add the node path to the trie.
-        trie.query_proof_and_add_slot(self, contract_address, slot_info)
+        trie.query_proof_and_add_slot(self, contract_address, bn, slot_info)
             .await;
         let proof = trie.prove_length(contract_address, chain_id, value, self.params(), &self.b);
 

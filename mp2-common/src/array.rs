@@ -1093,7 +1093,7 @@ mod test {
         };
         run_circuit::<F, D, C, _>(circuit);
 
-        arr2[0] = arr2[0] + 1; // ensure arr2 is different from arr
+        arr2[0] += 1; // ensure arr2 is different from arr
         let res = panic::catch_unwind(|| {
             let circuit = TestSliceEqual {
                 arr,
@@ -1138,7 +1138,7 @@ mod test {
             let inp = [77, 66, 55];
             let exp = [00, 77, 66, 55];
             run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> {
-                input: Vector::from_vec(&inp.to_vec()).unwrap(),
+                input: Vector::from_vec(&inp).unwrap(),
                 exp,
             });
         }
@@ -1148,7 +1148,7 @@ mod test {
             let inp = [33];
             let exp = [00, 00, 00, 33];
             run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> {
-                input: Vector::from_vec(&inp.to_vec()).unwrap(),
+                input: Vector::from_vec(&inp).unwrap(),
                 exp,
             });
         }

@@ -5,6 +5,8 @@ use anyhow::*;
 use assembler::assemble_static;
 use clap::{Parser, Subcommand};
 use log::Level;
+use parsil::queries::{core_keys_for_index_tree, core_keys_for_row_tree};
+use ryhope::{tree::sbbst::NodeIdx, Epoch};
 use sqlparser::ast::Query;
 use symbols::{ContextProvider, FileContextProvider};
 use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
@@ -73,6 +75,21 @@ enum Command {
         hi_sec: bool,
         #[arg(long)]
         to_keys: bool,
+    },
+    Core {
+        request: String,
+
+        #[arg(short = 'E', long)]
+        /// The epoch at which to run the query
+        epoch: Epoch,
+
+        #[arg(short = 'm', long)]
+        /// Primary index lower bound
+        min_block: i64,
+
+        #[arg(short = 'M', long)]
+        /// Primary index upper bound
+        max_block: i64,
     },
 }
 
@@ -155,6 +172,22 @@ fn main() -> Result<()> {
 
             println!("{}", r.0.unwrap_or("nothing".into()));
             println!("{}", r.1.unwrap_or("nothing".into()));
+        }
+        Command::Core {
+            request,
+            epoch,
+            min_block,
+            max_block,
+        } => {
+            let mut query = parse_and_validate(&request, &settings)?;
+            let query_index =
+                core_keys_for_index_tree(epoch, (min_block as NodeIdx, max_block as NodeIdx))?;
+            // let query_row = core_keys_for_row_tree(
+            //     qeury,
+            //     &settings,
+            //     (min_block as NodeIdx, max_block as NodeIdx),
+            // )?;
+            println!("INDEX TREE: {query_index}");
         }
     }
 

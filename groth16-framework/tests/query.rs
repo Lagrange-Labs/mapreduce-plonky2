@@ -19,6 +19,28 @@ use itertools::Itertools;
 use serial_test::serial;
 use std::path::Path;
 
+/// Test Groth16 proof on local.
+/// For testing the Groth16 proof on local, need to make the following steps:
+/// - Copy the Groth16 proof to the path `groth16_query/full_proof.bin`.
+/// - If have the query info of input and output, could update
+///   `groth16_query/query_input.json` and `groth16_query/query_output.json`.
+/// - If have no query info, comment out `verifyQuery` in `processQuery`
+///   function of `test_data/TestGroth16Verifier.sol`.
+#[ignore] // Ignore for long running time in CI.
+#[test]
+fn test_local_groth16_proof() {
+    env_logger::init();
+
+    const ASSET_DIR: &str = "groth16_query";
+
+    // Verify the query in the Solidity function.
+    // The editing Solidity code is saved in `test_data/TestGroth16Verifier.sol`.
+    // TODO: In practice, the separate `Groth16VerifierExtensions.sol` and
+    // `verifier.sol` should be used, but the `revm` (Rust EVM) cannot support
+    // compilated contract deployment (as inheritance) for now.
+    verify_query_in_solidity(ASSET_DIR);
+}
+
 /// Test proving for the query circuits.
 #[ignore] // Ignore for long running time in CI.
 #[serial]
@@ -58,7 +80,7 @@ fn verify_query_in_solidity(asset_dir: &str) {
     let abi = JsonAbi::parse(["function processQuery( \
             bytes32[], \
             tuple(uint32, uint32, uint64, uint64, bytes32, bytes32, uint256[]) \
-        ) public view returns (tuple(uint256, bytes[]))"])
+        ) public view returns (tuple(uint256, bytes[], uint256))"])
     .unwrap();
     let contract = Interface::new(abi);
 
@@ -124,12 +146,18 @@ fn verify_query_in_solidity(asset_dir: &str) {
     if let DynSolValue::Tuple(mut output) = output.pop().unwrap() {
         assert_eq!(
             output.len(),
-            2,
-            "Query output must have `total_matched_rows` and `rows`."
+            3,
+            "Query output must have `total_matched_rows`, `rows` and `error`."
         );
+        let error = output.pop().unwrap();
         let rows = output.pop().unwrap();
         let total_matched_rows = output.pop().unwrap();
 
+        // Check the error.
+        assert_eq!(
+            error,
+            DynSolValue::Uint(U256::from(query_output.error), 256)
+        );
         // Check the total matched rows.
         assert_eq!(
             total_matched_rows,

@@ -32,6 +32,7 @@ pub fn nibbles_to_bytes(nibbles: &[u8]) -> Vec<u8> {
 }
 
 /// Decodes the RLP header (assuming it's a value < 0x80 or less than 55 bytes)
+///
 /// Left pad the leaf value
 /// return as big-endian.
 /// NOTE: WARNING: RLP_VALUE_LEN MUST include an additional byte for a potential

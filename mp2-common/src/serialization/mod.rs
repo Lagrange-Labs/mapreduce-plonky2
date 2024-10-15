@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use plonky2::util::serialization::IoError;
+use plonky2::util::serialization::{Buffer, IoError, Read};
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Implement serialization for Plonky2 circuits-related data structures
@@ -19,6 +19,7 @@ pub trait FromBytes: Sized {
     /// Construct an instance of `Self` from a sequence of bytes
     fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError>;
 }
+
 /// Error type for serialization methods implemented in this module
 pub struct SerializationError(String);
 

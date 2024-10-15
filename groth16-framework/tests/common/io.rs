@@ -28,4 +28,5 @@ pub(crate) struct TestQueryInput {
 pub(crate) struct TestQueryOutput {
     pub(crate) total_matched_rows: u32,
     pub(crate) rows: Vec<[U256; MAX_NUM_ITEMS_PER_OUTPUT]>,
+    pub(crate) error: u32,
 }

@@ -1,11 +1,9 @@
 //! Utility structs and functions used for integration tests
 use alloy::primitives::Address;
 use anyhow::Result;
-use cases::TableSourceSlot;
-use mp2_v1::{
-    api::{metadata_hash, MetadataHash, SlotInputs},
-    MAX_LEAF_NODE_LEN,
-};
+use cases::table_source::TableSource;
+use itertools::Itertools;
+use mp2_v1::api::{merge_metadata_hash, metadata_hash, MetadataHash, SlotInputs};
 use serde::{Deserialize, Serialize};
 use table::TableColumns;
 pub mod benchmarker;
@@ -28,7 +26,6 @@ mod values_extraction;
 use std::path::PathBuf;
 
 use anyhow::Context;
-pub(crate) use cases::TestCase;
 pub(crate) use context::TestContext;
 
 use mp2_common::{proof::ProofWithVK, types::HashOutput};
@@ -83,31 +80,58 @@ pub fn mkdir_all(params_path_str: &str) -> Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableInfo {
     pub columns: TableColumns,
+    // column to do queries over for numerical values, NOT secondary index
+    pub value_column: String,
     pub public_name: String,
     pub contract_address: Address,
     pub chain_id: u64,
-    pub source: TableSourceSlot,
+    pub source: TableSource,
 }
 
 impl TableInfo {
     pub fn metadata_hash(&self) -> MetadataHash {
-        let slots = match &self.source {
-            TableSourceSlot::Mapping((mapping, _)) => SlotInputs::Mapping(mapping.slot),
+        match &self.source {
+            TableSource::Mapping((mapping, _)) => {
+                let slot = SlotInputs::Mapping(mapping.slot);
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
+            }
             // mapping with length not tested right now
-            TableSourceSlot::SingleValues(args) => {
+            TableSource::SingleValues(args) => {
                 let slots = args
                     .slots
                     .iter()
                     .map(|slot_info| slot_info.slot().slot())
                     .collect();
-                SlotInputs::Simple(slots)
+                let slot = SlotInputs::Simple(slots);
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
             }
-        };
-        metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-            slots,
-            &self.contract_address,
-            self.chain_id,
-            vec![],
-        )
+            TableSource::Merge(merge) => {
+                let slots = merge
+                    .single
+                    .slots
+                    .iter()
+                    .map(|slot_info| slot_info.slot().slot())
+                    .collect_vec();
+                let single = SlotInputs::Simple(slots);
+                let mapping = SlotInputs::Mapping(merge.mapping.slot);
+                merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    self.contract_address,
+                    self.chain_id,
+                    vec![],
+                    single,
+                    mapping,
+                )
+            }
+        }
     }
 }
