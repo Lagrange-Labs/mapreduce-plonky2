@@ -1,13 +1,21 @@
+use std::iter::once;
+
 use alloy::primitives::U256;
 use anyhow::Result;
+use itertools::Itertools;
 use mp2_common::{
-    poseidon::empty_poseidon_hash,
+    poseidon::{empty_poseidon_hash, HashPermutation},
     proof::ProofWithVK,
     serialization::{deserialize_long_array, serialize_long_array},
     types::HashOutput,
+    utils::{Fieldable, ToFields},
     F,
 };
-use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
+use plonky2::{
+    field::types::Field,
+    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
+    plonk::config::GenericHashOut,
+};
 use serde::{Deserialize, Serialize};
 
 pub(crate) mod child_proven_single_path_node;
@@ -140,7 +148,7 @@ impl QueryBounds {
 }
 
 /// Data structure containing all the information needed as input by aggregation circuits for a single node of the tree
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeInfo {
     /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
     /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
@@ -157,6 +165,8 @@ pub struct NodeInfo {
     /// minimum value associated to the current node. It can be a primary index value if the node is a node in the index tree,
     /// a secondary index value if the node is a node in a rows tree
     pub(crate) max: U256,
+    /// Flag specifying whether this is a leaf node or not
+    pub(crate) is_leaf: bool,
 }
 
 impl NodeInfo {
@@ -184,10 +194,30 @@ impl NodeInfo {
             value,
             min,
             max,
+            is_leaf: left_child_hash.is_none() && right_child_hash.is_none(),
         }
     }
+
+    pub fn node_hash(&self, index_id: u64) -> HashOutput {
+        HashOutput::try_from(self.compute_node_hash(index_id.to_field()).to_bytes()).unwrap()
+    }
+
+    pub(crate) fn compute_node_hash(&self, index_id: F) -> HashOut<F> {
+        hash_n_to_hash_no_pad::<F, HashPermutation>(
+            &self
+                .child_hashes
+                .into_iter()
+                .flat_map(|h| h.to_vec())
+                .chain(self.min.to_fields())
+                .chain(self.max.to_fields())
+                .chain(once(index_id))
+                .chain(self.value.to_fields())
+                .chain(self.embedded_tree_hash.to_vec())
+                .collect_vec(),
+        )
+    }
 }
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// enum to specify whether a node is the left or right child of another node
 pub enum ChildPosition {
     Left,

@@ -71,7 +71,7 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // we need to clone data if we fix by put variants inside a `Box`
 pub enum CircuitInput<
     const MAX_NUM_COLUMNS: usize,
@@ -813,23 +813,6 @@ mod tests {
         },
     };
 
-    impl NodeInfo {
-        pub(crate) fn compute_node_hash(&self, index_id: F) -> HashOut<F> {
-            hash_n_to_hash_no_pad::<F, HashPermutation>(
-                &self
-                    .child_hashes
-                    .into_iter()
-                    .flat_map(|h| h.to_vec())
-                    .chain(self.min.to_fields())
-                    .chain(self.max.to_fields())
-                    .chain(once(index_id))
-                    .chain(self.value.to_fields())
-                    .chain(self.embedded_tree_hash.to_vec())
-                    .collect_vec(),
-            )
-        }
-    }
-
     #[test]
     fn test_api() {
         // Simple query for testing SELECT SUM(C1 + C3) FROM T WHERE C3 >= 5 AND C1 > 56 AND C1 <= 67 AND C2 > 34 AND C2 <= $1
@@ -903,7 +886,8 @@ mod tests {
             result_operations,
             output_items,
             aggregation_op_ids.clone(),
-        );
+        )
+        .unwrap();
         let first_placeholder_id = PlaceholderIdentifier::Generic(0);
         let placeholders = Placeholders::from((
             vec![(first_placeholder_id, U256::from(max_query_secondary))],

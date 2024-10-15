@@ -13,7 +13,7 @@ use ryhope::{storage::WideLineage, tree::NodeContext, Epoch, NodePayload};
 use verifiable_db::query::aggregation::QueryBounds;
 
 use crate::common::{
-    cases::query::prove_non_existence_row,
+    cases::query::aggregated_queries::prove_non_existence_row,
     index_tree::MerkleIndexTree,
     proof_storage::{PlaceholderValues, ProofKey, ProofStorage, QueryID},
     rowtree::MerkleRowTree,
@@ -21,7 +21,7 @@ use crate::common::{
     TestContext,
 };
 
-use super::query::{prove_single_row, QueryCooking};
+use super::query::{aggregated_queries::prove_single_row, QueryCooking};
 
 pub(crate) struct QueryPlanner<'a> {
     pub(crate) query: QueryCooking,

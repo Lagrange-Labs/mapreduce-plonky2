@@ -1062,7 +1062,7 @@ where
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Inputs for the 2 variant of universal query circuit
 pub enum UniversalCircuitInput<
     const MAX_NUM_COLUMNS: usize,
@@ -1434,7 +1434,8 @@ mod tests {
                 .iter()
                 .map(|op| op.to_canonical_u64())
                 .collect_vec(),
-        );
+        )
+        .unwrap();
 
         let query_bounds = QueryBounds::new(
             &placeholders,
@@ -1812,7 +1813,9 @@ mod tests {
                 .iter()
                 .map(|id| id.to_canonical_u64())
                 .collect_vec(),
-        );
+            false,
+        )
+        .unwrap();
         let query_bounds = QueryBounds::new(
             &placeholders,
             Some(QueryBoundSource::Placeholder(third_placeholder_id)),
