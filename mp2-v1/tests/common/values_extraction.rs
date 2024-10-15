@@ -97,7 +97,7 @@ impl TestContext {
             F::from_canonical_usize(length),
             F::from_canonical_u32(evm_word),
         )];
-        let metadata = MetadataGadget::new(table_info, 1, 1, evm_word);
+        let metadata = MetadataGadget::new(table_info, &[column_identifier], 1, evm_word);
 
         // Query the slot and add the node path to the trie.
         let slot = slot as usize;

@@ -2,6 +2,7 @@
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
 use anyhow::Result;
+use futures::SinkExt;
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_v1::{
@@ -16,6 +17,7 @@ use mp2_v1::{
 };
 use rand::{Rng, SeedableRng};
 use ryhope::storage::RoEpochKvStorage;
+use std::slice;
 
 use crate::common::{
     bindings::simple::Simple::{self, MappingChange, MappingOperation},
@@ -1332,11 +1334,10 @@ fn next_value() -> U256 {
 // address public s4
 fn single_var_slot_info(contract_address: &Address, chain_id: u64) -> Vec<StorageSlotInfo> {
     const NUM_ACTUAL_COLUMNS: usize = 4;
-    const NUM_EXTRACTED_COLUMNS: usize = 1;
     // bool, uint256, string, address
     const SINGLE_SLOT_LENGTHS: [usize; 4] = [1, 32, 32, 20];
 
-    let base_table_info = SINGLE_SLOTS
+    let table_info = SINGLE_SLOTS
         .into_iter()
         .zip_eq(SINGLE_SLOT_LENGTHS)
         .map(|(slot, length)| {
@@ -1362,14 +1363,13 @@ fn single_var_slot_info(contract_address: &Address, chain_id: u64) -> Vec<Storag
             // Create the simple slot.
             let slot = StorageSlot::Simple(slot as usize);
 
-            // Swap the required column information to the first.
-            let mut table_info = base_table_info.clone();
-            table_info[0] = base_table_info[i].clone();
-            table_info[i] = base_table_info[0].clone();
-
             // Create the metadata gadget.
-            let metadata =
-                MetadataGadget::new(table_info, NUM_ACTUAL_COLUMNS, NUM_EXTRACTED_COLUMNS, 0);
+            let metadata = MetadataGadget::new(
+                table_info.clone(),
+                slice::from_ref(&table_info[i].identifier()),
+                NUM_ACTUAL_COLUMNS,
+                0,
+            );
 
             StorageSlotInfo::new(slot, metadata, F::ZERO, F::ZERO)
         })

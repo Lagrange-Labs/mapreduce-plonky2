@@ -52,14 +52,22 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     /// Create a new MPT metadata.
     pub fn new(
         mut table_info: Vec<ColumnInfo>,
+        extracted_column_identifiers: &[F],
         num_actual_columns: usize,
-        num_extracted_columns: usize,
         evm_word: u32,
     ) -> Self {
         assert!(table_info.len() <= MAX_COLUMNS);
         assert!(num_actual_columns <= MAX_COLUMNS);
+
+        let num_extracted_columns = extracted_column_identifiers.len();
         assert!(num_extracted_columns <= MAX_FIELD_PER_EVM);
 
+        // Move the extracted columns to the front the vector of column information.
+        table_info.sort_by_key(|column_info| {
+            !extracted_column_identifiers.contains(&column_info.identifier)
+        });
+
+        // Extend the column information vector with the last element.
         let last_column_info = table_info.last().cloned().unwrap_or(ColumnInfo::default());
         table_info.resize(MAX_COLUMNS, last_column_info);
         let table_info = table_info.try_into().unwrap();

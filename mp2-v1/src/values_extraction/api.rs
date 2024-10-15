@@ -66,14 +66,14 @@ where
         slot: u8,
         evm_word: u32,
         num_actual_columns: usize,
-        num_extracted_columns: usize,
+        extracted_column_identifiers: &[F],
         table_info: Vec<ColumnInfo>,
     ) -> Self {
         let slot = SimpleSlot::new(slot);
         let metadata = MetadataGadget::new(
             table_info,
+            extracted_column_identifiers,
             num_actual_columns,
-            num_extracted_columns,
             evm_word,
         );
 
@@ -92,14 +92,14 @@ where
         key_id: F,
         evm_word: u32,
         num_actual_columns: usize,
-        num_extracted_columns: usize,
+        extracted_column_identifiers: &[F],
         table_info: Vec<ColumnInfo>,
     ) -> Self {
         let slot = MappingSlot::new(slot, mapping_key);
         let metadata = MetadataGadget::new(
             table_info,
+            extracted_column_identifiers,
             num_actual_columns,
-            num_extracted_columns,
             evm_word,
         );
 
@@ -122,14 +122,14 @@ where
         inner_key_id: F,
         evm_word: u32,
         num_actual_columns: usize,
-        num_extracted_columns: usize,
+        extracted_column_identifiers: &[F],
         table_info: Vec<ColumnInfo>,
     ) -> Self {
         let slot = MappingSlot::new(slot, outer_key);
         let metadata = MetadataGadget::new(
             table_info,
+            extracted_column_identifiers,
             num_actual_columns,
-            num_extracted_columns,
             evm_word,
         );
 
@@ -514,7 +514,7 @@ mod tests {
     use mp2_test::{mpt_sequential::generate_random_storage_mpt, utils::random_vector};
     use plonky2::field::types::{Field, Sample};
     use plonky2_ecgfp5::curve::curve::Point;
-    use std::sync::Arc;
+    use std::{slice, sync::Arc};
 
     type StorageSlotInfo = super::super::StorageSlotInfo<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
     type PublicParameters =
@@ -541,10 +541,13 @@ mod tests {
         // Set the second test slot and EVM word.
         metadata1.table_info[1].slot = TEST_SLOTS[1].to_field();
         metadata1.table_info[1].evm_word = F::ZERO;
-        let mut metadata2 = metadata1.clone();
-        // Swap the column infos of the two test slots.
-        metadata2.table_info[0] = metadata1.table_info[1].clone();
-        metadata2.table_info[1] = metadata1.table_info[0].clone();
+        // Initialize the second metadata with second column identifier.
+        let metadata2 = MetadataGadget::new(
+            metadata1.table_info.to_vec(),
+            slice::from_ref(&metadata1.table_info[1].identifier),
+            metadata1.num_actual_columns,
+            0,
+        );
 
         let test_slots = [
             StorageSlotInfo::new(storage_slot1, metadata1, F::rand(), F::rand()),
@@ -575,11 +578,13 @@ mod tests {
         // Set the second test slot and EVM word.
         metadata1.table_info[1].slot = TEST_SLOT.to_field();
         metadata1.table_info[1].evm_word = TEST_EVM_WORDS[1].to_field();
-        let mut metadata2 = metadata1.clone();
-        metadata2.evm_word = TEST_EVM_WORDS[1];
-        // Swap the column infos of the two test slots.
-        metadata2.table_info[0] = metadata1.table_info[1].clone();
-        metadata2.table_info[1] = metadata1.table_info[0].clone();
+        // Initialize the second metadata with second column identifier.
+        let metadata2 = MetadataGadget::new(
+            metadata1.table_info.to_vec(),
+            slice::from_ref(&metadata1.table_info[1].identifier),
+            metadata1.num_actual_columns,
+            TEST_EVM_WORDS[1],
+        );
 
         let test_slots = [
             StorageSlotInfo::new(storage_slot1, metadata1, F::rand(), F::rand()),
@@ -606,7 +611,7 @@ mod tests {
         // Set the second test slot and EVM word.
         metadata1.table_info[1].slot = TEST_SLOT.to_field();
         metadata1.table_info[1].evm_word = F::ZERO;
-        // The first and second column infos are same.
+        // The first and second column infos are same (only for testing).
         let metadata2 = metadata1.clone();
 
         let key_id = F::rand();
@@ -639,11 +644,13 @@ mod tests {
         // Set the second test slot and EVM word.
         metadata1.table_info[1].slot = TEST_SLOT.to_field();
         metadata1.table_info[1].evm_word = TEST_EVM_WORDS[1].to_field();
-        let mut metadata2 = metadata1.clone();
-        metadata2.evm_word = TEST_EVM_WORDS[1];
-        // Swap the column infos of the two test slots.
-        metadata2.table_info[0] = metadata1.table_info[1].clone();
-        metadata2.table_info[1] = metadata1.table_info[0].clone();
+        // Initialize the second metadata with second column identifier.
+        let metadata2 = MetadataGadget::new(
+            metadata1.table_info.to_vec(),
+            slice::from_ref(&metadata1.table_info[1].identifier),
+            metadata1.num_actual_columns,
+            TEST_EVM_WORDS[1],
+        );
 
         let key_id = F::rand();
         let test_slots = [
@@ -760,6 +767,12 @@ mod tests {
 
     /// Generate a leaf proof.
     fn prove_leaf(params: &PublicParameters, node: Vec<u8>, test_slot: StorageSlotInfo) -> Vec<u8> {
+        let table_info = test_slot.metadata.table_info.to_vec();
+        let extracted_column_identifiers = table_info[..test_slot.metadata.num_extracted_columns]
+            .iter()
+            .map(|column_info| column_info.identifier)
+            .collect_vec();
+
         let input = match test_slot.slot {
             // Simple variable slot
             StorageSlot::Simple(slot) => CircuitInput::new_single_variable_leaf(
@@ -767,8 +780,8 @@ mod tests {
                 slot as u8,
                 test_slot.metadata.evm_word,
                 test_slot.metadata.num_actual_columns,
-                test_slot.metadata.num_extracted_columns,
-                test_slot.metadata.table_info.to_vec(),
+                &extracted_column_identifiers,
+                table_info,
             ),
             // Mapping variable
             StorageSlot::Mapping(mapping_key, slot) => CircuitInput::new_mapping_variable_leaf(
@@ -778,8 +791,8 @@ mod tests {
                 test_slot.outer_key_id,
                 test_slot.metadata.evm_word,
                 test_slot.metadata.num_actual_columns,
-                test_slot.metadata.num_extracted_columns,
-                test_slot.metadata.table_info.to_vec(),
+                &extracted_column_identifiers,
+                table_info,
             ),
             StorageSlot::Node(StorageSlotNode::Struct(parent, evm_word)) => match *parent {
                 // Simple Struct
@@ -788,8 +801,8 @@ mod tests {
                     slot as u8,
                     evm_word,
                     test_slot.metadata.num_actual_columns,
-                    test_slot.metadata.num_extracted_columns,
-                    test_slot.metadata.table_info.to_vec(),
+                    &extracted_column_identifiers,
+                    table_info,
                 ),
                 // Mapping Struct
                 StorageSlot::Mapping(mapping_key, slot) => CircuitInput::new_mapping_variable_leaf(
@@ -799,8 +812,8 @@ mod tests {
                     test_slot.outer_key_id,
                     test_slot.metadata.evm_word,
                     test_slot.metadata.num_actual_columns,
-                    test_slot.metadata.num_extracted_columns,
-                    test_slot.metadata.table_info.to_vec(),
+                    &extracted_column_identifiers,
+                    table_info,
                 ),
                 // Mapping of mappings Struct
                 StorageSlot::Node(StorageSlotNode::Mapping(grand, inner_mapping_key)) => {
@@ -815,8 +828,8 @@ mod tests {
                                 test_slot.inner_key_id,
                                 test_slot.metadata.evm_word,
                                 test_slot.metadata.num_actual_columns,
-                                test_slot.metadata.num_extracted_columns,
-                                test_slot.metadata.table_info.to_vec(),
+                                &extracted_column_identifiers,
+                                table_info,
                             )
                         }
                         _ => unreachable!(),

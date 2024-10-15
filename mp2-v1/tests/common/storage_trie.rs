@@ -5,6 +5,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
 };
+use itertools::Itertools;
 use log::debug;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot, StorageSlotNode},
@@ -202,6 +203,12 @@ impl TrieNode {
         let metadata = slot_info.metadata();
 
         // Build the leaf circuit input.
+        let table_info = slot_info.metadata().table_info().to_vec();
+        let extracted_column_identifiers = table_info
+            [..slot_info.metadata().num_extracted_columns()]
+            .iter()
+            .map(|column_info| column_info.identifier())
+            .collect_vec();
         let (name, input) = match slot_info.slot() {
             // Simple variable slot
             StorageSlot::Simple(slot) => (
@@ -211,8 +218,8 @@ impl TrieNode {
                     *slot as u8,
                     metadata.evm_word(),
                     metadata.num_actual_columns(),
-                    metadata.num_extracted_columns(),
-                    metadata.table_info().to_vec(),
+                    &extracted_column_identifiers,
+                    table_info,
                 ),
             ),
             // Mapping variable
@@ -225,8 +232,8 @@ impl TrieNode {
                     slot_info.outer_key_id(),
                     metadata.evm_word(),
                     metadata.num_actual_columns(),
-                    metadata.num_extracted_columns(),
-                    metadata.table_info().to_vec(),
+                    &extracted_column_identifiers,
+                    table_info,
                 ),
             ),
             StorageSlot::Node(StorageSlotNode::Struct(parent, evm_word)) => match &**parent {
@@ -238,8 +245,8 @@ impl TrieNode {
                         *slot as u8,
                         *evm_word,
                         metadata.num_actual_columns(),
-                        metadata.num_extracted_columns(),
-                        metadata.table_info().to_vec(),
+                        &extracted_column_identifiers,
+                        table_info,
                     ),
                 ),
                 // Mapping Struct
@@ -252,8 +259,8 @@ impl TrieNode {
                         slot_info.outer_key_id(),
                         metadata.evm_word(),
                         metadata.num_actual_columns(),
-                        metadata.num_extracted_columns(),
-                        metadata.table_info().to_vec(),
+                        &extracted_column_identifiers,
+                        table_info,
                     ),
                 ),
                 // Mapping of mappings Struct
@@ -270,8 +277,8 @@ impl TrieNode {
                                 slot_info.inner_key_id(),
                                 metadata.evm_word(),
                                 metadata.num_actual_columns(),
-                                metadata.num_extracted_columns(),
-                                metadata.table_info().to_vec(),
+                                &extracted_column_identifiers,
+                                table_info,
                             ),
                         ),
                         _ => unreachable!(),
