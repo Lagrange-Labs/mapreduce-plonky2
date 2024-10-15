@@ -24,7 +24,7 @@ use tracing::*;
 
 mod storages;
 
-const MAX_PGSQL_BIGINT: i64 = 9223372036854775807;
+const MAX_PGSQL_BIGINT: i64 = i64::MAX;
 
 /// A trait that must be implemented by a custom node key. This allows to
 /// (de)serialize any custom key to and fro a PgSQL BYTEA.
