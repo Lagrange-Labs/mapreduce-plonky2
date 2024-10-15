@@ -232,6 +232,9 @@ mod tests {
     };
     use crate::{
         tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
+        values_extraction::{
+            compute_leaf_mapping_metadata_digest, compute_leaf_mapping_values_digest,
+        },
         MAX_LEAF_NODE_LEN,
     };
     use eth_trie::{Nibbles, Trie};
@@ -258,6 +261,7 @@ mod tests {
     };
     use plonky2_ecgfp5::curve::scalar_field::Scalar;
     use std::array;
+    use verifiable_db::test_utils::MAX_NUM_COLUMNS;
 
     type LeafCircuit =
         LeafMappingCircuit<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
@@ -303,25 +307,34 @@ mod tests {
 
         let slot = storage_slot.slot();
         let evm_word = storage_slot.evm_offset();
+        let key_id = F::rand();
         let metadata =
             MetadataGadget::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
-        let mut metadata_digest = metadata.digest();
+        let extracted_column_identifiers = metadata.table_info[..metadata.num_extracted_columns]
+            .iter()
+            .map(|column_info| column_info.identifier)
+            .collect_vec();
+        let metadata_digest =
+            compute_leaf_mapping_metadata_digest::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                metadata.table_info.to_vec(),
+                &extracted_column_identifiers,
+                metadata.num_actual_columns,
+                evm_word,
+                slot,
+                key_id,
+            );
         // Compute the values digest.
-        let mut values_digest = ColumnGadgetData::<TEST_MAX_FIELD_PER_EVM>::new(
-            value
-                .clone()
-                .into_iter()
-                .map(F::from_canonical_u8)
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-            array::from_fn(|i| metadata.table_info[i].clone()),
-            metadata.num_extracted_columns,
-        )
-        .digest();
+        let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
+            &metadata_digest,
+            metadata.table_info.to_vec(),
+            &extracted_column_identifiers,
+            value.clone().try_into().unwrap(),
+            mapping_key.clone(),
+            evm_word,
+            key_id,
+        );
         let slot = MappingSlot::new(slot, mapping_key.clone());
-        let key_id = F::rand();
         let c = LeafCircuit {
             node: node.clone(),
             slot,
@@ -358,64 +371,9 @@ mod tests {
         }
         assert_eq!(pi.n(), F::ONE);
         // Check metadata digest
-        {
-            // TODO: Move to a common function.
-            // key_column_md = H( "KEY" || slot)
-            let key_id_prefix = u32::from_be_bytes(
-                once(0_u8)
-                    .chain(KEY_ID_PREFIX.iter().cloned())
-                    .collect_vec()
-                    .try_into()
-                    .unwrap(),
-            );
-            let inputs = vec![
-                F::from_canonical_u32(key_id_prefix),
-                F::from_canonical_u8(storage_slot.slot()),
-            ];
-            let key_column_md = H::hash_no_pad(&inputs);
-            // metadata_digest += D(key_column_md || key_id)
-            let inputs = key_column_md
-                .to_fields()
-                .into_iter()
-                .chain(once(key_id))
-                .collect_vec();
-            let metadata_key_digest = map_to_curve_point(&inputs);
-            metadata_digest += metadata_key_digest;
-
-            assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
-        }
+        assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
         // Check values digest
-        {
-            // TODO: Move to a common function.
-            // values_digest += evm_word == 0 ? D(key_id || pack(left_pad32(key))) : CURVE_ZERO
-            let packed_mapping_key = left_pad32(&mapping_key)
-                .pack(Endianness::Big)
-                .into_iter()
-                .map(F::from_canonical_u32);
-            if evm_word == 0 {
-                let inputs = iter::once(key_id)
-                    .chain(packed_mapping_key.clone())
-                    .collect_vec();
-                let values_key_digest = map_to_curve_point(&inputs);
-                values_digest += values_key_digest;
-            }
-            // row_unique_data = H(pack(left_pad32(key))
-            let row_unique_data = H::hash_no_pad(&packed_mapping_key.collect_vec());
-            // row_id = H2int(row_unique_data || metadata_digest)
-            let inputs = row_unique_data
-                .to_fields()
-                .into_iter()
-                .chain(metadata_digest.to_fields())
-                .collect_vec();
-            let hash = H::hash_no_pad(&inputs);
-            let row_id = hash_to_int_value(hash);
-
-            // value_digest = value_digest * row_id
-            let row_id = Scalar::from_noncanonical_biguint(row_id);
-            values_digest *= row_id;
-
-            assert_eq!(pi.values_digest(), values_digest.to_weierstrass());
-        }
+        assert_eq!(pi.values_digest(), values_digest.to_weierstrass());
     }
 
     #[test]

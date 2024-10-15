@@ -2,7 +2,6 @@
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
 use anyhow::Result;
-use futures::SinkExt;
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_v1::{
@@ -31,7 +30,7 @@ use crate::common::{
         CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TreeRowUpdate,
         TreeUpdateType,
     },
-    MetadataGadget, StorageSlotInfo, TestContext,
+    MetadataGadget, StorageSlotInfo, TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
 };
 
 use super::{
@@ -539,8 +538,12 @@ impl TestCase {
                     }
                 };
                 let slot_input = SlotInputs::Mapping(mapping.slot);
-                let metadata_hash =
-                    metadata_hash(slot_input, &self.contract_address, chain_id, vec![]);
+                let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot_input,
+                    &self.contract_address,
+                    chain_id,
+                    vec![],
+                );
                 // it's a compoound value type of proof since we're not using the length
                 (mapping_root_proof, true, None, metadata_hash)
             }
@@ -570,8 +573,12 @@ impl TestCase {
                     .map(|slot_info| slot_info.slot().slot())
                     .collect();
                 let slot_input = SlotInputs::Simple(slots);
-                let metadata_hash =
-                    metadata_hash(slot_input, &self.contract_address, chain_id, vec![]);
+                let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot_input,
+                    &self.contract_address,
+                    chain_id,
+                    vec![],
+                );
                 // we're just proving a single set of a value
                 (single_value_proof, false, None, metadata_hash)
             }

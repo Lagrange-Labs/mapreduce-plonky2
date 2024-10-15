@@ -83,7 +83,6 @@ impl TestContext {
         // Compute the column identifier. It's only one column for simple mapping values.
         let column_identifier = F::from_canonical_u64(identifier_for_mapping_key_column(
             slot,
-            evm_word,
             contract_address,
             chain_id,
             vec![],

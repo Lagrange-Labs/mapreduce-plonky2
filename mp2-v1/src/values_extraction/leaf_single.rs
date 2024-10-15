@@ -1,14 +1,11 @@
 //! Module handling the single variable inside a storage trie
 
-use crate::{
-    values_extraction::{
-        gadgets::{
-            column_gadget::ColumnGadget,
-            metadata_gadget::{MetadataGadget, MetadataTarget},
-        },
-        public_inputs::{PublicInputs, PublicInputsArgs},
+use crate::values_extraction::{
+    gadgets::{
+        column_gadget::ColumnGadget,
+        metadata_gadget::{MetadataGadget, MetadataTarget},
     },
-    MAX_LEAF_NODE_LEN,
+    public_inputs::{PublicInputs, PublicInputsArgs},
 };
 use anyhow::Result;
 use mp2_common::{
@@ -178,9 +175,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{super::gadgets::column_gadget::ColumnGadgetData, *};
+    use super::*;
     use crate::{
         tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
+        values_extraction::compute_leaf_single_values_digest,
         MAX_LEAF_NODE_LEN,
     };
     use eth_trie::{Nibbles, Trie};
@@ -189,9 +187,8 @@ mod tests {
         array::Array,
         eth::{StorageSlot, StorageSlotNode},
         mpt_sequential::utils::bytes_to_nibbles,
-        poseidon::{hash_to_int_value, H},
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{keccak256, Endianness, Packer, ToFields},
+        utils::{keccak256, Endianness, Packer},
         C, D, F,
     };
     use mp2_test::{
@@ -202,10 +199,7 @@ mod tests {
     use plonky2::{
         field::types::Field,
         iop::{target::Target, witness::PartialWitness},
-        plonk::config::Hasher,
     };
-    use plonky2_ecgfp5::curve::scalar_field::Scalar;
-    use std::array;
 
     type LeafCircuit =
         LeafSingleCircuit<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
@@ -256,18 +250,16 @@ mod tests {
         // Compute the metadata digest.
         let metadata_digest = metadata.digest();
         // Compute the values digest.
-        let mut values_digest = ColumnGadgetData::<TEST_MAX_FIELD_PER_EVM>::new(
-            value
-                .clone()
-                .into_iter()
-                .map(F::from_canonical_u8)
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-            array::from_fn(|i| metadata.table_info[i].clone()),
-            metadata.num_extracted_columns,
-        )
-        .digest();
+        let extracted_column_identifiers = metadata.table_info[..metadata.num_extracted_columns]
+            .iter()
+            .map(|column_info| column_info.identifier)
+            .collect_vec();
+        let values_digest = compute_leaf_single_values_digest::<TEST_MAX_FIELD_PER_EVM>(
+            &metadata_digest,
+            metadata.table_info.to_vec(),
+            &extracted_column_identifiers,
+            value.clone().try_into().unwrap(),
+        );
         let slot = SimpleSlot::new(slot);
         let c = LeafCircuit {
             node: node.clone(),
@@ -306,23 +298,7 @@ mod tests {
         // Check metadata digest
         assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
         // Check values digest
-        {
-            // TODO: Move to a common function.
-            // row_id = H2int(H("") || metadata_digest)
-            let inputs = empty_poseidon_hash()
-                .to_fields()
-                .into_iter()
-                .chain(metadata_digest.to_fields())
-                .collect_vec();
-            let hash = H::hash_no_pad(&inputs);
-            let row_id = hash_to_int_value(hash);
-
-            // value_digest = value_digest * row_id
-            let row_id = Scalar::from_noncanonical_biguint(row_id);
-            values_digest *= row_id;
-
-            assert_eq!(pi.values_digest(), values_digest.to_weierstrass());
-        }
+        assert_eq!(pi.values_digest(), values_digest.to_weierstrass());
     }
 
     #[test]

@@ -104,6 +104,11 @@ impl TableInfo {
                 SlotInputs::Simple(slots)
             }
         };
-        metadata_hash(slots, &self.contract_address, self.chain_id, vec![])
+        metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+            slots,
+            &self.contract_address,
+            self.chain_id,
+            vec![],
+        )
     }
 }

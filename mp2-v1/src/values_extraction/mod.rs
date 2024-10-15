@@ -1,11 +1,13 @@
 use alloy::primitives::Address;
-use gadgets::metadata_gadget::MetadataGadget;
+use gadgets::{
+    column_gadget::ColumnGadgetData, column_info::ColumnInfo, metadata_gadget::MetadataGadget,
+};
 use itertools::Itertools;
 use mp2_common::{
     eth::{left_pad32, StorageSlot},
     group_hashing::map_to_curve_point,
-    poseidon::H,
-    types::{MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
+    poseidon::{empty_poseidon_hash, hash_to_int_value, H},
+    types::MAPPING_LEAF_VALUE_LEN,
     utils::{Endianness, Packer, ToFields},
     F,
 };
@@ -13,9 +15,12 @@ use plonky2::{
     field::types::{Field, PrimeField64},
     plonk::config::Hasher,
 };
-use plonky2_ecgfp5::curve::curve::Point as Digest;
+use plonky2_ecgfp5::curve::{curve::Point as Digest, scalar_field::Scalar};
 use serde::{Deserialize, Serialize};
-use std::iter::once;
+use std::{
+    iter::{once, repeat},
+    usize,
+};
 
 pub mod api;
 mod branch;
@@ -177,6 +182,271 @@ fn compute_id_with_prefix(
     H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
 }
 
+/// Compute the metadata digest for single variable leaf.
+pub fn compute_leaf_single_metadata_digest<
+    const MAX_COLUMNS: usize,
+    const MAX_FIELD_PER_EVM: usize,
+>(
+    table_info: Vec<ColumnInfo>,
+    extracted_column_identifiers: &[F],
+    num_actual_columns: usize,
+    evm_word: u32,
+) -> Digest {
+    MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
+        table_info,
+        extracted_column_identifiers,
+        num_actual_columns,
+        evm_word,
+    )
+    .digest()
+}
+
+/// Compute the values digest for single variable leaf.
+pub fn compute_leaf_single_values_digest<const MAX_FIELD_PER_EVM: usize>(
+    metadata_digest: &Digest,
+    table_info: Vec<ColumnInfo>,
+    extracted_column_identifiers: &[F],
+    value: [u8; MAPPING_LEAF_VALUE_LEN],
+) -> Digest {
+    let values_digest =
+        ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
+            .digest();
+
+    // row_id = H2int(H("") || metadata_digest)
+    let inputs = empty_poseidon_hash()
+        .to_fields()
+        .into_iter()
+        .chain(metadata_digest.to_fields())
+        .collect_vec();
+    let hash = H::hash_no_pad(&inputs);
+    let row_id = hash_to_int_value(hash);
+
+    // value_digest * row_id
+    let row_id = Scalar::from_noncanonical_biguint(row_id);
+    values_digest * row_id
+}
+
+/// Compute the metadata digest for mapping variable leaf.
+pub fn compute_leaf_mapping_metadata_digest<
+    const MAX_COLUMNS: usize,
+    const MAX_FIELD_PER_EVM: usize,
+>(
+    table_info: Vec<ColumnInfo>,
+    extracted_column_identifiers: &[F],
+    num_actual_columns: usize,
+    evm_word: u32,
+    slot: u8,
+    key_id: F,
+) -> Digest {
+    let metadata_digest = MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
+        table_info,
+        extracted_column_identifiers,
+        num_actual_columns,
+        evm_word,
+    )
+    .digest();
+
+    // key_column_md = H( "KEY" || slot)
+    let key_id_prefix = u32::from_be_bytes(
+        once(0_u8)
+            .chain(KEY_ID_PREFIX.iter().cloned())
+            .collect_vec()
+            .try_into()
+            .unwrap(),
+    );
+    let inputs = vec![
+        F::from_canonical_u32(key_id_prefix),
+        F::from_canonical_u8(slot),
+    ];
+    let key_column_md = H::hash_no_pad(&inputs);
+    // metadata_digest += D(key_column_md || key_id)
+    let inputs = key_column_md
+        .to_fields()
+        .into_iter()
+        .chain(once(key_id))
+        .collect_vec();
+    let metadata_key_digest = map_to_curve_point(&inputs);
+
+    metadata_digest + metadata_key_digest
+}
+
+/// Compute the values digest for mapping variable leaf.
+pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
+    metadata_digest: &Digest,
+    table_info: Vec<ColumnInfo>,
+    extracted_column_identifiers: &[F],
+    value: [u8; MAPPING_LEAF_VALUE_LEN],
+    mapping_key: Vec<u8>,
+    evm_word: u32,
+    key_id: F,
+) -> Digest {
+    let mut values_digest =
+        ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
+            .digest();
+
+    // values_digest += evm_word == 0 ? D(key_id || pack(left_pad32(key))) : CURVE_ZERO
+    let packed_mapping_key = left_pad32(&mapping_key)
+        .pack(Endianness::Big)
+        .into_iter()
+        .map(F::from_canonical_u32);
+    if evm_word == 0 {
+        let inputs = once(key_id).chain(packed_mapping_key.clone()).collect_vec();
+        let values_key_digest = map_to_curve_point(&inputs);
+        values_digest += values_key_digest;
+    }
+    // row_unique_data = H(pack(left_pad32(key))
+    let row_unique_data = H::hash_no_pad(&packed_mapping_key.collect_vec());
+    // row_id = H2int(row_unique_data || metadata_digest)
+    let inputs = row_unique_data
+        .to_fields()
+        .into_iter()
+        .chain(metadata_digest.to_fields())
+        .collect_vec();
+    let hash = H::hash_no_pad(&inputs);
+    let row_id = hash_to_int_value(hash);
+
+    // value_digest * row_id
+    let row_id = Scalar::from_noncanonical_biguint(row_id);
+    values_digest * row_id
+}
+
+/// Compute the metadata digest for mapping of mappings leaf.
+pub fn compute_leaf_mapping_of_mappings_metadata_digest<
+    const MAX_COLUMNS: usize,
+    const MAX_FIELD_PER_EVM: usize,
+>(
+    table_info: Vec<ColumnInfo>,
+    extracted_column_identifiers: &[F],
+    num_actual_columns: usize,
+    evm_word: u32,
+    slot: u8,
+    outer_key_id: F,
+    inner_key_id: F,
+) -> Digest {
+    let metadata_digest = MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
+        table_info,
+        extracted_column_identifiers,
+        num_actual_columns,
+        evm_word,
+    )
+    .digest();
+
+    // Compute the outer and inner key metadata digests.
+    let [outer_key_digest, inner_key_digest] = [
+        (OUTER_KEY_ID_PREFIX, outer_key_id),
+        (INNER_KEY_ID_PREFIX, inner_key_id),
+    ]
+    .map(|(prefix, key_id)| {
+        let prefix = u64::from_be_bytes(
+            repeat(0_u8)
+                .take(8 - prefix.len())
+                .chain(prefix.iter().cloned())
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        );
+
+        // key_column_md = H(KEY_ID_PREFIX || slot)
+        let inputs = vec![F::from_canonical_u64(prefix), F::from_canonical_u8(slot)];
+        let key_column_md = H::hash_no_pad(&inputs);
+
+        // key_digest = D(key_column_md || key_id)
+        let inputs = key_column_md
+            .to_fields()
+            .into_iter()
+            .chain(once(key_id))
+            .collect_vec();
+        map_to_curve_point(&inputs)
+    });
+
+    // Add the outer and inner key digests into the metadata digest.
+    // metadata_digest + outer_key_digest + inner_key_digest
+    metadata_digest + inner_key_digest + outer_key_digest
+}
+
+/// Compute the values digest for mapping of mappings leaf.
+pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: usize>(
+    metadata_digest: &Digest,
+    table_info: Vec<ColumnInfo>,
+    extracted_column_identifiers: &[F],
+    value: [u8; MAPPING_LEAF_VALUE_LEN],
+    evm_word: u32,
+    outer_mapping_key: Vec<u8>,
+    inner_mapping_key: Vec<u8>,
+    outer_key_id: F,
+    inner_key_id: F,
+) -> Digest {
+    let mut values_digest =
+        ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
+            .digest();
+
+    // Compute the outer and inner key values digests.
+    let [packed_outer_key, packed_inner_key] = [outer_mapping_key, inner_mapping_key].map(|key| {
+        left_pad32(&key)
+            .pack(Endianness::Big)
+            .into_iter()
+            .map(F::from_canonical_u32)
+    });
+    if evm_word == 0 {
+        let [outer_key_digest, inner_key_digest] = [
+            (outer_key_id, packed_outer_key.clone()),
+            (inner_key_id, packed_inner_key.clone()),
+        ]
+        .map(|(key_id, packed_key)| {
+            // D(key_id || pack(key))
+            let inputs = once(key_id).chain(packed_key).collect_vec();
+            map_to_curve_point(&inputs)
+        });
+        // values_digest += outer_key_digest + inner_key_digest
+        values_digest += inner_key_digest + outer_key_digest;
+    }
+
+    // Compute the unique data to identify a row is the mapping key:
+    // row_unique_data = H(outer_key || inner_key)
+    let inputs = packed_outer_key.chain(packed_inner_key).collect_vec();
+    let row_unique_data = H::hash_no_pad(&inputs);
+    // row_id = H2int(row_unique_data || metadata_digest)
+    let inputs = row_unique_data
+        .to_fields()
+        .into_iter()
+        .chain(metadata_digest.to_fields())
+        .collect_vec();
+    let hash = H::hash_no_pad(&inputs);
+    let row_id = hash_to_int_value(hash);
+
+    // values_digest = values_digest * row_id
+    let row_id = Scalar::from_noncanonical_biguint(row_id);
+    values_digest * row_id
+}
+
+/*
+// gupeng
+/// Calculate `metadata_digest = D(id || slot)` for single variable leaf.
+pub fn compute_leaf_single_metadata_digest(id: u64, slot: u8) -> Digest {
+    map_to_curve_point(&[F::from_canonical_u64(id), F::from_canonical_u8(slot)])
+}
+
+/// Calculate `values_digest = D(id || value)` for single variable leaf.
+pub fn compute_leaf_single_values_digest(id: u64, value: &[u8]) -> Digest {
+    assert!(value.len() <= MAPPING_LEAF_VALUE_LEN);
+
+    let packed_value = left_pad32(value).pack(Endianness::Big).to_fields();
+
+    let inputs: Vec<_> = once(F::from_canonical_u64(id))
+        .chain(packed_value)
+        .collect();
+    map_to_curve_point(&inputs)
+}
+
+/// Calculate `metadata_digest = D(key_id || value_id || slot)` for mapping variable leaf.
+pub fn compute_leaf_mapping_metadata_digest(key_id: u64, value_id: u64, slot: u8) -> Digest {
+    map_to_curve_point(&[
+        F::from_canonical_u64(key_id),
+        F::from_canonical_u64(value_id),
+        F::from_canonical_u8(slot),
+    ])
+}
+
 /// Calculate `values_digest = D(D(key_id || key) + D(value_id || value))` for mapping variable leaf.
 pub fn compute_leaf_mapping_values_digest(
     key_id: u64,
@@ -209,29 +479,4 @@ pub fn compute_leaf_mapping_values_digest(
         .collect();
     map_to_curve_point(&inputs)
 }
-
-/// Calculate `values_digest = D(id || value)` for single variable leaf.
-pub fn compute_leaf_single_values_digest(id: u64, value: &[u8]) -> Digest {
-    assert!(value.len() <= MAPPING_LEAF_VALUE_LEN);
-
-    let packed_value = left_pad32(value).pack(Endianness::Big).to_fields();
-
-    let inputs: Vec<_> = once(F::from_canonical_u64(id))
-        .chain(packed_value)
-        .collect();
-    map_to_curve_point(&inputs)
-}
-
-/// Calculate `metadata_digest = D(id || slot)` for single variable leaf.
-pub fn compute_leaf_single_metadata_digest(id: u64, slot: u8) -> Digest {
-    map_to_curve_point(&[F::from_canonical_u64(id), F::from_canonical_u8(slot)])
-}
-
-/// Calculate `metadata_digest = D(key_id || value_id || slot)` for mapping variable leaf.
-pub fn compute_leaf_mapping_metadata_digest(key_id: u64, value_id: u64, slot: u8) -> Digest {
-    map_to_curve_point(&[
-        F::from_canonical_u64(key_id),
-        F::from_canonical_u64(value_id),
-        F::from_canonical_u8(slot),
-    ])
-}
+*/

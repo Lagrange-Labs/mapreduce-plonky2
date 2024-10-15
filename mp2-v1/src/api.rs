@@ -1,6 +1,6 @@
 //! Main APIs and related structures
 
-use std::iter::once;
+use std::{iter::once, slice};
 
 use crate::{
     block_extraction,
@@ -11,8 +11,8 @@ use crate::{
     },
     values_extraction::{
         self, compute_leaf_mapping_metadata_digest, compute_leaf_single_metadata_digest,
-        identifier_block_column, identifier_for_mapping_key_column,
-        identifier_for_mapping_value_column, identifier_single_var_column,
+        gadgets::column_info::ColumnInfo, identifier_block_column,
+        identifier_for_mapping_key_column, identifier_single_var_column,
     },
 };
 use alloy::primitives::Address;
@@ -21,10 +21,12 @@ use itertools::Itertools;
 use mp2_common::{
     mpt_sequential::PAD_LEN,
     poseidon::H,
-    types::HashOutput,
+    types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Fieldable, ToFields},
+    F,
 };
 use plonky2::{
+    field::types::Field,
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };
@@ -211,7 +213,7 @@ pub enum SlotInputs {
 
 /// Compute metadata hash for a table related to the provided inputs slots of the contract with
 /// address `contract_address`
-pub fn metadata_hash(
+pub fn metadata_hash<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
     slot_input: SlotInputs,
     contract_address: &Address,
     chain_id: u64,
@@ -219,19 +221,64 @@ pub fn metadata_hash(
 ) -> MetadataHash {
     // closure to compute the metadata digest associated to a mapping variable
     let metadata_digest_mapping = |slot| {
-        let key_id =
-            identifier_for_mapping_key_column(slot, contract_address, chain_id, extra.clone());
-        let value_id =
-            identifier_for_mapping_value_column(slot, contract_address, chain_id, extra.clone());
-        compute_leaf_mapping_metadata_digest(key_id, value_id, slot)
+        // TODO: Need to check. We use length of `32` to compute the table metadata hash for now.
+        let length = F::from_canonical_usize(MAPPING_LEAF_VALUE_LEN);
+        let key_id = F::from_canonical_u64(identifier_for_mapping_key_column(
+            slot,
+            contract_address,
+            chain_id,
+            extra.clone(),
+        ));
+        // TODO: Need to check. We use `key_id` also as the column identifier.
+        let column_info = ColumnInfo::new(
+            F::from_canonical_u8(slot),
+            key_id,
+            F::ZERO,
+            F::ZERO,
+            length,
+            F::ZERO,
+        );
+        let column_identifier = column_info.identifier;
+        compute_leaf_mapping_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
+            vec![column_info],
+            slice::from_ref(&column_identifier),
+            1,
+            0,
+            slot,
+            key_id,
+        )
     };
     let digest = match slot_input {
-        SlotInputs::Simple(slots) => slots.iter().fold(Point::NEUTRAL, |acc, &slot| {
-            let id =
-                identifier_single_var_column(slot, 0, contract_address, chain_id, extra.clone());
-            let digest = compute_leaf_single_metadata_digest(id, slot);
-            acc + digest
-        }),
+        SlotInputs::Simple(slots) => {
+            let table_info = slots
+                .into_iter()
+                .map(|slot| {
+                    let identifier = F::from_canonical_u64(identifier_single_var_column(
+                        slot,
+                        0,
+                        contract_address,
+                        chain_id,
+                        vec![],
+                    ));
+
+                    let slot = F::from_canonical_u8(slot);
+                    // TODO: We use length of `32` to compute the table metadata hash here.
+                    let length = F::from_canonical_usize(MAPPING_LEAF_VALUE_LEN);
+
+                    ColumnInfo::new(slot, identifier, F::ZERO, F::ZERO, length, F::ZERO)
+                })
+                .collect_vec();
+            let num_actual_columns = table_info.len();
+            table_info.iter().fold(Point::NEUTRAL, |acc, column_info| {
+                let digest = compute_leaf_single_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
+                    table_info.clone(),
+                    slice::from_ref(&column_info.identifier),
+                    num_actual_columns,
+                    0,
+                );
+                acc + digest
+            })
+        }
         SlotInputs::Mapping(slot) => metadata_digest_mapping(slot),
         SlotInputs::MappingWithLength(mapping_slot, length_slot) => {
             let mapping_digest = metadata_digest_mapping(mapping_slot);
