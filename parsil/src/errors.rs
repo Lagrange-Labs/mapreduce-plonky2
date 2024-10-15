@@ -3,12 +3,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ValidationError {
-    // HACK: refuse non-aggregated queries
-    #[error(
-        "only aggregated query projections are supported for now, e.g. `SELECT AVG(x) FROM ...`"
-    )]
-    TabularQuery,
-
     #[error("query projection must not mix aggregates and scalars")]
     MixedQuery,
 
