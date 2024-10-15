@@ -126,13 +126,8 @@ impl TestContext {
 
             // TODO: Check if we could use the column identifier as the
             // outer key ID for mapping values.
-            let outer_key_id = column_identifier;
-            let slot_info = StorageSlotInfo::new(
-                sslot,
-                metadata.clone(),
-                outer_key_id,
-                F::from_canonical_u32(evm_word),
-            );
+            let outer_key_id = Some(column_identifier);
+            let slot_info = StorageSlotInfo::new(sslot, metadata.clone(), outer_key_id, None);
             trie.add_slot(slot_info, nodes);
         }
 

@@ -550,8 +550,8 @@ mod tests {
         );
 
         let test_slots = [
-            StorageSlotInfo::new(storage_slot1, metadata1, F::rand(), F::rand()),
-            StorageSlotInfo::new(storage_slot2, metadata2, F::rand(), F::rand()),
+            StorageSlotInfo::new(storage_slot1, metadata1, None, None),
+            StorageSlotInfo::new(storage_slot2, metadata2, None, None),
         ];
 
         test_api(test_slots);
@@ -587,8 +587,8 @@ mod tests {
         );
 
         let test_slots = [
-            StorageSlotInfo::new(storage_slot1, metadata1, F::rand(), F::rand()),
-            StorageSlotInfo::new(storage_slot2, metadata2, F::rand(), F::rand()),
+            StorageSlotInfo::new(storage_slot1, metadata1, None, None),
+            StorageSlotInfo::new(storage_slot2, metadata2, None, None),
         ];
 
         test_api(test_slots);
@@ -614,10 +614,10 @@ mod tests {
         // The first and second column infos are same (only for testing).
         let metadata2 = metadata1.clone();
 
-        let key_id = F::rand();
+        let key_id = Some(F::rand());
         let test_slots = [
-            StorageSlotInfo::new(storage_slot1, metadata1, key_id, F::rand()),
-            StorageSlotInfo::new(storage_slot2, metadata2, key_id, F::rand()),
+            StorageSlotInfo::new(storage_slot1, metadata1, key_id, None),
+            StorageSlotInfo::new(storage_slot2, metadata2, key_id, None),
         ];
 
         test_api(test_slots);
@@ -652,10 +652,10 @@ mod tests {
             TEST_EVM_WORDS[1],
         );
 
-        let key_id = F::rand();
+        let key_id = Some(F::rand());
         let test_slots = [
-            StorageSlotInfo::new(storage_slot1, metadata1, key_id, F::rand()),
-            StorageSlotInfo::new(storage_slot2, metadata2, key_id, F::rand()),
+            StorageSlotInfo::new(storage_slot1, metadata1, key_id, None),
+            StorageSlotInfo::new(storage_slot2, metadata2, key_id, None),
         ];
 
         test_api(test_slots);
@@ -689,8 +689,8 @@ mod tests {
         metadata2.table_info[0] = metadata1.table_info[1].clone();
         metadata2.table_info[1] = metadata1.table_info[0].clone();
 
-        let outer_key_id = F::rand();
-        let inner_key_id = F::rand();
+        let outer_key_id = Some(F::rand());
+        let inner_key_id = Some(F::rand());
         let test_slots = [
             StorageSlotInfo::new(storage_slot1, metadata1, outer_key_id, inner_key_id),
             StorageSlotInfo::new(storage_slot2, metadata2, outer_key_id, inner_key_id),
@@ -708,7 +708,7 @@ mod tests {
 
         let storage_slot = StorageSlot::Simple(TEST_SLOT as usize);
         let metadata = MetadataGadget::sample(TEST_SLOT, 0);
-        let test_slot = StorageSlotInfo::new(storage_slot, metadata, F::rand(), F::rand());
+        let test_slot = StorageSlotInfo::new(storage_slot, metadata, None, None);
 
         test_branch_with_multiple_children(NUM_CHILDREN, test_slot);
     }

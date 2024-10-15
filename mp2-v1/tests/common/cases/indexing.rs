@@ -1371,7 +1371,7 @@ fn single_var_slot_info(contract_address: &Address, chain_id: u64) -> Vec<Storag
                 0,
             );
 
-            StorageSlotInfo::new(slot, metadata, F::ZERO, F::ZERO)
+            StorageSlotInfo::new(slot, metadata, None, None)
         })
         .collect_vec()
 }

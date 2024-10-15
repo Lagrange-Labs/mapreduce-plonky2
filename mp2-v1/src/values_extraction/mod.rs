@@ -56,9 +56,11 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     pub fn new(
         slot: StorageSlot,
         metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-        outer_key_id: F,
-        inner_key_id: F,
+        outer_key_id: Option<F>,
+        inner_key_id: Option<F>,
     ) -> Self {
+        let [outer_key_id, inner_key_id] =
+            [outer_key_id, inner_key_id].map(|key_id| key_id.unwrap_or_default());
         Self {
             slot,
             metadata,
