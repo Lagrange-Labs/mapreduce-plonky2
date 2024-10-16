@@ -186,7 +186,7 @@ pub fn compute_leaf_single_metadata_digest<
 >(
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[u64],
-    evm_word: usize,
+    evm_word: u32,
 ) -> Digest {
     MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
         table_info,
@@ -228,7 +228,7 @@ pub fn compute_leaf_mapping_metadata_digest<
 >(
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[u64],
-    evm_word: usize,
+    evm_word: u32,
     slot: u8,
     key_id: u64,
 ) -> Digest {
@@ -264,7 +264,7 @@ pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
     extracted_column_identifiers: &[u64],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
     mapping_key: Vec<u8>,
-    evm_word: usize,
+    evm_word: u32,
     key_id: u64,
 ) -> Digest {
     let mut values_digest =
@@ -306,7 +306,7 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
 >(
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[u64],
-    evm_word: usize,
+    evm_word: u32,
     slot: u8,
     outer_key_id: u64,
     inner_key_id: u64,
@@ -349,7 +349,7 @@ pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: u
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[u64],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
-    evm_word: usize,
+    evm_word: u32,
     outer_mapping_key: Vec<u8>,
     inner_mapping_key: Vec<u8>,
     outer_key_id: u64,

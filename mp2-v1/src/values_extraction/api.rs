@@ -67,7 +67,7 @@ where
     pub fn new_single_variable_leaf(
         node: Vec<u8>,
         slot: u8,
-        evm_word: usize,
+        evm_word: u32,
         extracted_column_identifiers: &[u64],
         table_info: Vec<ColumnInfo>,
     ) -> Self {
@@ -87,7 +87,7 @@ where
         slot: u8,
         mapping_key: Vec<u8>,
         key_id: u64,
-        evm_word: usize,
+        evm_word: u32,
         extracted_column_identifiers: &[u64],
         table_info: Vec<ColumnInfo>,
     ) -> Self {
@@ -112,7 +112,7 @@ where
         inner_key: Vec<u8>,
         outer_key_id: u64,
         inner_key_id: u64,
-        evm_word: usize,
+        evm_word: u32,
         extracted_column_identifiers: &[u64],
         table_info: Vec<ColumnInfo>,
     ) -> Self {
@@ -554,7 +554,7 @@ mod tests {
     #[test]
     fn test_values_extraction_api_single_struct() {
         const TEST_SLOT: u8 = 2;
-        const TEST_EVM_WORDS: [usize; 2] = [10, 20];
+        const TEST_EVM_WORDS: [u32; 2] = [10, 20];
 
         let _ = env_logger::try_init();
 
@@ -621,7 +621,7 @@ mod tests {
     #[test]
     fn test_values_extraction_api_mapping_struct() {
         const TEST_SLOT: u8 = 2;
-        const TEST_EVM_WORDS: [usize; 2] = [10, 20];
+        const TEST_EVM_WORDS: [u32; 2] = [10, 20];
 
         let _ = env_logger::try_init();
 
@@ -660,7 +660,7 @@ mod tests {
     #[test]
     fn test_values_extraction_api_mapping_of_mappings() {
         const TEST_SLOT: u8 = 2;
-        const TEST_EVM_WORDS: [usize; 2] = [10, 20];
+        const TEST_EVM_WORDS: [u32; 2] = [10, 20];
 
         let _ = env_logger::try_init();
 
@@ -714,7 +714,7 @@ mod tests {
     #[test]
     fn test_values_extraction_api_serialization() {
         const TEST_SLOT: u8 = 10;
-        const TEST_EVM_WORD: usize = 5;
+        const TEST_EVM_WORD: u32 = 5;
         const TEST_OUTER_KEY: [u8; 2] = [10, 20];
         const TEST_INNER_KEY: [u8; 3] = [30, 40, 50];
 

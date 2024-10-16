@@ -125,7 +125,7 @@ pub enum StorageSlotNode {
     /// Mapping entry including a parent node and the mapping key
     Mapping(Box<StorageSlot>, Vec<u8>),
     /// Struct entry including a parent node and EVM offset
-    Struct(Box<StorageSlot>, usize),
+    Struct(Box<StorageSlot>, u32),
 }
 
 impl StorageSlotNode {
@@ -141,7 +141,7 @@ impl StorageSlotNode {
         Ok(Self::Mapping(parent, mapping_key))
     }
 
-    pub fn new_struct(parent: StorageSlot, evm_offset: usize) -> Self {
+    pub fn new_struct(parent: StorageSlot, evm_offset: u32) -> Self {
         let parent = Box::new(parent);
 
         Self::Struct(parent, evm_offset)
@@ -178,7 +178,7 @@ impl StorageSlot {
             StorageSlot::Node(node) => node.parent().slot(),
         }
     }
-    pub fn evm_offset(&self) -> usize {
+    pub fn evm_offset(&self) -> u32 {
         match self {
             // Only the Struct storage has the EVM offset.
             StorageSlot::Node(StorageSlotNode::Struct(_, evm_offset)) => *evm_offset,

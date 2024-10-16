@@ -44,12 +44,13 @@ impl ColumnInfo {
         byte_offset: usize,
         bit_offset: usize,
         length: usize,
-        evm_word: usize,
+        evm_word: u32,
     ) -> Self {
         let slot = F::from_canonical_u8(slot);
         let identifier = F::from_canonical_u64(identifier);
-        let [byte_offset, bit_offset, length, evm_word] =
-            [byte_offset, bit_offset, length, evm_word].map(F::from_canonical_usize);
+        let [byte_offset, bit_offset, length] =
+            [byte_offset, bit_offset, length].map(F::from_canonical_usize);
+        let evm_word = F::from_canonical_u32(evm_word);
 
         Self {
             slot,

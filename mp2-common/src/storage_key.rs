@@ -131,7 +131,7 @@ impl KeccakMPT {
         wires: &KeccakMPTWires,
         inputs: Vec<u8>,
         base: [u8; HASH_LEN],
-        offset: usize,
+        offset: u32,
     ) {
         // Assign the Keccak necessary values for base.
         KeccakCircuit::<{ INPUT_PADDED_LEN }>::assign_byte_keccak(
@@ -295,7 +295,7 @@ impl SimpleSlot {
         &self,
         pw: &mut PartialWitness<F>,
         wires: &SimpleSlotWires,
-        offset: usize,
+        offset: u32,
     ) {
         let slot = match self.0 {
             // Safe downcasting because it's assumed to be u8 in constructor.
@@ -503,7 +503,7 @@ impl MappingSlot {
         &self,
         pw: &mut PartialWitness<F>,
         wires: &MappingSlotWires,
-        offset: usize,
+        offset: u32,
     ) {
         pw.set_target(wires.mapping_slot, F::from_canonical_u8(self.mapping_slot));
 
@@ -523,7 +523,7 @@ impl MappingSlot {
         pw: &mut PartialWitness<F>,
         wires: &MappingOfMappingsSlotWires,
         inner_key: &[u8],
-        offset: usize,
+        offset: u32,
     ) {
         pw.set_target(wires.mapping_slot, F::from_canonical_u8(self.mapping_slot));
 
@@ -616,7 +616,7 @@ mod test {
     #[derive(Clone, Debug)]
     struct TestSimpleSlotWithOffset {
         slot: u8,
-        evm_offset: usize,
+        evm_offset: u32,
     }
 
     impl UserCircuit<F, D> for TestSimpleSlotWithOffset {
@@ -639,7 +639,7 @@ mod test {
             let storage_slot =
                 StorageSlot::Node(StorageSlotNode::new_struct(parent, self.evm_offset));
 
-            pw.set_target(wires.0, F::from_canonical_usize(self.evm_offset));
+            pw.set_target(wires.0, F::from_canonical_u32(self.evm_offset));
             circuit.assign(pw, &wires.1, self.evm_offset);
             wires.2.assign_bytes(pw, &storage_slot.mpt_nibbles());
         }
@@ -743,7 +743,7 @@ mod test {
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             pw.set_target(wires.0, F::from_canonical_u32(self.evm_offset));
             self.mapping_slot
-                .assign_mapping_slot(pw, &wires.1, self.evm_offset as usize);
+                .assign_mapping_slot(pw, &wires.1, self.evm_offset);
             wires
                 .2
                 .assign_bytes(pw, &self.exp_mpt_key.clone().try_into().unwrap());
@@ -758,8 +758,7 @@ mod test {
         let evm_offset = rng.gen();
         let mapping_key = random_vector(16);
         let parent = StorageSlot::Mapping(mapping_key.clone(), slot as usize);
-        let storage_slot =
-            StorageSlot::Node(StorageSlotNode::new_struct(parent, evm_offset as usize));
+        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(parent, evm_offset));
         let mpt_key = storage_slot.mpt_key_vec();
 
         let circuit = TestMappingSlotWithOffset {
@@ -811,7 +810,7 @@ mod test {
                 pw,
                 &wires.1,
                 &self.inner_key,
-                self.evm_offset as usize,
+                self.evm_offset,
             );
             wires
                 .2
@@ -829,8 +828,7 @@ mod test {
         let grand = StorageSlot::Mapping(outer_key.clone(), slot as usize);
         let parent =
             StorageSlot::Node(StorageSlotNode::new_mapping(grand, inner_key.clone()).unwrap());
-        let storage_slot =
-            StorageSlot::Node(StorageSlotNode::new_struct(parent, evm_offset as usize));
+        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(parent, evm_offset));
         let mpt_key = storage_slot.mpt_key_vec();
 
         let circuit = TestMappingSlotWithInnerOffset {

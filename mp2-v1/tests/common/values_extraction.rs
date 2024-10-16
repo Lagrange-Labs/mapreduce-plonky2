@@ -69,7 +69,7 @@ impl TestContext {
         contract_address: &Address,
         chain_id: u64,
         slot: u8,
-        evm_word: usize,
+        evm_word: u32,
         length: usize,
         mapping_keys: Vec<MappingKey>,
     ) -> Vec<u8> {
