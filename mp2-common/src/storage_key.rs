@@ -148,11 +148,14 @@ pub struct SimpleSlotWires {
 // TODO: refactor to extract common functions with MappingSlot.
 impl SimpleSlot {
     /// Derive the MPT key in circuit according to simple storage slot.
+    ///
     /// Remember the rules to get the MPT key is as follow:
     /// * location = pad32(slot)
     /// * mpt_key = keccak256(location)
+    ///
     /// Note the simple slot wire and the contract address wires are NOT range
     /// checked, because they are expected to be given by the verifier.
+    ///
     /// If that assumption is not true, then the caller should call
     /// `b.range_check(slot, 8)` to ensure its byteness.
     pub fn build<F: RichField + Extendable<D>, const D: usize>(
