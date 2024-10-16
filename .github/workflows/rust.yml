@@ -41,7 +41,7 @@ jobs:
 
       - name: clippy
         run: |
-            docker run --rm base cargo clippy --all-targets --all -- -D warnings -A incomplete-features -A clippy::needless_return
+            docker run --rm base cargo clippy --all-targets --all -- -D warnings -A incomplete-features -A clippy::needless_return -A clippy::too_long_first_doc_paragraph 
       - name: fmt
         run: |
             docker run --rm base cargo fmt --all -- --check
