@@ -29,8 +29,8 @@
 //!
 //! Therefore determining the parent of a node of general value x is achieved by:
 //!   1. determine the layer i to which x belongs, which is the smaller power of
-//!   2 to which x is congruent, i.e. the number of trailing zeros in its binary
-//!     representation;
+//!      2 to which x is congruent, i.e. the number of trailing zeros in its binary
+//!      representation;
 //!   2. determine x rank n in the layer l^i, which is equal to (x - 2^i)/2^(i+1);
 //!   3. if n is even then x parent is n + 2^i, or n - 2^i if n is odd.
 //!
@@ -168,11 +168,7 @@ impl State {
 
     pub fn node_context(&self, k: &NodeIdx) -> Option<NodeContext<NodeIdx>> {
         if let Some(inner) = self.node_context_inner(&self.inner_idx(*k)) {
-            let parent_outer = if let Some(parent) = inner.parent {
-                Some(self.outer_idx(parent))
-            } else {
-                None
-            };
+            let parent_outer = inner.parent.map(|parent| self.outer_idx(parent));
 
             let left_outer = inner.left.map(|left| self.outer_idx(left));
             let right_outer = inner.right.map(|right| self.outer_idx(right));
@@ -494,7 +490,7 @@ impl PrintableTree for Tree {
     }
 
     // TODO: Leave the warning for `k`, since we will implement it later.
-    async fn subtree_to_string<S: TreeStorage<Self>>(&self, s: &S, k: &Self::Key) -> String {
+    async fn subtree_to_string<S: TreeStorage<Self>>(&self, s: &S, _k: &Self::Key) -> String {
         self.tree_to_string(s).await
     }
 }
