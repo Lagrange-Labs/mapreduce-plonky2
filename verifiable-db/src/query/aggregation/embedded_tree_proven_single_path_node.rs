@@ -339,7 +339,7 @@ mod tests {
         embedded_tree_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestEmbeddedTreeProvenSinglePathNodeCircuit<'a> {
+    impl UserCircuit<F, D> for TestEmbeddedTreeProvenSinglePathNodeCircuit<'_> {
         type Wires = (
             EmbeddedTreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
             Vec<Target>,

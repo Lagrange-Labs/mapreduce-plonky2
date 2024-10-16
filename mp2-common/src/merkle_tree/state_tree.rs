@@ -44,7 +44,7 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
     ///
     /// - `leaf_data` will be the preimage of the node of the branch at depth `0`.
     /// - `siblings` will be the full Merkle path up to [MAX_DEPTH]; the remainder nodes will be
-    /// ignored.
+    ///   ignored.
     /// - `positions` will be bits path up to [MAX_DEPTH]; the remainder items will be ignored.
     /// - `depth` will be the variable depth to be proven.
     pub fn build<F, const D: usize>(
