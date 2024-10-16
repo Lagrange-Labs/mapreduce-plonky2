@@ -22,7 +22,7 @@ use itertools::Itertools;
 use mp2_common::{
     digest::Digest,
     poseidon::H,
-    types::{HashOutput, EVM_WORD_LEN, MAPPING_LEAF_VALUE_LEN},
+    types::{HashOutput, EVM_WORD_LEN},
     utils::{Fieldable, ToFields},
     F,
 };
@@ -252,12 +252,10 @@ fn value_metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
                     ColumnInfo::new(slot, identifier, F::ZERO, F::ZERO, length, F::ZERO)
                 })
                 .collect_vec();
-            let num_actual_columns = table_info.len();
             table_info.iter().fold(Point::NEUTRAL, |acc, column_info| {
                 let digest = compute_leaf_single_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
                     table_info.clone(),
                     slice::from_ref(&column_info.identifier),
-                    num_actual_columns,
                     0,
                 );
                 acc + digest
@@ -284,8 +282,9 @@ fn metadata_digest_mapping<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: us
     extra: Vec<u8>,
     slot: u8,
 ) -> Digest {
-    // TODO: Need to check. We use length of `32` to compute the table metadata hash for now.
-    let length = F::from_canonical_usize(MAPPING_LEAF_VALUE_LEN);
+    // TODO: Need to check with integration test. We just use
+    // EVM word length (`32`) to compute the table metadata hash here.
+    let length = F::from_canonical_usize(EVM_WORD_LEN);
     let key_id = F::from_canonical_u64(identifier_for_mapping_key_column(
         slot,
         address,
@@ -305,7 +304,6 @@ fn metadata_digest_mapping<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: us
     compute_leaf_mapping_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
         vec![column_info],
         slice::from_ref(&column_identifier),
-        1,
         0,
         slot,
         key_id,

@@ -189,13 +189,11 @@ pub fn compute_leaf_single_metadata_digest<
 >(
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[F],
-    num_actual_columns: usize,
     evm_word: u32,
 ) -> Digest {
     MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
         table_info,
         extracted_column_identifiers,
-        num_actual_columns,
         evm_word,
     )
     .digest()
@@ -233,7 +231,6 @@ pub fn compute_leaf_mapping_metadata_digest<
 >(
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[F],
-    num_actual_columns: usize,
     evm_word: u32,
     slot: u8,
     key_id: F,
@@ -241,7 +238,6 @@ pub fn compute_leaf_mapping_metadata_digest<
     let metadata_digest = MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
         table_info,
         extracted_column_identifiers,
-        num_actual_columns,
         evm_word,
     )
     .digest();
@@ -317,7 +313,6 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
 >(
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[F],
-    num_actual_columns: usize,
     evm_word: u32,
     slot: u8,
     outer_key_id: F,
@@ -326,7 +321,6 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
     let metadata_digest = MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
         table_info,
         extracted_column_identifiers,
-        num_actual_columns,
         evm_word,
     )
     .digest();

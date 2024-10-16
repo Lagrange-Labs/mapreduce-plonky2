@@ -226,10 +226,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        super::{gadgets::column_gadget::ColumnGadgetData, left_pad32},
-        *,
-    };
+    use super::*;
     use crate::{
         tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
         values_extraction::{
@@ -242,11 +239,9 @@ mod tests {
     use mp2_common::{
         array::Array,
         eth::{StorageSlot, StorageSlotNode},
-        group_hashing::map_to_curve_point,
         mpt_sequential::utils::bytes_to_nibbles,
-        poseidon::{hash_to_int_value, H},
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{keccak256, Endianness, Packer, ToFields},
+        utils::{keccak256, Endianness, Packer},
         C, D, F,
     };
     use mp2_test::{
@@ -257,11 +252,7 @@ mod tests {
     use plonky2::{
         field::types::{Field, Sample},
         iop::{target::Target, witness::PartialWitness},
-        plonk::config::Hasher,
     };
-    use plonky2_ecgfp5::curve::scalar_field::Scalar;
-    use std::array;
-    use verifiable_db::test_utils::MAX_NUM_COLUMNS;
 
     type LeafCircuit =
         LeafMappingCircuit<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
@@ -317,9 +308,8 @@ mod tests {
             .collect_vec();
         let metadata_digest =
             compute_leaf_mapping_metadata_digest::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-                metadata.table_info.to_vec(),
+                metadata.table_info[..metadata.num_actual_columns].to_vec(),
                 &extracted_column_identifiers,
-                metadata.num_actual_columns,
                 evm_word,
                 slot,
                 key_id,

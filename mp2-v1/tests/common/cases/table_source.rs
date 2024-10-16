@@ -11,7 +11,7 @@ use alloy::{
     providers::Provider,
 };
 use anyhow::{bail, Result};
-use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
+use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
@@ -649,7 +649,6 @@ impl MappingValuesExtractionArgs {
             .await
             .unwrap();
         let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-        let chain_id = ctx.rpc.get_chain_id().await.unwrap();
         // NOTE HERE is the interesting bit for dist system as this is the logic to execute
         // on receiving updates from scapper. This only needs to have the relevant
         // information from update and it will translate that to changes in the tree.
@@ -1086,7 +1085,6 @@ pub(crate) fn single_var_slot_info(
     chain_id: u64,
 ) -> Vec<StorageSlotInfo> {
     const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
-    const NUM_ACTUAL_COLUMNS: usize = 4;
     // bool, uint256, string, address
     const SINGLE_SLOT_LENGTHS: [usize; 4] = [1, 32, 32, 20];
 
@@ -1120,7 +1118,6 @@ pub(crate) fn single_var_slot_info(
             let metadata = MetadataGadget::new(
                 table_info.clone(),
                 slice::from_ref(&table_info[i].identifier()),
-                NUM_ACTUAL_COLUMNS,
                 0,
             );
 

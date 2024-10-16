@@ -64,17 +64,11 @@ where
         node: Vec<u8>,
         slot: u8,
         evm_word: u32,
-        num_actual_columns: usize,
         extracted_column_identifiers: &[F],
         table_info: Vec<ColumnInfo>,
     ) -> Self {
         let slot = SimpleSlot::new(slot);
-        let metadata = MetadataGadget::new(
-            table_info,
-            extracted_column_identifiers,
-            num_actual_columns,
-            evm_word,
-        );
+        let metadata = MetadataGadget::new(table_info, extracted_column_identifiers, evm_word);
 
         CircuitInput::LeafSingle(LeafSingleCircuit {
             node,
@@ -90,17 +84,11 @@ where
         mapping_key: Vec<u8>,
         key_id: F,
         evm_word: u32,
-        num_actual_columns: usize,
         extracted_column_identifiers: &[F],
         table_info: Vec<ColumnInfo>,
     ) -> Self {
         let slot = MappingSlot::new(slot, mapping_key);
-        let metadata = MetadataGadget::new(
-            table_info,
-            extracted_column_identifiers,
-            num_actual_columns,
-            evm_word,
-        );
+        let metadata = MetadataGadget::new(table_info, extracted_column_identifiers, evm_word);
 
         CircuitInput::LeafMapping(LeafMappingCircuit {
             node,
@@ -120,17 +108,11 @@ where
         outer_key_id: F,
         inner_key_id: F,
         evm_word: u32,
-        num_actual_columns: usize,
         extracted_column_identifiers: &[F],
         table_info: Vec<ColumnInfo>,
     ) -> Self {
         let slot = MappingSlot::new(slot, outer_key);
-        let metadata = MetadataGadget::new(
-            table_info,
-            extracted_column_identifiers,
-            num_actual_columns,
-            evm_word,
-        );
+        let metadata = MetadataGadget::new(table_info, extracted_column_identifiers, evm_word);
 
         CircuitInput::LeafMappingOfMappings(LeafMappingOfMappingsCircuit {
             node,
@@ -501,7 +483,7 @@ mod tests {
         tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
         values_extraction::{
             compute_leaf_mapping_metadata_digest, compute_leaf_mapping_of_mappings_metadata_digest,
-            compute_leaf_single_metadata_digest, compute_leaf_single_values_digest,
+            compute_leaf_single_metadata_digest,
         },
         MAX_LEAF_NODE_LEN,
     };
@@ -549,9 +531,8 @@ mod tests {
         metadata1.table_info[1].evm_word = F::ZERO;
         // Initialize the second metadata with second column identifier.
         let metadata2 = MetadataGadget::new(
-            metadata1.table_info.to_vec(),
+            metadata1.table_info[..metadata1.num_actual_columns].to_vec(),
             slice::from_ref(&metadata1.table_info[1].identifier),
-            metadata1.num_actual_columns,
             0,
         );
 
@@ -586,9 +567,8 @@ mod tests {
         metadata1.table_info[1].evm_word = TEST_EVM_WORDS[1].to_field();
         // Initialize the second metadata with second column identifier.
         let metadata2 = MetadataGadget::new(
-            metadata1.table_info.to_vec(),
+            metadata1.table_info[..metadata1.num_actual_columns].to_vec(),
             slice::from_ref(&metadata1.table_info[1].identifier),
-            metadata1.num_actual_columns,
             TEST_EVM_WORDS[1],
         );
 
@@ -652,9 +632,8 @@ mod tests {
         metadata1.table_info[1].evm_word = TEST_EVM_WORDS[1].to_field();
         // Initialize the second metadata with second column identifier.
         let metadata2 = MetadataGadget::new(
-            metadata1.table_info.to_vec(),
+            metadata1.table_info[..metadata1.num_actual_columns].to_vec(),
             slice::from_ref(&metadata1.table_info[1].identifier),
-            metadata1.num_actual_columns,
             TEST_EVM_WORDS[1],
         );
 
@@ -766,7 +745,6 @@ mod tests {
             proof.last().unwrap().to_vec(),
             TEST_SLOT,
             0,
-            1,
             slice::from_ref(&column_identifier),
             table_info,
         ));
@@ -792,7 +770,6 @@ mod tests {
             TEST_OUTER_KEY.to_vec(),
             key_id,
             TEST_EVM_WORD,
-            1,
             slice::from_ref(&column_identifier),
             table_info,
         ));
@@ -828,7 +805,6 @@ mod tests {
             outer_key_id,
             inner_key_id,
             TEST_EVM_WORD,
-            1,
             slice::from_ref(&column_identifier),
             table_info,
         ));
@@ -899,8 +875,7 @@ mod tests {
     fn prove_leaf(params: &PublicParameters, node: Vec<u8>, test_slot: StorageSlotInfo) -> Vec<u8> {
         let metadata = test_slot.metadata();
         let evm_word = metadata.evm_word;
-        let num_actual_columns = metadata.num_actual_columns;
-        let table_info = metadata.table_info.to_vec();
+        let table_info = metadata.table_info[..metadata.num_actual_columns].to_vec();
         let extracted_column_identifiers = table_info[..metadata.num_extracted_columns]
             .iter()
             .map(|column_info| column_info.identifier)
@@ -913,17 +888,13 @@ mod tests {
                     TEST_MAX_COLUMNS,
                     TEST_MAX_FIELD_PER_EVM,
                 >(
-                    table_info.clone(),
-                    &extracted_column_identifiers,
-                    num_actual_columns,
-                    evm_word,
+                    table_info.clone(), &extracted_column_identifiers, evm_word
                 );
 
                 let circuit_input = CircuitInput::new_single_variable_leaf(
                     node,
                     slot as u8,
                     evm_word,
-                    num_actual_columns,
                     &extracted_column_identifiers,
                     table_info,
                 );
@@ -938,7 +909,6 @@ mod tests {
                 >(
                     table_info.clone(),
                     &extracted_column_identifiers,
-                    num_actual_columns,
                     evm_word,
                     slot as u8,
                     test_slot.outer_key_id,
@@ -950,7 +920,6 @@ mod tests {
                     mapping_key,
                     test_slot.outer_key_id,
                     evm_word,
-                    num_actual_columns,
                     &extracted_column_identifiers,
                     table_info,
                 );
@@ -960,21 +929,18 @@ mod tests {
             StorageSlot::Node(StorageSlotNode::Struct(parent, evm_word)) => match *parent {
                 // Simple Struct
                 StorageSlot::Simple(slot) => {
-                    let metadata_digest = compute_leaf_single_metadata_digest::<
-                        TEST_MAX_COLUMNS,
-                        TEST_MAX_FIELD_PER_EVM,
-                    >(
-                        table_info.clone(),
-                        &extracted_column_identifiers,
-                        num_actual_columns,
-                        evm_word,
-                    );
+                    let metadata_digest =
+                        compute_leaf_single_metadata_digest::<
+                            TEST_MAX_COLUMNS,
+                            TEST_MAX_FIELD_PER_EVM,
+                        >(
+                            table_info.clone(), &extracted_column_identifiers, evm_word
+                        );
 
                     let circuit_input = CircuitInput::new_single_variable_leaf(
                         node,
                         slot as u8,
                         evm_word,
-                        num_actual_columns,
                         &extracted_column_identifiers,
                         table_info,
                     );
@@ -989,7 +955,6 @@ mod tests {
                     >(
                         table_info.clone(),
                         &extracted_column_identifiers,
-                        num_actual_columns,
                         evm_word,
                         slot as u8,
                         test_slot.outer_key_id,
@@ -1001,7 +966,6 @@ mod tests {
                         mapping_key,
                         test_slot.outer_key_id,
                         evm_word,
-                        num_actual_columns,
                         &extracted_column_identifiers,
                         table_info,
                     );
@@ -1018,7 +982,6 @@ mod tests {
                             >(
                                 table_info.clone(),
                                 &extracted_column_identifiers,
-                                num_actual_columns,
                                 evm_word,
                                 slot as u8,
                                 test_slot.outer_key_id,
@@ -1033,7 +996,6 @@ mod tests {
                                 test_slot.outer_key_id,
                                 test_slot.inner_key_id,
                                 evm_word,
-                                num_actual_columns,
                                 &extracted_column_identifiers,
                                 table_info,
                             );

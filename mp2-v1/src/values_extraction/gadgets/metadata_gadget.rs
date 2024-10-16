@@ -53,10 +53,9 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     pub fn new(
         mut table_info: Vec<ColumnInfo>,
         extracted_column_identifiers: &[F],
-        num_actual_columns: usize,
         evm_word: u32,
     ) -> Self {
-        assert!(table_info.len() <= MAX_COLUMNS);
+        let num_actual_columns = table_info.len();
         assert!(num_actual_columns <= MAX_COLUMNS);
 
         let num_extracted_columns = extracted_column_identifiers.len();

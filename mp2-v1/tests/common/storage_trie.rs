@@ -203,7 +203,8 @@ impl TrieNode {
         let metadata = slot_info.metadata();
 
         // Build the leaf circuit input.
-        let table_info = slot_info.metadata().table_info().to_vec();
+        let table_info =
+            slot_info.metadata().table_info()[..metadata.num_actual_columns()].to_vec();
         let extracted_column_identifiers = table_info
             [..slot_info.metadata().num_extracted_columns()]
             .iter()
@@ -217,7 +218,6 @@ impl TrieNode {
                     node.clone(),
                     *slot as u8,
                     metadata.evm_word(),
-                    metadata.num_actual_columns(),
                     &extracted_column_identifiers,
                     table_info,
                 ),
@@ -231,7 +231,6 @@ impl TrieNode {
                     mapping_key.clone(),
                     slot_info.outer_key_id(),
                     metadata.evm_word(),
-                    metadata.num_actual_columns(),
                     &extracted_column_identifiers,
                     table_info,
                 ),
@@ -244,7 +243,6 @@ impl TrieNode {
                         node.clone(),
                         *slot as u8,
                         *evm_word,
-                        metadata.num_actual_columns(),
                         &extracted_column_identifiers,
                         table_info,
                     ),
@@ -258,7 +256,6 @@ impl TrieNode {
                         mapping_key.clone(),
                         slot_info.outer_key_id(),
                         metadata.evm_word(),
-                        metadata.num_actual_columns(),
                         &extracted_column_identifiers,
                         table_info,
                     ),
@@ -276,7 +273,6 @@ impl TrieNode {
                                 slot_info.outer_key_id(),
                                 slot_info.inner_key_id(),
                                 metadata.evm_word(),
-                                metadata.num_actual_columns(),
                                 &extracted_column_identifiers,
                                 table_info,
                             ),
