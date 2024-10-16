@@ -1,6 +1,5 @@
 use std::{collections::HashSet, future::Future};
 
-use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::Result;
 use log::info;
 use mp2_v1::indexing::{
@@ -9,8 +8,7 @@ use mp2_v1::indexing::{
     row::{RowPayload, RowTreeKey},
 };
 use parsil::{assembler::DynamicCircuitPis, ParsilSettings};
-use ryhope::{storage::WideLineage, tree::NodeContext, Epoch, NodePayload};
-use verifiable_db::query::aggregation::QueryBounds;
+use ryhope::{storage::WideLineage, tree::NodeContext, Epoch};
 
 use crate::common::{
     cases::query::prove_non_existence_row,

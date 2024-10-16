@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn test_query_agg_non_existence_for_index_tree_leaf_node() {
         // Generate the random operations.
-        let mut ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+        let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
         test_non_existence_inter_circuit(false, false, false, ops);
     }
@@ -741,7 +741,7 @@ mod tests {
     #[test]
     fn test_query_agg_non_existence_for_row_tree_full_node() {
         // Generate the random operations.
-        let mut ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+        let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
         test_non_existence_inter_circuit(true, true, true, ops);
     }

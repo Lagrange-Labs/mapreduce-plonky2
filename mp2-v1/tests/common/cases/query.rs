@@ -235,7 +235,7 @@ async fn prove_query(
 ) -> Result<()> {
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
-    let mut row_keys_per_epoch = row_cache.keys_by_epochs();
+    let row_keys_per_epoch = row_cache.keys_by_epochs();
     let all_epochs = query.min_block as Epoch..=query.max_block as Epoch;
     let mut planner = QueryPlanner {
         ctx,
