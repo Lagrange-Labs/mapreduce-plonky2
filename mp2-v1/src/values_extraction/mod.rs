@@ -31,8 +31,9 @@ pub mod public_inputs;
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
 pub use public_inputs::PublicInputs;
 
-/// Constant prefix for the key ID. Restrict to 4-bytes (Uint32).
+/// Constant prefixes for the key and value IDs. Restrict to 4-bytes (Uint32).
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"\0KEY";
+pub(crate) const VALUE_ID_PREFIX: &[u8] = b"\0VAL";
 
 /// Constant prefixes for the inner and outer key IDs of mapping slot.
 /// Restrict to 8-bytes (Uint64).
@@ -146,15 +147,12 @@ pub fn identifier_for_inner_mapping_key_column(
 
 /// Compute value indetifier for mapping variable.
 /// `value_id = H(VAL || slot || contract_address || chain_id)[0]`
-#[deprecated]
 pub fn identifier_for_mapping_value_column(
     slot: u8,
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
-    const VALUE_ID_PREFIX: &[u8] = b"VAL";
-
     compute_id_with_prefix(VALUE_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
@@ -185,15 +183,9 @@ pub fn compute_leaf_single_metadata_digest<
     const MAX_FIELD_PER_EVM: usize,
 >(
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[u64],
-    evm_word: u32,
 ) -> Digest {
-    MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
-        table_info,
-        extracted_column_identifiers,
-        evm_word,
-    )
-    .digest()
+    // We don't need `extracted_column_identifiers` and `evm_word` to compute the metadata digest.
+    MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(table_info, &[], 0).digest()
 }
 
 /// Compute the values digest for single variable leaf.
@@ -227,17 +219,12 @@ pub fn compute_leaf_mapping_metadata_digest<
     const MAX_FIELD_PER_EVM: usize,
 >(
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[u64],
-    evm_word: u32,
     slot: u8,
     key_id: u64,
 ) -> Digest {
-    let metadata_digest = MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
-        table_info,
-        extracted_column_identifiers,
-        evm_word,
-    )
-    .digest();
+    // We don't need `extracted_column_identifiers` and `evm_word` to compute the metadata digest.
+    let metadata_digest =
+        MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(table_info, &[], 0).digest();
 
     // key_column_md = H( "\0KEY" || slot)
     let key_id_prefix = u32::from_be_bytes(KEY_ID_PREFIX.try_into().unwrap());
@@ -305,18 +292,13 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
     const MAX_FIELD_PER_EVM: usize,
 >(
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[u64],
-    evm_word: u32,
     slot: u8,
     outer_key_id: u64,
     inner_key_id: u64,
 ) -> Digest {
-    let metadata_digest = MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
-        table_info,
-        extracted_column_identifiers,
-        evm_word,
-    )
-    .digest();
+    // We don't need `extracted_column_identifiers` and `evm_word` to compute the metadata digest.
+    let metadata_digest =
+        MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(table_info, &[], 0).digest();
 
     // Compute the outer and inner key metadata digests.
     let [outer_key_digest, inner_key_digest] = [

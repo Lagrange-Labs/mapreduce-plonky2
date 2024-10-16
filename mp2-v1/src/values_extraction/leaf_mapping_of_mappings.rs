@@ -357,14 +357,7 @@ mod tests {
         let metadata_digest = compute_leaf_mapping_of_mappings_metadata_digest::<
             TEST_MAX_COLUMNS,
             TEST_MAX_FIELD_PER_EVM,
-        >(
-            table_info.clone(),
-            &extracted_column_identifiers,
-            evm_word,
-            slot,
-            outer_key_id,
-            inner_key_id,
-        );
+        >(table_info.clone(), slot, outer_key_id, inner_key_id);
         // Compute the values digest.
         let values_digest = compute_leaf_mapping_of_mappings_values_digest::<TEST_MAX_FIELD_PER_EVM>(
             &metadata_digest,

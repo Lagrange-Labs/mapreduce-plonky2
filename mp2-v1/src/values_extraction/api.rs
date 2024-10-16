@@ -901,9 +901,7 @@ mod tests {
                 let metadata_digest = compute_leaf_single_metadata_digest::<
                     TEST_MAX_COLUMNS,
                     TEST_MAX_FIELD_PER_EVM,
-                >(
-                    table_info.clone(), &extracted_column_identifiers, evm_word
-                );
+                >(table_info.clone());
 
                 let circuit_input = CircuitInput::new_single_variable_leaf(
                     node,
@@ -921,11 +919,7 @@ mod tests {
                     TEST_MAX_COLUMNS,
                     TEST_MAX_FIELD_PER_EVM,
                 >(
-                    table_info.clone(),
-                    &extracted_column_identifiers,
-                    evm_word,
-                    slot as u8,
-                    test_slot.outer_key_id,
+                    table_info.clone(), slot as u8, test_slot.outer_key_id
                 );
 
                 let circuit_input = CircuitInput::new_mapping_variable_leaf(
@@ -943,13 +937,10 @@ mod tests {
             StorageSlot::Node(StorageSlotNode::Struct(parent, evm_word)) => match *parent {
                 // Simple Struct
                 StorageSlot::Simple(slot) => {
-                    let metadata_digest =
-                        compute_leaf_single_metadata_digest::<
-                            TEST_MAX_COLUMNS,
-                            TEST_MAX_FIELD_PER_EVM,
-                        >(
-                            table_info.clone(), &extracted_column_identifiers, evm_word
-                        );
+                    let metadata_digest = compute_leaf_single_metadata_digest::<
+                        TEST_MAX_COLUMNS,
+                        TEST_MAX_FIELD_PER_EVM,
+                    >(table_info.clone());
 
                     let circuit_input = CircuitInput::new_single_variable_leaf(
                         node,
@@ -967,11 +958,7 @@ mod tests {
                         TEST_MAX_COLUMNS,
                         TEST_MAX_FIELD_PER_EVM,
                     >(
-                        table_info.clone(),
-                        &extracted_column_identifiers,
-                        evm_word,
-                        slot as u8,
-                        test_slot.outer_key_id,
+                        table_info.clone(), slot as u8, test_slot.outer_key_id
                     );
 
                     let circuit_input = CircuitInput::new_mapping_variable_leaf(
@@ -995,8 +982,6 @@ mod tests {
                                 TEST_MAX_FIELD_PER_EVM,
                             >(
                                 table_info.clone(),
-                                &extracted_column_identifiers,
-                                evm_word,
                                 slot as u8,
                                 test_slot.outer_key_id,
                                 test_slot.inner_key_id,

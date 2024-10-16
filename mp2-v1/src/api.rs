@@ -24,10 +24,9 @@ use mp2_common::{
     poseidon::H,
     types::{HashOutput, EVM_WORD_LEN},
     utils::{Fieldable, ToFields},
-    F,
 };
 use plonky2::{
-    field::types::{Field, PrimeField64},
+    field::types::PrimeField64,
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };
@@ -246,14 +245,7 @@ fn value_metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
                     ColumnInfo::new(slot, identifier, 0, 0, length, 0)
                 })
                 .collect_vec();
-            table_info.iter().fold(Point::NEUTRAL, |acc, column_info| {
-                let digest = compute_leaf_single_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-                    table_info.clone(),
-                    slice::from_ref(&column_info.identifier.to_canonical_u64()),
-                    0,
-                );
-                acc + digest
-            })
+            compute_leaf_single_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(table_info)
         }
         SlotInputs::Mapping(slot) => metadata_digest_mapping::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
             contract, chain_id, extra, slot,
@@ -283,11 +275,8 @@ fn metadata_digest_mapping<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: us
     // TODO: Need to check with integration test. We use `key_id`
     // also as the column identifier here.
     let column_info = ColumnInfo::new(slot, key_id, 0, 0, length, 0);
-    let column_identifier = column_info.identifier.to_canonical_u64();
     compute_leaf_mapping_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
         vec![column_info],
-        slice::from_ref(&column_identifier),
-        0,
         slot,
         key_id,
     )

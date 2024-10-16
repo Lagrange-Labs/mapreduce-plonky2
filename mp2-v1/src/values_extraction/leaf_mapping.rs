@@ -306,14 +306,10 @@ mod tests {
             .iter()
             .map(|column_info| column_info.identifier.to_canonical_u64())
             .collect_vec();
-        let metadata_digest =
-            compute_leaf_mapping_metadata_digest::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-                table_info.clone(),
-                &extracted_column_identifiers,
-                evm_word,
-                slot,
-                key_id,
-            );
+        let metadata_digest = compute_leaf_mapping_metadata_digest::<
+            TEST_MAX_COLUMNS,
+            TEST_MAX_FIELD_PER_EVM,
+        >(table_info.clone(), slot, key_id);
         // Compute the values digest.
         let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
             &metadata_digest,
