@@ -431,7 +431,7 @@ mod tests {
         let inner_key = random_vector(20);
         let parent = StorageSlot::Mapping(outer_key.clone(), 2);
         let storage_slot =
-            StorageSlot::Node(StorageSlotNode::new_mapping(parent, inner_key.clone()));
+            StorageSlot::Node(StorageSlotNode::new_mapping(parent, inner_key.clone()).unwrap());
 
         test_circuit_for_storage_slot(outer_key, inner_key, storage_slot);
     }
@@ -441,7 +441,8 @@ mod tests {
         let outer_key = random_vector(10);
         let inner_key = random_vector(20);
         let grand = StorageSlot::Mapping(outer_key.clone(), 2);
-        let parent = StorageSlot::Node(StorageSlotNode::new_mapping(grand, inner_key.clone()));
+        let parent =
+            StorageSlot::Node(StorageSlotNode::new_mapping(grand, inner_key.clone()).unwrap());
         let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(parent, 30));
 
         test_circuit_for_storage_slot(outer_key, inner_key, storage_slot);

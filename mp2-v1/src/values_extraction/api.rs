@@ -654,7 +654,8 @@ mod tests {
         let _ = env_logger::try_init();
 
         let grand_slot = StorageSlot::Mapping(vec![10, 20], TEST_SLOT as usize);
-        let parent_slot = StorageSlot::Node(StorageSlotNode::new_mapping(grand_slot, vec![30, 40]));
+        let parent_slot =
+            StorageSlot::Node(StorageSlotNode::new_mapping(grand_slot, vec![30, 40]).unwrap());
         let storage_slot1 = StorageSlot::Node(StorageSlotNode::new_struct(
             parent_slot.clone(),
             TEST_EVM_WORDS[0],
@@ -776,10 +777,9 @@ mod tests {
 
         // Test for mapping of mappings leaf.
         let grand_slot = StorageSlot::Mapping(TEST_OUTER_KEY.to_vec(), TEST_SLOT as usize);
-        let parent_slot = StorageSlot::Node(StorageSlotNode::new_mapping(
-            grand_slot,
-            TEST_INNER_KEY.to_vec(),
-        ));
+        let parent_slot = StorageSlot::Node(
+            StorageSlotNode::new_mapping(grand_slot, TEST_INNER_KEY.to_vec()).unwrap(),
+        );
         let storage_slot =
             StorageSlot::Node(StorageSlotNode::new_struct(parent_slot, TEST_EVM_WORD));
         let mut metadata = MetadataGadget::sample(TEST_SLOT, TEST_EVM_WORD);

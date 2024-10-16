@@ -118,7 +118,8 @@ pub struct ProofQuery {
 /// Any intermediate nodes could be represented as:
 /// - For mapping entry, it has a parent node and the mapping key.
 /// - For Struct entry, it has a parent node and the EVM offset.
-// TODO: This is not strict, as the parent of a mapping node cannot be a Struct.
+// NOTE: This is not strict, since the parent of a Slot mapping entry must type of
+// mapping (cannot be a Struct).
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum StorageSlotNode {
     /// Mapping entry including a parent node and the mapping key
@@ -128,10 +129,16 @@ pub enum StorageSlotNode {
 }
 
 impl StorageSlotNode {
-    pub fn new_mapping(parent: StorageSlot, mapping_key: Vec<u8>) -> Self {
+    pub fn new_mapping(parent: StorageSlot, mapping_key: Vec<u8>) -> Result<Self> {
         let parent = Box::new(parent);
+        if !matches!(
+            *parent,
+            StorageSlot::Mapping(_, _) | StorageSlot::Node(Self::Mapping(_, _))
+        ) {
+            bail!("The parent of a Slot mapping entry must be type of mapping");
+        }
 
-        Self::Mapping(parent, mapping_key)
+        Ok(Self::Mapping(parent, mapping_key))
     }
 
     pub fn new_struct(parent: StorageSlot, evm_offset: u32) -> Self {
