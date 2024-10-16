@@ -711,7 +711,7 @@ mod test {
 
     #[derive(Clone, Debug)]
     struct TestMappingSlotWithOffset {
-        evm_offset: usize,
+        evm_offset: u32,
         mapping_slot: MappingSlot,
         exp_mpt_key: Vec<u8>,
     }
@@ -741,9 +741,9 @@ mod test {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_target(wires.0, F::from_canonical_usize(self.evm_offset));
+            pw.set_target(wires.0, F::from_canonical_u32(self.evm_offset));
             self.mapping_slot
-                .assign_mapping_slot(pw, &wires.1, self.evm_offset);
+                .assign_mapping_slot(pw, &wires.1, self.evm_offset as usize);
             wires
                 .2
                 .assign_bytes(pw, &self.exp_mpt_key.clone().try_into().unwrap());
@@ -758,7 +758,8 @@ mod test {
         let evm_offset = rng.gen();
         let mapping_key = random_vector(16);
         let parent = StorageSlot::Mapping(mapping_key.clone(), slot as usize);
-        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(parent, evm_offset));
+        let storage_slot =
+            StorageSlot::Node(StorageSlotNode::new_struct(parent, evm_offset as usize));
         let mpt_key = storage_slot.mpt_key_vec();
 
         let circuit = TestMappingSlotWithOffset {
@@ -774,7 +775,7 @@ mod test {
 
     #[derive(Clone, Debug)]
     struct TestMappingSlotWithInnerOffset {
-        evm_offset: usize,
+        evm_offset: u32,
         inner_key: Vec<u8>,
         mapping_slot: MappingSlot,
         exp_mpt_key: Vec<u8>,
@@ -805,12 +806,12 @@ mod test {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_target(wires.0, F::from_canonical_usize(self.evm_offset));
+            pw.set_target(wires.0, F::from_canonical_u32(self.evm_offset));
             self.mapping_slot.assign_mapping_of_mappings(
                 pw,
                 &wires.1,
                 &self.inner_key,
-                self.evm_offset,
+                self.evm_offset as usize,
             );
             wires
                 .2
@@ -828,7 +829,8 @@ mod test {
         let grand = StorageSlot::Mapping(outer_key.clone(), slot as usize);
         let parent =
             StorageSlot::Node(StorageSlotNode::new_mapping(grand, inner_key.clone()).unwrap());
-        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(parent, evm_offset));
+        let storage_slot =
+            StorageSlot::Node(StorageSlotNode::new_struct(parent, evm_offset as usize));
         let mpt_key = storage_slot.mpt_key_vec();
 
         let circuit = TestMappingSlotWithInnerOffset {
