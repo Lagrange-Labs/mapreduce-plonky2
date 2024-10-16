@@ -350,7 +350,7 @@ mod tests {
             MetadataGadget::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
         let table_info = metadata.table_info[..metadata.num_actual_columns].to_vec();
-        let extracted_column_identifiers = table_info
+        let extracted_column_identifiers = table_info[..metadata.num_extracted_columns]
             .iter()
             .map(|column_info| column_info.identifier.to_canonical_u64())
             .collect_vec();

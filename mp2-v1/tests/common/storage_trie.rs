@@ -206,7 +206,7 @@ impl TrieNode {
         // Build the leaf circuit input.
         let table_info =
             slot_info.metadata().table_info()[..metadata.num_actual_columns()].to_vec();
-        let extracted_column_identifiers = table_info
+        let extracted_column_identifiers = table_info[..metadata.num_extracted_columns()]
             .iter()
             .map(|column_info| column_info.identifier().to_canonical_u64())
             .collect_vec();
