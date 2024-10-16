@@ -203,11 +203,17 @@ impl TableSource {
                 let slots = single
                     .slots
                     .iter()
-                    .map(|slot_info| slot_info.slot().slot())
+                    .map(|slot_info| {
+                        let storage_slot = slot_info.slot();
+                        (storage_slot.slot(), storage_slot.evm_offset())
+                    })
                     .collect_vec();
                 SlotInputs::Simple(slots)
             }
-            TableSource::Mapping((m, _)) => SlotInputs::Mapping(m.slot),
+            TableSource::Mapping((m, _)) => {
+                // TODO: We need to set the EVM word here.
+                SlotInputs::Mapping(m.slot, 0)
+            }
             TableSource::Merge(_) => panic!("can't call slot inputs on merge table"),
         }
     }
@@ -453,7 +459,10 @@ impl SingleValuesExtractionArgs {
         let slots = self
             .slots
             .iter()
-            .map(|slot_info| slot_info.slot().slot())
+            .map(|slot_info| {
+                let storage_slot = slot_info.slot();
+                (storage_slot.slot(), storage_slot.evm_offset())
+            })
             .collect_vec();
         let slot_input = SlotInputs::Simple(slots);
         let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
@@ -707,7 +716,8 @@ impl MappingValuesExtractionArgs {
                 mapping_values_proof
             }
         };
-        let slot_input = SlotInputs::Mapping(self.slot);
+        // TODO: We need to set the EVM word here.
+        let slot_input = SlotInputs::Mapping(self.slot, 0);
         let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
             slot_input,
             &contract.address,

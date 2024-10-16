@@ -92,7 +92,8 @@ impl TableInfo {
     pub fn metadata_hash(&self) -> MetadataHash {
         match &self.source {
             TableSource::Mapping((mapping, _)) => {
-                let slot = SlotInputs::Mapping(mapping.slot);
+                // TODO: We need to set the EVM word here.
+                let slot = SlotInputs::Mapping(mapping.slot, 0);
                 metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
                     slot,
                     &self.contract_address,
@@ -105,7 +106,10 @@ impl TableInfo {
                 let slots = args
                     .slots
                     .iter()
-                    .map(|slot_info| slot_info.slot().slot())
+                    .map(|slot_info| {
+                        let storage_slot = slot_info.slot();
+                        (storage_slot.slot(), storage_slot.evm_offset())
+                    })
                     .collect();
                 let slot = SlotInputs::Simple(slots);
                 metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
@@ -116,14 +120,18 @@ impl TableInfo {
                 )
             }
             TableSource::Merge(merge) => {
-                let slots = merge
+                let slots_evm_words = merge
                     .single
                     .slots
                     .iter()
-                    .map(|slot_info| slot_info.slot().slot())
+                    .map(|slot_info| {
+                        let storage_slot = slot_info.slot();
+                        (storage_slot.slot(), storage_slot.evm_offset())
+                    })
                     .collect_vec();
-                let single = SlotInputs::Simple(slots);
-                let mapping = SlotInputs::Mapping(merge.mapping.slot);
+                let single = SlotInputs::Simple(slots_evm_words);
+                // TODO: We need to set the EVM word here.
+                let mapping = SlotInputs::Mapping(merge.mapping.slot, 0);
                 merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
                     self.contract_address,
                     self.chain_id,

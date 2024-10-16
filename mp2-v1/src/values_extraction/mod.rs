@@ -35,10 +35,12 @@ pub use public_inputs::PublicInputs;
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"\0KEY";
 pub(crate) const VALUE_ID_PREFIX: &[u8] = b"\0VAL";
 
-/// Constant prefixes for the inner and outer key IDs of mapping slot.
+/// Constant prefixes for the inner and outer key and value IDs of mapping slot.
 /// Restrict to 8-bytes (Uint64).
 pub(crate) const INNER_KEY_ID_PREFIX: &[u8] = b"\0\0IN_KEY";
 pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"\0OUT_KEY";
+pub(crate) const INNER_VALUE_ID_PREFIX: &[u8] = b"\0\0IN_VAL";
+pub(crate) const OUTER_VALUE_ID_PREFIX: &[u8] = b"\0OUT_VAL";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
@@ -135,7 +137,7 @@ pub fn identifier_for_outer_mapping_key_column(
 }
 
 /// Compute inner key indetifier for mapping of mappings variable.
-/// `inner_key_id = H(OUT_KEY || slot || contract_address || chain_id)[0]`
+/// `inner_key_id = H(IN_KEY || slot || contract_address || chain_id)[0]`
 pub fn identifier_for_inner_mapping_key_column(
     slot: u8,
     contract_address: &Address,
@@ -154,6 +156,40 @@ pub fn identifier_for_mapping_value_column(
     extra: Vec<u8>,
 ) -> u64 {
     compute_id_with_prefix(VALUE_ID_PREFIX, slot, contract_address, chain_id, extra)
+}
+
+/// Compute outer value indetifier for mapping of mappings variable.
+/// `outer_value_id = H(OUT_VAL || slot || contract_address || chain_id)[0]`
+pub fn identifier_for_outer_mapping_value_column(
+    slot: u8,
+    contract_address: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+) -> u64 {
+    compute_id_with_prefix(
+        OUTER_VALUE_ID_PREFIX,
+        slot,
+        contract_address,
+        chain_id,
+        extra,
+    )
+}
+
+/// Compute inner value indetifier for mapping of mappings variable.
+/// `inner_value_id = H(IN_VAL || slot || contract_address || chain_id)[0]`
+pub fn identifier_for_inner_mapping_value_column(
+    slot: u8,
+    contract_address: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+) -> u64 {
+    compute_id_with_prefix(
+        INNER_VALUE_ID_PREFIX,
+        slot,
+        contract_address,
+        chain_id,
+        extra,
+    )
 }
 
 /// Calculate ID with prefix.

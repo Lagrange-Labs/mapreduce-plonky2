@@ -1,6 +1,6 @@
 //! Main APIs and related structures
 
-use std::{iter::once, slice};
+use std::iter::once;
 
 use crate::{
     block_extraction,
@@ -10,10 +10,11 @@ use crate::{
         self, compute_metadata_digest as length_metadata_digest, LengthCircuitInput,
     },
     values_extraction::{
-        self, compute_leaf_mapping_metadata_digest, compute_leaf_single_metadata_digest,
+        self, compute_leaf_mapping_metadata_digest,
+        compute_leaf_mapping_of_mappings_metadata_digest, compute_leaf_single_metadata_digest,
         gadgets::column_info::ColumnInfo, identifier_block_column,
-        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column,
+        identifier_for_inner_mapping_value_column, identifier_for_mapping_value_column,
+        identifier_for_outer_mapping_value_column, identifier_single_var_column,
     },
     MAX_LEAF_NODE_LEN,
 };
@@ -27,11 +28,9 @@ use mp2_common::{
     utils::{Fieldable, ToFields},
 };
 use plonky2::{
-    field::types::PrimeField64,
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };
-use plonky2_ecgfp5::curve::curve::Point;
 use serde::{Deserialize, Serialize};
 
 /// Struct containing the expected input MPT Extension/Branch node
@@ -191,12 +190,17 @@ pub type MetadataHash = HashOutput;
 
 /// Enumeration to be employed to provide input slots for metadata hash computation
 pub enum SlotInputs {
-    /// slots of a set of simple variables
-    Simple(Vec<u8>),
-    /// slot of a mapping variable without an associated length slot to determine the number of entries
-    Mapping(u8),
+    /// slots of a set of simple variables or Struct
+    /// slot number + EVM word (0 for simple value)
+    Simple(Vec<(u8, u32)>),
+    /// slot of a mapping variable or Struct
+    /// slot number + EVM word (0 for simple value)
+    Mapping(u8, u32),
+    /// slot of a mapping of mappings variable or Struct
+    /// slot number + EVM word (0 for simple value)
+    MappingOfMappings(u8, u32),
     /// slots of a mapping variable and of a slot containing the length of the mapping
-    MappingWithLength(u8, u8),
+    MappingWithLength(u8, u8, u32),
 }
 
 /// Compute metadata hash for a "merge" table. Right now it supports only merging tables from the
@@ -232,10 +236,10 @@ fn value_metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
     extra: Vec<u8>,
 ) -> Digest {
     match inputs {
-        SlotInputs::Simple(slots) => {
-            let table_info = slots
+        SlotInputs::Simple(slots_evm_words) => {
+            let table_info = slots_evm_words
                 .into_iter()
-                .map(|slot| {
+                .map(|(slot, evm_word)| {
                     let identifier =
                         identifier_single_var_column(slot, 0, contract, chain_id, vec![]);
 
@@ -243,41 +247,72 @@ fn value_metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
                     // EVM word length (`32`) to compute the table metadata hash here.
                     let length = EVM_WORD_LEN;
 
-                    ColumnInfo::new(slot, identifier, 0, 0, length, 0)
+                    ColumnInfo::new(slot, identifier, 0, 0, length, evm_word)
                 })
                 .collect_vec();
             compute_leaf_single_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(table_info)
         }
-        SlotInputs::Mapping(slot) => metadata_digest_mapping::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-            contract, chain_id, extra, slot,
-        ),
-        SlotInputs::MappingWithLength(mapping_slot, length_slot) => {
+        SlotInputs::Mapping(slot, evm_word) => metadata_digest_mapping::<
+            MAX_COLUMNS,
+            MAX_FIELD_PER_EVM,
+        >(contract, chain_id, extra, slot, evm_word),
+        SlotInputs::MappingOfMappings(slot, evm_word) => {
+            metadata_digest_mapping_of_mappings::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
+                contract, chain_id, extra, slot, evm_word,
+            )
+        }
+        SlotInputs::MappingWithLength(mapping_slot, length_slot, evm_word) => {
             let mapping_digest = metadata_digest_mapping::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
                 contract,
                 chain_id,
                 extra,
                 mapping_slot,
+                evm_word,
             );
             let length_digest = length_metadata_digest(length_slot, mapping_slot);
             mapping_digest + length_digest
         }
     }
 }
+
 fn metadata_digest_mapping<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
     address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
     slot: u8,
+    evm_word: u32,
 ) -> Digest {
     // TODO: Need to check with integration test. We just use
     // EVM word length (`32`) to compute the table metadata hash here.
     let length = EVM_WORD_LEN;
     let value_id = identifier_for_mapping_value_column(slot, address, chain_id, extra.clone());
-    let column_info = ColumnInfo::new(slot, value_id, 0, 0, length, 0);
+    let column_info = ColumnInfo::new(slot, value_id, 0, 0, length, evm_word);
     compute_leaf_mapping_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
         vec![column_info],
         slot,
         value_id,
+    )
+}
+
+fn metadata_digest_mapping_of_mappings<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+    address: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+    slot: u8,
+    evm_word: u32,
+) -> Digest {
+    // TODO: Need to check with integration test. We just use
+    // EVM word length (`32`) to compute the table metadata hash here.
+    let length = EVM_WORD_LEN;
+    let outer_value_id =
+        identifier_for_outer_mapping_value_column(slot, address, chain_id, extra.clone());
+    let inner_value_id = identifier_for_inner_mapping_value_column(slot, address, chain_id, extra);
+    let column_info = ColumnInfo::new(slot, inner_value_id, 0, 0, length, evm_word);
+    compute_leaf_mapping_of_mappings_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
+        vec![column_info],
+        slot,
+        outer_value_id,
+        inner_value_id,
     )
 }
 
