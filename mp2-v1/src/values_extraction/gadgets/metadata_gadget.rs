@@ -5,8 +5,7 @@ use super::column_info::{
 };
 use itertools::Itertools;
 use mp2_common::{
-    group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
-    poseidon::H,
+    group_hashing::CircuitBuilderGroupHashing,
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
@@ -20,7 +19,6 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::config::Hasher,
 };
 use plonky2_ecgfp5::{
     curve::curve::Point,
@@ -111,26 +109,7 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     pub fn digest(&self) -> Point {
         self.table_info[..self.num_actual_columns]
             .iter()
-            .fold(Point::NEUTRAL, |acc, info| {
-                // metadata = H(info.slot || info.evm_word || info.byte_offset || info.bit_offset || info.length)
-                let inputs = vec![
-                    info.slot,
-                    info.evm_word,
-                    info.byte_offset,
-                    info.bit_offset,
-                    info.length,
-                ];
-                let metadata = H::hash_no_pad(&inputs);
-                // digest = D(mpt_metadata || info.identifier)
-                let inputs = metadata
-                    .elements
-                    .into_iter()
-                    .chain(once(info.identifier))
-                    .collect_vec();
-                let digest = map_to_curve_point(&inputs);
-
-                acc + digest
-            })
+            .fold(Point::NEUTRAL, |acc, info| acc + info.digest())
     }
 
     pub fn table_info(&self) -> &[ColumnInfo; MAX_COLUMNS] {

@@ -291,7 +291,8 @@ fn metadata_digest_mapping<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: us
         chain_id,
         extra.clone(),
     ));
-    // TODO: Need to check. We use `key_id` also as the column identifier.
+    // TODO: Need to check with integration test. We use `key_id`
+    // also as the column identifier here.
     let column_info = ColumnInfo::new(
         F::from_canonical_u8(slot),
         key_id,

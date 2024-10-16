@@ -1,17 +1,21 @@
 //! Column information for values extraction
 
-use itertools::zip_eq;
+use itertools::{zip_eq, Itertools};
 use mp2_common::{
+    group_hashing::map_to_curve_point,
+    poseidon::H,
     types::{CBuilder, MAPPING_LEAF_VALUE_LEN},
     F,
 };
 use plonky2::{
     field::types::{Field, Sample},
     iop::{target::Target, witness::WitnessWrite},
+    plonk::config::Hasher,
 };
+use plonky2_ecgfp5::curve::curve::Point;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
-use std::array;
+use std::{array, iter::once};
 
 /// Column info
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -71,6 +75,26 @@ impl ColumnInfo {
             length,
             evm_word,
         }
+    }
+    /// Compute the column information digest.
+    pub fn digest(&self) -> Point {
+        // metadata = H(info.slot || info.evm_word || info.byte_offset || info.bit_offset || info.length)
+        let inputs = vec![
+            self.slot,
+            self.evm_word,
+            self.byte_offset,
+            self.bit_offset,
+            self.length,
+        ];
+        let metadata = H::hash_no_pad(&inputs);
+
+        // digest = D(mpt_metadata || info.identifier)
+        let inputs = metadata
+            .elements
+            .into_iter()
+            .chain(once(self.identifier))
+            .collect_vec();
+        map_to_curve_point(&inputs)
     }
 
     pub fn slot(&self) -> F {
