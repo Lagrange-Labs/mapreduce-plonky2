@@ -1,4 +1,6 @@
-//! Module handling the recursive proving of the correct derivation of the MPT path
+//! Module handling the recursive proving of the correct derivation
+//! of the MPT path
+//!
 //! depending on the type of variables the slot is holding (simple unit variable like uint256
 //! variable length & composite type like a mapping).
 
@@ -111,8 +113,8 @@ impl KeccakMPT {
 /// Deriving a MPT key from simple slot is done like:
 /// 1. location = left_pad32(slot)
 /// 2. mpt_key = keccak(location)
-/// WARNING: Currently takes the assumption that the storage slot number fits
-/// inside a single byte.
+///    WARNING: Currently takes the assumption that the storage slot number fits
+///    inside a single byte.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SimpleSlot(pub StorageSlot);
 
