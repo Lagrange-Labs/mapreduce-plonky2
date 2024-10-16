@@ -17,6 +17,7 @@ use mp2_v1::{
     api::{generate_proof, CircuitInput},
     length_extraction, values_extraction,
 };
+use plonky2::field::types::PrimeField64;
 use rlp::{Prototype, Rlp};
 use std::collections::HashMap;
 
@@ -206,9 +207,8 @@ impl TrieNode {
         let table_info =
             slot_info.metadata().table_info()[..metadata.num_actual_columns()].to_vec();
         let extracted_column_identifiers = table_info
-            [..slot_info.metadata().num_extracted_columns()]
             .iter()
-            .map(|column_info| column_info.identifier())
+            .map(|column_info| column_info.identifier().to_canonical_u64())
             .collect_vec();
         let (name, input) = match slot_info.slot() {
             // Simple variable slot

@@ -69,7 +69,7 @@ impl TestContext {
         contract_address: &Address,
         chain_id: u64,
         slot: u8,
-        evm_word: u32,
+        evm_word: usize,
         length: usize,
         mapping_keys: Vec<MappingKey>,
     ) -> Vec<u8> {
@@ -81,28 +81,23 @@ impl TestContext {
         info!("mapping mpt proving: Initialized the test storage trie");
 
         // Compute the column identifier. It's only one column for simple mapping values.
-        let column_identifier = F::from_canonical_u64(identifier_for_mapping_key_column(
-            slot,
-            contract_address,
-            chain_id,
-            vec![],
-        ));
+        let column_identifier =
+            identifier_for_mapping_key_column(slot, contract_address, chain_id, vec![]);
         // Compute the table metadata information.
         let table_info = vec![ColumnInfo::new(
-            F::from_canonical_u8(slot),
+            slot,
             column_identifier,
-            F::ZERO,
-            F::ZERO,
-            F::from_canonical_usize(length),
-            F::from_canonical_u32(evm_word),
+            0,
+            0,
+            length,
+            evm_word,
         )];
         let metadata = MetadataGadget::new(table_info, &[column_identifier], evm_word);
 
         // Query the slot and add the node path to the trie.
         let slot = slot as usize;
         for mapping_key in mapping_keys {
-            let query =
-                ProofQuery::new_mapping_slot(contract_address.clone(), slot, mapping_key.clone());
+            let query = ProofQuery::new_mapping_slot(*contract_address, slot, mapping_key.clone());
             let response = self
                 .query_mpt_proof(&query, BlockNumberOrTag::Number(self.block_number().await))
                 .await;
