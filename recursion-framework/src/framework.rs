@@ -347,7 +347,7 @@ pub(crate) mod tests {
         ) -> Self {
             Self {
                 targets: builder_parameters.verify_proof_in_circuit_set(builder),
-                c: PhantomData::<C>::default(),
+                c: PhantomData::<C>,
             }
         }
 
@@ -397,7 +397,7 @@ pub(crate) mod tests {
                 targets: builder_parameters
                     .0
                     .verify_proof_fixed_circuit_in_circuit_set(builder, &builder_parameters.1),
-                c: PhantomData::<C>::default(),
+                c: PhantomData::<C>,
             }
         }
 

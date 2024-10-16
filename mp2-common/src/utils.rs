@@ -124,6 +124,7 @@ pub fn less_than<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Returns true if a < b in the first n bits, False otherwise.
+///
 /// Will panic if `n >= F::BITS-1`.
 /// This variant is unsafe since it assumes that `a < 2^n` and `b < 2^n`;
 /// undefined behavior may occur if this assumption is not ensured by the
@@ -159,6 +160,7 @@ pub fn greater_than<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Returns true if a > b in the first n bits, False otherwise.
+///
 /// Will panic if `n >= F::BITS-1`.
 /// This variant is unsafe since it assumes that `a < 2^n` and `b < 2^n`;
 /// undefined behavior may occur if this assumption is not ensured by the

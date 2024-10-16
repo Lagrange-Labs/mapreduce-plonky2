@@ -423,7 +423,7 @@ impl<T: Debug + Clone + Hash + Eq> UpdatePlan<T> {
         let i = *self
             .t
             .idx
-            .get(&item.k())
+            .get(item.k())
             .ok_or_else(|| anyhow!("unknwown key"))?;
 
         // May happen when restarting a plan

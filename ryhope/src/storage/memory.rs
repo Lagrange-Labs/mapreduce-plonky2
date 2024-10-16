@@ -132,6 +132,12 @@ pub struct VersionedKvStorage<K: Debug, V: Debug> {
     /// The initial epoch
     epoch_offset: Epoch,
 }
+impl<K: Debug, V: Debug> Default for VersionedKvStorage<K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K: Debug, V: Debug> VersionedKvStorage<K, V> {
     pub fn new() -> Self {
         Self::new_at(0)

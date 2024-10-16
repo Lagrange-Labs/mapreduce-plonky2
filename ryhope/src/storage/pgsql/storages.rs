@@ -348,50 +348,48 @@ where
         })
     }
 
-    fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
+    async fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
         &self,
         s: &S,
         db: DBPool,
         table: &str,
         data: I,
-    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<Self::Key>, V)>>> + Send {
-        async move {
-            let data = data.into_iter().collect::<Vec<_>>();
-            let connection = db.get().await.unwrap();
-            let immediate_table = data
-                .iter()
-                .map(|(epoch, key)| {
-                    format!(
-                        "({epoch}::BIGINT, '\\x{}'::BYTEA)",
-                        hex::encode(key.to_bytea())
-                    )
-                })
-                .join(", ");
+    ) -> Result<Vec<(Epoch, NodeContext<Self::Key>, V)>> {
+        let data = data.into_iter().collect::<Vec<_>>();
+        let connection = db.get().await.unwrap();
+        let immediate_table = data
+            .iter()
+            .map(|(epoch, key)| {
+                format!(
+                    "({epoch}::BIGINT, '\\x{}'::BYTEA)",
+                    hex::encode(key.to_bytea())
+                )
+            })
+            .join(", ");
 
-            let mut r = Vec::new();
-            for row in connection
-            .query(
-                &dbg!(format!(
-                   "SELECT batch.key, batch.epoch, {table}.{PAYLOAD} FROM
-                     (VALUES {}) AS batch (epoch, key)
-                     LEFT JOIN {table} ON
-                     batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
-                   immediate_table
-               )),
-                &[],
-            )
-               .await
-               .context("while fetching payload from database")?
-                .iter() {
-                   let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
-                   let epoch = row.get::<_, Epoch>(1);
-                    let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
-                    if let Some(v) = v {
-                        r.push((epoch, self.node_context(&k, s).await.unwrap() , v));
-                    }
+        let mut r = Vec::new();
+        for row in connection
+        .query(
+            &dbg!(format!(
+               "SELECT batch.key, batch.epoch, {table}.{PAYLOAD} FROM
+                 (VALUES {}) AS batch (epoch, key)
+                 LEFT JOIN {table} ON
+                 batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
+               immediate_table
+           )),
+            &[],
+        )
+           .await
+           .context("while fetching payload from database")?
+            .iter() {
+               let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
+               let epoch = row.get::<_, Epoch>(1);
+                let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
+                if let Some(v) = v {
+                    r.push((epoch, self.node_context(&k, s).await.unwrap() , v));
                 }
-            Ok(r)
-        }
+            }
+        Ok(r)
     }
 }
 
@@ -498,142 +496,138 @@ where
             .map(|_| ())
     }
 
-    fn wide_lineage_between<S: TreeStorage<Self>>(
+    async fn wide_lineage_between<S: TreeStorage<Self>>(
         &self,
         _: &S,
         db: DBPool,
         table: &str,
         keys_query: &str,
         bounds: (Epoch, Epoch),
-    ) -> impl Future<Output = Result<WideLineage<K, V>>> {
-        async move {
-            ensure!(
-                !keys_query.contains('$'),
-                "unexpected placeholder found in keys_query"
-            );
-            // Call the mega-query doing everything
-            let query = format!(
-                include_str!("wide_lineage.sql"),
-                KEY = KEY,
-                EPOCH = EPOCH,
-                PAYLOAD = PAYLOAD,
-                VALID_FROM = VALID_FROM,
-                VALID_UNTIL = VALID_UNTIL,
-                PARENT = PARENT,
-                LEFT_CHILD = LEFT_CHILD,
-                RIGHT_CHILD = RIGHT_CHILD,
-                SUBTREE_SIZE = SUBTREE_SIZE,
-                max_depth = 2,
-                zk_table = table,
-                core_keys_query = keys_query,
-            );
-            let connection = db.get().await.unwrap();
-            let rows = connection
-                .query(&query, &[&bounds.0, &bounds.1])
-                .await
-                .with_context(|| {
-                    format!(
-                        "while fetching wide lineage for {table} [[{}, {}]] with: {query}",
-                        bounds.0, bounds.1
-                    )
-                })?;
+    ) -> Result<WideLineage<K, V>> {
+        ensure!(
+            !keys_query.contains('$'),
+            "unexpected placeholder found in keys_query"
+        );
+        // Call the mega-query doing everything
+        let query = format!(
+            include_str!("wide_lineage.sql"),
+            KEY = KEY,
+            EPOCH = EPOCH,
+            PAYLOAD = PAYLOAD,
+            VALID_FROM = VALID_FROM,
+            VALID_UNTIL = VALID_UNTIL,
+            PARENT = PARENT,
+            LEFT_CHILD = LEFT_CHILD,
+            RIGHT_CHILD = RIGHT_CHILD,
+            SUBTREE_SIZE = SUBTREE_SIZE,
+            max_depth = 2,
+            zk_table = table,
+            core_keys_query = keys_query,
+        );
+        let connection = db.get().await.unwrap();
+        let rows = connection
+            .query(&query, &[&bounds.0, &bounds.1])
+            .await
+            .with_context(|| {
+                format!(
+                    "while fetching wide lineage for {table} [[{}, {}]] with: {query}",
+                    bounds.0, bounds.1
+                )
+            })?;
 
-            // Assemble the final result
-            let mut core_keys = Vec::new();
-            let mut epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)> =
-                HashMap::new();
+        // Assemble the final result
+        let mut core_keys = Vec::new();
+        let mut epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)> =
+            HashMap::new();
 
-            for row in &rows {
-                let is_core = row
-                    .try_get::<_, i32>("is_core")
-                    .context("while fetching core flag from row")?
-                    > 0;
-                let epoch = row
-                    .try_get::<_, i64>(EPOCH)
-                    .context("while fetching epoch from row")?;
-                let node = <Self as DbConnector<V>>::node_from_row(row)?;
-                let payload = Self::payload_from_row(row)?;
-                if is_core {
-                    core_keys.push((epoch, node.k.clone()));
-                }
-
-                let h_epoch = epoch_lineages.entry(epoch).or_default();
-                h_epoch.0.insert(
-                    node.k.clone(),
-                    NodeContext {
-                        node_id: node.k.clone(),
-                        parent: node.parent.clone(),
-                        left: node.left.clone(),
-                        right: node.right.clone(),
-                    },
-                );
-                h_epoch.1.insert(node.k, payload);
+        for row in &rows {
+            let is_core = row
+                .try_get::<_, i32>("is_core")
+                .context("while fetching core flag from row")?
+                > 0;
+            let epoch = row
+                .try_get::<_, i64>(EPOCH)
+                .context("while fetching epoch from row")?;
+            let node = <Self as DbConnector<V>>::node_from_row(row)?;
+            let payload = Self::payload_from_row(row)?;
+            if is_core {
+                core_keys.push((epoch, node.k.clone()));
             }
 
-            Ok(WideLineage {
-                core_keys,
-                epoch_lineages,
-            })
+            let h_epoch = epoch_lineages.entry(epoch).or_default();
+            h_epoch.0.insert(
+                node.k.clone(),
+                NodeContext {
+                    node_id: node.k.clone(),
+                    parent: node.parent.clone(),
+                    left: node.left.clone(),
+                    right: node.right.clone(),
+                },
+            );
+            h_epoch.1.insert(node.k, payload);
         }
+
+        Ok(WideLineage {
+            core_keys,
+            epoch_lineages,
+        })
     }
 
-    fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
+    async fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
         &self,
         _s: &S,
         db: DBPool,
         table: &str,
         data: I,
-    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<Self::Key>, V)>>> + Send {
-        async move {
-            let data = data.into_iter().collect::<Vec<_>>();
-            let connection = db.get().await.unwrap();
-            let immediate_table = data
-                .iter()
-                .map(|(epoch, key)| {
-                    format!(
-                        "({epoch}::BIGINT, '\\x{}'::BYTEA)",
-                        hex::encode(key.to_bytea())
-                    )
-                })
-                .join(", ");
-
-            let mut r = Vec::new();
-            for row in connection
-                .query(
-                     &format!(
-                         "SELECT
-                            batch.key, batch.epoch, {table}.{PAYLOAD},
-                            {table}.{PARENT}, {table}.{LEFT_CHILD}, {table}.{RIGHT_CHILD}
-                          FROM
-                            (VALUES {}) AS batch (epoch, key)
-                          LEFT JOIN {table} ON
-                            batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
-                        immediate_table
-                    ),
-                    &[],
+    ) -> Result<Vec<(Epoch, NodeContext<Self::Key>, V)>> {
+        let data = data.into_iter().collect::<Vec<_>>();
+        let connection = db.get().await.unwrap();
+        let immediate_table = data
+            .iter()
+            .map(|(epoch, key)| {
+                format!(
+                    "({epoch}::BIGINT, '\\x{}'::BYTEA)",
+                    hex::encode(key.to_bytea())
                 )
-                .await
-                .context("while fetching payload from database")?
-                .iter()
-            {
-                let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
-                let epoch = row.get::<_, Epoch>(1);
-                let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
-                if let Some(v) = v {
-                    r.push((
-                        epoch,
-                        NodeContext {
-                            node_id: k,
-                            parent: row.get::<_, Option<Vec<u8>>>(3).map(K::from_bytea),
-                            left: row.get::<_, Option<Vec<u8>>>(4).map(K::from_bytea),
-                            right: row.get::<_, Option<Vec<u8>>>(5).map(K::from_bytea),
-                        },
-                        v,
-                    ));
-                }
+            })
+            .join(", ");
+
+        let mut r = Vec::new();
+        for row in connection
+            .query(
+                 &format!(
+                     "SELECT
+                        batch.key, batch.epoch, {table}.{PAYLOAD},
+                        {table}.{PARENT}, {table}.{LEFT_CHILD}, {table}.{RIGHT_CHILD}
+                      FROM
+                        (VALUES {}) AS batch (epoch, key)
+                      LEFT JOIN {table} ON
+                        batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
+                    immediate_table
+                ),
+                &[],
+            )
+            .await
+            .context("while fetching payload from database")?
+            .iter()
+        {
+            let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
+            let epoch = row.get::<_, Epoch>(1);
+            let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
+            if let Some(v) = v {
+                r.push((
+                    epoch,
+                    NodeContext {
+                        node_id: k,
+                        parent: row.get::<_, Option<Vec<u8>>>(3).map(K::from_bytea),
+                        left: row.get::<_, Option<Vec<u8>>>(4).map(K::from_bytea),
+                        right: row.get::<_, Option<Vec<u8>>>(5).map(K::from_bytea),
+                    },
+                    v,
+                ));
             }
-            Ok(r)
         }
+        Ok(r)
     }
 }
 
