@@ -30,7 +30,7 @@
 //! Therefore determining the parent of a node of general value x is achieved by:
 //!   1. determine the layer i to which x belongs, which is the smaller power of
 //!   2 to which x is congruent, i.e. the number of trailing zeros in its binary
-//!   representation;
+//!     representation;
 //!   2. determine x rank n in the layer l^i, which is equal to (x - 2^i)/2^(i+1);
 //!   3. if n is even then x parent is n + 2^i, or n - 2^i if n is odd.
 //!
