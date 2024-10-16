@@ -22,7 +22,7 @@ use itertools::Itertools;
 use mp2_common::{
     digest::Digest,
     poseidon::H,
-    types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
+    types::{HashOutput, EVM_WORD_LEN, MAPPING_LEAF_VALUE_LEN},
     utils::{Fieldable, ToFields},
     F,
 };
@@ -245,8 +245,9 @@ fn value_metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
                     ));
 
                     let slot = F::from_canonical_u8(slot);
-                    // TODO: We use length of `32` to compute the table metadata hash here.
-                    let length = F::from_canonical_usize(MAPPING_LEAF_VALUE_LEN);
+                    // TODO: Need to check with integration test. We just use
+                    // EVM word length (`32`) to compute the table metadata hash here.
+                    let length = F::from_canonical_usize(EVM_WORD_LEN);
 
                     ColumnInfo::new(slot, identifier, F::ZERO, F::ZERO, length, F::ZERO)
                 })
