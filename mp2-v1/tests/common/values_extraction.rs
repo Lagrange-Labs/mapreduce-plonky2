@@ -15,7 +15,7 @@ use mp2_common::{
 };
 use mp2_v1::values_extraction::{
     gadgets::{column_info::ColumnInfo, metadata_gadget::MetadataGadget},
-    identifier_for_mapping_key_column,
+    identifier_for_mapping_value_column,
     public_inputs::PublicInputs,
 };
 use plonky2::field::types::Field;
@@ -80,9 +80,9 @@ impl TestContext {
         let mut trie = TestStorageTrie::new();
         info!("mapping mpt proving: Initialized the test storage trie");
 
-        // Compute the column identifier. It's only one column for simple mapping values.
+        // Compute the column identifier for the value column.
         let column_identifier =
-            identifier_for_mapping_key_column(slot, contract_address, chain_id, vec![]);
+            identifier_for_mapping_value_column(slot, contract_address, chain_id, vec![]);
         // Compute the table metadata information.
         let table_info = vec![ColumnInfo::new(
             slot,
