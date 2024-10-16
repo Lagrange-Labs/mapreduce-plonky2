@@ -455,7 +455,7 @@ impl ToTargets for HashOutTarget {
     }
 }
 
-impl<'a> ToTargets for &'a HashOutTarget {
+impl ToTargets for &HashOutTarget {
     fn to_targets(&self) -> Vec<Target> {
         self.elements.to_vec()
     }
@@ -494,7 +494,8 @@ impl TryIntoBool for U256 {
     }
 }
 
-/// Trait alias defined to implement `Packer` and `ToBool` traits for `RichField`
+/// Implement `Packer` and `ToBool` for `RichField`.
+///
 /// Fields that want to be packed with `Packer` have to implement
 /// this trait (trivial implementation). Currently implemented only
 /// for Goldilocks

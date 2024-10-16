@@ -229,7 +229,7 @@ impl<K: Debug + Clone + Hash + Eq> UpdateTree<K> {
             std::iter::once(k).chain(
                 n.children
                     .iter()
-                    .flat_map(|child_i| self.descendants(*child_i).into_iter()),
+                    .flat_map(|child_i| self.descendants(*child_i)),
             ),
         )
     }

@@ -1175,7 +1175,7 @@ async fn all_pgsql() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT2.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i.unwrap()).await?;
             }
             Ok(())
         })
@@ -1223,7 +1223,7 @@ async fn all_memory() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT1.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i.unwrap()).await?;
             }
             Ok(())
         })
@@ -1244,7 +1244,7 @@ async fn all_memory() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT2.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i.unwrap()).await?;
             }
             Ok(())
         })
