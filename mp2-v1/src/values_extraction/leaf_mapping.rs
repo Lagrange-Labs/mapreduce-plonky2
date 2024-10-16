@@ -102,13 +102,9 @@ where
         // Compute the metadata digest.
         let metadata_digest = metadata.digest(b, slot.mapping_slot);
 
-        // key_column_md = H( "KEY" || slot)
+        // key_column_md = H( "\0KEY" || slot)
         let key_id_prefix = b.constant(F::from_canonical_u32(u32::from_be_bytes(
-            once(0_u8)
-                .chain(KEY_ID_PREFIX.iter().cloned())
-                .collect_vec()
-                .try_into()
-                .unwrap(),
+            KEY_ID_PREFIX.try_into().unwrap(),
         )));
         let inputs = vec![key_id_prefix, slot.mapping_slot];
         let key_column_md = b.hash_n_to_hash_no_pad::<CHasher>(inputs);

@@ -121,12 +121,7 @@ where
         ]
         .map(|(prefix, key_id)| {
             let prefix = b.constant(F::from_canonical_u64(u64::from_be_bytes(
-                repeat(0_u8)
-                    .take(8 - prefix.len())
-                    .chain(prefix.iter().cloned())
-                    .collect_vec()
-                    .try_into()
-                    .unwrap(),
+                prefix.try_into().unwrap(),
             )));
 
             // key_column_md = H(KEY_ID_PREFIX || slot)

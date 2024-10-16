@@ -17,10 +17,7 @@ use plonky2::{
 };
 use plonky2_ecgfp5::curve::{curve::Point as Digest, scalar_field::Scalar};
 use serde::{Deserialize, Serialize};
-use std::{
-    iter::{once, repeat},
-    usize,
-};
+use std::iter::{once, repeat};
 
 pub mod api;
 mod branch;
@@ -34,15 +31,13 @@ pub mod public_inputs;
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
 pub use public_inputs::PublicInputs;
 
-/// Constant prefixes for key and value IDs. Restrict both prefixes to 3-bytes,
-/// so `prefix + slot (u8)` could be converted to an U32.
-pub(crate) const KEY_ID_PREFIX: &[u8] = b"KEY";
-pub(crate) const VALUE_ID_PREFIX: &[u8] = b"VAL";
+/// Constant prefix for the key ID. Restrict to 4-bytes (Uint32).
+pub(crate) const KEY_ID_PREFIX: &[u8] = b"\0KEY";
 
 /// Constant prefixes for the inner and outer key IDs of mapping slot.
-/// Restrict to one field.
-pub(crate) const INNER_KEY_ID_PREFIX: &[u8] = b"IN_KEY";
-pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"OUT_KEY";
+/// Restrict to 8-bytes (Uint64).
+pub(crate) const INNER_KEY_ID_PREFIX: &[u8] = b"\0\0IN_KEY";
+pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"\0OUT_KEY";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
@@ -158,6 +153,8 @@ pub fn identifier_for_mapping_value_column(
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
+    const VALUE_ID_PREFIX: &[u8] = b"VAL";
+
     compute_id_with_prefix(VALUE_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
@@ -242,14 +239,8 @@ pub fn compute_leaf_mapping_metadata_digest<
     )
     .digest();
 
-    // key_column_md = H( "KEY" || slot)
-    let key_id_prefix = u32::from_be_bytes(
-        once(0_u8)
-            .chain(KEY_ID_PREFIX.iter().cloned())
-            .collect_vec()
-            .try_into()
-            .unwrap(),
-    );
+    // key_column_md = H( "\0KEY" || slot)
+    let key_id_prefix = u32::from_be_bytes(KEY_ID_PREFIX.try_into().unwrap());
     let inputs = vec![
         F::from_canonical_u32(key_id_prefix),
         F::from_canonical_u8(slot),
@@ -331,16 +322,8 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
         (INNER_KEY_ID_PREFIX, inner_key_id),
     ]
     .map(|(prefix, key_id)| {
-        let prefix = u64::from_be_bytes(
-            repeat(0_u8)
-                .take(8 - prefix.len())
-                .chain(prefix.iter().cloned())
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        );
-
         // key_column_md = H(KEY_ID_PREFIX || slot)
+        let prefix = u64::from_be_bytes(prefix.try_into().unwrap());
         let inputs = vec![F::from_canonical_u64(prefix), F::from_canonical_u8(slot)];
         let key_column_md = H::hash_no_pad(&inputs);
 
