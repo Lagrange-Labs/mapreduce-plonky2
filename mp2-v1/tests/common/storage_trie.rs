@@ -201,15 +201,9 @@ impl TrieNode {
 
         // Find the storage slot information for this leaf node.
         let slot_info = ctx.slots.get(&node).unwrap();
-        let metadata = slot_info.metadata();
+        let metadata = slot_info.metadata().clone();
 
         // Build the leaf circuit input.
-        let table_info =
-            slot_info.metadata().table_info()[..metadata.num_actual_columns()].to_vec();
-        let extracted_column_identifiers = table_info[..metadata.num_extracted_columns()]
-            .iter()
-            .map(|column_info| column_info.identifier().to_canonical_u64())
-            .collect_vec();
         let (name, input) = match slot_info.slot() {
             // Simple variable slot
             StorageSlot::Simple(slot) => (
@@ -217,9 +211,7 @@ impl TrieNode {
                 values_extraction::CircuitInput::new_single_variable_leaf(
                     node.clone(),
                     *slot as u8,
-                    metadata.evm_word(),
-                    &extracted_column_identifiers,
-                    table_info,
+                    metadata,
                 ),
             ),
             // Mapping variable
@@ -230,21 +222,17 @@ impl TrieNode {
                     *slot as u8,
                     mapping_key.clone(),
                     slot_info.outer_key_id(),
-                    metadata.evm_word(),
-                    &extracted_column_identifiers,
-                    table_info,
+                    metadata,
                 ),
             ),
-            StorageSlot::Node(StorageSlotNode::Struct(parent, evm_word)) => match &**parent {
+            StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => match &**parent {
                 // Simple Struct
                 StorageSlot::Simple(slot) => (
                     "indexing::extraction::mpt::leaf::single_struct",
                     values_extraction::CircuitInput::new_single_variable_leaf(
                         node.clone(),
                         *slot as u8,
-                        *evm_word,
-                        &extracted_column_identifiers,
-                        table_info,
+                        metadata,
                     ),
                 ),
                 // Mapping Struct
@@ -255,9 +243,7 @@ impl TrieNode {
                         *slot as u8,
                         mapping_key.clone(),
                         slot_info.outer_key_id(),
-                        metadata.evm_word(),
-                        &extracted_column_identifiers,
-                        table_info,
+                        metadata,
                     ),
                 ),
                 // Mapping of mappings Struct
@@ -272,9 +258,7 @@ impl TrieNode {
                                 inner_mapping_key.clone(),
                                 slot_info.outer_key_id(),
                                 slot_info.inner_key_id(),
-                                metadata.evm_word(),
-                                &extracted_column_identifiers,
-                                table_info,
+                                metadata,
                             ),
                         ),
                         _ => unreachable!(),
