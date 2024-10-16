@@ -27,7 +27,7 @@ use mp2_common::{
     F,
 };
 use plonky2::{
-    field::types::Field,
+    field::types::{Field, PrimeField64},
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };
@@ -236,26 +236,20 @@ fn value_metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
             let table_info = slots
                 .into_iter()
                 .map(|slot| {
-                    let identifier = F::from_canonical_u64(identifier_single_var_column(
-                        slot,
-                        0,
-                        contract,
-                        chain_id,
-                        vec![],
-                    ));
+                    let identifier =
+                        identifier_single_var_column(slot, 0, contract, chain_id, vec![]);
 
-                    let slot = F::from_canonical_u8(slot);
                     // TODO: Need to check with integration test. We just use
                     // EVM word length (`32`) to compute the table metadata hash here.
-                    let length = F::from_canonical_usize(EVM_WORD_LEN);
+                    let length = EVM_WORD_LEN;
 
-                    ColumnInfo::new(slot, identifier, F::ZERO, F::ZERO, length, F::ZERO)
+                    ColumnInfo::new(slot, identifier, 0, 0, length, 0)
                 })
                 .collect_vec();
             table_info.iter().fold(Point::NEUTRAL, |acc, column_info| {
                 let digest = compute_leaf_single_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
                     table_info.clone(),
-                    slice::from_ref(&column_info.identifier),
+                    slice::from_ref(&column_info.identifier.to_canonical_u64()),
                     0,
                 );
                 acc + digest
@@ -284,24 +278,12 @@ fn metadata_digest_mapping<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: us
 ) -> Digest {
     // TODO: Need to check with integration test. We just use
     // EVM word length (`32`) to compute the table metadata hash here.
-    let length = F::from_canonical_usize(EVM_WORD_LEN);
-    let key_id = F::from_canonical_u64(identifier_for_mapping_key_column(
-        slot,
-        address,
-        chain_id,
-        extra.clone(),
-    ));
+    let length = EVM_WORD_LEN;
+    let key_id = identifier_for_mapping_key_column(slot, address, chain_id, extra.clone());
     // TODO: Need to check with integration test. We use `key_id`
     // also as the column identifier here.
-    let column_info = ColumnInfo::new(
-        F::from_canonical_u8(slot),
-        key_id,
-        F::ZERO,
-        F::ZERO,
-        length,
-        F::ZERO,
-    );
-    let column_identifier = column_info.identifier;
+    let column_info = ColumnInfo::new(slot, key_id, 0, 0, length, 0);
+    let column_identifier = column_info.identifier.to_canonical_u64();
     compute_leaf_mapping_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
         vec![column_info],
         slice::from_ref(&column_identifier),

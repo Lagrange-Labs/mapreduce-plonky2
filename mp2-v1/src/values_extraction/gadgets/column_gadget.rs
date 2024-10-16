@@ -268,7 +268,7 @@ impl<const MAX_FIELD_PER_EVM: usize> ColumnGadgetData<MAX_FIELD_PER_EVM> {
     /// Create a new data.
     pub fn new(
         mut table_info: Vec<ColumnInfo>,
-        extracted_column_identifiers: &[F],
+        extracted_column_identifiers: &[u64],
         value: [u8; MAPPING_LEAF_VALUE_LEN],
     ) -> Self {
         let num_extracted_columns = extracted_column_identifiers.len();
@@ -276,7 +276,7 @@ impl<const MAX_FIELD_PER_EVM: usize> ColumnGadgetData<MAX_FIELD_PER_EVM> {
 
         // Move the extracted columns to the front the vector of column information.
         table_info.sort_by_key(|column_info| {
-            !extracted_column_identifiers.contains(&column_info.identifier)
+            !extracted_column_identifiers.contains(&column_info.identifier.to_canonical_u64())
         });
 
         // Extend the column information vector with the last element.

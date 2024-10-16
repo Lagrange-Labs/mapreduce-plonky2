@@ -38,10 +38,7 @@ use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::{
-    iter,
-    iter::{once, repeat},
-};
+use std::{iter, iter::once};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafMappingOfMappingsWires<
@@ -291,9 +288,10 @@ mod tests {
         utils::random_vector,
     };
     use plonky2::{
-        field::types::{Field, Sample},
+        field::types::{Field, PrimeField64},
         iop::{target::Target, witness::PartialWitness},
     };
+    use rand::{thread_rng, Rng};
     use std::array;
 
     type LeafCircuit =
@@ -332,6 +330,8 @@ mod tests {
         inner_key: Vec<u8>,
         storage_slot: StorageSlot,
     ) {
+        let rng = &mut thread_rng();
+
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);
         let encoded_value: Vec<u8> = rlp::encode(&value).to_vec();
@@ -345,19 +345,20 @@ mod tests {
 
         let slot = storage_slot.slot();
         let evm_word = storage_slot.evm_offset();
-        let [outer_key_id, inner_key_id] = array::from_fn(|_| F::rand());
+        let [outer_key_id, inner_key_id] = array::from_fn(|_| rng.gen());
         let metadata =
             MetadataGadget::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
-        let extracted_column_identifiers = metadata.table_info[..metadata.num_extracted_columns]
+        let table_info = metadata.table_info[..metadata.num_actual_columns].to_vec();
+        let extracted_column_identifiers = table_info
             .iter()
-            .map(|column_info| column_info.identifier)
+            .map(|column_info| column_info.identifier.to_canonical_u64())
             .collect_vec();
         let metadata_digest = compute_leaf_mapping_of_mappings_metadata_digest::<
             TEST_MAX_COLUMNS,
             TEST_MAX_FIELD_PER_EVM,
         >(
-            metadata.table_info[..metadata.num_actual_columns].to_vec(),
+            table_info.clone(),
             &extracted_column_identifiers,
             evm_word,
             slot,
@@ -367,7 +368,7 @@ mod tests {
         // Compute the values digest.
         let values_digest = compute_leaf_mapping_of_mappings_values_digest::<TEST_MAX_FIELD_PER_EVM>(
             &metadata_digest,
-            metadata.table_info.to_vec(),
+            table_info,
             &extracted_column_identifiers,
             value.clone().try_into().unwrap(),
             evm_word,
@@ -381,8 +382,8 @@ mod tests {
             node: node.clone(),
             slot,
             inner_key: inner_key.clone(),
-            outer_key_id,
-            inner_key_id,
+            outer_key_id: F::from_canonical_u64(outer_key_id),
+            inner_key_id: F::from_canonical_u64(inner_key_id),
             metadata,
         };
         let test_circuit = TestLeafMappingOfMappingsCircuit {

@@ -246,9 +246,10 @@ mod tests {
         utils::random_vector,
     };
     use plonky2::{
-        field::types::{Field, Sample},
+        field::types::{Field, PrimeField64},
         iop::{target::Target, witness::PartialWitness},
     };
+    use rand::{thread_rng, Rng};
 
     type LeafCircuit =
         LeafMappingCircuit<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
@@ -281,6 +282,8 @@ mod tests {
     }
 
     fn test_circuit_for_storage_slot(mapping_key: Vec<u8>, storage_slot: StorageSlot) {
+        let rng = &mut thread_rng();
+
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);
         let encoded_value: Vec<u8> = rlp::encode(&value).to_vec();
@@ -294,17 +297,18 @@ mod tests {
 
         let slot = storage_slot.slot();
         let evm_word = storage_slot.evm_offset();
-        let key_id = F::rand();
+        let key_id = rng.gen();
         let metadata =
             MetadataGadget::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
-        let extracted_column_identifiers = metadata.table_info[..metadata.num_extracted_columns]
+        let table_info = metadata.table_info[..metadata.num_actual_columns].to_vec();
+        let extracted_column_identifiers = table_info
             .iter()
-            .map(|column_info| column_info.identifier)
+            .map(|column_info| column_info.identifier.to_canonical_u64())
             .collect_vec();
         let metadata_digest =
             compute_leaf_mapping_metadata_digest::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-                metadata.table_info[..metadata.num_actual_columns].to_vec(),
+                table_info.clone(),
                 &extracted_column_identifiers,
                 evm_word,
                 slot,
@@ -313,7 +317,7 @@ mod tests {
         // Compute the values digest.
         let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
             &metadata_digest,
-            metadata.table_info.to_vec(),
+            table_info,
             &extracted_column_identifiers,
             value.clone().try_into().unwrap(),
             mapping_key.clone(),
@@ -324,7 +328,7 @@ mod tests {
         let c = LeafCircuit {
             node: node.clone(),
             slot,
-            key_id,
+            key_id: F::from_canonical_u64(key_id),
             metadata,
         };
         let test_circuit = TestLeafMappingCircuit {

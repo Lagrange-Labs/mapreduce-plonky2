@@ -17,7 +17,7 @@ use plonky2::{
 };
 use plonky2_ecgfp5::curve::{curve::Point as Digest, scalar_field::Scalar};
 use serde::{Deserialize, Serialize};
-use std::iter::{once, repeat};
+use std::iter::once;
 
 pub mod api;
 mod branch;
@@ -46,8 +46,8 @@ pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 pub struct StorageSlotInfo<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
     slot: StorageSlot,
     metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    outer_key_id: F,
-    inner_key_id: F,
+    outer_key_id: u64,
+    inner_key_id: u64,
 }
 
 impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
@@ -56,8 +56,8 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     pub fn new(
         slot: StorageSlot,
         metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-        outer_key_id: Option<F>,
-        inner_key_id: Option<F>,
+        outer_key_id: Option<u64>,
+        inner_key_id: Option<u64>,
     ) -> Self {
         let [outer_key_id, inner_key_id] =
             [outer_key_id, inner_key_id].map(|key_id| key_id.unwrap_or_default());
@@ -77,11 +77,11 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
         &self.metadata
     }
 
-    pub fn outer_key_id(&self) -> F {
+    pub fn outer_key_id(&self) -> u64 {
         self.outer_key_id
     }
 
-    pub fn inner_key_id(&self) -> F {
+    pub fn inner_key_id(&self) -> u64 {
         self.inner_key_id
     }
 }
@@ -185,8 +185,8 @@ pub fn compute_leaf_single_metadata_digest<
     const MAX_FIELD_PER_EVM: usize,
 >(
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[F],
-    evm_word: u32,
+    extracted_column_identifiers: &[u64],
+    evm_word: usize,
 ) -> Digest {
     MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
         table_info,
@@ -200,7 +200,7 @@ pub fn compute_leaf_single_metadata_digest<
 pub fn compute_leaf_single_values_digest<const MAX_FIELD_PER_EVM: usize>(
     metadata_digest: &Digest,
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[F],
+    extracted_column_identifiers: &[u64],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
 ) -> Digest {
     let values_digest =
@@ -227,10 +227,10 @@ pub fn compute_leaf_mapping_metadata_digest<
     const MAX_FIELD_PER_EVM: usize,
 >(
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[F],
-    evm_word: u32,
+    extracted_column_identifiers: &[u64],
+    evm_word: usize,
     slot: u8,
-    key_id: F,
+    key_id: u64,
 ) -> Digest {
     let metadata_digest = MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
         table_info,
@@ -250,7 +250,7 @@ pub fn compute_leaf_mapping_metadata_digest<
     let inputs = key_column_md
         .to_fields()
         .into_iter()
-        .chain(once(key_id))
+        .chain(once(F::from_canonical_u64(key_id)))
         .collect_vec();
     let metadata_key_digest = map_to_curve_point(&inputs);
 
@@ -261,11 +261,11 @@ pub fn compute_leaf_mapping_metadata_digest<
 pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
     metadata_digest: &Digest,
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[F],
+    extracted_column_identifiers: &[u64],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
     mapping_key: Vec<u8>,
-    evm_word: u32,
-    key_id: F,
+    evm_word: usize,
+    key_id: u64,
 ) -> Digest {
     let mut values_digest =
         ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
@@ -277,7 +277,9 @@ pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
         .into_iter()
         .map(F::from_canonical_u32);
     if evm_word == 0 {
-        let inputs = once(key_id).chain(packed_mapping_key.clone()).collect_vec();
+        let inputs = once(F::from_canonical_u64(key_id))
+            .chain(packed_mapping_key.clone())
+            .collect_vec();
         let values_key_digest = map_to_curve_point(&inputs);
         values_digest += values_key_digest;
     }
@@ -303,11 +305,11 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
     const MAX_FIELD_PER_EVM: usize,
 >(
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[F],
-    evm_word: u32,
+    extracted_column_identifiers: &[u64],
+    evm_word: usize,
     slot: u8,
-    outer_key_id: F,
-    inner_key_id: F,
+    outer_key_id: u64,
+    inner_key_id: u64,
 ) -> Digest {
     let metadata_digest = MetadataGadget::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(
         table_info,
@@ -331,7 +333,7 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
         let inputs = key_column_md
             .to_fields()
             .into_iter()
-            .chain(once(key_id))
+            .chain(once(F::from_canonical_u64(key_id)))
             .collect_vec();
         map_to_curve_point(&inputs)
     });
@@ -345,13 +347,13 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
 pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: usize>(
     metadata_digest: &Digest,
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[F],
+    extracted_column_identifiers: &[u64],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
-    evm_word: u32,
+    evm_word: usize,
     outer_mapping_key: Vec<u8>,
     inner_mapping_key: Vec<u8>,
-    outer_key_id: F,
-    inner_key_id: F,
+    outer_key_id: u64,
+    inner_key_id: u64,
 ) -> Digest {
     let mut values_digest =
         ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
@@ -371,7 +373,9 @@ pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: u
         ]
         .map(|(key_id, packed_key)| {
             // D(key_id || pack(key))
-            let inputs = once(key_id).chain(packed_key).collect_vec();
+            let inputs = once(F::from_canonical_u64(key_id))
+                .chain(packed_key)
+                .collect_vec();
             map_to_curve_point(&inputs)
         });
         // values_digest += outer_key_digest + inner_key_digest

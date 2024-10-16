@@ -39,13 +39,18 @@ pub struct ColumnInfo {
 
 impl ColumnInfo {
     pub fn new(
-        slot: F,
-        identifier: F,
-        byte_offset: F,
-        bit_offset: F,
-        length: F,
-        evm_word: F,
+        slot: u8,
+        identifier: u64,
+        byte_offset: usize,
+        bit_offset: usize,
+        length: usize,
+        evm_word: usize,
     ) -> Self {
+        let slot = F::from_canonical_u8(slot);
+        let identifier = F::from_canonical_u64(identifier);
+        let [byte_offset, bit_offset, length, evm_word] =
+            [byte_offset, bit_offset, length, evm_word].map(F::from_canonical_usize);
+
         Self {
             slot,
             identifier,

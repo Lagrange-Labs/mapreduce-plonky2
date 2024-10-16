@@ -14,7 +14,7 @@ use mp2_common::{
     CHasher, F,
 };
 use plonky2::{
-    field::types::Field,
+    field::types::{Field, PrimeField64},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -41,7 +41,7 @@ pub struct MetadataGadget<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usi
     /// Column number to be extracted
     pub(crate) num_extracted_columns: usize,
     /// EVM word that should be the same for all extracted columns
-    pub(crate) evm_word: u32,
+    pub(crate) evm_word: usize,
 }
 
 impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
@@ -50,8 +50,8 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     /// Create a new MPT metadata.
     pub fn new(
         mut table_info: Vec<ColumnInfo>,
-        extracted_column_identifiers: &[F],
-        evm_word: u32,
+        extracted_column_identifiers: &[u64],
+        evm_word: usize,
     ) -> Self {
         let num_actual_columns = table_info.len();
         assert!(num_actual_columns <= MAX_COLUMNS);
@@ -61,7 +61,7 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
 
         // Move the extracted columns to the front the vector of column information.
         table_info.sort_by_key(|column_info| {
-            !extracted_column_identifiers.contains(&column_info.identifier)
+            !extracted_column_identifiers.contains(&column_info.identifier.to_canonical_u64())
         });
 
         // Extend the column information vector with the last element.
@@ -78,7 +78,7 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     }
 
     /// Create a sample MPT metadata. It could be used in integration tests.
-    pub fn sample(slot: u8, evm_word: u32) -> Self {
+    pub fn sample(slot: u8, evm_word: usize) -> Self {
         let rng = &mut thread_rng();
 
         let mut table_info = array::from_fn(|_| ColumnInfo::sample());
@@ -88,7 +88,7 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
 
         // if is_extracted:
         //      evm_word == info.evm_word && slot == info.slot
-        let evm_word_field = F::from_canonical_u32(evm_word);
+        let evm_word_field = F::from_canonical_usize(evm_word);
         let slot_field = F::from_canonical_u8(slot);
         table_info[..num_extracted_columns]
             .iter_mut()
@@ -124,7 +124,7 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
         self.num_extracted_columns
     }
 
-    pub fn evm_word(&self) -> u32 {
+    pub fn evm_word(&self) -> usize {
         self.evm_word
     }
 
@@ -160,7 +160,7 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
             .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_extracted_columns));
         pw.set_target(
             metadata_target.evm_word,
-            F::from_canonical_u32(self.evm_word),
+            F::from_canonical_usize(self.evm_word),
         );
     }
 }

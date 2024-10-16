@@ -19,7 +19,6 @@ use mp2_common::{
     eth::{ProofQuery, StorageSlot},
     proof::ProofWithVK,
     types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
-    F,
 };
 use mp2_v1::{
     api::{merge_metadata_hash, metadata_hash, SlotInputs},
@@ -34,7 +33,7 @@ use mp2_v1::{
         identifier_single_var_column,
     },
 };
-use plonky2::field::types::Field;
+use plonky2::field::types::PrimeField64;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
@@ -1092,18 +1091,10 @@ pub(crate) fn single_var_slot_info(
         .into_iter()
         .zip_eq(SINGLE_SLOT_LENGTHS)
         .map(|(slot, length)| {
-            let identifier = F::from_canonical_u64(identifier_single_var_column(
-                slot,
-                0,
-                contract_address,
-                chain_id,
-                vec![],
-            ));
+            let identifier =
+                identifier_single_var_column(slot, 0, contract_address, chain_id, vec![]);
 
-            let slot = F::from_canonical_u8(slot);
-            let length = F::from_canonical_usize(length);
-
-            ColumnInfo::new(slot, identifier, F::ZERO, F::ZERO, length, F::ZERO)
+            ColumnInfo::new(slot, identifier, 0, 0, length, 0)
         })
         .collect_vec();
 
@@ -1117,7 +1108,7 @@ pub(crate) fn single_var_slot_info(
             // Create the metadata gadget.
             let metadata = MetadataGadget::new(
                 table_info.clone(),
-                slice::from_ref(&table_info[i].identifier()),
+                slice::from_ref(&table_info[i].identifier().to_canonical_u64()),
                 0,
             );
 
