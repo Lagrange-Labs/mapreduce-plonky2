@@ -1,18 +1,14 @@
+use derive_more::{From, Into};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing,
+    digest::{TableDimension, TableDimensionWire},
     public_inputs::PublicInputCommon,
-    serialization::{deserialize, serialize},
     utils::ToTargets,
     D, F,
 };
 use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
@@ -20,29 +16,17 @@ use crate::values_extraction;
 
 use super::{
     api::{FinalExtractionBuilderParams, NUM_IO},
-    base_circuit,
-    base_circuit::{BaseCircuitProofInputs, BaseCircuitProofWires},
+    base_circuit::{self, BaseCircuitProofInputs, BaseCircuitProofWires},
     PublicInputs,
 };
 
 /// This circuit contains the logic to prove the final extraction of a simple
 /// variable (like uint256) or a mapping without an associated length slot.
-#[derive(Clone, Debug)]
-pub struct SimpleCircuit {
-    /// Set to true for types that
-    /// * have multiple entries (like an mapping, unlike a single uin256 for example)
-    /// * don't need or have an associated length slot to combine with
-    /// It happens contracts don't have a length slot associated with the mapping
-    /// like ERC20 and thus there is no proof circuits have looked at _all_ the entries
-    /// due to limitations on EVM (there is no mapping.len()).
-    compound_type: bool,
-}
+#[derive(Clone, Debug, From, Into)]
+pub struct SimpleCircuit(TableDimension);
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct SimpleWires {
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    compound: BoolTarget,
-}
+pub struct SimpleWires(TableDimensionWire);
 
 impl SimpleCircuit {
     fn build(
@@ -51,31 +35,34 @@ impl SimpleCircuit {
         contract_pi: &[Target],
         value_pi: &[Target],
     ) -> SimpleWires {
-        let base_wires = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, value_pi);
+        // only one value proof to verify for this circuit
+        let base_wires = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, vec![value_pi]);
 
         let value_pi = values_extraction::PublicInputs::<Target>::new(value_pi);
-        let dv = value_pi.values_digest_target().to_targets();
-        let single_variable = b.map_to_curve_point(&dv);
-        let compound = b.add_virtual_bool_target_safe();
-        let final_dv = b.curve_select(compound, value_pi.values_digest_target(), single_variable);
+        let dv = value_pi.values_digest_target();
+        // Compute the final value digest depending on the table dimension
+        let dimension: TableDimensionWire = b.add_virtual_bool_target_safe().into();
+        let final_dv = dimension.conditional_row_digest(b, dv);
         PublicInputs::new(
             &base_wires.bh,
             &base_wires.prev_bh,
             &final_dv.to_targets(),
             &base_wires.dm.to_targets(),
             &base_wires.bn.to_targets(),
+            &[b._false().target],
         )
         .register_args(b);
-        SimpleWires { compound }
+        SimpleWires(dimension)
     }
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &SimpleWires) {
-        pw.set_bool_target(wires.compound, self.compound_type);
+        self.0.assign_wire(pw, &wires.0);
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct SimpleCircuitRecursiveWires {
+    /// NOTE: assumed to be containing a single value inside, in the vec.
     base: BaseCircuitProofWires,
     simple_wires: SimpleWires,
 }
@@ -86,11 +73,11 @@ pub struct SimpleCircuitInput {
 }
 
 impl SimpleCircuitInput {
-    pub(crate) fn new(base: BaseCircuitProofInputs, compound: bool) -> Self {
-        let simple = SimpleCircuit {
-            compound_type: compound,
-        };
-        Self { base, simple }
+    pub(crate) fn new(base: BaseCircuitProofInputs, dimension: TableDimension) -> Self {
+        Self {
+            base,
+            simple: dimension.into(),
+        }
     }
 }
 
@@ -106,7 +93,8 @@ impl CircuitLogicWires<F, D, 0> for SimpleCircuitRecursiveWires {
         _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let base = BaseCircuitProofInputs::build(builder, &builder_parameters);
+        // only one proof to verify for this simple circuit
+        let base = BaseCircuitProofInputs::build(builder, &builder_parameters, 1);
         let wires = SimpleCircuit::build(
             builder,
             base.get_block_public_inputs(),
@@ -165,20 +153,16 @@ mod test {
         let pis = ProofsPi::random();
         let test_circuit = TestSimpleCircuit {
             pis: pis.clone(),
-            circuit: SimpleCircuit {
-                compound_type: true,
-            },
+            circuit: TableDimension::Compound.into(),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        pis.check_proof_public_inputs(&proof, true, None);
+        pis.check_proof_public_inputs(&proof, TableDimension::Compound, None);
 
         let test_circuit = TestSimpleCircuit {
             pis: pis.clone(),
-            circuit: SimpleCircuit {
-                compound_type: false,
-            },
+            circuit: TableDimension::Single.into(),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        pis.check_proof_public_inputs(&proof, false, None);
+        pis.check_proof_public_inputs(&proof, TableDimension::Single, None);
     }
 }
