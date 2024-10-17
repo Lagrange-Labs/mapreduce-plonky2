@@ -69,7 +69,7 @@ mod test {
     };
     use anyhow::Result;
     use mp2_common::{
-        eth::BlockUtil,
+        eth::Rlpable,
         proof::deserialize_proof,
         utils::{Endianness, FromFields, Packer, ToFields},
         C, D, F,
@@ -121,7 +121,11 @@ mod test {
         );
         assert_eq!(
             U256::from_fields(pi.block_number_raw()),
+<<<<<<< HEAD
             U256::from(block.header.number),
+=======
+            U256::from(block.header.number)
+>>>>>>> 6072e82 (test with receipts encoding)
         );
         assert_eq!(
             pi.state_root_raw(),

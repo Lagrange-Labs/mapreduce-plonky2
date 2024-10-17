@@ -131,7 +131,7 @@ mod test {
     use mp2_common::{eth::left_pad_generic, u256, utils::ToFields, C, F};
 
     use mp2_common::{
-        eth::BlockUtil,
+        eth::Rlpable,
         types::CBuilder,
         utils::{Endianness, Packer},
         D,
