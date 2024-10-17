@@ -18,10 +18,10 @@ use mp2_common::{
     digest::TableDimension,
     eth::{ProofQuery, StorageSlot},
     proof::ProofWithVK,
-    types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
+    types::HashOutput,
 };
 use mp2_v1::{
-    api::{merge_metadata_hash, metadata_hash, SlotInputs},
+    api::{merge_metadata_hash, metadata_hash, SlotInput, SlotInputs},
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
@@ -29,8 +29,7 @@ use mp2_v1::{
     },
     values_extraction::{
         gadgets::{column_info::ColumnInfo, metadata_gadget::MetadataGadget},
-        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column,
+        identifier_for_mapping_key_column, identifier_for_value_column,
     },
 };
 use plonky2::field::types::PrimeField64;
@@ -123,8 +122,14 @@ impl UniqueMappingEntry {
             vec![],
         ));
         let key_cell = self.to_cell(extract_key);
-        let extract_key = MappingIndex::Value(identifier_for_mapping_value_column(
-            slot,
+        let extract_key = MappingIndex::Value(identifier_for_value_column(
+            &SlotInput::new(
+                slot, // byte_offset
+                0,    // bit_offset
+                0,    // length
+                0,    // evm_word
+                0,
+            ),
             contract,
             chain_id,
             vec![],
@@ -200,20 +205,32 @@ impl TableSource {
     pub fn slot_input(&self) -> SlotInputs {
         match self {
             TableSource::SingleValues(single) => {
-                let slots = single
+                let inputs = single
                     .slots
                     .iter()
-                    .map(|slot_info| {
-                        let storage_slot = slot_info.slot();
-                        (storage_slot.slot(), storage_slot.evm_offset())
+                    .flat_map(|slot_info| {
+                        slot_info
+                            .metadata()
+                            .extracted_table_info()
+                            .iter()
+                            .map(Into::into)
+                            .collect_vec()
                     })
-                    .collect_vec();
-                SlotInputs::Simple(slots)
+                    .collect();
+                SlotInputs::Simple(inputs)
             }
             TableSource::Mapping((m, _)) => {
-                // TODO: We need to set the EVM word here.
-                SlotInputs::Mapping(m.slot, 0)
+                // TODO: Support for mapping to Struct.
+                let slot_input = SlotInput::new(
+                    m.slot, // byte_offset
+                    0,      // bit_offset
+                    0,      // length
+                    0,      // evm_word
+                    0,
+                );
+                SlotInputs::Mapping(vec![slot_input])
             }
+            // TODO: Support for mapping of mappings.
             TableSource::Merge(_) => panic!("can't call slot inputs on merge table"),
         }
     }
@@ -375,9 +392,10 @@ impl SingleValuesExtractionArgs {
         for slot_info in self.slots.iter() {
             let slot = slot_info.slot().slot();
             let query = ProofQuery::new_simple_slot(contract.address, slot as usize);
-            let id = identifier_single_var_column(
-                slot,
-                0,
+            // TODO: Support for the Struct.
+            let slot_input = (&slot_info.metadata().extracted_table_info()[0]).into();
+            let id = identifier_for_value_column(
+                &slot_input,
                 &contract.address,
                 ctx.rpc.get_chain_id().await.unwrap(),
                 vec![],
@@ -456,15 +474,19 @@ impl SingleValuesExtractionArgs {
                 single_values_proof
             }
         };
-        let slots = self
+        let inputs = self
             .slots
             .iter()
-            .map(|slot_info| {
-                let storage_slot = slot_info.slot();
-                (storage_slot.slot(), storage_slot.evm_offset())
+            .flat_map(|slot_info| {
+                slot_info
+                    .metadata()
+                    .extracted_table_info()
+                    .iter()
+                    .map(Into::into)
+                    .collect_vec()
             })
-            .collect_vec();
-        let slot_input = SlotInputs::Simple(slots);
+            .collect();
+        let slot_input = SlotInputs::Simple(inputs);
         let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
             slot_input,
             &contract.address,
@@ -676,6 +698,13 @@ impl MappingValuesExtractionArgs {
         proof_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
         let chain_id = ctx.rpc.get_chain_id().await?;
+        let slot_input = SlotInput::new(
+            self.slot, // byte_offset
+            0,         // bit_offset
+            0,         // length
+            0,         // evm_word
+            0,
+        );
         let mapping_root_proof = match ctx.storage.get_proof_exact(&proof_key) {
             Ok(p) => p,
             Err(_) => {
@@ -683,10 +712,7 @@ impl MappingValuesExtractionArgs {
                     .prove_mapping_values_extraction(
                         &contract.address,
                         chain_id,
-                        self.slot,
-                        0,
-                        // TODO: Need to check. We assume the length is 32 bytes here.
-                        MAPPING_LEAF_VALUE_LEN,
+                        &slot_input,
                         self.mapping_keys.clone(),
                     )
                     .await;
@@ -716,10 +742,8 @@ impl MappingValuesExtractionArgs {
                 mapping_values_proof
             }
         };
-        // TODO: We need to set the EVM word here.
-        let slot_input = SlotInputs::Mapping(self.slot, 0);
         let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-            slot_input,
+            SlotInputs::Mapping(vec![slot_input]),
             &contract.address,
             chain_id,
             vec![],
@@ -1101,8 +1125,15 @@ pub(crate) fn single_var_slot_info(
         .into_iter()
         .zip_eq(SINGLE_SLOT_LENGTHS)
         .map(|(slot, length)| {
+            let slot_input = SlotInput::new(
+                slot,   // byte_offset
+                0,      // bit_offset
+                length, // length
+                0,      // evm_word
+                0,
+            );
             let identifier =
-                identifier_single_var_column(slot, 0, contract_address, chain_id, vec![]);
+                identifier_for_value_column(&slot_input, contract_address, chain_id, vec![]);
 
             ColumnInfo::new(slot, identifier, 0, 0, length, 0)
         })

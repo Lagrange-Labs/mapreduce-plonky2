@@ -3,7 +3,7 @@ use alloy::primitives::Address;
 use anyhow::Result;
 use cases::table_source::TableSource;
 use itertools::Itertools;
-use mp2_v1::api::{merge_metadata_hash, metadata_hash, MetadataHash, SlotInputs};
+use mp2_v1::api::{merge_metadata_hash, metadata_hash, MetadataHash, SlotInput, SlotInputs};
 use serde::{Deserialize, Serialize};
 use table::TableColumns;
 pub mod benchmarker;
@@ -92,10 +92,15 @@ impl TableInfo {
     pub fn metadata_hash(&self) -> MetadataHash {
         match &self.source {
             TableSource::Mapping((mapping, _)) => {
-                // TODO: We need to set the EVM word here.
-                let slot = SlotInputs::Mapping(mapping.slot, 0);
+                let slot_input = SlotInputs::Mapping(vec![SlotInput::new(
+                    mapping.slot, // byte_offset
+                    0,            // bit_offset
+                    0,            // length
+                    0,            // evm_word
+                    0,
+                )]);
                 metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-                    slot,
+                    slot_input,
                     &self.contract_address,
                     self.chain_id,
                     vec![],
@@ -103,15 +108,19 @@ impl TableInfo {
             }
             // mapping with length not tested right now
             TableSource::SingleValues(args) => {
-                let slots = args
+                let inputs = args
                     .slots
                     .iter()
-                    .map(|slot_info| {
-                        let storage_slot = slot_info.slot();
-                        (storage_slot.slot(), storage_slot.evm_offset())
+                    .flat_map(|slot_info| {
+                        slot_info
+                            .metadata()
+                            .extracted_table_info()
+                            .iter()
+                            .map(Into::into)
+                            .collect_vec()
                     })
                     .collect();
-                let slot = SlotInputs::Simple(slots);
+                let slot = SlotInputs::Simple(inputs);
                 metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
                     slot,
                     &self.contract_address,
@@ -120,18 +129,27 @@ impl TableInfo {
                 )
             }
             TableSource::Merge(merge) => {
-                let slots_evm_words = merge
+                let inputs = merge
                     .single
                     .slots
                     .iter()
-                    .map(|slot_info| {
-                        let storage_slot = slot_info.slot();
-                        (storage_slot.slot(), storage_slot.evm_offset())
+                    .flat_map(|slot_info| {
+                        slot_info
+                            .metadata()
+                            .extracted_table_info()
+                            .iter()
+                            .map(Into::into)
+                            .collect_vec()
                     })
-                    .collect_vec();
-                let single = SlotInputs::Simple(slots_evm_words);
-                // TODO: We need to set the EVM word here.
-                let mapping = SlotInputs::Mapping(merge.mapping.slot, 0);
+                    .collect();
+                let single = SlotInputs::Simple(inputs);
+                let mapping = SlotInputs::Mapping(vec![SlotInput::new(
+                    merge.mapping.slot, // byte_offset
+                    0,                  // bit_offset
+                    0,                  // length
+                    0,                  // evm_word
+                    0,
+                )]);
                 merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
                     self.contract_address,
                     self.chain_id,

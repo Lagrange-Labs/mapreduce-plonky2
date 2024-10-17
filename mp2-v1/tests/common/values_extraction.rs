@@ -13,10 +13,13 @@ use mp2_common::{
     mpt_sequential::utils::bytes_to_nibbles,
     F,
 };
-use mp2_v1::values_extraction::{
-    gadgets::{column_info::ColumnInfo, metadata_gadget::MetadataGadget},
-    identifier_for_mapping_value_column,
-    public_inputs::PublicInputs,
+use mp2_v1::{
+    api::SlotInput,
+    values_extraction::{
+        gadgets::{column_info::ColumnInfo, metadata_gadget::MetadataGadget},
+        identifier_for_value_column,
+        public_inputs::PublicInputs,
+    },
 };
 use plonky2::field::types::Field;
 
@@ -68,9 +71,7 @@ impl TestContext {
         &self,
         contract_address: &Address,
         chain_id: u64,
-        slot: u8,
-        evm_word: u32,
-        length: usize,
+        slot_input: &SlotInput,
         mapping_keys: Vec<MappingKey>,
     ) -> Vec<u8> {
         let first_mapping_key = mapping_keys[0].clone();
@@ -82,14 +83,16 @@ impl TestContext {
 
         // Compute the column identifier for the value column.
         let column_identifier =
-            identifier_for_mapping_value_column(slot, contract_address, chain_id, vec![]);
+            identifier_for_value_column(slot_input, contract_address, chain_id, vec![]);
         // Compute the table metadata information.
+        let slot = slot_input.slot();
+        let evm_word = slot_input.evm_word();
         let table_info = vec![ColumnInfo::new(
             slot,
             column_identifier,
-            0,
-            0,
-            length,
+            slot_input.byte_offset(),
+            slot_input.bit_offset(),
+            slot_input.length(),
             evm_word,
         )];
         let metadata = MetadataGadget::new(table_info, &[column_identifier], evm_word);

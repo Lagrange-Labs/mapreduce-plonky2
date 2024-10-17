@@ -77,6 +77,16 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
         }
     }
 
+    /// Get the actual column information.
+    pub fn actual_table_info(&self) -> &[ColumnInfo] {
+        &self.table_info[..self.num_actual_columns]
+    }
+
+    /// Get the extracted column information.
+    pub fn extracted_table_info(&self) -> &[ColumnInfo] {
+        &self.table_info[..self.num_extracted_columns]
+    }
+
     /// Create a sample MPT metadata. It could be used in integration tests.
     pub fn sample(slot: u8, evm_word: u32) -> Self {
         let rng = &mut thread_rng();

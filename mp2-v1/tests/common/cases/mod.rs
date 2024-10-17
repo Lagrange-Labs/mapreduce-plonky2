@@ -13,10 +13,7 @@ use mp2_v1::{
         row::{RowTreeKey, ToNonce},
         ColumnID,
     },
-    values_extraction::{
-        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column,
-    },
+    values_extraction::identifier_for_mapping_key_column,
 };
 use serde::{Deserialize, Serialize};
 use table_source::{ContractExtractionArgs, TableSource};

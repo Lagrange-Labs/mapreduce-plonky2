@@ -1,3 +1,4 @@
+use crate::api::SlotInput;
 use alloy::primitives::Address;
 use gadgets::{
     column_gadget::ColumnGadgetData, column_info::ColumnInfo, metadata_gadget::MetadataGadget,
@@ -31,16 +32,13 @@ pub mod public_inputs;
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
 pub use public_inputs::PublicInputs;
 
-/// Constant prefixes for the key and value IDs. Restrict to 4-bytes (Uint32).
+/// Constant prefixes for the mapping key ID. Restrict to 4-bytes (Uint32).
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"\0KEY";
-pub(crate) const VALUE_ID_PREFIX: &[u8] = b"\0VAL";
 
-/// Constant prefixes for the inner and outer key and value IDs of mapping slot.
+/// Constant prefixes for the inner and outer key IDs of mapping slot.
 /// Restrict to 8-bytes (Uint64).
 pub(crate) const INNER_KEY_ID_PREFIX: &[u8] = b"\0\0IN_KEY";
 pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"\0OUT_KEY";
-pub(crate) const INNER_VALUE_ID_PREFIX: &[u8] = b"\0\0IN_VAL";
-pub(crate) const OUTER_VALUE_ID_PREFIX: &[u8] = b"\0OUT_VAL";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
@@ -94,17 +92,20 @@ pub fn identifier_block_column() -> u64 {
     H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
 }
 
-/// Compute identifier for single variable (value of Struct).
-/// `id = H(slot || evm_word || contract_address || chain_id)[0]`
-pub fn identifier_single_var_column(
-    slot: u8,
-    evm_word: u32,
+/// Compute identifier for value column.
+/// The value column could be either simple value or mapping value.
+/// `id = H(slot || byte_offset || bit_offset || length || evm_word || contract_address || chain_id)[0]`
+pub fn identifier_for_value_column(
+    input: &SlotInput,
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
-    let inputs = once(slot)
-        .chain(evm_word.to_be_bytes())
+    let inputs = once(input.slot)
+        .chain(input.byte_offset.to_be_bytes())
+        .chain(input.bit_offset.to_be_bytes())
+        .chain(input.length.to_be_bytes())
+        .chain(input.evm_word.to_be_bytes())
         .chain(contract_address.0.to_vec())
         .chain(chain_id.to_be_bytes())
         .chain(extra)
@@ -145,51 +146,6 @@ pub fn identifier_for_inner_mapping_key_column(
     extra: Vec<u8>,
 ) -> u64 {
     compute_id_with_prefix(INNER_KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
-}
-
-/// Compute value indetifier for mapping variable.
-/// `value_id = H(VAL || slot || contract_address || chain_id)[0]`
-pub fn identifier_for_mapping_value_column(
-    slot: u8,
-    contract_address: &Address,
-    chain_id: u64,
-    extra: Vec<u8>,
-) -> u64 {
-    compute_id_with_prefix(VALUE_ID_PREFIX, slot, contract_address, chain_id, extra)
-}
-
-/// Compute outer value indetifier for mapping of mappings variable.
-/// `outer_value_id = H(OUT_VAL || slot || contract_address || chain_id)[0]`
-pub fn identifier_for_outer_mapping_value_column(
-    slot: u8,
-    contract_address: &Address,
-    chain_id: u64,
-    extra: Vec<u8>,
-) -> u64 {
-    compute_id_with_prefix(
-        OUTER_VALUE_ID_PREFIX,
-        slot,
-        contract_address,
-        chain_id,
-        extra,
-    )
-}
-
-/// Compute inner value indetifier for mapping of mappings variable.
-/// `inner_value_id = H(IN_VAL || slot || contract_address || chain_id)[0]`
-pub fn identifier_for_inner_mapping_value_column(
-    slot: u8,
-    contract_address: &Address,
-    chain_id: u64,
-    extra: Vec<u8>,
-) -> u64 {
-    compute_id_with_prefix(
-        INNER_VALUE_ID_PREFIX,
-        slot,
-        contract_address,
-        chain_id,
-        extra,
-    )
 }
 
 /// Calculate ID with prefix.

@@ -13,8 +13,8 @@ use crate::{
         self, compute_leaf_mapping_metadata_digest,
         compute_leaf_mapping_of_mappings_metadata_digest, compute_leaf_single_metadata_digest,
         gadgets::column_info::ColumnInfo, identifier_block_column,
-        identifier_for_inner_mapping_value_column, identifier_for_mapping_value_column,
-        identifier_for_outer_mapping_value_column, identifier_single_var_column,
+        identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
+        identifier_for_outer_mapping_key_column, identifier_for_value_column,
     },
     MAX_LEAF_NODE_LEN,
 };
@@ -24,10 +24,11 @@ use itertools::Itertools;
 use mp2_common::{
     digest::Digest,
     poseidon::H,
-    types::{HashOutput, EVM_WORD_LEN},
+    types::HashOutput,
     utils::{Fieldable, ToFields},
 };
 use plonky2::{
+    field::types::PrimeField64,
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };
@@ -189,18 +190,92 @@ pub fn generate_proof<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
 pub type MetadataHash = HashOutput;
 
 /// Enumeration to be employed to provide input slots for metadata hash computation
+#[derive(Debug)]
 pub enum SlotInputs {
-    /// slots of a set of simple variables or Struct
-    /// slot number + EVM word (0 for simple value)
-    Simple(Vec<(u8, u32)>),
-    /// slot of a mapping variable or Struct
-    /// slot number + EVM word (0 for simple value)
-    Mapping(u8, u32),
-    /// slot of a mapping of mappings variable or Struct
-    /// slot number + EVM word (0 for simple value)
-    MappingOfMappings(u8, u32),
-    /// slots of a mapping variable and of a slot containing the length of the mapping
-    MappingWithLength(u8, u8, u32),
+    /// Slots of a set of simple variables or Struct
+    /// The slot number should be same for the fields of one Struct.
+    Simple(Vec<SlotInput>),
+    /// Slot of a mapping variable or Struct
+    /// It should be only one input for mapping to simple value, and multiple inputs
+    /// for the fields of a Struct. The slot number should be always same for both
+    /// mapping to simple value or a Struct.
+    Mapping(Vec<SlotInput>),
+    /// Slot of a mapping of mappings variable or Struct
+    /// It's similiar as mapping type, the mapping value could be simple value or a Struct.
+    /// The slot number should be always same.
+    MappingOfMappings(Vec<SlotInput>),
+    /// Slots of a mapping variable and of a slot containing the length of the mapping
+    MappingWithLength(Vec<SlotInput>, u8),
+}
+
+#[derive(Debug)]
+pub struct SlotInput {
+    /// Slot information of the variable
+    pub(crate) slot: u8,
+    /// The offset in bytes where to extract this column in a given EVM word
+    pub(crate) byte_offset: usize,
+    /// The starting offset in `byte_offset` of the bits to be extracted for this column.
+    /// The column bits will start at `byte_offset * 8 + bit_offset`.
+    pub(crate) bit_offset: usize,
+    /// The length (in bits) of the field to extract in the EVM word
+    pub(crate) length: usize,
+    /// At which EVM word is this column extracted from. For simple variables,
+    /// this value should always be 0. For structs that spans more than one EVM word
+    // that value should be depending on which section of the struct we are in.
+    pub(crate) evm_word: u32,
+}
+
+impl From<&ColumnInfo> for SlotInput {
+    fn from(column_info: &ColumnInfo) -> Self {
+        let slot = u8::try_from(column_info.slot.to_canonical_u64()).unwrap();
+        let [byte_offset, bit_offset, length] = [
+            column_info.byte_offset,
+            column_info.bit_offset,
+            column_info.length,
+        ]
+        .map(|f| usize::try_from(f.to_canonical_u64()).unwrap());
+        let evm_word = u32::try_from(column_info.evm_word.to_canonical_u64()).unwrap();
+
+        SlotInput::new(slot, byte_offset, bit_offset, length, evm_word)
+    }
+}
+
+impl SlotInput {
+    pub fn new(
+        slot: u8,
+        byte_offset: usize,
+        bit_offset: usize,
+        length: usize,
+        evm_word: u32,
+    ) -> Self {
+        Self {
+            slot,
+            byte_offset,
+            bit_offset,
+            length,
+            evm_word,
+        }
+    }
+
+    pub fn slot(&self) -> u8 {
+        self.slot
+    }
+
+    pub fn byte_offset(&self) -> usize {
+        self.byte_offset
+    }
+
+    pub fn bit_offset(&self) -> usize {
+        self.bit_offset
+    }
+
+    pub fn length(&self) -> usize {
+        self.length
+    }
+
+    pub fn evm_word(&self) -> u32 {
+        self.evm_word
+    }
 }
 
 /// Compute metadata hash for a "merge" table. Right now it supports only merging tables from the
@@ -236,38 +311,24 @@ fn value_metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
     extra: Vec<u8>,
 ) -> Digest {
     match inputs {
-        SlotInputs::Simple(slots_evm_words) => {
-            let table_info = slots_evm_words
-                .into_iter()
-                .map(|(slot, evm_word)| {
-                    let identifier =
-                        identifier_single_var_column(slot, 0, contract, chain_id, vec![]);
-
-                    // TODO: Need to check with integration test. We just use
-                    // EVM word length (`32`) to compute the table metadata hash here.
-                    let length = EVM_WORD_LEN;
-
-                    ColumnInfo::new(slot, identifier, 0, 0, length, evm_word)
-                })
-                .collect_vec();
-            compute_leaf_single_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(table_info)
-        }
-        SlotInputs::Mapping(slot, evm_word) => metadata_digest_mapping::<
+        SlotInputs::Simple(inputs) => metadata_digest_simple::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
+            inputs, contract, chain_id, extra,
+        ),
+        SlotInputs::Mapping(inputs) => metadata_digest_mapping::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
+            inputs, contract, chain_id, extra,
+        ),
+        SlotInputs::MappingOfMappings(inputs) => metadata_digest_mapping_of_mappings::<
             MAX_COLUMNS,
             MAX_FIELD_PER_EVM,
-        >(contract, chain_id, extra, slot, evm_word),
-        SlotInputs::MappingOfMappings(slot, evm_word) => {
-            metadata_digest_mapping_of_mappings::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-                contract, chain_id, extra, slot, evm_word,
-            )
-        }
-        SlotInputs::MappingWithLength(mapping_slot, length_slot, evm_word) => {
+        >(inputs, contract, chain_id, extra),
+        SlotInputs::MappingWithLength(mapping_inputs, length_slot) => {
+            assert!(!mapping_inputs.is_empty());
+            let mapping_slot = mapping_inputs[0].slot;
             let mapping_digest = metadata_digest_mapping::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
+                mapping_inputs,
                 contract,
                 chain_id,
                 extra,
-                mapping_slot,
-                evm_word,
             );
             let length_digest = length_metadata_digest(length_slot, mapping_slot);
             mapping_digest + length_digest
@@ -275,44 +336,80 @@ fn value_metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
     }
 }
 
-fn metadata_digest_mapping<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+/// Compute the table information for the value columns.
+fn compute_table_info(
+    inputs: Vec<SlotInput>,
     address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
-    slot: u8,
-    evm_word: u32,
+) -> Vec<ColumnInfo> {
+    inputs
+        .into_iter()
+        .map(|input| {
+            let id = identifier_for_value_column(&input, address, chain_id, extra.clone());
+
+            ColumnInfo::new(
+                input.slot,
+                id,
+                input.byte_offset,
+                input.bit_offset,
+                input.length,
+                input.evm_word,
+            )
+        })
+        .collect_vec()
+}
+
+fn metadata_digest_simple<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+    inputs: Vec<SlotInput>,
+    contract: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
 ) -> Digest {
-    // TODO: Need to check with integration test. We just use
-    // EVM word length (`32`) to compute the table metadata hash here.
-    let length = EVM_WORD_LEN;
-    let value_id = identifier_for_mapping_value_column(slot, address, chain_id, extra.clone());
-    let column_info = ColumnInfo::new(slot, value_id, 0, 0, length, evm_word);
-    compute_leaf_mapping_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-        vec![column_info],
-        slot,
-        value_id,
-    )
+    let table_info = compute_table_info(inputs, contract, chain_id, extra);
+    compute_leaf_single_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(table_info)
+}
+
+fn metadata_digest_mapping<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+    inputs: Vec<SlotInput>,
+    contract: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+) -> Digest {
+    assert!(!inputs.is_empty());
+    let slot = inputs[0].slot;
+
+    // Ensure the slot numbers must be same for mapping type.
+    let slots_equal = inputs[1..].iter().all(|input| input.slot == slot);
+    assert!(slots_equal);
+
+    let table_info = compute_table_info(inputs, contract, chain_id, extra.clone());
+    let key_id = identifier_for_mapping_key_column(slot, contract, chain_id, extra);
+    compute_leaf_mapping_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(table_info, slot, key_id)
 }
 
 fn metadata_digest_mapping_of_mappings<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-    address: &Address,
+    inputs: Vec<SlotInput>,
+    contract: &Address,
     chain_id: u64,
     extra: Vec<u8>,
-    slot: u8,
-    evm_word: u32,
 ) -> Digest {
-    // TODO: Need to check with integration test. We just use
-    // EVM word length (`32`) to compute the table metadata hash here.
-    let length = EVM_WORD_LEN;
-    let outer_value_id =
-        identifier_for_outer_mapping_value_column(slot, address, chain_id, extra.clone());
-    let inner_value_id = identifier_for_inner_mapping_value_column(slot, address, chain_id, extra);
-    let column_info = ColumnInfo::new(slot, inner_value_id, 0, 0, length, evm_word);
+    assert!(!inputs.is_empty());
+    let slot = inputs[0].slot;
+
+    // Ensure the slot numbers must be same for mapping type.
+    let slots_equal = inputs[1..].iter().all(|input| input.slot == slot);
+    assert!(slots_equal);
+
+    let table_info = compute_table_info(inputs, contract, chain_id, extra.clone());
+    let outer_key_id =
+        identifier_for_outer_mapping_key_column(slot, contract, chain_id, extra.clone());
+    let inner_key_id = identifier_for_inner_mapping_key_column(slot, contract, chain_id, extra);
     compute_leaf_mapping_of_mappings_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-        vec![column_info],
+        table_info,
         slot,
-        outer_value_id,
-        inner_value_id,
+        outer_key_id,
+        inner_key_id,
     )
 }
 
