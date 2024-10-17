@@ -284,7 +284,7 @@ pub enum InputData<'a, F, const N: usize> {
     NonAssigned(&'a Vector<F, N>),
 }
 
-impl<'a, F, const N: usize> InputData<'a, F, N> {
+impl<F, const N: usize> InputData<'_, F, N> {
     pub fn real_len(&self) -> usize {
         match self {
             InputData::Assigned(v) => v.real_len,

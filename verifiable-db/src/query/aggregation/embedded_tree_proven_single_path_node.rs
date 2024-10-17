@@ -339,7 +339,7 @@ mod tests {
         embedded_tree_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestEmbeddedTreeProvenSinglePathNodeCircuit<'a> {
+    impl UserCircuit<F, D> for TestEmbeddedTreeProvenSinglePathNodeCircuit<'_> {
         type Wires = (
             EmbeddedTreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
             Vec<Target>,
@@ -358,7 +358,7 @@ mod tests {
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.c.assign(pw, &wires.0);
-            pw.set_target_arr(&wires.1, &self.embedded_tree_proof);
+            pw.set_target_arr(&wires.1, self.embedded_tree_proof);
         }
     }
 

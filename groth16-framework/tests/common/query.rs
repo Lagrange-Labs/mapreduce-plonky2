@@ -11,7 +11,6 @@ use mp2_common::{
     F,
 };
 use plonky2::field::types::PrimeField64;
-use rand::thread_rng;
 use verifiable_db::{
     query::api::CircuitInput as QueryInput,
     revelation::{api::CircuitInput, PublicInputs as RevelationPI},

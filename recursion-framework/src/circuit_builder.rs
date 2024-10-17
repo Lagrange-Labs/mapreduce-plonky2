@@ -435,8 +435,8 @@ pub(crate) mod tests {
             Self {
                 inputs,
                 generator,
-                _f: PhantomData::default(),
-                _h: PhantomData::default(),
+                _f: PhantomData,
+                _h: PhantomData,
             }
         }
 

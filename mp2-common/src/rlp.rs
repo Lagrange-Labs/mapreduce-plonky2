@@ -251,6 +251,7 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Decodes the header of the list, and then decodes the first N items of the list.
+///
 /// The offsets decoded in the returned list are starting from the 0-index of `data`
 /// not from the `offset` index.
 /// If N is less than the actual number of items, then the number of fields will be N.

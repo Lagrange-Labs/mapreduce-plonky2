@@ -190,7 +190,7 @@ mod tests {
         child_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestMembershipCircuit<'a> {
+    impl UserCircuit<F, D> for TestMembershipCircuit<'_> {
         // Membership wires + child public inputs
         type Wires = (MembershipWires, Vec<Target>);
 

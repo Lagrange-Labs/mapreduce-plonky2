@@ -568,12 +568,12 @@ where
     ) -> T {
         // Only use random_access when SIZE is a power of 2 and smaller than 64
         // see https://stackoverflow.com/a/600306/1202623 for the trick
-        if SIZE < RANDOM_ACCESS_SIZE && (SIZE & (SIZE - 1) == 0) {
+        if SIZE < RANDOM_ACCESS_SIZE && SIZE.is_power_of_two() {
             // Escape hatch when we can use random_access from plonky2 base
-            return T::from_target(b.random_access(
+            T::from_target(b.random_access(
                 at,
                 self.arr.iter().map(|v| v.to_target()).collect::<Vec<_>>(),
-            ));
+            ))
         } else {
             self.value_at_failover(b, at)
         }
