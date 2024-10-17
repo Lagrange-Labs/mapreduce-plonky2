@@ -23,6 +23,7 @@ use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     digest::Digest,
+    group_hashing::map_to_curve_point,
     poseidon::H,
     types::HashOutput,
     utils::{Fieldable, ToFields},
@@ -295,7 +296,7 @@ pub fn merge_metadata_hash<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: us
     );
     let md_b =
         value_metadata::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(table_b, &contract, chain_id, extra);
-    let combined = md_a + md_b;
+    let combined = map_to_curve_point(&md_a.to_fields()) + map_to_curve_point(&md_b.to_fields());
     let contract_digest = contract_metadata_digest(&contract);
     // the block id is only added at the index tree level, the rest is combined at the final
     // extraction level.
