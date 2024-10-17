@@ -69,7 +69,7 @@ mod test {
     };
     use anyhow::Result;
     use mp2_common::{
-        eth::BlockUtil,
+        eth::Rlpable,
         proof::deserialize_proof,
         utils::{Endianness, FromFields, Packer, ToFields},
         C, D, F,
