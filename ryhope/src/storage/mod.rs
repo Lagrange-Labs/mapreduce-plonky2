@@ -55,6 +55,7 @@ where
     /// The keys touched by the query itself
     pub core_keys: Vec<(Epoch, K)>,
     /// An epoch -> (K -> NodeContext, K -> Payload) mapping
+    #[allow(clippy::type_complexity)]
     epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
 }
 
@@ -406,7 +407,6 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
     /// Execute the given function acting on `Self` within a transaction.
     ///
     /// Will fail if the transaction failed.
-
     fn in_transaction<F: FnOnce(&mut Self) -> BoxFuture<'_, Result<()>> + Sync>(
         &mut self,
         f: F,
@@ -452,7 +452,7 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
 ///   * a **single** transaction in a **single** connection must be used;
 ///
 ///   * the `post_commit` hook **must** be called after, and only after, a
-///   successful SQL transaction execution.
+///     successful SQL transaction execution.
 pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send + Sync>:
     TreeTransactionalStorage<K, V>
 {
@@ -515,7 +515,7 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
             Ok(r)
         }
     }
-
+    #[allow(clippy::type_complexity)]
     fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
         &self,
         t: &T,

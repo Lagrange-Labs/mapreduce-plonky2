@@ -58,6 +58,7 @@ pub trait TreeTopology: Default + Send + Sync {
     /// Return, if it has some, the children of `k`.
     ///
     /// Return nothing if `k` is not in the tree.
+    #[allow(clippy::type_complexity)]
     fn children<S: TreeStorage<Self>>(
         &self,
         k: &Self::Key,

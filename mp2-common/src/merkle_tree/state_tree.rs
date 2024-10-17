@@ -83,10 +83,10 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
         // d == Σ(v₍ᵢ₋₁₎ · vᵢ)
         let mut val = cb.one();
         let mut acc = cb.zero();
-        for i in 0..MAX_DEPTH {
-            val = cb.mul(val, is_value[i].target);
-            acc = cb.add(acc, val);
-        }
+        acc = is_value.iter().take(MAX_DEPTH).fold(acc, |acc, iv| {
+            val = cb.mul(val, iv.target);
+            cb.add(acc, val)
+        });
         cb.connect(acc, depth);
 
         let mut root = cb.hash_n_to_hash_no_pad::<H>(leaf_data.to_vec());

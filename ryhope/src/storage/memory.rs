@@ -37,10 +37,6 @@ impl<T> VersionedStorage<T>
 where
     T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
-    fn new(initial_state: T) -> Self {
-        Self::new_at(initial_state, 0)
-    }
-
     fn new_at(initial_state: T, epoch: Epoch) -> Self {
         Self {
             in_tx: false,

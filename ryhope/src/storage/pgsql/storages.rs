@@ -348,7 +348,10 @@ where
         })
     }
 
-    async fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
+    async fn fetch_many_at<
+        S: TreeStorage<Self>,
+        I: IntoIterator<Item = (Epoch, Self::Key)> + Send,
+    >(
         &self,
         s: &S,
         db: DBPool,
@@ -573,7 +576,10 @@ where
         })
     }
 
-    async fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
+    async fn fetch_many_at<
+        S: TreeStorage<Self>,
+        I: IntoIterator<Item = (Epoch, Self::Key)> + Send,
+    >(
         &self,
         _s: &S,
         db: DBPool,
@@ -1105,6 +1111,26 @@ where
     async fn pairs_at(&self, _epoch: Epoch) -> Result<HashMap<T::Key, T::Node>> {
         unimplemented!("should never be used");
     }
+
+    fn fetch(&self, k: &T::Key) -> impl Future<Output = T::Node> + Send {
+        async { self.fetch_at(k, self.current_epoch()).await }
+    }
+
+    fn try_fetch(&self, k: &T::Key) -> impl Future<Output = Option<T::Node>> + Send {
+        async { self.try_fetch_at(k, self.current_epoch()).await }
+    }
+
+    fn fetch_at(&self, k: &T::Key, epoch: Epoch) -> impl Future<Output = T::Node> + Send {
+        async move { self.try_fetch_at(k, epoch).await.unwrap() }
+    }
+
+    fn contains(&self, k: &T::Key) -> impl Future<Output = bool> {
+        async { self.try_fetch(k).await.is_some() }
+    }
+
+    fn contains_at(&self, k: &T::Key, epoch: Epoch) -> impl Future<Output = bool> {
+        async move { self.try_fetch_at(k, epoch).await.is_some() }
+    }
 }
 impl<T, V> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
 where
@@ -1147,6 +1173,25 @@ where
             .nodes_cache
             .insert(k, Some(CachedValue::Written(value)));
         async { Ok(()) }
+    }
+
+    fn update_with<F: Fn(&mut T::Node) + Send + Sync>(
+        &mut self,
+        k: T::Key,
+        updater: F,
+    ) -> impl Future<Output = ()> + Send
+    where
+        Self: Sync + Send,
+    {
+        async move {
+            let mut v = self.fetch(&k).await;
+            updater(&mut v);
+            self.update(k, v).await.unwrap();
+        }
+    }
+
+    fn rollback(&mut self) -> impl Future<Output = Result<()>> {
+        self.rollback_to(self.current_epoch() - 1)
     }
 }
 
