@@ -19,7 +19,7 @@ use mp2_common::{
     },
     poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
-    storage_key::{MappingSlot, MappingSlotWires},
+    storage_key::{MappingSlot, MappingStructSlotWires},
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, PackerTarget, ToTargets},
     CHasher, D, F,
@@ -53,7 +53,7 @@ pub struct LeafMappingWires<
     /// MPT root
     pub(crate) root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     /// Storage mapping variable slot
-    pub(crate) slot: MappingSlotWires,
+    pub(crate) slot: MappingStructSlotWires,
     /// Identifier of the column of the table storing the key of the current mapping entry
     pub(crate) key_id: Target,
     /// MPT metadata
@@ -85,13 +85,13 @@ where
 
         let key_id = b.add_virtual_target();
         let metadata = MetadataGadget::build(b);
-        let slot = MappingSlot::mpt_key_with_offset(b, metadata.evm_word);
+        let slot = MappingSlot::build_struct(b, metadata.evm_word);
 
         // Build the node wires.
         let wires =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
                 b,
-                &slot.keccak_mpt.mpt_key,
+                &slot.keccak_mpt.base.mpt_key,
             );
         let node = wires.node;
         let root = wires.root;
@@ -190,7 +190,7 @@ where
         );
         pw.set_target(wires.key_id, self.key_id);
         self.slot
-            .assign_mapping_slot(pw, &wires.slot, self.metadata.evm_word);
+            .assign_struct(pw, &wires.slot, self.metadata.evm_word);
         self.metadata.assign(pw, &wires.metadata);
     }
 }

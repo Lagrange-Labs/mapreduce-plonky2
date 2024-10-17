@@ -16,7 +16,7 @@ use mp2_common::{
     },
     poseidon::{empty_poseidon_hash, hash_to_int_target},
     public_inputs::PublicInputCommon,
-    storage_key::{SimpleSlot, SimpleSlotWires},
+    storage_key::{SimpleSlot, SimpleStructSlotWires},
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
     utils::ToTargets,
     CHasher, D, F,
@@ -45,7 +45,7 @@ pub struct LeafSingleWires<
     /// MPT root
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     /// Storage single variable slot
-    slot: SimpleSlotWires,
+    slot: SimpleStructSlotWires,
     /// MPT metadata
     metadata: MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
 }
@@ -69,13 +69,13 @@ where
 {
     pub fn build(b: &mut CBuilder) -> LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM> {
         let metadata = MetadataGadget::build(b);
-        let slot = SimpleSlot::build_with_offset(b, metadata.evm_word);
+        let slot = SimpleSlot::build_struct(b, metadata.evm_word);
 
         // Build the node wires.
         let wires =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
                 b,
-                &slot.mpt_key,
+                &slot.base.mpt_key,
             );
         let node = wires.node;
         let root = wires.root;
@@ -84,7 +84,7 @@ where
         let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
 
         // Compute the metadata digest.
-        let metadata_digest = metadata.digest(b, slot.slot);
+        let metadata_digest = metadata.digest(b, slot.base.slot);
 
         // Compute the values digest.
         let values_digest = ColumnGadget::<MAX_FIELD_PER_EVM>::new(
@@ -143,7 +143,8 @@ where
             &wires.root,
             &InputData::Assigned(&padded_node),
         );
-        self.slot.assign(pw, &wires.slot, self.metadata.evm_word);
+        self.slot
+            .assign_struct(pw, &wires.slot, self.metadata.evm_word);
         self.metadata.assign(pw, &wires.metadata);
     }
 }

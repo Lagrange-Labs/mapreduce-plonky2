@@ -94,13 +94,13 @@ where
 
         let [outer_key_id, inner_key_id] = b.add_virtual_target_arr();
         let metadata = MetadataGadget::build(b);
-        let slot = MappingSlot::mpt_key_with_inner_offset(b, metadata.evm_word);
+        let slot = MappingSlot::build_mapping_of_mappings(b, metadata.evm_word);
 
         // Build the node wires.
         let wires =
             MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
                 b,
-                &slot.keccak_mpt.mpt_key,
+                &slot.keccak_mpt.base.mpt_key,
             );
         let node = wires.node;
         let root = wires.root;
