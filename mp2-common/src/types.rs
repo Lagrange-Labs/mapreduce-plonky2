@@ -71,9 +71,13 @@ impl AsRef<[u8]> for &HashOutput {
 pub const MAX_BLOCK_LEN: usize = 650;
 
 /// This constant represents the maximum size a value can be inside the storage trie.
+///
 /// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
 /// value **not** RLP encoded,i.e. without the 1-byte RLP header.
 pub const MAPPING_LEAF_VALUE_LEN: usize = 32;
+
+/// The length of an EVM word
+pub const EVM_WORD_LEN: usize = 32;
 
 impl From<[u8; 32]> for HashOutput {
     fn from(value: [u8; 32]) -> Self {

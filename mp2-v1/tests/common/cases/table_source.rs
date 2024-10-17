@@ -1,5 +1,6 @@
 use std::{
     assert_matches::assert_matches,
+    slice,
     str::FromStr,
     sync::atomic::{AtomicU64, AtomicUsize},
 };
@@ -10,7 +11,8 @@ use alloy::{
     providers::Provider,
 };
 use anyhow::{bail, Result};
-use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
+use futures::{future::BoxFuture, FutureExt};
+use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
     digest::TableDimension,
@@ -19,17 +21,18 @@ use mp2_common::{
     types::HashOutput,
 };
 use mp2_v1::{
-    api::{merge_metadata_hash, metadata_hash, SlotInputs},
+    api::{merge_metadata_hash, metadata_hash, SlotInput, SlotInputs},
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
         row::{RowTreeKey, ToNonce},
     },
     values_extraction::{
-        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column,
+        gadgets::{column_info::ColumnInfo, metadata_gadget::MetadataGadget},
+        identifier_for_mapping_key_column, identifier_for_value_column,
     },
 };
+use plonky2::field::types::PrimeField64;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
@@ -39,7 +42,7 @@ use crate::common::{
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
-    TestContext,
+    StorageSlotInfo, TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
 };
 
 use super::{
@@ -119,8 +122,14 @@ impl UniqueMappingEntry {
             vec![],
         ));
         let key_cell = self.to_cell(extract_key);
-        let extract_key = MappingIndex::Value(identifier_for_mapping_value_column(
-            slot,
+        let extract_key = MappingIndex::Value(identifier_for_value_column(
+            &SlotInput::new(
+                slot, // byte_offset
+                0,    // bit_offset
+                0,    // length
+                0,    // evm_word
+                0,
+            ),
             contract,
             chain_id,
             vec![],
@@ -195,8 +204,33 @@ pub(crate) enum TableSource {
 impl TableSource {
     pub fn slot_input(&self) -> SlotInputs {
         match self {
-            TableSource::SingleValues(single) => SlotInputs::Simple(single.slots.clone()),
-            TableSource::Mapping((m, _)) => SlotInputs::Mapping(m.slot),
+            TableSource::SingleValues(single) => {
+                let inputs = single
+                    .slots
+                    .iter()
+                    .flat_map(|slot_info| {
+                        slot_info
+                            .metadata()
+                            .extracted_table_info()
+                            .iter()
+                            .map(Into::into)
+                            .collect_vec()
+                    })
+                    .collect();
+                SlotInputs::Simple(inputs)
+            }
+            TableSource::Mapping((m, _)) => {
+                // TODO: Support for mapping to Struct.
+                let slot_input = SlotInput::new(
+                    m.slot, // byte_offset
+                    0,      // bit_offset
+                    0,      // length
+                    0,      // evm_word
+                    0,
+                );
+                SlotInputs::Mapping(vec![slot_input])
+            }
+            // TODO: Support for mapping of mappings.
             TableSource::Merge(_) => panic!("can't call slot inputs on merge table"),
         }
     }
@@ -268,7 +302,7 @@ impl TableSource {
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct SingleValuesExtractionArgs {
     /// Simple slots
-    pub(crate) slots: Vec<u8>,
+    pub(crate) slots: Vec<StorageSlotInfo>,
     // in case of merge table, there might not be any index slot for single table
     pub(crate) index_slot: Option<u8>,
 }
@@ -355,10 +389,13 @@ impl SingleValuesExtractionArgs {
     ) -> Vec<TableRowValues<BlockPrimaryIndex>> {
         let mut secondary_cell = None;
         let mut rest_cells = Vec::new();
-        for slot in self.slots.iter() {
-            let query = ProofQuery::new_simple_slot(contract.address, *slot as usize);
-            let id = identifier_single_var_column(
-                *slot,
+        for slot_info in self.slots.iter() {
+            let slot = slot_info.slot().slot();
+            let query = ProofQuery::new_simple_slot(contract.address, slot as usize);
+            // TODO: Support for the Struct.
+            let slot_input = (&slot_info.metadata().extracted_table_info()[0]).into();
+            let id = identifier_for_value_column(
+                &slot_input,
                 &contract.address,
                 ctx.rpc.get_chain_id().await.unwrap(),
                 vec![],
@@ -374,7 +411,7 @@ impl SingleValuesExtractionArgs {
             let cell = Cell::new(id, value);
             // make sure we separate the secondary cells and rest of the cells separately.
             if let Some(index) = self.index_slot
-                && index == *slot
+                && index == slot
             {
                 // we put 0 since we know there are no other rows with that secondary value since we are dealing
                 // we single values, so only 1 row.
@@ -437,8 +474,25 @@ impl SingleValuesExtractionArgs {
                 single_values_proof
             }
         };
-        let slot_input = SlotInputs::Simple(self.slots.clone());
-        let metadata_hash = metadata_hash(slot_input, &contract.address, chain_id, vec![]);
+        let inputs = self
+            .slots
+            .iter()
+            .flat_map(|slot_info| {
+                slot_info
+                    .metadata()
+                    .extracted_table_info()
+                    .iter()
+                    .map(Into::into)
+                    .collect_vec()
+            })
+            .collect();
+        let slot_input = SlotInputs::Simple(inputs);
+        let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+            slot_input,
+            &contract.address,
+            chain_id,
+            vec![],
+        );
         // we're just proving a single set of a value
         let input = ExtractionProofInput::Single(ExtractionTableProof {
             dimension: TableDimension::Single,
@@ -625,7 +679,6 @@ impl MappingValuesExtractionArgs {
             .await
             .unwrap();
         let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-        let chain_id = ctx.rpc.get_chain_id().await.unwrap();
         // NOTE HERE is the interesting bit for dist system as this is the logic to execute
         // on receiving updates from scapper. This only needs to have the relevant
         // information from update and it will translate that to changes in the tree.
@@ -645,13 +698,21 @@ impl MappingValuesExtractionArgs {
         proof_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
         let chain_id = ctx.rpc.get_chain_id().await?;
+        let slot_input = SlotInput::new(
+            self.slot, // byte_offset
+            0,         // bit_offset
+            0,         // length
+            0,         // evm_word
+            0,
+        );
         let mapping_root_proof = match ctx.storage.get_proof_exact(&proof_key) {
             Ok(p) => p,
             Err(_) => {
                 let mapping_values_proof = ctx
                     .prove_mapping_values_extraction(
                         &contract.address,
-                        self.slot,
+                        chain_id,
+                        &slot_input,
                         self.mapping_keys.clone(),
                     )
                     .await;
@@ -681,8 +742,12 @@ impl MappingValuesExtractionArgs {
                 mapping_values_proof
             }
         };
-        let slot_input = SlotInputs::Mapping(self.slot);
-        let metadata_hash = metadata_hash(slot_input, &contract.address, chain_id, vec![]);
+        let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+            SlotInputs::Mapping(vec![slot_input]),
+            &contract.address,
+            chain_id,
+            vec![],
+        );
         // it's a compoound value type of proof since we're not using the length
         let input = ExtractionProofInput::Single(ExtractionTableProof {
             dimension: TableDimension::Compound,
@@ -979,7 +1044,7 @@ impl MergeSource {
             };
 
             // add the metadata hashes together - this is mostly for debugging
-            let md = merge_metadata_hash(
+            let md = merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
                 contract.address,
                 contract.chain_id,
                 vec![],
@@ -1041,4 +1106,54 @@ pub fn next_value() -> U256 {
     let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let bv: U256 = *BASE_VALUE;
     bv + U256::from(shift)
+}
+
+/// Construct the storage slot information for the simple variable slots.
+// bool public s1
+// uint256 public s2
+// string public s3
+// address public s4
+pub(crate) fn single_var_slot_info(
+    contract_address: &Address,
+    chain_id: u64,
+) -> Vec<StorageSlotInfo> {
+    const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
+    // bool, uint256, string, address
+    const SINGLE_SLOT_LENGTHS: [usize; 4] = [1, 32, 32, 20];
+
+    let table_info = SINGLE_SLOTS
+        .into_iter()
+        .zip_eq(SINGLE_SLOT_LENGTHS)
+        .map(|(slot, length)| {
+            let slot_input = SlotInput::new(
+                slot,   // byte_offset
+                0,      // bit_offset
+                length, // length
+                0,      // evm_word
+                0,
+            );
+            let identifier =
+                identifier_for_value_column(&slot_input, contract_address, chain_id, vec![]);
+
+            ColumnInfo::new(slot, identifier, 0, 0, length, 0)
+        })
+        .collect_vec();
+
+    SINGLE_SLOTS
+        .into_iter()
+        .enumerate()
+        .map(|(i, slot)| {
+            // Create the simple slot.
+            let slot = StorageSlot::Simple(slot as usize);
+
+            // Create the metadata gadget.
+            let metadata = MetadataGadget::new(
+                table_info.clone(),
+                slice::from_ref(&table_info[i].identifier().to_canonical_u64()),
+                0,
+            );
+
+            StorageSlotInfo::new(slot, metadata, None, None)
+        })
+        .collect_vec()
 }

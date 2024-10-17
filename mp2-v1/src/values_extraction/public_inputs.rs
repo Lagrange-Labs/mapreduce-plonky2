@@ -139,12 +139,16 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
         (key, ptr)
     }
 
+    pub fn metadata_digest_raw(&self) -> &[T] {
+        &self.proof_inputs[DM_RANGE]
+    }
+
     pub fn values_digest_info(&self) -> ([T; 5], [T; 5], T) {
         convert_slice_to_curve_point(&self.proof_inputs[DV_RANGE])
     }
 
     pub fn metadata_digest_info(&self) -> ([T; 5], [T; 5], T) {
-        convert_slice_to_curve_point(&self.proof_inputs[DM_RANGE])
+        convert_slice_to_curve_point(self.metadata_digest_raw())
     }
 
     /// Return the number of leaves extracted from this subtree.

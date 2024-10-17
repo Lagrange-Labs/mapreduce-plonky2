@@ -83,6 +83,8 @@ impl TestContext {
                 let ext_pi = mp2_v1::final_extraction::PublicInputs::from_slice(
                     &ext_proof.proof().public_inputs,
                 );
+                // TODO: Fix the rows digest in rows tree according to values extraction update.
+                // <https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/385>
                 assert_eq!(
                     row_pi.rows_digest_field(),
                     ext_pi.value_point(),

@@ -69,11 +69,11 @@ impl TestContext {
         let pproof = ProofWithVK::deserialize(&proof)?;
         let block = self.query_current_block().await;
 
-        let block_hash = HashOutput::from(block.header.hash.unwrap().0);
+        let block_hash = HashOutput::from(block.header.hash.0);
         let prev_block_hash = HashOutput::from(block.header.parent_hash.0);
 
         let pis = PublicInputs::from_slice(pproof.proof().public_inputs.as_slice());
-        assert_eq!(pis.block_number(), block.header.number.unwrap());
+        assert_eq!(pis.block_number(), block.header.number);
         assert_eq!(pis.block_hash_raw(), block_hash.to_fields());
         assert_eq!(pis.prev_block_hash_raw(), prev_block_hash.to_fields());
         debug!(" FINAL EXTRACTION MPT - digest: {:?}", pis.value_point());

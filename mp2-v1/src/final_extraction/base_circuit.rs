@@ -76,10 +76,11 @@ impl BaseCircuit {
         }
         b.connect(contract_pi.mpt_key().pointer, minus_one);
 
-        let mut base_dm = value_pis[0].metadata_digest_target();
-        for vp in value_pis.iter().skip(1) {
-            base_dm = b.add_curve_point(&[base_dm, vp.metadata_digest_target()]);
-        }
+        let value_dms = value_pis
+            .iter()
+            .map(|vp| b.map_to_curve_point(vp.metadata_digest_raw()))
+            .collect_vec();
+        let base_dm = b.add_curve_point(&value_dms);
         let final_dm = b.add_curve_point(&[base_dm, contract_pi.metadata_digest()]);
 
         // enforce block_pi.state_root == contract_pi.state_root
@@ -419,7 +420,7 @@ pub(crate) mod test {
             };
             let contract_pi = contract_extraction::PublicInputs::from_slice(&self.contract_pi);
             let contract_dm = weierstrass_to_point(contract_pi.metadata_point()).unwrap();
-            let value_dm = weierstrass_to_point(value_pi.metadata_digest()).unwrap();
+            let value_dm = map_to_curve_point(value_pi.metadata_digest_raw());
             let expected_dm = if let Some(len_dm) = length_dm {
                 let len_dm = weierstrass_to_point(len_dm).unwrap();
                 contract_dm + value_dm + len_dm

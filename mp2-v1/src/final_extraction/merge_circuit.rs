@@ -172,7 +172,7 @@ mod test {
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
     use mp2_common::{
         digest::SplitDigestPoint,
-        group_hashing::{field_hashed_scalar_mul, weierstrass_to_point as wp},
+        group_hashing::{field_hashed_scalar_mul, map_to_curve_point, weierstrass_to_point as wp},
         utils::ToFields,
         C, D, F,
     };
@@ -181,6 +181,7 @@ mod test {
         field::types::Sample,
         iop::witness::{PartialWitness, WitnessWrite},
     };
+    use plonky2_ecgfp5::curve::curve::Point;
 
     use super::MergeTableWires;
 
@@ -263,9 +264,10 @@ mod test {
         let final_digest = split_total.combine_to_row_digest();
         // testing the digest values
         assert_eq!(final_digest, wp(&pi.value_point()));
-        let combined_metadata = wp(&pis_a.value_inputs().metadata_digest())
-            + wp(&pis_b.value_inputs().metadata_digest())
-            + wp(&pis_a.contract_inputs().metadata_point());
+        let [metadata_a, metadata_b] =
+            [&pis_a, &pis_b].map(|pi| map_to_curve_point(pi.value_inputs().metadata_digest_raw()));
+        let combined_metadata =
+            metadata_a + metadata_b + wp(&pis_a.contract_inputs().metadata_point());
         assert_eq!(combined_metadata, wp(&pi.metadata_point()));
         let block_pi = pis_a.block_inputs();
         assert_eq!(pi.bn, block_pi.bn);
