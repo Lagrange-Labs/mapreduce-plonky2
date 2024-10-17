@@ -231,6 +231,21 @@ where
         keys.into_iter().cloned().collect()
     }
 
+    async fn random_key_at(&self, epoch: Epoch) -> Option<K> {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
+
+        for i in (0..=epoch as usize).rev() {
+            for (k, v) in self.mem[i].iter() {
+                if v.is_some() {
+                    return Some(k.clone());
+                }
+            }
+        }
+
+        None
+    }
+
     async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<K, V>> {
         assert!(epoch >= self.epoch_offset);
         let mut pairs = HashMap::new();
