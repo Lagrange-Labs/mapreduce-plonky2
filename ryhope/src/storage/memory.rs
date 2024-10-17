@@ -219,7 +219,13 @@ where
         let mut keys = HashSet::new();
 
         for i in 0..=epoch as usize {
-            keys.extend(self.mem[i].keys())
+            for (k, v) in self.mem[i].iter() {
+                if v.is_some() {
+                    keys.insert(k);
+                } else {
+                    keys.remove(k);
+                }
+            }
         }
 
         keys.into_iter().cloned().collect()
