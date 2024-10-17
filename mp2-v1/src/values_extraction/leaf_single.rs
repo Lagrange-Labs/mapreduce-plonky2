@@ -182,7 +182,6 @@ mod tests {
         MAX_LEAF_NODE_LEN,
     };
     use eth_trie::{Nibbles, Trie};
-    use itertools::Itertools;
     use mp2_common::{
         array::Array,
         eth::{StorageSlot, StorageSlotNode},
@@ -197,7 +196,7 @@ mod tests {
         utils::random_vector,
     };
     use plonky2::{
-        field::types::{Field, PrimeField64},
+        field::types::Field,
         iop::{target::Target, witness::PartialWitness},
     };
 
@@ -250,11 +249,8 @@ mod tests {
         // Compute the metadata digest.
         let metadata_digest = metadata.digest();
         // Compute the values digest.
-        let table_info = metadata.table_info[..metadata.num_actual_columns].to_vec();
-        let extracted_column_identifiers = table_info[..metadata.num_extracted_columns]
-            .iter()
-            .map(|column_info| column_info.identifier.to_canonical_u64())
-            .collect_vec();
+        let table_info = metadata.actual_table_info().to_vec();
+        let extracted_column_identifiers = metadata.extracted_column_identifiers();
         let values_digest = compute_leaf_single_values_digest::<TEST_MAX_FIELD_PER_EVM>(
             &metadata_digest,
             table_info,

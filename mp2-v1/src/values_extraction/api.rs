@@ -874,11 +874,8 @@ mod tests {
 
         let metadata = test_slot.metadata().clone();
         let evm_word = metadata.evm_word;
-        let table_info = metadata.table_info[..metadata.num_actual_columns].to_vec();
-        let extracted_column_identifiers = table_info[..metadata.num_extracted_columns]
-            .iter()
-            .map(|column_info| column_info.identifier.to_canonical_u64())
-            .collect_vec();
+        let table_info = metadata.actual_table_info().to_vec();
+        let extracted_column_identifiers = metadata.extracted_column_identifiers();
 
         let (expected_metadata_digest, expected_values_digest, circuit_input) = match test_slot.slot
         {

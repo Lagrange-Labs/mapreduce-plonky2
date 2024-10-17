@@ -273,7 +273,6 @@ mod tests {
         MAX_LEAF_NODE_LEN,
     };
     use eth_trie::{Nibbles, Trie};
-    use itertools::Itertools;
     use mp2_common::{
         array::Array,
         eth::{StorageSlot, StorageSlotNode},
@@ -288,7 +287,7 @@ mod tests {
         utils::random_vector,
     };
     use plonky2::{
-        field::types::{Field, PrimeField64},
+        field::types::Field,
         iop::{target::Target, witness::PartialWitness},
     };
     use rand::{thread_rng, Rng};
@@ -349,11 +348,8 @@ mod tests {
         let metadata =
             MetadataGadget::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
-        let table_info = metadata.table_info[..metadata.num_actual_columns].to_vec();
-        let extracted_column_identifiers = table_info[..metadata.num_extracted_columns]
-            .iter()
-            .map(|column_info| column_info.identifier.to_canonical_u64())
-            .collect_vec();
+        let table_info = metadata.actual_table_info().to_vec();
+        let extracted_column_identifiers = metadata.extracted_column_identifiers();
         let metadata_digest = compute_leaf_mapping_of_mappings_metadata_digest::<
             TEST_MAX_COLUMNS,
             TEST_MAX_FIELD_PER_EVM,

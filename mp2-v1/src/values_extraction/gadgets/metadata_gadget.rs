@@ -87,6 +87,14 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
         &self.table_info[..self.num_extracted_columns]
     }
 
+    /// Get the extracted column identifiers.
+    pub fn extracted_column_identifiers(&self) -> Vec<u64> {
+        self.table_info[..self.num_extracted_columns]
+            .iter()
+            .map(|column_info| column_info.identifier.to_canonical_u64())
+            .collect_vec()
+    }
+
     /// Create a sample MPT metadata. It could be used in integration tests.
     pub fn sample(slot: u8, evm_word: u32) -> Self {
         let rng = &mut thread_rng();
