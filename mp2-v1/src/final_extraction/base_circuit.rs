@@ -420,7 +420,7 @@ pub(crate) mod test {
             };
             let contract_pi = contract_extraction::PublicInputs::from_slice(&self.contract_pi);
             let contract_dm = weierstrass_to_point(contract_pi.metadata_point()).unwrap();
-            let value_dm = weierstrass_to_point(value_pi.metadata_digest()).unwrap();
+            let value_dm = map_to_curve_point(value_pi.metadata_digest_raw());
             let expected_dm = if let Some(len_dm) = length_dm {
                 let len_dm = weierstrass_to_point(len_dm).unwrap();
                 contract_dm + value_dm + len_dm
