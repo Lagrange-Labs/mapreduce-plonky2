@@ -13,7 +13,7 @@ use plonky2::{
     iop::target::Target,
 };
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
-use std::{array, fmt::Debug};
+use std::array;
 
 pub enum CellsTreePublicInputs {
     // - `H : [4]F` : Poseidon hash of the subtree at this node
@@ -176,8 +176,8 @@ impl<'a> PublicInputs<'a, Target> {
 }
 
 impl<'a> PublicInputs<'a, F> {
-    pub fn node_hash(&self) -> [F; NUM_HASH_OUT_ELTS] {
-        self.to_node_hash_raw().try_into().unwrap()
+    pub fn node_hash(&self) -> HashOut<F> {
+        HashOut::from_partial(self.to_node_hash_raw())
     }
 
     pub fn individual_values_digest_point(&self) -> WeierstrassPoint {
@@ -245,15 +245,15 @@ mod tests {
         let rng = &mut thread_rng();
 
         // Prepare the public inputs.
-        let h = &random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
+        let h = random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
         let [individual_vd, multiplier_vd, individual_md, multiplier_md] =
-            array::from_fn(|_| &Point::sample(rng).to_weierstrass().to_fields());
+            array::from_fn(|_| Point::sample(rng).to_weierstrass().to_fields());
         let exp_pi = PublicInputs::new(
-            h,
-            individual_vd,
-            multiplier_vd,
-            individual_md,
-            multiplier_md,
+            &h,
+            &individual_vd,
+            &multiplier_vd,
+            &individual_md,
+            &multiplier_md,
         );
         let exp_pi = &exp_pi.to_vec();
 

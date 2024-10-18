@@ -26,27 +26,14 @@ pub struct LeafCircuit(Cell);
 
 impl LeafCircuit {
     fn build(b: &mut CBuilder) -> LeafWires {
-        let curve_zero = b.curve_zero();
-        let empty_hash = b.constant_hash(*empty_poseidon_hash()).to_targets();
-
         let cell = CellWire::new(b);
-        let values_digest = cell.values_digest(b);
-        let metadata_digest = cell.metadata_digest(b);
-
-        // individual_vd = is_individual ? vd : CURVE_ZERO
-        let individual_vd = b.curve_select(cell.is_multiplier, curve_zero, values_digest);
-
-        // multiplier_vd = is_individual ? CURVE_ZERO : vd
-        let multiplier_vd = b.curve_select(cell.is_multiplier, values_digest, curve_zero);
-
-        // individual_md = is_individual ? md : CURVE_ZERO
-        let individual_md = b.curve_select(cell.is_multiplier, curve_zero, metadata_digest);
-
-        // multiplier_md = is_individual ? CURVE_ZERO : md
-        let multiplier_md = b.curve_select(cell.is_multiplier, metadata_digest, curve_zero);
+        let (individual_vd, multiplier_vd) = cell.individual_multiplier_values_digests(b);
+        let (individual_md, multiplier_md) = cell.individual_multiplier_metadata_digests(b);
 
         // h = Poseidon(Poseidon("") || Poseidon("") || identifier || pack_u32(value))
+        let empty_hash = b.constant_hash(*empty_poseidon_hash()).to_targets();
         let inputs = empty_hash
+            .clone()
             .into_iter()
             .chain(empty_hash)
             .chain(once(cell.identifier))

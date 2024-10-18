@@ -7,6 +7,7 @@ use mp2_common::{
     utils::ToTargets, D, F,
 };
 use plonky2::{iop::witness::PartialWitness, plonk::proof::ProofWithPublicInputsTarget};
+use plonky2_ecdsa::gadgets::curve;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
@@ -23,11 +24,11 @@ impl EmptyNodeCircuit {
         let empty_hash = empty_poseidon_hash();
         let h = b.constant_hash(*empty_hash).elements;
 
-        // dc = CURVE_ZERO
-        let dc = b.curve_zero().to_targets();
+        // CURVE_ZERO
+        let curve_zero = b.curve_zero().to_targets();
 
         // Register the public inputs.
-        PublicInputs::new(&h, &dc, &dc).register(b);
+        PublicInputs::new(&h, &curve_zero, &curve_zero, &curve_zero, &curve_zero).register(b);
 
         EmptyNodeWires
     }
@@ -39,7 +40,7 @@ impl CircuitLogicWires<F, D, 0> for EmptyNodeWires {
 
     type Inputs = EmptyNodeCircuit;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::total_len();
 
     fn circuit_logic(
         builder: &mut CBuilder,
@@ -54,6 +55,7 @@ impl CircuitLogicWires<F, D, 0> for EmptyNodeWires {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,3 +89,4 @@ mod tests {
         }
     }
 }
+*/

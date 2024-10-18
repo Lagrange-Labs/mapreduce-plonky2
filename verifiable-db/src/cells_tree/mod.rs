@@ -101,15 +101,35 @@ impl CellWire {
             mpt_metadata: b.add_virtual_hash(),
         }
     }
-    pub(crate) fn values_digest(&self, b: &mut CBuilder) -> CurveTarget {
+    /// Compute the individual and multiplier values digests.
+    pub(crate) fn individual_multiplier_values_digests(
+        &self,
+        b: &mut CBuilder,
+    ) -> (CurveTarget, CurveTarget) {
+        let curve_zero = b.curve_zero();
+
         // # value digest for current cell
         // vd = D(identifier || pack_u32(value))
         let inputs = once(self.identifier)
             .chain(self.value.to_targets())
             .collect_vec();
         let digest = b.map_to_curve_point(&inputs);
+
+        // individual_vd = is_individual ? vd : CURVE_ZERO
+        let individual_vd = b.curve_select(self.is_multiplier, curve_zero, digest);
+
+        // multiplier_vd = is_individual ? CURVE_ZERO : vd
+        let multiplier_vd = b.curve_select(self.is_multiplier, digest, curve_zero);
+
+        (individual_vd, multiplier_vd)
     }
-    pub(crate) fn metadata_digest(&self, b: &mut CBuilder) -> CurveTarget {
+    /// Compute the individual and multiplier metdata digests.
+    pub(crate) fn individual_multiplier_metadata_digests(
+        &self,
+        b: &mut CBuilder,
+    ) -> (CurveTarget, CurveTarget) {
+        let curve_zero = b.curve_zero();
+
         // # metadata digest for current cell
         // md = D(mpt_metadata || identifier)
         let inputs = self
@@ -118,8 +138,15 @@ impl CellWire {
             .into_iter()
             .chain(once(self.identifier))
             .collect_vec();
+        let digest = b.map_to_curve_point(&inputs);
 
-        b.map_to_curve_point(&inputs)
+        // individual_md = is_individual ? md : CURVE_ZERO
+        let individual_md = b.curve_select(self.is_multiplier, curve_zero, digest);
+
+        // multiplier_md = is_individual ? CURVE_ZERO : md
+        let multiplier_md = b.curve_select(self.is_multiplier, digest, curve_zero);
+
+        (individual_md, multiplier_md)
     }
 
     // gupeng
