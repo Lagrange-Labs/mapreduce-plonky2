@@ -7,6 +7,7 @@ pub mod computational_hash_ids;
 pub mod merkle_path;
 pub mod public_inputs;
 pub mod universal_circuit;
+pub mod batching;
 
 // Without this skipping config, the generic parameter was deleted when `cargo fmt`.
 #[rustfmt::skip]

@@ -24,7 +24,7 @@ use mp2_common::{
     },
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{Fieldable, SelectHashBuilder, ToTargets},
+    utils::{Fieldable, HashBuilder, ToTargets},
     C, D, F,
 };
 use plonky2::{

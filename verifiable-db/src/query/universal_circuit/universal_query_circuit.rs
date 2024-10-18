@@ -11,7 +11,7 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, HashPermutation},
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    utils::{SelectHashBuilder, ToFields, ToTargets},
+    utils::{HashBuilder, ToFields, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{

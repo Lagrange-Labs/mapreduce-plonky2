@@ -307,7 +307,7 @@ pub fn pack_and_compute_poseidon_target<F: HashableField + Extendable<D>, const 
     b.hash_n_to_hash_no_pad::<H>(packed)
 }
 
-pub trait SelectHashBuilder {
+pub trait HashBuilder {
     /// Select `first_hash` or `second_hash` as output depending on the Boolean `cond`
     fn select_hash(
         &mut self,
@@ -315,9 +315,16 @@ pub trait SelectHashBuilder {
         first_hash: &HashOutTarget,
         second_hash: &HashOutTarget,
     ) -> HashOutTarget;
+
+    /// Determine whether `first_hash == second_hash`
+    fn hash_eq(
+        &mut self,
+        first_hash: &HashOutTarget,
+        second_hash: &HashOutTarget
+    ) -> BoolTarget;
 }
 
-impl<F: RichField + Extendable<D>, const D: usize> SelectHashBuilder for CircuitBuilder<F, D> {
+impl<F: RichField + Extendable<D>, const D: usize> HashBuilder for CircuitBuilder<F, D> {
     fn select_hash(
         &mut self,
         cond: BoolTarget,
@@ -332,6 +339,19 @@ impl<F: RichField + Extendable<D>, const D: usize> SelectHashBuilder for Circuit
                 .map(|(first, second)| self.select(cond, first, second))
                 .collect_vec(),
         )
+    }
+
+    fn hash_eq(
+            &mut self,
+            first_hash: &HashOutTarget,
+            second_hash: &HashOutTarget
+        ) -> BoolTarget {
+        let _true = self._true();
+        first_hash.elements.iter().zip(second_hash.elements.iter())
+            .fold(_true, |acc, (first, second)| {
+                let is_eq = self.is_equal(*first, *second);
+                self.and(acc, is_eq)
+            })
     }
 }
 

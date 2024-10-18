@@ -16,7 +16,7 @@ use mp2_common::{
     },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{FromFields, SelectHashBuilder, ToFields, ToTargets},
+    utils::{FromFields, HashBuilder, ToFields, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{
@@ -525,6 +525,7 @@ pub(crate) struct UniversalQueryHashInputWires<
     output_component_wires: <T::HashWires as OutputComponentHashWires>::InputWires,
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct UniversalQueryHashWires<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
@@ -958,6 +959,7 @@ pub(crate) struct UniversalQueryValueInputWires<const MAX_NUM_COLUMNS: usize> {
     pub(crate) is_non_dummy_row: BoolTarget,
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct UniversalQueryOutputWires<const MAX_NUM_RESULTS: usize> {
     pub(crate) tree_hash: MembershipHashTarget,
     pub(crate) values: [Vec<Target>; MAX_NUM_RESULTS],
@@ -965,6 +967,7 @@ pub(crate) struct UniversalQueryOutputWires<const MAX_NUM_RESULTS: usize> {
     pub(crate) num_overflows: Target,
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct UniversalQueryValueWires<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_RESULTS: usize,

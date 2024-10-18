@@ -8,7 +8,7 @@ use mp2_common::{
     serialization::{deserialize, deserialize_array, serialize, serialize_array},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{SelectHashBuilder, ToTargets},
+    utils::{HashBuilder, ToTargets},
     D, F,
 };
 use plonky2::{

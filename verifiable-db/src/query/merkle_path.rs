@@ -9,11 +9,11 @@ use mp2_common::{
     hash::hash_maybe_first,
     poseidon::empty_poseidon_hash,
     serialization::{
-        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array, serialize, deserialize
     },
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
-    utils::{Fieldable, FromTargets, SelectHashBuilder, ToTargets},
+    utils::{Fieldable, FromTargets, HashBuilder, ToTargets},
     D, F,
 };
 use plonky2::{
@@ -73,13 +73,15 @@ where
     )]
     is_real_node: [BoolTarget; MAX_DEPTH - 1],
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires related to the data of the end node whose membership is proven with `MerklePathWithNeighborsGadget`
 pub struct EndNodeInputs {
     node_min: UInt256Target,
     node_max: UInt256Target,
+    #[serde(serialize_with="serialize", deserialize_with="deserialize")]
     left_child_exists: BoolTarget,
     left_child_info: NodeInfoTarget,
+    #[serde(serialize_with="serialize", deserialize_with="deserialize")]
     right_child_exists: BoolTarget,
     right_child_info: NodeInfoTarget,
 }
@@ -116,14 +118,14 @@ where
 /// either the predecessor or the successor of a node)
 pub struct NeighborInfoTarget {
     /// Boolean flag specifying whether the node has the given neighbor
-    is_found: BoolTarget,
+    pub(crate) is_found: BoolTarget,
     /// Boolean flag specifying whether the neighbor is in the path from the
     /// given node up to the root
-    is_in_path: BoolTarget,
+    pub(crate) is_in_path: BoolTarget,
     /// Value of the neighbor (if the neighbor exists, otherwise a dummy value can be employed)
-    value: UInt256Target,
+    pub(crate) value: UInt256Target,
     /// Hash of the neighbor node (if the neighbor exists, otherwise a dummy value can be employed)
-    hash: HashOutTarget,
+    pub(crate) hash: HashOutTarget,
 }
 
 impl NeighborInfoTarget {
@@ -150,7 +152,7 @@ impl FromTargets for NeighborInfoTarget {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Set of input wires for the merkle path with neighbors gadget
 pub struct MerklePathWithNeighborsTargetInputs<const MAX_DEPTH: usize>
 where
@@ -645,7 +647,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::array;
 
     use alloy::primitives::U256;
@@ -800,53 +802,67 @@ mod tests {
             pw.set_target(wires.3, self.index_id);
         }
     }
+
+    // method to build a `NodeInfo` for a node from the provided inputs
+    pub(crate) fn build_node(
+        left_child: Option<&NodeInfo>,
+        right_child: Option<&NodeInfo>,
+        node_value: U256,
+        embedded_tree_hash: HashOutput,
+        index_id: F,
+    ) -> NodeInfo {
+        let node_min = if let Some(node) = &left_child {
+            node.min
+        } else {
+            node_value
+        };
+        let node_max = if let Some(node) = &right_child {
+            node.max
+        } else {
+            node_value
+        };
+        let left_child = left_child.map(|node| {
+            HashOutput::try_from(node.compute_node_hash(index_id).to_bytes()).unwrap()
+        });
+        let right_child = right_child.map(|node| {
+            HashOutput::try_from(node.compute_node_hash(index_id).to_bytes()).unwrap()
+        });
+        NodeInfo::new(
+            &embedded_tree_hash,
+            left_child.as_ref(),
+            right_child.as_ref(),
+            node_value,
+            node_min,
+            node_max,
+        )
+    }
+
     // Build the following Merkle-tree to be employed in tests, using
     // the `index_id` provided as input to compute the hash of the nodes
     //              A
     //          B       C
     //      D               G
     //   E      F
-    fn generate_test_tree(index_id: F) -> [NodeInfo; 7] {
+    pub(crate) fn generate_test_tree(index_id: F) -> [NodeInfo; 7] {
         let rng = &mut thread_rng();
         // closure to generate a random node of the tree from the 2 children, if any
         let mut random_node =
-            |left_child: Option<&NodeInfo>, right_child: Option<&NodeInfo>| -> NodeInfo {
+            |left_child: Option<&NodeInfo>, right_child: Option<&NodeInfo>, node_value: U256| -> NodeInfo {
                 let embedded_tree_hash =
                     HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap();
-                let node_value = gen_random_u256(rng);
-                let node_min = if let Some(node) = &left_child {
-                    node.min
-                } else {
-                    node_value
-                };
-                let node_max = if let Some(node) = &right_child {
-                    node.max
-                } else {
-                    node_value
-                };
-                let left_child = left_child.map(|node| {
-                    HashOutput::try_from(node.compute_node_hash(index_id).to_bytes()).unwrap()
-                });
-                let right_child = right_child.map(|node| {
-                    HashOutput::try_from(node.compute_node_hash(index_id).to_bytes()).unwrap()
-                });
-                NodeInfo::new(
-                    &embedded_tree_hash,
-                    left_child.as_ref(),
-                    right_child.as_ref(),
-                    node_value,
-                    node_min,
-                    node_max,
-                )
+                build_node(left_child, right_child, node_value, embedded_tree_hash, index_id)
             };
-
-        let node_E = random_node(None, None); // it's a leaf node, so no children
-        let node_F = random_node(None, None);
-        let node_G = random_node(None, None);
-        let node_D = random_node(Some(&node_E), Some(&node_F));
-        let node_B = random_node(Some(&node_D), None);
-        let node_C = random_node(None, Some(&node_G));
-        let node_A = random_node(Some(&node_B), Some(&node_C));
+        let mut values: [U256; 7] = array::from_fn(|_|
+            gen_random_u256(rng)
+        );
+        values.sort(); 
+        let node_E = random_node(None, None, values[0]); // it's a leaf node, so no children
+        let node_F = random_node(None, None, values[2]);
+        let node_G = random_node(None, None, values[6]);
+        let node_D = random_node(Some(&node_E), Some(&node_F), values[1]);
+        let node_B = random_node(Some(&node_D), None, values[3]);
+        let node_C = random_node(None, Some(&node_G), values[5]);
+        let node_A = random_node(Some(&node_B), Some(&node_C), values[4]);
         [node_A, node_B, node_C, node_D, node_E, node_F, node_G]
     }
 

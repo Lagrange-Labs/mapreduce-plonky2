@@ -6,7 +6,7 @@ use itertools::Itertools;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, HashPermutation},
     proof::ProofWithVK,
-    serialization::{deserialize_long_array, serialize_long_array},
+    serialization::{deserialize_long_array, serialize_long_array, serialize, deserialize, serialize_array, deserialize_array},
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{Fieldable, ToFields, ToTargets},
@@ -225,13 +225,15 @@ impl NodeInfo {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct NodeInfoTarget {
     /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
     /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
+    #[serde(serialize_with="serialize", deserialize_with="deserialize")]
     pub(crate) embedded_tree_hash: HashOutTarget,
     /// Hashes of the children of the current node, first left child and then right child hash. The hash of left/right child
     /// is the empty hash (i.e., H("")) if there is no corresponding left/right child for the current node
+    #[serde(serialize_with="serialize_array", deserialize_with="deserialize_array")]
     pub(crate) child_hashes: [HashOutTarget; 2],
     /// value stored in the node. It can be a primary index value if the node is a node in the index tree,
     /// a secondary index value if the node is a node in a rows tree
