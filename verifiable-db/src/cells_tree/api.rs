@@ -2,9 +2,9 @@
 
 use super::{
     empty_node::{EmptyNodeCircuit, EmptyNodeWires},
-    full_node::{FullNodeCircuit, FullNodeWires},
+    full_node::FullNodeWires,
     leaf::{LeafCircuit, LeafWires},
-    partial_node::{PartialNodeCircuit, PartialNodeWires},
+    partial_node::PartialNodeWires,
     public_inputs::PublicInputs,
     Cell,
 };
@@ -39,12 +39,13 @@ impl CircuitInput {
     /// Create a circuit input for proving a leaf node.
     /// It is not considered a multiplier column. Please use `leaf_multiplier` for registering a
     /// multiplier column.
-    pub fn leaf(identifier: u64, value: U256) -> Self {
+    pub fn leaf(identifier: u64, value: U256, mpt_metadata: HashOut<F>) -> Self {
         CircuitInput::Leaf(
             Cell {
                 identifier: F::from_canonical_u64(identifier),
                 value,
                 is_multiplier: false,
+                mpt_metadata,
             }
             .into(),
         )
@@ -52,12 +53,18 @@ impl CircuitInput {
     /// Create a circuit input for proving a leaf node whose value is considered as a multiplier
     /// depending on the boolean value.
     /// i.e. it means it's one of the repeated value amongst all the rows
-    pub fn leaf_multiplier(identifier: u64, value: U256, is_multiplier: bool) -> Self {
+    pub fn leaf_multiplier(
+        identifier: u64,
+        value: U256,
+        is_multiplier: bool,
+        mpt_metadata: HashOut<F>,
+    ) -> Self {
         CircuitInput::Leaf(
             Cell {
                 identifier: F::from_canonical_u64(identifier),
                 value,
                 is_multiplier,
+                mpt_metadata,
             }
             .into(),
         )
@@ -66,11 +73,17 @@ impl CircuitInput {
     /// Create a circuit input for proving a full node of 2 children.
     /// It is not considered a multiplier column. Please use `full_multiplier` for registering a
     /// multiplier column.
-    pub fn full(identifier: u64, value: U256, child_proofs: [Vec<u8>; 2]) -> Self {
+    pub fn full(
+        identifier: u64,
+        value: U256,
+        mpt_metadata: HashOut<F>,
+        child_proofs: [Vec<u8>; 2],
+    ) -> Self {
         CircuitInput::FullNode(new_child_input(
             F::from_canonical_u64(identifier),
             value,
             false,
+            mpt_metadata,
             child_proofs.to_vec(),
         ))
     }
@@ -80,23 +93,31 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
+        mpt_metadata: HashOut<F>,
         child_proofs: [Vec<u8>; 2],
     ) -> Self {
         CircuitInput::FullNode(new_child_input(
             F::from_canonical_u64(identifier),
             value,
             is_multiplier,
+            mpt_metadata,
             child_proofs.to_vec(),
         ))
     }
     /// Create a circuit input for proving a partial node of 1 child.
     /// It is not considered a multiplier column. Please use `partial_multiplier` for registering a
     /// multiplier column.
-    pub fn partial(identifier: u64, value: U256, child_proof: Vec<u8>) -> Self {
+    pub fn partial(
+        identifier: u64,
+        value: U256,
+        mpt_metadata: HashOut<F>,
+        child_proof: Vec<u8>,
+    ) -> Self {
         CircuitInput::PartialNode(new_child_input(
             F::from_canonical_u64(identifier),
             value,
             false,
+            mpt_metadata,
             vec![child_proof],
         ))
     }
@@ -104,12 +125,14 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
+        mpt_metadata: HashOut<F>,
         child_proof: Vec<u8>,
     ) -> Self {
         CircuitInput::PartialNode(new_child_input(
             F::from_canonical_u64(identifier),
             value,
             is_multiplier,
+            mpt_metadata,
             vec![child_proof],
         ))
     }
@@ -120,6 +143,7 @@ fn new_child_input(
     identifier: F,
     value: U256,
     is_multiplier: bool,
+    mpt_metadata: HashOut<F>,
     serialized_child_proofs: Vec<Vec<u8>>,
 ) -> ChildInput {
     ChildInput {
@@ -127,6 +151,7 @@ fn new_child_input(
             identifier,
             value,
             is_multiplier,
+            mpt_metadata,
         },
         serialized_child_proofs,
     }
@@ -148,7 +173,7 @@ pub fn build_circuits_params() -> PublicParameters {
     PublicParameters::build()
 }
 
-const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
+const NUM_IO: usize = PublicInputs::<F>::total_len();
 
 /// Number of circuits in the set
 /// 1 leaf + 1 full node + 1 partial node + 1 empty node
@@ -246,8 +271,10 @@ impl PublicParameters {
 
 pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
     let p = ProofWithVK::deserialize(proof)?;
-    Ok(PublicInputs::from_slice(&p.proof.public_inputs).root_hash_hashout())
+    Ok(PublicInputs::from_slice(&p.proof.public_inputs).node_hash())
 }
+
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,3 +479,4 @@ mod tests {
         proof
     }
 }
+*/

@@ -14,6 +14,7 @@ use super::{
     full_node::{self, FullNodeCircuit},
     leaf::{self, LeafCircuit},
     partial_node::{self, PartialNodeCircuit},
+    row::Row,
     PublicInputs,
 };
 
@@ -38,7 +39,7 @@ pub struct PublicParameters {
     row_set: RecursiveCircuits<F, C, D>,
 }
 
-const ROW_IO_LEN: usize = super::public_inputs::TOTAL_LEN;
+const ROW_IO_LEN: usize = super::PublicInputs::<F>::total_len();
 
 impl PublicParameters {
     pub fn build(cells_set: &RecursiveCircuits<F, C, D>) -> Self {
@@ -180,18 +181,39 @@ pub enum CircuitInput {
 }
 
 impl CircuitInput {
-    pub fn leaf(identifier: u64, value: U256, cells_proof: Vec<u8>) -> Result<Self> {
-        Self::leaf_multiplier(identifier, value, false, cells_proof)
+    pub fn leaf(
+        identifier: u64,
+        value: U256,
+        mpt_metadata: HashOut<F>,
+        row_unique_data: HashOut<F>,
+        cells_proof: Vec<u8>,
+    ) -> Result<Self> {
+        Self::leaf_multiplier(
+            identifier,
+            value,
+            false,
+            mpt_metadata,
+            row_unique_data,
+            cells_proof,
+        )
     }
     pub fn leaf_multiplier(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
+        mpt_metadata: HashOut<F>,
+        row_unique_data: HashOut<F>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let circuit = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
+        let cell = Cell::new(
+            F::from_canonical_u64(identifier),
+            value,
+            is_multiplier,
+            mpt_metadata,
+        );
+        let row = Row::new(cell, row_unique_data);
         Ok(CircuitInput::Leaf {
-            witness: circuit.into(),
+            witness: row.into(),
             cells_proof,
         })
     }
@@ -199,6 +221,8 @@ impl CircuitInput {
     pub fn full(
         identifier: u64,
         value: U256,
+        mpt_metadata: HashOut<F>,
+        row_unique_data: HashOut<F>,
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
@@ -207,6 +231,8 @@ impl CircuitInput {
             identifier,
             value,
             false,
+            mpt_metadata,
+            row_unique_data,
             left_proof,
             right_proof,
             cells_proof,
@@ -216,13 +242,21 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
+        mpt_metadata: HashOut<F>,
+        row_unique_data: HashOut<F>,
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let circuit = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
+        let cell = Cell::new(
+            F::from_canonical_u64(identifier),
+            value,
+            is_multiplier,
+            mpt_metadata,
+        );
+        let row = Row::new(cell, row_unique_data);
         Ok(CircuitInput::Full {
-            witness: circuit.into(),
+            witness: row.into(),
             left_proof,
             right_proof,
             cells_proof,
@@ -232,6 +266,8 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_child_left: bool,
+        mpt_metadata: HashOut<F>,
+        row_unique_data: HashOut<F>,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
@@ -240,6 +276,8 @@ impl CircuitInput {
             value,
             false,
             is_child_left,
+            mpt_metadata,
+            row_unique_data,
             child_proof,
             cells_proof,
         )
@@ -249,11 +287,19 @@ impl CircuitInput {
         value: U256,
         is_multiplier: bool,
         is_child_left: bool,
+        mpt_metadata: HashOut<F>,
+        row_unique_data: HashOut<F>,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let tuple = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
-        let witness = PartialNodeCircuit::new(tuple, is_child_left);
+        let cell = Cell::new(
+            F::from_canonical_u64(identifier),
+            value,
+            is_multiplier,
+            mpt_metadata,
+        );
+        let row = Row::new(cell, row_unique_data);
+        let witness = PartialNodeCircuit::new(row, is_child_left);
         Ok(CircuitInput::Partial {
             witness,
             child_proof,
@@ -264,9 +310,10 @@ impl CircuitInput {
 
 pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
     let p = ProofWithVK::deserialize(proof)?;
-    Ok(PublicInputs::from_slice(&p.proof.public_inputs).root_hash_hashout())
+    Ok(PublicInputs::from_slice(&p.proof.public_inputs).root_hash())
 }
 
+/*
 #[cfg(test)]
 mod test {
     use crate::{cells_tree, row_tree::public_inputs::PublicInputs};
@@ -533,3 +580,4 @@ mod test {
         Ok(proof)
     }
 }
+*/

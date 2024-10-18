@@ -1,7 +1,7 @@
 //! This circuit is employed when the new node is inserted as parent of an existing node,
 //! referred to as old node.
 
-use super::{compute_index_digest, public_inputs::PublicInputs};
+use super::{compute_final_digest, compute_index_digest, public_inputs::PublicInputs};
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
@@ -10,7 +10,6 @@ use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     default_config,
-    group_hashing::CircuitBuilderGroupHashing,
     poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -84,12 +83,9 @@ impl ParentCircuit {
 
         let extraction_pi = E::PI::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
+        let final_digest = compute_final_digest::<E>(b, &extraction_pi, &rows_tree_pi);
 
         let block_number = extraction_pi.primary_index_value();
-
-        // Enforce that the data extracted from the blockchain is the same as the data
-        // employed to build the rows tree for this node.
-        b.connect_curve_points(extraction_pi.value_set_digest(), rows_tree_pi.rows_digest());
 
         // Compute the hash of table metadata, to be exposed as public input to prove to
         // the verifier that we extracted the correct storage slots and we place the data
@@ -110,7 +106,7 @@ impl ParentCircuit {
         let inputs = iter::once(index_identifier)
             .chain(block_number.iter().cloned())
             .collect();
-        let node_digest = compute_index_digest(b, inputs, rows_tree_pi.rows_digest());
+        let node_digest = compute_index_digest(b, inputs, final_digest);
 
         // We recompute the hash of the old node to bind the `old_min` and `old_max`
         // values to the hash of the old tree.
@@ -154,7 +150,7 @@ impl ParentCircuit {
 
         // check that the rows tree built is for a merged table iff we extract data from MPT for a merged table
         b.connect(
-            rows_tree_pi.is_merge_case().target,
+            rows_tree_pi.merge_flag_target().target,
             extraction_pi.is_merge_case().target,
         );
 
@@ -236,7 +232,7 @@ where
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::TOTAL_LEN;
+        const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::total_len();
 
         let extraction_verifier =
             RecursiveCircuitsVerifierGagdet::<F, C, D, { E::PI::TOTAL_LEN }>::new(
@@ -315,7 +311,7 @@ mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let extraction_pi = b.add_virtual_targets(TestPITargets::TOTAL_LEN);
-            let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::TOTAL_LEN);
+            let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::total_len());
 
             let parent_wires =
                 ParentCircuit::build::<TestPITargets>(b, &extraction_pi, &rows_tree_pi);
@@ -329,7 +325,7 @@ mod tests {
             assert_eq!(wires.1.len(), TestPITargets::TOTAL_LEN);
             pw.set_target_arr(&wires.1, self.extraction_pi);
 
-            assert_eq!(wires.2.len(), row_tree::PublicInputs::<Target>::TOTAL_LEN);
+            assert_eq!(wires.2.len(), row_tree::PublicInputs::<Target>::total_len());
             pw.set_target_arr(&wires.2, self.rows_tree_pi);
         }
     }

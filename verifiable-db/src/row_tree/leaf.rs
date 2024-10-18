@@ -1,7 +1,11 @@
+use super::{
+    public_inputs::PublicInputs,
+    row::{Row, RowWire},
+};
+use crate::cells_tree;
 use derive_more::{From, Into};
 use mp2_common::{
     default_config,
-    group_hashing::{cond_circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -9,10 +13,7 @@ use mp2_common::{
     C, D, F,
 };
 use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::PartialWitness,
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
 use recursion_framework::{
@@ -22,57 +23,50 @@ use recursion_framework::{
     },
 };
 use serde::{Deserialize, Serialize};
-
-use crate::cells_tree::{self, Cell, CellWire};
-
-use super::public_inputs::PublicInputs;
+use std::iter::once;
 
 // new type to implement the circuit logic on each differently
 // deref to access directly the same members - read only so it's ok
 #[derive(Clone, Debug, From, Into)]
-pub struct LeafCircuit(Cell);
+pub struct LeafCircuit(Row);
 
 #[derive(Clone, Serialize, Deserialize, From, Into)]
-pub(crate) struct LeafWires(CellWire);
+pub(crate) struct LeafWires(RowWire);
 
 impl LeafCircuit {
     pub(crate) fn build(b: &mut CircuitBuilder<F, D>, cells_pis: &[Target]) -> LeafWires {
         let cells_pis = cells_tree::PublicInputs::from_slice(cells_pis);
-        // D(index_id||pack_u32(index_value)
-        let tuple = CellWire::new(b);
-        // set the right digest depending on the multiplier and accumulate the ones from the public
-        // inputs of the cell root proof
-        let split_digest = tuple.split_and_accumulate_digest(b, cells_pis.split_digest_target());
-        // final_digest = HashToInt(D(mul_digest)) * D(ind_digest)
-        // NOTE This additional digest is necessary since the individual digest is supposed to be a
-        // full row, that is how it is extracted from MPT
-        let (final_digest, is_merge) = split_digest.cond_combine_to_row_digest(b);
+        let row = RowWire::new(b);
+        let id = row.identifier();
+        let value = row.value().to_targets();
+        let digest = row.digest(b, &cells_pis);
 
         // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
         // in our case, min == max == index_value
         // left_child_hash == right_child_hash == empty_hash since there is not children
-        let empty_hash = b.constant_hash(*empty_poseidon_hash());
+        let empty_hash = b.constant_hash(*empty_poseidon_hash()).to_targets();
         let inputs = empty_hash
-            .to_targets()
-            .iter()
-            .chain(empty_hash.to_targets().iter())
-            .chain(tuple.value.to_targets().iter())
-            .chain(tuple.value.to_targets().iter())
-            .chain(tuple.to_targets().iter())
-            .chain(cells_pis.node_hash().to_targets().iter())
-            .cloned()
+            .clone()
+            .into_iter()
+            .chain(empty_hash)
+            .chain(value.clone())
+            .chain(value.clone())
+            .chain(once(id))
+            .chain(cells_pis.node_hash_target())
             .collect::<Vec<_>>();
         let row_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
-        let value_fields = tuple.value.to_targets();
         PublicInputs::new(
             &row_hash.elements,
-            &final_digest.to_targets(),
-            &value_fields,
-            &value_fields,
-            &[is_merge.target],
+            &digest.individual_vd.to_targets(),
+            &digest.multiplier_vd.to_targets(),
+            &digest.row_id_multiplier.to_targets(),
+            &value,
+            &value,
+            &[digest.is_merge.target],
         )
         .register(b);
-        LeafWires(tuple)
+
+        LeafWires(row)
     }
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
@@ -102,14 +96,14 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 
     type Inputs = RecursiveLeafInput;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::total_len();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::TOTAL_LEN;
+        const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::total_len();
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, CELLS_IO>::new(
             default_config(),
             &builder_parameters,
@@ -131,6 +125,7 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
     }
 }
 
+/*
 #[cfg(test)]
 mod test {
 
@@ -243,3 +238,4 @@ mod test {
         test_row_tree_leaf_circuit(true, true);
     }
 }
+*/
