@@ -227,8 +227,8 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
     }
 }
 
-impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputCommon
-    for PublicInputs<'a, Target, L, S, PH>
+impl<const L: usize, const S: usize, const PH: usize> PublicInputCommon
+    for PublicInputs<'_, Target, L, S, PH>
 {
     const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
@@ -246,7 +246,7 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputCommon
     }
 }
 
-impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, Target, L, S, PH> {
+impl<const L: usize, const S: usize, const PH: usize> PublicInputs<'_, Target, L, S, PH> {
     pub fn original_block_hash_target(&self) -> [Target; PACKED_HASH_LEN] {
         self.to_original_block_hash_raw().try_into().unwrap()
     }
@@ -305,7 +305,7 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, Targe
     }
 }
 
-impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, F, L, S, PH> {
+impl<const L: usize, const S: usize, const PH: usize> PublicInputs<'_, F, L, S, PH> {
     pub fn original_block_hash(&self) -> [F; PACKED_HASH_LEN] {
         self.to_original_block_hash_raw().try_into().unwrap()
     }
@@ -405,7 +405,7 @@ mod tests {
         pis: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPublicInputs<'a> {
+    impl UserCircuit<F, D> for TestPublicInputs<'_> {
         type Wires = Vec<Target>;
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {

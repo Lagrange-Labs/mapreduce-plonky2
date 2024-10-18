@@ -278,7 +278,7 @@ mod tests {
                     let child_pi = PublicInputs::from_slice(&child_pi);
                     // Check packed block hash
                     {
-                        let hash = keccak256(&node).pack(Endianness::Little).to_fields();
+                        let hash = keccak256(node).pack(Endianness::Little).to_fields();
                         assert_eq!(pi.h, hash);
                     }
                     // Check metadata digest
@@ -288,7 +288,7 @@ mod tests {
                         assert_eq!(pi.k, child_pi.k);
 
                         // child pointer - partial key length
-                        let keys: Vec<Vec<u8>> = rlp::decode_list(&node);
+                        let keys: Vec<Vec<u8>> = rlp::decode_list(node);
                         let nibbles = Nibbles::from_compact(&keys[0]);
                         let exp_ptr =
                             *child_pi.t - F::from_canonical_usize(nibbles.nibbles().len());
@@ -311,7 +311,7 @@ mod tests {
                     let child_pi = PublicInputs::from_slice(&child_pi);
                     // Check packed block hash
                     {
-                        let hash = keccak256(&node).pack(Endianness::Little).to_fields();
+                        let hash = keccak256(node).pack(Endianness::Little).to_fields();
                         assert_eq!(pi.h, hash);
                     }
                     // Check metadata digest

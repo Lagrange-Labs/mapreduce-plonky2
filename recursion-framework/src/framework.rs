@@ -101,8 +101,8 @@ where
     ///   and `input_verifier_data` contains the corrisponding verifier data
     /// - `custom_inputs` contains the input necessary to fill the witness data related to the additional logic being
     ///   enforced in the circuit besides verifying the `NUM_VERIFIERS` proofs with the universal verifier
-    /// Note that this function will already output a proof that can be directly recursively verified with the
-    /// universal verifier
+    ///   Note that this function will already output a proof that can be directly recursively verified with the
+    ///   universal verifier
     pub fn generate_proof<
         const NUM_VERIFIERS: usize,
         CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
@@ -347,7 +347,7 @@ pub(crate) mod tests {
         ) -> Self {
             Self {
                 targets: builder_parameters.verify_proof_in_circuit_set(builder),
-                c: PhantomData::<C>::default(),
+                c: PhantomData::<C>,
             }
         }
 
@@ -397,7 +397,7 @@ pub(crate) mod tests {
                 targets: builder_parameters
                     .0
                     .verify_proof_fixed_circuit_in_circuit_set(builder, &builder_parameters.1),
-                c: PhantomData::<C>::default(),
+                c: PhantomData::<C>,
             }
         }
 

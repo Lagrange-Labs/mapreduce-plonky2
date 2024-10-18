@@ -102,8 +102,8 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
     /// `build_circuit` builds a Plonky2 circuit which:
     /// - Verify `NUM_VERIFIERS` proofs employing the universal verifier.
     /// - Execute the custom logic specified by the `CLW` implementation
-    /// Note that the output data structure contains also the wrapping circuit necessary to
-    /// generate proofs that can be verified recursively with a universal verifier.
+    ///   Note that the output data structure contains also the wrapping circuit necessary to
+    ///   generate proofs that can be verified recursively with a universal verifier.
     pub fn build_circuit<
         C: GenericConfig<D, F = F>,
         const NUM_VERIFIERS: usize,
@@ -285,9 +285,9 @@ where
     ///   input of the circuit
     /// - `custom_inputs` are employed as inputs to fill witness data related to the additional logic being
     ///   enforced besides verifying the `NUM_VERIFIERS` proofs with the universal verifier
-    /// Note that this function will output a proof of the wrapping circuit, which can be directly
-    /// recursively verified with the universal verifier. This method is publicly exposed through the
-    /// `generate_proof` method of `RecursiveCircuits` data structure
+    ///   Note that this function will output a proof of the wrapping circuit, which can be directly
+    ///   recursively verified with the universal verifier. This method is publicly exposed through the
+    ///   `generate_proof` method of `RecursiveCircuits` data structure
     pub(crate) fn generate_proof(
         &self,
         input_proofs: [ProofWithPublicInputs<F, C, D>; NUM_VERIFIERS],
@@ -435,8 +435,8 @@ pub(crate) mod tests {
             Self {
                 inputs,
                 generator,
-                _f: PhantomData::default(),
-                _h: PhantomData::default(),
+                _f: PhantomData,
+                _h: PhantomData,
             }
         }
 

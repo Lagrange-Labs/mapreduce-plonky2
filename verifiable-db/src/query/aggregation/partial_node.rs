@@ -312,7 +312,7 @@ mod tests {
         child_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPartialNodeCircuit<'a> {
+    impl UserCircuit<F, D> for TestPartialNodeCircuit<'_> {
         // Circuit wires + query proof + child proof
         type Wires = (PartialNodeWires<MAX_NUM_RESULTS>, Vec<Target>, Vec<Target>);
 

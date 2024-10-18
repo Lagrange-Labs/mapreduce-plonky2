@@ -149,7 +149,7 @@ mod tests {
         subtree_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestFullNodeIndexLeafCircuit<'a> {
+    impl UserCircuit<F, D> for TestFullNodeIndexLeafCircuit<'_> {
         // Circuit wires + subtree proof
         type Wires = (FullNodeIndexLeafWires<MAX_NUM_RESULTS>, Vec<Target>);
 

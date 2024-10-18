@@ -257,7 +257,7 @@ pub mod tests {
         pub pi: &'a [GFp],
     }
 
-    impl<'a> UserCircuit<GFp, D> for ExtensionTestCircuit<'a> {
+    impl UserCircuit<GFp, D> for ExtensionTestCircuit<'_> {
         type Wires = ExtensionTestWires;
 
         fn build(cb: &mut CBuilder) -> Self::Wires {

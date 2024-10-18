@@ -44,7 +44,7 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
     ///
     /// - `leaf_data` will be the preimage of the node of the branch at depth `0`.
     /// - `siblings` will be the full Merkle path up to [MAX_DEPTH]; the remainder nodes will be
-    /// ignored.
+    ///   ignored.
     /// - `positions` will be bits path up to [MAX_DEPTH]; the remainder items will be ignored.
     /// - `depth` will be the variable depth to be proven.
     pub fn build<F, const D: usize>(
@@ -83,10 +83,10 @@ impl<const MAX_DEPTH: usize> StateTreeWires<MAX_DEPTH> {
         // d == Σ(v₍ᵢ₋₁₎ · vᵢ)
         let mut val = cb.one();
         let mut acc = cb.zero();
-        for i in 0..MAX_DEPTH {
-            val = cb.mul(val, is_value[i].target);
-            acc = cb.add(acc, val);
-        }
+        acc = is_value.iter().take(MAX_DEPTH).fold(acc, |acc, iv| {
+            val = cb.mul(val, iv.target);
+            cb.add(acc, val)
+        });
         cb.connect(acc, depth);
 
         let mut root = cb.hash_n_to_hash_no_pad::<H>(leaf_data.to_vec());

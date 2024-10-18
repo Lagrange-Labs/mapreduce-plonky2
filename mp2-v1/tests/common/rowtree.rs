@@ -87,7 +87,7 @@ impl TestContext {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(wk)) = workplan.next() {
             let k = wk.k();
-            let (context, row) = t.fetch_with_context(&k).await;
+            let (context, row) = t.fetch_with_context(k).await;
             let id = row.secondary_index_column;
             // Sec. index value
             let value = row.secondary_index_value();

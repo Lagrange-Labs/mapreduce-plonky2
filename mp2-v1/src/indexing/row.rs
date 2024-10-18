@@ -83,6 +83,7 @@ impl RowTreeKey {
 }
 
 /// CellInfo is the structure saved in the row JSON payload.
+///
 /// Each cell info is identified by its column ID in the CellCollection.
 /// The primary information is required to be able to pinpoint each cells to its associated proof.
 /// This is required to be able to snapsho, go back in time, prove multiple blocks in parallel etc.
@@ -103,6 +104,7 @@ impl<PrimaryIndex> CellInfo<PrimaryIndex> {
 }
 
 /// A collection of cells inserted in the JSON.
+///
 /// IMPORTANT: This collection MUST CONTAIN the secondary index value, as first element, to easily
 /// search in JSONB from the SQL. It is also important it is in an easily
 /// searchable format.

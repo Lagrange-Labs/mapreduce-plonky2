@@ -161,7 +161,7 @@ fn test_map_reduce_circuits() {
 
     let mut dataset_chunk_digests = dataset
         .chunks(INPUT_CHUNK_SIZE)
-        .map(|chunk| H::hash_no_pad(chunk))
+        .map(H::hash_no_pad)
         .collect::<Vec<_>>();
     while dataset_chunk_digests.len() != 1 {
         let new_dataset_chunk_digests = dataset_chunk_digests

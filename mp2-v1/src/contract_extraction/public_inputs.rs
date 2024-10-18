@@ -35,7 +35,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) s: &'a [T],
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] = &[H_RANGE, DM_RANGE, K_RANGE, T_RANGE, S_RANGE];
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -47,7 +47,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     }
 }
 
-impl<'a> PublicInputs<'a, GFp> {
+impl PublicInputs<'_, GFp> {
     /// Get the metadata point.
     pub fn metadata_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.dm)
@@ -168,7 +168,7 @@ mod tests {
         exp_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPICircuit<'a> {
+    impl UserCircuit<F, D> for TestPICircuit<'_> {
         type Wires = Vec<Target>;
 
         fn build(b: &mut CBuilder) -> Self::Wires {
@@ -179,7 +179,7 @@ mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_target_arr(&wires, self.exp_pi);
+            pw.set_target_arr(wires, self.exp_pi);
         }
     }
 

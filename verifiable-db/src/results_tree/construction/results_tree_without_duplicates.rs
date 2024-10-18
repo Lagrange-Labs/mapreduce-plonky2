@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(pi.index_ids(), ids[..2]);
 
         // No duplicates
-        assert_eq!(pi.no_duplicates_flag(), true);
+        assert!(pi.no_duplicates_flag());
 
         // Accumulator
         let accumulator_inputs: Vec<_> = iter::once(ids[0])

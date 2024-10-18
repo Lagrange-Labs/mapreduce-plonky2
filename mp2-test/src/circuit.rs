@@ -1,8 +1,7 @@
 use anyhow::Result;
 use mp2_common::{C, D, F};
-use plonky2::iop::target::BoolTarget;
 use plonky2::plonk::circuit_data::CircuitConfig;
-use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
+use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -10,7 +9,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{
-            CircuitData, CommonCircuitData, VerifierCircuitData, VerifierOnlyCircuitData,
+            CircuitData, VerifierCircuitData,
         },
         config::GenericConfig,
     },

@@ -35,7 +35,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) n: &'a T,
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] = &[H_RANGE, DM_RANGE, K_RANGE, T_RANGE, N_RANGE];
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -82,7 +82,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 }
 
-impl<'a, T: Clone> PublicInputs<'a, T> {
+impl<T: Clone> PublicInputs<'_, T> {
     /// Creates a vector from the parts of the public inputs
     pub fn to_vec(&self) -> Vec<T> {
         self.h
@@ -149,7 +149,7 @@ impl<'a, T> PublicInputs<'a, T> {
     }
 }
 
-impl<'a> PublicInputs<'a, GFp> {
+impl PublicInputs<'_, GFp> {
     /// Creates a [WeierstrassPoint] from the metadata.
     pub fn metadata_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.dm)

@@ -16,7 +16,7 @@ use std::array::from_fn as create_array;
 
 /// -  H: new (Merkle) root
 /// - `DM` : metadata hash representing the extraction of the data from storage slots and insertion in the expected columns of the table being built.
-/// It's represented as a hash since more efficient to pass along in public inputs.
+///   It's represented as a hash since more efficient to pass along in public inputs.
 /// - `DV` : order-agnostic digest of the block tree, useful in case we want to build another index tree with a different index column
 /// - **IVC Information - specific to blockchain:**
 ///     - `$z_0$`: first block number inserted (as u256, represented by  8 32-bit limbs)
@@ -39,7 +39,7 @@ pub(crate) const Z0_RANGE: PublicInputRange = DV_RANGE.end..DV_RANGE.end + INDEX
 pub(crate) const ZI_RANGE: PublicInputRange = Z0_RANGE.end..Z0_RANGE.end + INDEX_LEN;
 pub(crate) const O_RANGE: PublicInputRange = ZI_RANGE.end..ZI_RANGE.end + PACKED_HASH_LEN;
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, DM_RANGE, DV_RANGE, Z0_RANGE, ZI_RANGE, O_RANGE];
 
@@ -100,7 +100,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
     }
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl PublicInputs<'_, Target> {
     pub fn merkle_hash(&self) -> HashOutTarget {
         HashOutTarget {
             elements: self.h.try_into().unwrap(),
@@ -123,7 +123,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 }
 
-impl<'a> PublicInputs<'a, F> {
+impl PublicInputs<'_, F> {
     pub fn merkle_root_hash_fields(&self) -> HashOut<F> {
         HashOut {
             elements: self.h.try_into().unwrap(),
@@ -179,7 +179,7 @@ mod tests {
         exp_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPICircuit<'a> {
+    impl UserCircuit<F, D> for TestPICircuit<'_> {
         type Wires = Vec<Target>;
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {

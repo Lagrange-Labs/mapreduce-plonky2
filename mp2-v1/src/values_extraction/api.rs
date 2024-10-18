@@ -551,7 +551,7 @@ mod tests {
         let v: Vec<u8> = rlp::encode(&random_vector(32)).to_vec();
         mpt_keys
             .iter()
-            .for_each(|mpt| trie.insert(&mpt, &v).unwrap());
+            .for_each(|mpt| trie.insert(mpt, &v).unwrap());
         trie.root_hash().unwrap();
 
         TestData {
@@ -696,8 +696,8 @@ mod tests {
         let trie = &mut test_data.trie;
         let mpt1 = test_data.mpt_keys[0].as_slice();
         let mpt2 = test_data.mpt_keys[1].as_slice();
-        let p1 = trie.get_proof(&mpt1).unwrap();
-        let p2 = trie.get_proof(&mpt2).unwrap();
+        let p1 = trie.get_proof(mpt1).unwrap();
+        let p2 = trie.get_proof(mpt2).unwrap();
 
         // They should share the same branch node.
         assert_eq!(p1.len(), p2.len());

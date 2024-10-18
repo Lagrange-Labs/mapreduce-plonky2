@@ -147,7 +147,7 @@ mod tests {
         child_pi: &'a [F],
     }
 
-    impl<'a, const NODE_LEN: usize> UserCircuit<F, D> for TestBranchCircuit<'a, NODE_LEN>
+    impl<const NODE_LEN: usize> UserCircuit<F, D> for TestBranchCircuit<'_, NODE_LEN>
     where
         [(); PAD_LEN(NODE_LEN)]:,
     {

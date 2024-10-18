@@ -34,7 +34,7 @@ use plonky2::plonk::config::GenericHashOut;
 type ColumnIdentifier = u64;
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
-    let root_pi = ProofWithVK::deserialize(&proof)
+    let root_pi = ProofWithVK::deserialize(proof)
         .expect("while deserializing proof")
         .proof
         .public_inputs;
@@ -46,7 +46,7 @@ fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
 }
 
 fn row_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
-    let root_pi = ProofWithVK::deserialize(&proof)
+    let root_pi = ProofWithVK::deserialize(proof)
         .expect("while deserializing proof")
         .proof
         .public_inputs;

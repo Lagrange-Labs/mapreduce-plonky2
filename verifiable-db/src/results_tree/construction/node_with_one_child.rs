@@ -314,7 +314,7 @@ mod tests {
         child_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestNodeWithOneChildCircuit<'a> {
+    impl UserCircuit<F, D> for TestNodeWithOneChildCircuit<'_> {
         // Circuit wires + subtree proof + child proof
         type Wires = (NodeWithOneChildWires<S>, Vec<Target>, Vec<Target>);
 

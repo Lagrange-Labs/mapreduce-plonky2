@@ -99,8 +99,8 @@ fn prove_leaf(
     // Generate the proof.
     let input = contract_extraction::CircuitInput::new_leaf(
         node.clone(),
-        &storage_root,
-        contract_address.clone(),
+        storage_root,
+        *contract_address,
     );
     let input = CircuitInput::ContractExtraction(input);
     let proof = ctx
