@@ -5,29 +5,32 @@ mod leaf;
 mod partial_node;
 mod public_inputs;
 
-use serde::{Deserialize, Serialize};
+use std::{convert::identity, iter::once};
 
 use alloy::primitives::U256;
 pub use api::{build_circuits_params, extract_hash_from_proof, CircuitInput, PublicParameters};
 use derive_more::Constructor;
+use itertools::Itertools;
 use mp2_common::{
     digest::{Digest, SplitDigestPoint, SplitDigestTarget},
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
     serialization::{deserialize, serialize},
-    types::CBuilder,
+    types::{CBuilder, CURVE_TARGET_LEN},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{ToFields, ToTargets},
     D, F,
 };
+use serde::{Deserialize, Serialize};
 
 use plonky2::{
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::CurveTarget;
+use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 pub use public_inputs::PublicInputs;
 
 /// A cell represents a column || value tuple. it can be given in the cells tree or as the
@@ -40,6 +43,8 @@ pub(crate) struct Cell {
     pub(crate) value: U256,
     /// is the secondary value should be included in multiplier digest or not
     pub(crate) is_multiplier: bool,
+    /// mpt_metadata : [4]F - Hash of the metadata associated to this cell, as computed in MPT extraction circuits
+    pub(crate) mpt_metadata: HashOut<F>,
 }
 
 impl Cell {
@@ -47,6 +52,7 @@ impl Cell {
         pw.set_u256_target(&wires.value, self.value);
         pw.set_target(wires.identifier, self.identifier);
         pw.set_bool_target(wires.is_multiplier, self.is_multiplier);
+        pw.set_hash_target(wires.mpt_metadata, self.mpt_metadata);
     }
     pub(crate) fn digest(&self) -> Digest {
         map_to_curve_point(&self.to_fields())
@@ -69,6 +75,8 @@ impl ToFields<F> for Cell {
         [self.identifier]
             .into_iter()
             .chain(self.value.to_fields())
+            // TODO: Could we ignore is_multiplier here?
+            .chain(self.mpt_metadata.to_fields())
             .collect()
     }
 }
@@ -80,16 +88,41 @@ pub(crate) struct CellWire {
     pub(crate) identifier: Target,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) is_multiplier: BoolTarget,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    pub(crate) mpt_metadata: HashOutTarget,
 }
 
 impl CellWire {
-    pub(crate) fn new(b: &mut CircuitBuilder<F, D>) -> Self {
+    pub(crate) fn new(b: &mut CBuilder) -> Self {
         Self {
             value: b.add_virtual_u256(),
             identifier: b.add_virtual_target(),
             is_multiplier: b.add_virtual_bool_target_safe(),
+            mpt_metadata: b.add_virtual_hash(),
         }
     }
+    pub(crate) fn values_digest(&self, b: &mut CBuilder) -> CurveTarget {
+        // # value digest for current cell
+        // vd = D(identifier || pack_u32(value))
+        let inputs = once(self.identifier)
+            .chain(self.value.to_targets())
+            .collect_vec();
+        let digest = b.map_to_curve_point(&inputs);
+    }
+    pub(crate) fn metadata_digest(&self, b: &mut CBuilder) -> CurveTarget {
+        // # metadata digest for current cell
+        // md = D(mpt_metadata || identifier)
+        let inputs = self
+            .mpt_metadata
+            .to_targets()
+            .into_iter()
+            .chain(once(self.identifier))
+            .collect_vec();
+
+        b.map_to_curve_point(&inputs)
+    }
+
+    // gupeng
     /// Returns the digest of the cell
     pub(crate) fn digest(&self, b: &mut CircuitBuilder<F, D>) -> CurveTarget {
         b.map_to_curve_point(&self.to_targets())
@@ -118,6 +151,8 @@ impl ToTargets for CellWire {
             .to_targets()
             .into_iter()
             .chain(self.value.to_targets())
+            // TODO: Could we ignore is_multiplier here?
+            .chain(self.mpt_metadata.to_targets())
             .collect::<Vec<_>>()
     }
 }
