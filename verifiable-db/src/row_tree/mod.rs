@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 mod api;
 mod full_node;
+mod gadgets;
 mod leaf;
 mod partial_node;
 mod public_inputs;
