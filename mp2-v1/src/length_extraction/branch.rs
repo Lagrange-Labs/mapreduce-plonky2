@@ -176,7 +176,6 @@ pub mod tests {
         }
         let length = GFp::from_canonical_u32(value);
         let dm = compute_metadata_digest(length_slot, variable_slot).to_weierstrass();
-        let is_inf = GFp::from_bool(dm.is_inf);
 
         // compute the public inputs for the first iteration
 

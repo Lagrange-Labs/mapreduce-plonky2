@@ -101,8 +101,8 @@ where
     ///   and `input_verifier_data` contains the corrisponding verifier data
     /// - `custom_inputs` contains the input necessary to fill the witness data related to the additional logic being
     ///   enforced in the circuit besides verifying the `NUM_VERIFIERS` proofs with the universal verifier
-    /// Note that this function will already output a proof that can be directly recursively verified with the
-    /// universal verifier
+    ///   Note that this function will already output a proof that can be directly recursively verified with the
+    ///   universal verifier
     pub fn generate_proof<
         const NUM_VERIFIERS: usize,
         CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,

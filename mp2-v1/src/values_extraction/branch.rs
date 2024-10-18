@@ -379,20 +379,20 @@ mod tests {
         let mut trie = EthTrie::new(Arc::clone(&memdb));
 
         let key: Vec<u8> = random_vector(32);
-        for i in 0..N_REAL {
+        for (i, child) in children.iter_mut().enumerate().take(N_REAL) {
             let mut key = key.clone();
             key[31] = key[31].wrapping_add(i as u8);
             let value = random_vector(32);
             trie.insert(&key, &value).unwrap();
 
-            children[i].key = key;
-            children[i].value = value;
+            child.key = key;
+            child.value = value;
         }
         trie.root_hash().unwrap();
 
         let metadata = random_vector(20);
-        for i in 0..N_REAL {
-            let proof = trie.get_proof(&children[i].key).unwrap();
+        for (_, child) in children.iter_mut().enumerate().take(N_REAL) {
+            let proof = trie.get_proof(&child.key).unwrap();
             assert!(proof.len() == 3);
             let leaf = proof.last().unwrap();
             let ptr = compute_key_ptr(leaf);
@@ -403,14 +403,14 @@ mod tests {
                 // Set the same metadata digests for `multiple` aggregation type.
                 metadata.clone()
             };
-            let pi = compute_pi(ptr, &children[i].key, &children[i].value, leaf, &metadata);
+            let pi = compute_pi(ptr, &child.key, &child.value, leaf, &metadata);
             assert_eq!(pi.len(), PublicInputs::<F>::TOTAL_LEN);
 
-            children[i].proof = proof.clone();
-            children[i].leaf = leaf.clone();
-            children[i].ptr = ptr;
-            children[i].metadata = metadata;
-            children[i].pi = pi;
+            child.proof = proof.clone();
+            child.leaf = leaf.clone();
+            child.ptr = ptr;
+            child.metadata = metadata;
+            child.pi = pi;
         }
         let node = children[0].proof[1].clone();
 
@@ -455,24 +455,31 @@ mod tests {
         }
         // Check values digest
         {
-            let mut branch_acc = Point::NEUTRAL;
-            for i in 0..N_REAL {
-                branch_acc += compute_digest(children[i].value.clone());
-            }
+            let branch_acc = children
+                .iter()
+                .take(N_REAL)
+                .map(|child| compute_digest(child.value.clone()))
+                .fold(Point::NEUTRAL, |acc, digest| acc + digest);
 
             assert_eq!(pi.values_digest(), branch_acc.to_weierstrass());
         }
         // Check metadata digest
         {
-            let mut branch_acc = compute_digest(children[0].metadata.clone());
-            for i in 1..N_REAL {
-                let child_acc = compute_digest(children[i].metadata.clone());
-                if is_simple_aggregation {
-                    branch_acc += child_acc;
-                } else {
-                    assert_eq!(branch_acc, child_acc);
-                };
-            }
+            let branch_acc = children
+                .iter()
+                .skip(1)
+                .map(|child| compute_digest(child.metadata.clone()))
+                .fold(
+                    compute_digest(children[0].metadata.clone()),
+                    |acc, digest| {
+                        if is_simple_aggregation {
+                            acc + digest
+                        } else {
+                            assert_eq!(acc, digest);
+                            acc
+                        }
+                    },
+                );
 
             assert_eq!(pi.metadata_digest(), branch_acc.to_weierstrass());
         }
