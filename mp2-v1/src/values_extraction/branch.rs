@@ -100,7 +100,7 @@ where
         let mut seen_nibbles = vec![];
         for (i, proof_inputs) in inputs.iter().enumerate() {
             let it = b.constant(GFp::from_canonical_usize(i));
-            let should_process = less_than(b, it, n_proof_valid, 4);
+            let should_process = less_than(b, it, n_proof_valid, 5);
 
             // Accumulate the values digest.
             let child_digest = proof_inputs.values_digest_target();
