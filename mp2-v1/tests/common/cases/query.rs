@@ -223,6 +223,7 @@ async fn test_query_mapping(
 }
 
 /// Execute a query to know all the touched rows, and then call the universal circuit on all rows
+#[warn(clippy::too_many_arguments)]
 async fn prove_query(
     ctx: &mut TestContext,
     table: &Table,
@@ -240,9 +241,9 @@ async fn prove_query(
     let mut planner = QueryPlanner {
         ctx,
         query: query.clone(),
-        settings: settings,
+        settings,
         pis: &pis,
-        table: table,
+        table,
         columns: table.columns.clone(),
     };
 
@@ -404,6 +405,7 @@ async fn prove_revelation(
     Ok(proof)
 }
 
+#[warn(clippy::too_many_arguments)]
 fn check_final_outputs(
     revelation_proof: Vec<u8>,
     ctx: &TestContext,
@@ -515,7 +517,7 @@ fn check_final_outputs(
 /// clippy doesn't see that it can not be done
 #[allow(clippy::needless_lifetimes)]
 async fn prove_query_on_tree<'a, I, K, V>(
-    mut planner: &mut QueryPlanner<'a>,
+    planner: &mut QueryPlanner<'a>,
     info: I,
     update: UpdateTree<K>,
     primary: BlockPrimaryIndex,
@@ -908,7 +910,9 @@ async fn prove_non_existence_index<'a>(
         planner,
         false,
     )
-    .unwrap_or_else(|_| panic!("unable to generate non-existence proof for {current_epoch} -> {primary}"));
+    .unwrap_or_else(|_| {
+        panic!("unable to generate non-existence proof for {current_epoch} -> {primary}")
+    });
     info!("Non-existence circuit proof DONE for {current_epoch} -> {primary} ");
     planner.ctx.storage.store_proof(proof_key, proof.clone())?;
 
@@ -999,7 +1003,9 @@ pub async fn prove_non_existence_row<'a>(
         planner,
         true,
     )
-    .unwrap_or_else(|_| panic!("unable to generate non-existence proof for {primary} -> {to_be_proven_node:?}"));
+    .unwrap_or_else(|_| {
+        panic!("unable to generate non-existence proof for {primary} -> {to_be_proven_node:?}")
+    });
     info!("Non-existence circuit proof DONE for {primary} -> {to_be_proven_node:?} ");
     planner.ctx.storage.store_proof(proof_key, proof.clone())?;
 
@@ -1534,9 +1540,7 @@ pub enum SqlType {
 impl SqlType {
     pub fn extract(&self, row: &PsqlRow, idx: usize) -> Option<SqlReturn> {
         match self {
-            SqlType::Numeric => row
-                .get::<_, Option<U256>>(idx)
-                .map(SqlReturn::Numeric),
+            SqlType::Numeric => row.get::<_, Option<U256>>(idx).map(SqlReturn::Numeric),
         }
     }
 }
