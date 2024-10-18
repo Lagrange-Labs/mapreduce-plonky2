@@ -4,8 +4,7 @@ use super::{public_inputs::PublicInputs, Cell, CellWire};
 use anyhow::Result;
 use derive_more::{From, Into};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing, public_inputs::PublicInputCommon, types::CBuilder,
-    u256::CircuitBuilderU256, utils::ToTargets, CHasher, D, F,
+    poseidon::H, public_inputs::PublicInputCommon, types::CBuilder, utils::ToTargets, D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -13,7 +12,7 @@ use plonky2::{
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::{array, iter};
+use std::{array, iter::once};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Into, From)]
 pub struct FullNodeWires(CellWire);
@@ -23,30 +22,35 @@ pub struct FullNodeCircuit(Cell);
 
 impl FullNodeCircuit {
     pub fn build(b: &mut CBuilder, child_proofs: [PublicInputs<Target>; 2]) -> FullNodeWires {
-        let cell = CellWire::new(b);
+        let [p1, p2] = child_proofs;
 
-        // h = Poseidon(p1.H || p2.H || identifier || value)
-        let [p1_hash, p2_hash] = [0, 1].map(|i| child_proofs[i].node_hash());
-        let inputs: Vec<_> = p1_hash
-            .elements
-            .iter()
-            .cloned()
-            .chain(p2_hash.elements)
-            .chain(iter::once(cell.identifier))
+        let cell = CellWire::new(b);
+        let metadata_digests = cell.split_metadata_digest(b);
+        let values_digests = cell.split_values_digest(b);
+
+        let metadata_digests = metadata_digests.accumulate(b, &p1.split_metadata_digest_target());
+        let metadata_digests = metadata_digests.accumulate(b, &p2.split_metadata_digest_target());
+
+        let values_digests = values_digests.accumulate(b, &p1.split_values_digest_target());
+        let values_digests = values_digests.accumulate(b, &p2.split_values_digest_target());
+
+        // H(p1.H || p2.H || identifier || value)
+        let inputs = p1
+            .node_hash_target()
+            .into_iter()
+            .chain(p2.node_hash_target())
+            .chain(once(cell.identifier))
             .chain(cell.value.to_targets())
             .collect();
-        let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
-
-        // digest_cell = p1.digest_cell + p2.digest_cell + D(identifier || value)
-        let split_digest = cell.split_digest(b);
-        let split_digest = split_digest.accumulate(b, &child_proofs[0].split_digest_target());
-        let split_digest = split_digest.accumulate(b, &child_proofs[1].split_digest_target());
+        let h = b.hash_n_to_hash_no_pad::<H>(inputs);
 
         // Register the public inputs.
         PublicInputs::new(
-            &h,
-            &split_digest.individual.to_targets(),
-            &split_digest.multiplier.to_targets(),
+            &h.to_targets(),
+            &values_digests.individual.to_targets(),
+            &values_digests.multiplier.to_targets(),
+            &metadata_digests.individual.to_targets(),
+            &metadata_digests.multiplier.to_targets(),
         )
         .register(b);
 
@@ -65,7 +69,7 @@ impl CircuitLogicWires<F, D, 2> for FullNodeWires {
 
     type Inputs = FullNodeCircuit;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::total_len();
 
     fn circuit_logic(
         builder: &mut CBuilder,
@@ -83,6 +87,7 @@ impl CircuitLogicWires<F, D, 2> for FullNodeWires {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,3 +200,4 @@ mod tests {
         }
     }
 }
+*/

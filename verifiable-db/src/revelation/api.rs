@@ -213,7 +213,7 @@ pub enum CircuitInput<
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
-    [(); { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) }]:,
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
     NoResultsTree {
         query_proof: ProofWithVK,

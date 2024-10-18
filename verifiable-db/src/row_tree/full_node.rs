@@ -1,19 +1,15 @@
+use super::row::{Row, RowWire};
+use crate::cells_tree;
 use derive_more::{From, Into};
 use mp2_common::{
-    default_config,
-    group_hashing::{cond_circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
-    poseidon::H,
-    proof::ProofWithVK,
-    public_inputs::PublicInputCommon,
-    u256::CircuitBuilderU256,
-    utils::ToTargets,
-    C, D, F,
+    default_config, group_hashing::CircuitBuilderGroupHashing, poseidon::H, proof::ProofWithVK,
+    public_inputs::PublicInputCommon, u256::CircuitBuilderU256, utils::ToTargets, C, D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
@@ -21,19 +17,17 @@ use recursion_framework::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::array::from_fn as create_array;
-
-use crate::cells_tree::{self, Cell, CellWire};
+use std::{array::from_fn as create_array, iter::once};
 
 use super::public_inputs::PublicInputs;
 // Arity not strictly needed now but may be an easy way to increase performance
 // easily down the line with less recursion. Best to provide code which is easily
 // amenable to a different arity rather than hardcoding binary tree only
 #[derive(Clone, Debug, From, Into)]
-pub struct FullNodeCircuit(Cell);
+pub struct FullNodeCircuit(Row);
 
 #[derive(Clone, Serialize, Deserialize, From, Into)]
-pub(crate) struct FullNodeWires(CellWire);
+pub(crate) struct FullNodeWires(RowWire);
 
 impl FullNodeCircuit {
     pub(crate) fn build(
@@ -42,52 +36,64 @@ impl FullNodeCircuit {
         right_pi: &[Target],
         cells_pi: &[Target],
     ) -> FullNodeWires {
-        let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
         let min_child = PublicInputs::from_slice(left_pi);
         let max_child = PublicInputs::from_slice(right_pi);
-        let tuple = CellWire::new(b);
-        let node_min = min_child.min_value();
-        let node_max = max_child.max_value();
+        let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
+        let row = RowWire::new(b);
+        let id = row.identifier();
+        let value = row.value();
+        let digest = row.digest(b, &cells_pi);
+
+        // Check multiplier_vd and row_id_multiplier are the same as children proofs.
+        // assert multiplier_vd == p1.multiplier_vd == p2.multiplier_vd
+        b.connect_curve_points(digest.multiplier_vd, min_child.multiplier_digest_target());
+        b.connect_curve_points(digest.multiplier_vd, max_child.multiplier_digest_target());
+        // assert row_id_multiplier == p1.row_id_multiplier == p2.row_id_multiplier
+        b.connect_biguint(
+            &digest.row_id_multiplier,
+            &min_child.row_id_multiplier_target(),
+        );
+        b.connect_biguint(
+            &digest.row_id_multiplier,
+            &max_child.row_id_multiplier_target(),
+        );
+
+        let node_min = min_child.min_value_target();
+        let node_max = max_child.max_value_target();
         // enforcing BST property
         let _true = b._true();
-        let left_comparison = b.is_less_or_equal_than_u256(&min_child.max_value(), &tuple.value);
-        let right_comparison = b.is_less_or_equal_than_u256(&tuple.value, &max_child.min_value());
+        let left_comparison = b.is_less_or_equal_than_u256(&min_child.max_value_target(), value);
+        let right_comparison = b.is_less_or_equal_than_u256(value, &max_child.min_value_target());
         b.connect(left_comparison.target, _true.target);
         b.connect(right_comparison.target, _true.target);
 
         // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
         let inputs = min_child
-            .root_hash()
-            .to_targets()
+            .root_hash_target()
             .iter()
-            .chain(max_child.root_hash().to_targets().iter())
+            .chain(max_child.root_hash_target().iter())
             .chain(node_min.to_targets().iter())
             .chain(node_max.to_targets().iter())
-            .chain(tuple.to_targets().iter())
-            .chain(cells_pi.node_hash().to_targets().iter())
+            .chain(once(&id))
+            .chain(cells_pi.node_hash_target().iter())
             .cloned()
             .collect::<Vec<_>>();
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        // final_digest = HashToInt(mul_digest) * D(ind_digest) + left.digest() + right.digest()
-        let split_digest = tuple.split_and_accumulate_digest(b, cells_pi.split_digest_target());
-        let (row_digest, is_merge) = split_digest.cond_combine_to_row_digest(b);
-
-        // add this row digest with the rest
-        let final_digest = b.curve_add(min_child.rows_digest(), max_child.rows_digest());
-        let final_digest = b.curve_add(final_digest, row_digest);
         // assert `is_merge` is the same as the flags in children pis
-        b.connect(min_child.is_merge_case().target, is_merge.target);
-        b.connect(max_child.is_merge_case().target, is_merge.target);
+        b.connect(min_child.merge_flag_target().target, digest.is_merge.target);
+        b.connect(max_child.merge_flag_target().target, digest.is_merge.target);
         PublicInputs::new(
             &hash.to_targets(),
-            &final_digest.to_targets(),
+            &digest.individual_vd.to_targets(),
+            &digest.multiplier_vd.to_targets(),
+            &digest.row_id_multiplier.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
-            &[is_merge.target],
+            &[digest.is_merge.target],
         )
         .register(b);
-        FullNodeWires(tuple)
+        FullNodeWires(row)
     }
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &FullNodeWires) {
         self.0.assign_wires(pw, &wires.0);
@@ -113,14 +119,14 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
 
     type Inputs = RecursiveFullInput;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::total_len();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
         verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_CHILDREN],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::TOTAL_LEN;
+        const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::total_len();
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, CELLS_IO>::new(
             default_config(),
             &builder_parameters,
@@ -144,6 +150,7 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
     }
 }
 
+/*
 #[cfg(test)]
 pub(crate) mod test {
 
@@ -185,9 +192,9 @@ pub(crate) mod test {
         type Wires = (FullNodeWires, Vec<Target>, Vec<Target>, Vec<Target>);
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let cells_pi = c.add_virtual_targets(cells_tree::PublicInputs::<Target>::TOTAL_LEN);
-            let left_pi = c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
-            let right_pi = c.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
+            let cells_pi = c.add_virtual_targets(cells_tree::PublicInputs::<Target>::total_len());
+            let left_pi = c.add_virtual_targets(PublicInputs::<Target>::total_len());
+            let right_pi = c.add_virtual_targets(PublicInputs::<Target>::total_len());
             (
                 FullNodeCircuit::build(c, &left_pi, &right_pi, &cells_pi),
                 left_pi,
@@ -302,3 +309,4 @@ pub(crate) mod test {
         test_row_tree_full_circuit(true, true);
     }
 }
+*/

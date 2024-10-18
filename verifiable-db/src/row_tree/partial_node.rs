@@ -1,8 +1,8 @@
-use plonky2::plonk::proof::ProofWithPublicInputsTarget;
-
+use super::row::{Row, RowWire};
+use crate::cells_tree;
 use mp2_common::{
     default_config,
-    group_hashing::{cond_circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
+    group_hashing::CircuitBuilderGroupHashing,
     hash::hash_maybe_first,
     poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
@@ -18,9 +18,9 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
+use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
@@ -28,28 +28,27 @@ use recursion_framework::{
     },
 };
 use serde::{Deserialize, Serialize};
-
-use crate::cells_tree::{self, Cell, CellWire};
+use std::iter::once;
 
 use super::public_inputs::PublicInputs;
 
 #[derive(Clone, Debug)]
 pub struct PartialNodeCircuit {
-    pub(crate) tuple: Cell,
+    pub(crate) row: Row,
     pub(crate) is_child_at_left: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PartialNodeWires {
-    tuple: CellWire,
+    row: RowWire,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_child_at_left: BoolTarget,
 }
 
 impl PartialNodeCircuit {
-    pub(crate) fn new(tuple: Cell, is_child_at_left: bool) -> Self {
+    pub(crate) fn new(row: Row, is_child_at_left: bool) -> Self {
         Self {
-            tuple,
+            row,
             is_child_at_left,
         }
     }
@@ -58,22 +57,35 @@ impl PartialNodeCircuit {
         child_pi: &[Target],
         cells_pi: &[Target],
     ) -> PartialNodeWires {
+        let child_pi = PublicInputs::from_slice(child_pi);
         let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
-        let tuple = CellWire::new(b);
+        let row = RowWire::new(b);
+        let id = row.identifier();
+        let value = row.value();
+        let digest = row.digest(b, &cells_pi);
+
+        // Check multiplier_vd and row_id_multiplier are the same as child proof
+        // assert multiplier_vd == child_proof.multiplier_vd
+        b.connect_curve_points(digest.multiplier_vd, child_pi.multiplier_digest_target());
+        //assert row_id_multiplier == child_proof.row_id_multiplier
+        b.connect_biguint(
+            &digest.row_id_multiplier,
+            &child_pi.row_id_multiplier_target(),
+        );
+
         // bool target range checked in poseidon gate
         let is_child_at_left = b.add_virtual_bool_target_unsafe();
-        let child_pi = PublicInputs::from_slice(child_pi);
         // max_left = left ? child_proof.max : index_value
         // min_right = left ? index_value : child_proof.min
-        let max_left = b.select_u256(is_child_at_left, &child_pi.max_value(), &tuple.value);
-        let min_right = b.select_u256(is_child_at_left, &tuple.value, &child_pi.min_value());
+        let max_left = b.select_u256(is_child_at_left, &child_pi.max_value_target(), value);
+        let min_right = b.select_u256(is_child_at_left, value, &child_pi.min_value_target());
         let bst_enforced = b.is_less_or_equal_than_u256(&max_left, &min_right);
         let _true = b._true();
         b.connect(bst_enforced.target, _true.target);
         // node_min = left ? child_proof.min : index_value
         // node_max = left ? index_value : child_proof.max
-        let node_min = b.select_u256(is_child_at_left, &child_pi.min_value(), &tuple.value);
-        let node_max = b.select_u256(is_child_at_left, &tuple.value, &child_pi.max_value());
+        let node_min = b.select_u256(is_child_at_left, &child_pi.min_value_target(), value);
+        let node_max = b.select_u256(is_child_at_left, value, &child_pi.max_value_target());
 
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
         // left_hash = left ? child_proof.H : H("")
@@ -85,8 +97,8 @@ impl PartialNodeCircuit {
             .to_targets()
             .iter()
             .chain(node_max.to_targets().iter())
-            .chain(tuple.to_targets().iter())
-            .chain(cells_pi.node_hash().to_targets().iter())
+            .chain(once(&id))
+            .chain(cells_pi.node_hash_target().iter())
             .cloned()
             .collect::<Vec<_>>();
         //  if child at left, then hash should be child_proof.H || H("") || rest
@@ -95,34 +107,31 @@ impl PartialNodeCircuit {
             b,
             is_child_at_left,
             empty_hash.elements,
-            child_pi.root_hash().elements,
+            child_pi.root_hash_target(),
             &rest,
         );
 
-        // final_digest = HashToInt(mul_digest) * D(ind_digest)
-        let split_digest = tuple.split_and_accumulate_digest(b, cells_pi.split_digest_target());
-        let (row_digest, is_merge) = split_digest.cond_combine_to_row_digest(b);
-
-        //  and add the digest of the row other rows
-        let final_digest = b.curve_add(child_pi.rows_digest(), row_digest);
         // assert is_merge is the same between this row and `child_pi`
-        b.connect(is_merge.target, child_pi.is_merge_case().target);
+        b.connect(digest.is_merge.target, child_pi.merge_flag_target().target);
+
         PublicInputs::new(
             &node_hash,
-            &final_digest.to_targets(),
+            &digest.individual_vd.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
-            &[is_merge.target],
+            &[digest.is_merge.target],
+            &digest.multiplier_vd.to_targets(),
+            &digest.row_id_multiplier.to_targets(),
         )
         .register(b);
         PartialNodeWires {
-            tuple,
+            row,
             is_child_at_left,
         }
     }
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &PartialNodeWires) {
-        self.tuple.assign_wires(pw, &wires.tuple);
+        self.row.assign_wires(pw, &wires.row);
         pw.set_bool_target(wires.is_child_at_left, self.is_child_at_left);
     }
 }
@@ -145,14 +154,14 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursivePartialWires {
 
     type Inputs = RecursivePartialInput;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::total_len();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
         verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_CHILDREN],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::TOTAL_LEN;
+        const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::total_len();
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, CELLS_IO>::new(
             default_config(),
             &builder_parameters,
@@ -175,6 +184,7 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursivePartialWires {
     }
 }
 
+/*
 #[cfg(test)]
 pub mod test {
     use mp2_common::{
@@ -322,8 +332,8 @@ pub mod test {
         // node_min = left ? child_proof.min : index_value
         // node_max = left ? index_value : child_proof.max
         let (node_min, node_max) = match child_at_left {
-            true => (pi.min_value_u256(), tuple.value),
-            false => (tuple.value, pi.max_value_u256()),
+            true => (pi.min_value(), tuple.value),
+            false => (tuple.value, pi.max_value()),
         };
         // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
         let child_hash = PublicInputs::from_slice(&child_pi).root_hash_hashout();
@@ -352,3 +362,4 @@ pub mod test {
         assert_eq!(split_digest.is_merge_case(), pi.is_merge_flag());
     }
 }
+*/

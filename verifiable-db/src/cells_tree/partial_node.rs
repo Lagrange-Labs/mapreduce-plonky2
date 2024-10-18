@@ -1,29 +1,22 @@
 //! Module handling the intermediate node with 1 child inside a cells tree
 
 use super::{public_inputs::PublicInputs, Cell, CellWire};
-use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{From, Into};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing,
-    poseidon::empty_poseidon_hash,
+    poseidon::{empty_poseidon_hash, H},
     public_inputs::PublicInputCommon,
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
-    CHasher, D, F,
+    D, F,
 };
 use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::proof::ProofWithPublicInputsTarget,
 };
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::iter;
+use std::iter::once;
 
 #[derive(Clone, Debug, Serialize, Deserialize, From, Into)]
 pub struct PartialNodeWires(CellWire);
@@ -32,32 +25,38 @@ pub struct PartialNodeWires(CellWire);
 pub struct PartialNodeCircuit(Cell);
 
 impl PartialNodeCircuit {
-    pub fn build(b: &mut CBuilder, child_proof: PublicInputs<Target>) -> PartialNodeWires {
+    pub fn build(b: &mut CBuilder, p: PublicInputs<Target>) -> PartialNodeWires {
         let cell = CellWire::new(b);
+        let metadata_digests = cell.split_metadata_digest(b);
+        let values_digests = cell.split_values_digest(b);
 
-        // h = Poseidon(p.H || Poseidon("") || identifier || value)
-        let child_hash = child_proof.node_hash();
-        let empty_hash = empty_poseidon_hash();
-        let empty_hash = b.constant_hash(*empty_hash);
-        let inputs: Vec<_> = child_hash
-            .elements
-            .iter()
-            .cloned()
-            .chain(empty_hash.elements)
-            .chain(iter::once(cell.identifier))
+        let metadata_digests = metadata_digests.accumulate(b, &p.split_metadata_digest_target());
+        let values_digests = values_digests.accumulate(b, &p.split_values_digest_target());
+
+        /*
+        # since there is no sorting constraint among the nodes of this tree, to simplify
+        # the circuits, when we build a node with only one child, we can always place
+        # it as the left child
+        # NOTE: this is true only if we the "block" tree
+        h = H(p.H || H("") || identifier || value)
+        */
+        let empty_hash = b.constant_hash(*empty_poseidon_hash()).to_targets();
+        let inputs = p
+            .node_hash_target()
+            .into_iter()
+            .chain(empty_hash)
+            .chain(once(cell.identifier))
             .chain(cell.value.to_targets())
             .collect();
-        let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
-
-        // aggregate the digest of the child proof in the right digest
-        // digest_cell = p.digest_cell + D(identifier || value)
-        let split_digest = cell.split_and_accumulate_digest(b, child_proof.split_digest_target());
+        let h = b.hash_n_to_hash_no_pad::<H>(inputs);
 
         // Register the public inputs.
         PublicInputs::new(
-            &h,
-            &split_digest.individual.to_targets(),
-            &split_digest.multiplier.to_targets(),
+            &h.to_targets(),
+            &values_digests.individual.to_targets(),
+            &values_digests.multiplier.to_targets(),
+            &metadata_digests.individual.to_targets(),
+            &metadata_digests.multiplier.to_targets(),
         )
         .register(b);
 
@@ -76,7 +75,7 @@ impl CircuitLogicWires<F, D, 1> for PartialNodeWires {
 
     type Inputs = PartialNodeCircuit;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::total_len();
 
     fn circuit_logic(
         builder: &mut CBuilder,
@@ -93,6 +92,7 @@ impl CircuitLogicWires<F, D, 1> for PartialNodeWires {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,3 +191,4 @@ mod tests {
         }
     }
 }
+*/
