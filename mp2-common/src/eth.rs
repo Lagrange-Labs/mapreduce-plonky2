@@ -581,9 +581,13 @@ mod test {
             hex::encode(tx_receipt.0.tx_hash())
         );
         // in the MPT trie it's
-        // RLP ( RLP(Index), RLP ( LOGS ))
+        // RLP ( RLP(Index), RLP ( DATA ))
         // the second component is done like that:
-        //
+        // DATA = RLP [ Rlp(status), Rlp(gas_used), Rlp(logs_bloom), Rlp(logs) ]
+        // it contains multiple logs so
+        // logs = RLP_LIST(RLP(logs[0]), RLP(logs[1])...)
+        // Each RLP(logs[0]) = RLP([ RLP(Address), RLP(topics), RLP(data)])
+        // RLP(topics) is a list with up to 4 topics
         let rlp_encoding = tx_receipt.receipt().encoded_2718();
         let state = rlp::Rlp::new(&rlp_encoding);
         assert!(state.is_list());
@@ -593,8 +597,7 @@ mod test {
         //  index 3 -> logs
         let logs_state = state.at(3).context("can't access logs field3")?;
         assert!(logs_state.is_list());
-        // there should be only one log for this tx
-        let log_state = logs_state.at(0).context("can't access first log")?;
+        let log_state = logs_state.at(0).context("can't access single log state")?;
         assert!(log_state.is_list());
         // log:
         // 0: address where it has been emitted
@@ -606,6 +609,7 @@ mod test {
             hex_address,
             "BBd3EDd4D3b519c0d14965d9311185CFaC8c3220".to_lowercase(),
         );
+        // the topics are in a list
         let topics: Vec<Vec<u8>> = log_state.list_at(1).context("can't decode topics")?;
         // Approval (index_topic_1 address owner, index_topic_2 address approved, index_topic_3 uint256 tokenId)View Source
         // first topic is signature of the event keccak(fn_name,args...)
