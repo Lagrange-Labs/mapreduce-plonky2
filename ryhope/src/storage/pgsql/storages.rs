@@ -195,6 +195,7 @@ where
     ) -> impl Future<Output = Result<WideLineage<Self::Key, V>>>;
 
     /// Return the value associated to the given key at the given epoch.
+    #[allow(clippy::type_complexity)]
     fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
         &self,
         s: &S,
@@ -322,6 +323,7 @@ where
             .context("failed to fetch payload for touched keys")?;
 
         // Assemble the final result
+        #[allow(clippy::type_complexity)]
         let mut epoch_lineages: HashMap<
             Epoch,
             (HashMap<NodeIdx, NodeContext<NodeIdx>>, HashMap<NodeIdx, V>),
@@ -540,8 +542,11 @@ where
 
         // Assemble the final result
         let mut core_keys = Vec::new();
-        let mut epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)> =
-            HashMap::new();
+        #[allow(clippy::type_complexity)]
+        let mut epoch_lineages: HashMap<
+            Epoch,
+            (HashMap<K, NodeContext<K>>, HashMap<K, V>),
+        > = HashMap::new();
 
         for row in &rows {
             let is_core = row
@@ -1112,24 +1117,24 @@ where
         unimplemented!("should never be used");
     }
 
-    fn fetch(&self, k: &T::Key) -> impl Future<Output = T::Node> + Send {
-        async { self.fetch_at(k, self.current_epoch()).await }
+    async fn fetch(&self, k: &T::Key) -> T::Node {
+        self.fetch_at(k, self.current_epoch()).await
     }
 
-    fn try_fetch(&self, k: &T::Key) -> impl Future<Output = Option<T::Node>> + Send {
-        async { self.try_fetch_at(k, self.current_epoch()).await }
+    async fn try_fetch(&self, k: &T::Key) -> Option<T::Node> {
+        self.try_fetch_at(k, self.current_epoch()).await
     }
 
-    fn fetch_at(&self, k: &T::Key, epoch: Epoch) -> impl Future<Output = T::Node> + Send {
-        async move { self.try_fetch_at(k, epoch).await.unwrap() }
+    async fn fetch_at(&self, k: &T::Key, epoch: Epoch) -> T::Node {
+        self.try_fetch_at(k, epoch).await.unwrap()
     }
 
-    fn contains(&self, k: &T::Key) -> impl Future<Output = bool> {
-        async { self.try_fetch(k).await.is_some() }
+    async fn contains(&self, k: &T::Key) -> bool {
+        self.try_fetch(k).await.is_some()
     }
 
-    fn contains_at(&self, k: &T::Key, epoch: Epoch) -> impl Future<Output = bool> {
-        async move { self.try_fetch_at(k, epoch).await.is_some() }
+    async fn contains_at(&self, k: &T::Key, epoch: Epoch) -> bool {
+        self.try_fetch_at(k, epoch).await.is_some()
     }
 }
 impl<T, V> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
@@ -1175,19 +1180,13 @@ where
         async { Ok(()) }
     }
 
-    fn update_with<F: Fn(&mut T::Node) + Send + Sync>(
-        &mut self,
-        k: T::Key,
-        updater: F,
-    ) -> impl Future<Output = ()> + Send
+    async fn update_with<F: Fn(&mut T::Node) + Send + Sync>(&mut self, k: T::Key, updater: F)
     where
         Self: Sync + Send,
     {
-        async move {
-            let mut v = self.fetch(&k).await;
-            updater(&mut v);
-            self.update(k, v).await.unwrap();
-        }
+        let mut v = self.fetch(&k).await;
+        updater(&mut v);
+        self.update(k, v).await.unwrap();
     }
 
     fn rollback(&mut self) -> impl Future<Output = Result<()>> {

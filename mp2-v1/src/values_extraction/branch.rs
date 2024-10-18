@@ -267,8 +267,8 @@ mod tests {
         child_pis: [PublicInputs<'a, F>; N_CHILDREN],
     }
 
-    impl<'a, const NODE_LEN: usize, const N_CHILDREN: usize> UserCircuit<F, D>
-        for TestBranchCircuit<'a, NODE_LEN, N_CHILDREN>
+    impl<const NODE_LEN: usize, const N_CHILDREN: usize> UserCircuit<F, D>
+        for TestBranchCircuit<'_, NODE_LEN, N_CHILDREN>
     where
         [(); PAD_LEN(NODE_LEN)]:,
     {

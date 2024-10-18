@@ -74,6 +74,7 @@ impl ToTargets for OutputHash {
 /// padded version length is less than N. In other words, N is the maximal size
 /// of the array + padding to hash.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct KeccakCircuit<const N: usize> {
     data: Vec<u8>,
 }

@@ -41,7 +41,7 @@ impl PublicInputs<'_, GFp> {
     }
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl PublicInputs<'_, Target> {
     /// Get the Poseidon hash of the subtree at this node.
     pub fn node_hash(&self) -> HashOutTarget {
         self.h.try_into().unwrap()

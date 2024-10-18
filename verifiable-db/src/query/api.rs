@@ -265,12 +265,12 @@ where
             .take(MAX_NUM_RESULTS)
             .collect_vec();
         let min_query = if is_rows_tree_node {
-            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary())
+            QueryBound::new_secondary_index_bound(placeholders, query_bounds.min_query_secondary())
         } else {
             QueryBound::new_primary_index_bound(placeholders, true)
         }?;
         let max_query = if is_rows_tree_node {
-            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary())
+            QueryBound::new_secondary_index_bound(placeholders, query_bounds.max_query_secondary())
         } else {
             QueryBound::new_primary_index_bound(placeholders, false)
         }?;
@@ -897,7 +897,7 @@ mod tests {
             second_operand: Some(InputOperand::Column(2)),
             op: Operation::AddOp,
         }];
-        let aggregation_op_ids = vec![AggregationOperation::SumOp.to_id() as u64];
+        let aggregation_op_ids = vec![AggregationOperation::SumOp.to_id()];
         let output_items = vec![OutputItem::ComputedValue(0)];
         let results = ResultStructure::new_for_query_with_aggregation(
             result_operations,
@@ -1094,7 +1094,7 @@ mod tests {
             .into();
         // check some public inputs for root proof
         let check_pis = |root_proof_pis: &[F], node_info: NodeInfo, column_values: &[Vec<U256>]| {
-            let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&root_proof_pis);
+            let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(root_proof_pis);
             assert_eq!(
                 pis.tree_hash(),
                 node_info.compute_node_hash(primary_index_id),
@@ -1378,8 +1378,7 @@ mod tests {
                     max_query_primary * 2,
                     max_query_primary * 3,
                     max_query_primary * 4,
-                ]
-                .into_iter(),
+                ],
             )
             .map(|index| gen_row(index, IndexValueBounds::InRange))
             .collect_vec();

@@ -234,15 +234,15 @@ async fn prove_query(
     metadata: MetadataHash,
 ) -> Result<()> {
     // the query to use to fetch all the rows keys involved in the result tree.
-    let pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &query.placeholders)?;
+    let pis = parsil::assembler::assemble_dynamic(&parsed, settings, &query.placeholders)?;
     let row_keys_per_epoch = row_cache.keys_by_epochs();
     let all_epochs = query.min_block as Epoch..=query.max_block as Epoch;
     let mut planner = QueryPlanner {
         ctx,
         query: query.clone(),
-        settings: &settings,
+        settings: settings,
         pis: &pis,
-        table: &table,
+        table: table,
         columns: table.columns.clone(),
     };
 
@@ -345,7 +345,7 @@ async fn prove_query(
     info!("Revelation proof done! Checking public inputs...");
     // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
     // to check the public inputs
-    let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
+    let pis = parsil::assembler::assemble_static(&parsed, settings)?;
 
     check_final_outputs(
         proof,
@@ -576,7 +576,7 @@ where
             .expect("cache is not full");
         let is_satisfying_query = info.is_satisfying_query(k);
         let embedded_proof = info
-            .load_or_prove_embedded(&mut planner, primary, k, &node_payload)
+            .load_or_prove_embedded(planner, primary, k, &node_payload)
             .await;
         if node_ctx.is_leaf() && info.is_row_tree() {
             // NOTE: if it is a leaf of the row tree, then there is no need to prove anything,
@@ -589,10 +589,10 @@ where
             if is_satisfying_query {
                 // unwrap is safe since we are guaranteed the row is satisfying the query
                 info.save_proof(
-                    &mut planner.ctx,
+                    planner.ctx,
                     &query_id,
                     primary,
-                    &k,
+                    k,
                     placeholder_values.clone(),
                     embedded_proof?.unwrap(),
                 )?;
@@ -623,12 +623,12 @@ where
                 continue;
             }
             assert!(
-                info.is_satisfying_query(&k),
+                info.is_satisfying_query(k),
                 "first node in merkle path should always be a valid query one"
             );
             let (node_info, left_info, right_info) =
             // we can use primary as epoch now that tree stores epoch from genesis
-                get_node_info(&info, &k, primary as Epoch).await;
+                get_node_info(&info, k, primary as Epoch).await;
             (
                 "querying::aggregation::single",
                 QueryCircuitInput::new_single_path(
@@ -655,7 +655,7 @@ where
                     fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                 let (node_info, left_info, right_info) = get_node_info(
                     &info,
-                    &k,
+                    k,
                     // we can use primary as epoch since storage starts epoch at genesis
                     primary as Epoch,
                 )
@@ -712,7 +712,7 @@ where
                     let (child_pos, child_proof) =
                         fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                     let (_, left_info, right_info) =
-                        get_node_info(&info, &k, primary as Epoch).await;
+                        get_node_info(&info, k, primary as Epoch).await;
                     let unproven = match child_pos {
                         ChildPosition::Left => right_info,
                         ChildPosition::Right => left_info,
@@ -740,7 +740,7 @@ where
             planner.ctx,
             &query_id,
             primary,
-            &k,
+            k,
             placeholder_values.clone(),
             proof,
         )?;
@@ -827,12 +827,12 @@ where
     )
 }
 
-pub fn generate_non_existence_proof<'a>(
+pub fn generate_non_existence_proof(
     node_info: NodeInfo,
     left_child_info: Option<NodeInfo>,
     right_child_info: Option<NodeInfo>,
     primary: BlockPrimaryIndex,
-    planner: &mut QueryPlanner<'a>,
+    planner: &mut QueryPlanner<'_>,
     is_rows_tree_node: bool,
 ) -> Result<Vec<u8>> {
     let index_ids = [
@@ -908,9 +908,7 @@ async fn prove_non_existence_index<'a>(
         planner,
         false,
     )
-    .expect(
-        format!("unable to generate non-existence proof for {current_epoch} -> {primary}").as_str(),
-    );
+    .unwrap_or_else(|_| panic!("unable to generate non-existence proof for {current_epoch} -> {primary}"));
     info!("Non-existence circuit proof DONE for {current_epoch} -> {primary} ");
     planner.ctx.storage.store_proof(proof_key, proof.clone())?;
 
@@ -924,7 +922,7 @@ pub async fn prove_non_existence_row<'a>(
     let row_tree = &planner.table.row;
     let (query_for_min, query_for_max) = bracket_secondary_index(
         &planner.table.public_name,
-        &planner.settings,
+        planner.settings,
         primary as Epoch,
         &planner.pis.bounds,
     );
@@ -937,7 +935,7 @@ pub async fn prove_non_existence_row<'a>(
             .table
             .execute_row_query(&query.unwrap(), &[])
             .await?;
-        if rows.len() == 0 {
+        if rows.is_empty() {
             // no node found, return None
             info!("Search node for non-existence circuit: no node found");
             return Ok(None);
@@ -1001,10 +999,7 @@ pub async fn prove_non_existence_row<'a>(
         planner,
         true,
     )
-    .expect(
-        format!("unable to generate non-existence proof for {primary} -> {to_be_proven_node:?}")
-            .as_str(),
-    );
+    .unwrap_or_else(|_| panic!("unable to generate non-existence proof for {primary} -> {to_be_proven_node:?}"));
     info!("Non-existence circuit proof DONE for {primary} -> {to_be_proven_node:?} ");
     planner.ctx.storage.store_proof(proof_key, proof.clone())?;
 
@@ -1027,7 +1022,7 @@ pub async fn prove_non_existence_row<'a>(
         query: planner.query.clone(),
         pis: planner.pis,
         columns: planner.columns.clone(),
-        settings: &planner.settings,
+        settings: planner.settings,
     };
     prove_query_on_tree(&mut planner, info, proving_tree, primary).await?;
 
@@ -1502,16 +1497,15 @@ async fn check_correct_cells_tree(
     all_cells: &[ColumnCell],
     payload: &RowPayload<BlockPrimaryIndex>,
 ) -> Result<()> {
-    let local_cells = all_cells.iter().cloned().collect::<Vec<_>>();
+    let local_cells = all_cells.to_vec();
     let expected_cells_root = payload
         .cell_root_hash
         .clone()
-        .or(Some(HashOutput::from(*empty_poseidon_hash())))
-        .unwrap();
+        .unwrap_or(HashOutput::from(*empty_poseidon_hash()));
     let mut tree = indexing::cell::new_tree().await;
     tree.in_transaction(|t| {
         async move {
-            for (i, cell) in local_cells[2..].into_iter().enumerate() {
+            for (i, cell) in local_cells[2..].iter().enumerate() {
                 // putting 0 for primary index as it doesn't matter in the hash computation
                 t.store(
                     i + 1,
@@ -1542,7 +1536,7 @@ impl SqlType {
         match self {
             SqlType::Numeric => row
                 .get::<_, Option<U256>>(idx)
-                .map(|num| SqlReturn::Numeric(num)),
+                .map(SqlReturn::Numeric),
         }
     }
 }
@@ -1553,11 +1547,11 @@ pub enum SqlReturn {
 }
 
 fn is_empty_result(rows: &[PsqlRow], types: SqlType) -> bool {
-    if rows.len() == 0 {
+    if rows.is_empty() {
         return true;
     }
     let columns = rows.first().as_ref().unwrap().columns();
-    if columns.len() == 0 {
+    if columns.is_empty() {
         return true;
     }
     for row in rows {
@@ -1569,7 +1563,7 @@ fn is_empty_result(rows: &[PsqlRow], types: SqlType) -> bool {
 }
 
 fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {
-    if rows.len() == 0 {
+    if rows.is_empty() {
         println!("no rows returned");
         return;
     }
