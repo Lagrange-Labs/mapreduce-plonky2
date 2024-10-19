@@ -338,14 +338,14 @@ mod tests {
 
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::new(
             config.clone(),
-            &testing_framework.get_recursive_circuit_set(),
+            testing_framework.get_recursive_circuit_set(),
         );
         let verifier_circuit = circuit_builder
             .build_circuit::<C, 0, VerifierCircuitWires<C, D, NUM_PUBLIC_INPUTS>>(verifier_gadget);
 
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::new(
             config.clone(),
-            &testing_framework.get_recursive_circuit_set(),
+            testing_framework.get_recursive_circuit_set(),
         );
         let verifier_circuit_fixed = circuit_builder
             .build_circuit::<C, 0, VerifierCircuitFixedWires<C, D, NUM_PUBLIC_INPUTS>>((

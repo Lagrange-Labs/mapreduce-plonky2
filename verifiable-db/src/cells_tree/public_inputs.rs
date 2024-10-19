@@ -25,7 +25,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) dc: &'a [T],
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] = &[H_RANGE, DC_RANGE];
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -34,14 +34,14 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     }
 }
 
-impl<'a> PublicInputs<'a, GFp> {
+impl PublicInputs<'_, GFp> {
     /// Get the cells digest point.
     pub fn digest_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.dc)
     }
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl PublicInputs<'_, Target> {
     /// Get the Poseidon hash of the subtree at this node.
     pub fn node_hash(&self) -> HashOutTarget {
         self.h.try_into().unwrap()
@@ -81,7 +81,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 }
 
-impl<'a> PublicInputs<'a, F> {
+impl PublicInputs<'_, F> {
     pub fn root_hash_hashout(&self) -> HashOut<F> {
         HashOut {
             elements: array::from_fn(|i| self.h[i]),
@@ -112,7 +112,7 @@ mod tests {
         exp_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPICircuit<'a> {
+    impl UserCircuit<F, D> for TestPICircuit<'_> {
         type Wires = Vec<Target>;
 
         fn build(b: &mut CBuilder) -> Self::Wires {

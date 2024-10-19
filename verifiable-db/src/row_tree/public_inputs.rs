@@ -35,7 +35,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) max: &'a [T],
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] = &[H_RANGE, DR_RANGE, MIN_RANGE, MAX_RANGE];
 
     fn register_args(&self, cb: &mut CircuitBuilder<F, D>) {
@@ -47,7 +47,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
 }
 
 // mostly used for testing
-impl<'a> PublicInputs<'a, F> {
+impl PublicInputs<'_, F> {
     /// Get the metadata point.
     pub fn rows_digest_field(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.dr)
@@ -68,7 +68,7 @@ impl<'a> PublicInputs<'a, F> {
     }
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl PublicInputs<'_, Target> {
     /// Get the hash corresponding to the root of the subtree of this node
     pub fn root_hash(&self) -> HashOutTarget {
         HashOutTarget::from_targets(self.h)
@@ -148,7 +148,7 @@ mod tests {
         exp_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPICircuit<'a> {
+    impl UserCircuit<F, D> for TestPICircuit<'_> {
         type Wires = Vec<Target>;
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
