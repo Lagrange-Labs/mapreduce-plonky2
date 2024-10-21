@@ -147,8 +147,9 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         &self,
         epoch: Epoch,
         key: &RowTreeKey,
-    ) -> Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)>
-    { self.ctx_and_payload_at(epoch, key) }
+    ) -> Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)> {
+        self.ctx_and_payload_at(epoch, key)
+    }
 }
 
 pub struct RowInfo<'a> {
@@ -239,8 +240,9 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         &self,
         epoch: Epoch,
         key: &RowTreeKey,
-    ) -> Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)>
-    { self.tree.try_fetch_with_context_at(key, epoch).await }
+    ) -> Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)> {
+        self.tree.try_fetch_with_context_at(key, epoch).await
+    }
 }
 
 impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
@@ -296,7 +298,9 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         &self,
         epoch: Epoch,
         key: &BlockPrimaryIndex,
-    ) -> Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)> { self.ctx_and_payload_at(epoch, key) }
+    ) -> Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)> {
+        self.ctx_and_payload_at(epoch, key)
+    }
 }
 
 pub struct IndexInfo<'a> {
@@ -365,7 +369,9 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
         &self,
         epoch: Epoch,
         key: &BlockPrimaryIndex,
-    ) -> Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)> { self.tree.try_fetch_with_context_at(key, epoch).await }
+    ) -> Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)> {
+        self.tree.try_fetch_with_context_at(key, epoch).await
+    }
 }
 
 async fn load_or_prove_embedded_index<
@@ -401,7 +407,9 @@ async fn load_or_prove_embedded_index<
                     .ctx
                     .storage
                     .get_proof_exact(&row_root_proof_key)
-                    .unwrap_or_else(|_| panic!("non-existence root proof not found for key {row_root_proof_key:?}"))
+                    .unwrap_or_else(|_| {
+                        panic!("non-existence root proof not found for key {row_root_proof_key:?}")
+                    })
             }
         };
         Some(proof)

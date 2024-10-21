@@ -75,8 +75,7 @@ impl TestContext {
 
         // Query the slot and add the node path to the trie.
         for mapping_key in mapping_keys {
-            let query =
-                ProofQuery::new_mapping_slot(*contract_address, slot, mapping_key.clone());
+            let query = ProofQuery::new_mapping_slot(*contract_address, slot, mapping_key.clone());
             let response = self
                 .query_mpt_proof(&query, BlockNumberOrTag::Number(self.block_number().await))
                 .await;

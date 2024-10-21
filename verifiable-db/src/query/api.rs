@@ -1373,13 +1373,11 @@ mod tests {
         // bigger than `max_query_primary`
         let column_values = [min_query_primary / 2]
             .into_iter()
-            .chain(
-                [
-                    max_query_primary * 2,
-                    max_query_primary * 3,
-                    max_query_primary * 4,
-                ],
-            )
+            .chain([
+                max_query_primary * 2,
+                max_query_primary * 3,
+                max_query_primary * 4,
+            ])
             .map(|index| gen_row(index, IndexValueBounds::InRange))
             .collect_vec();
 
