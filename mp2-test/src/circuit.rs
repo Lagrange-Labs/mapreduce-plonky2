@@ -8,9 +8,7 @@ use plonky2::{
     iop::witness::PartialWitness,
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{
-            CircuitData, VerifierCircuitData,
-        },
+        circuit_data::{CircuitData, VerifierCircuitData},
         config::GenericConfig,
     },
 };

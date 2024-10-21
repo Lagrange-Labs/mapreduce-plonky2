@@ -1559,7 +1559,8 @@ mod tests {
             let params = Parameters::build();
             params
                 .generate_proof(input)
-                .and_then(|p| ProofWithVK::deserialize(&p)).map(|p| p.proof().clone())
+                .and_then(|p| ProofWithVK::deserialize(&p))
+                .map(|p| p.proof().clone())
                 .unwrap()
         } else {
             run_circuit::<F, D, C, _>(circuit.clone())
@@ -1938,7 +1939,8 @@ mod tests {
             let params = Parameters::build();
             params
                 .generate_proof(input)
-                .and_then(|p| ProofWithVK::deserialize(&p)).map(|p| p.proof().clone())
+                .and_then(|p| ProofWithVK::deserialize(&p))
+                .map(|p| p.proof().clone())
                 .unwrap()
         } else {
             run_circuit::<F, D, C, _>(circuit.clone())
