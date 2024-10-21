@@ -294,7 +294,7 @@ mod tests {
     use std::iter;
 
     const EXTRACTION_IO_LEN: usize = extraction::test::PublicInputs::<F>::TOTAL_LEN;
-    const ROWS_TREE_IO_LEN: usize = row_tree::PublicInputs::<F>::TOTAL_LEN;
+    const ROWS_TREE_IO_LEN: usize = row_tree::PublicInputs::<F>::total_len();
 
     struct TestBuilder<E>
     where

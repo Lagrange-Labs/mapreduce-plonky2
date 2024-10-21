@@ -35,6 +35,9 @@ pub type H = <C as GenericConfig<D>>::Hasher;
 pub type P = <H as AlgebraicHasher<GoldilocksField>>::AlgebraicPermutation;
 pub type HashPermutation = <H as Hasher<F>>::Permutation;
 
+/// The result of hash to integer has 4 Uint32 (128 bits).
+pub const HASH_TO_INT_LEN: usize = 4;
+
 /// The flattened length of Poseidon hash, each original field is splitted from an
 /// Uint64 into two Uint32.
 pub const FLATTEN_POSEIDON_LEN: usize = NUM_HASH_OUT_ELTS * 2;

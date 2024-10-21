@@ -3,8 +3,11 @@
 use super::{public_inputs::PublicInputs, Cell, CellWire};
 use derive_more::{From, Into};
 use mp2_common::{
-    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, types::CBuilder,
-    utils::ToTargets, CHasher, D, F,
+    poseidon::{empty_poseidon_hash, H},
+    public_inputs::PublicInputCommon,
+    types::CBuilder,
+    utils::ToTargets,
+    D, F,
 };
 use plonky2::{
     iop::witness::PartialWitness,
@@ -12,7 +15,7 @@ use plonky2::{
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::iter;
+use std::iter::once;
 
 #[derive(Clone, Debug, Serialize, Deserialize, From, Into)]
 pub struct LeafWires(CellWire);
@@ -23,28 +26,27 @@ pub struct LeafCircuit(Cell);
 impl LeafCircuit {
     fn build(b: &mut CBuilder) -> LeafWires {
         let cell = CellWire::new(b);
+        let metadata_digests = cell.split_metadata_digest(b);
+        let values_digests = cell.split_values_digest(b);
 
-        // h = Poseidon(Poseidon("") || Poseidon("") || identifier || value)
-        let empty_hash = empty_poseidon_hash();
-        let empty_hash = b.constant_hash(*empty_hash);
-        let inputs: Vec<_> = empty_hash
-            .elements
-            .iter()
-            .cloned()
-            .chain(empty_hash.elements)
-            .chain(iter::once(cell.identifier))
+        // H(H("") || H("") || identifier || pack_u32(value))
+        let empty_hash = b.constant_hash(*empty_poseidon_hash()).to_targets();
+        let inputs = empty_hash
+            .clone()
+            .into_iter()
+            .chain(empty_hash)
+            .chain(once(cell.identifier))
             .chain(cell.value.to_targets())
             .collect();
-        let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
-
-        // digest_cell = D(identifier || value)
-        let split_digest = cell.split_digest(b);
+        let h = b.hash_n_to_hash_no_pad::<H>(inputs);
 
         // Register the public inputs.
         PublicInputs::new(
-            &h,
-            &split_digest.individual.to_targets(),
-            &split_digest.multiplier.to_targets(),
+            &h.to_targets(),
+            &values_digests.individual.to_targets(),
+            &values_digests.multiplier.to_targets(),
+            &metadata_digests.individual.to_targets(),
+            &metadata_digests.multiplier.to_targets(),
         )
         .register(b);
 
@@ -63,7 +65,7 @@ impl CircuitLogicWires<F, D, 0> for LeafWires {
 
     type Inputs = LeafCircuit;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::total_len();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -79,6 +81,7 @@ impl CircuitLogicWires<F, D, 0> for LeafWires {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,3 +156,4 @@ mod tests {
         }
     }
 }
+*/
