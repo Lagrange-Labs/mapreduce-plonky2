@@ -340,6 +340,11 @@ impl BlockUtil {
                 };
                 let body_rlp = receipt_primitive.encoded_2718();
 
+                println!(
+                    "TX index {} RLP encoded: {:?}",
+                    receipt.transaction_index.unwrap(),
+                    tx_index.to_vec()
+                );
                 receipts_trie
                     .insert(&tx_index, &body_rlp)
                     .expect("can't insert tx");
@@ -509,9 +514,9 @@ mod tryethers {
             for tr in tx_with_receipt.iter() {
                 if tr.tx().transaction_index.unwrap() == U64::from(0) {
                     println!(
-                        "Ethers: Index {} -> {}",
+                        "Ethers: Index {} -> {:?}",
                         tr.tx().transaction_index.unwrap(),
-                        hex::encode(tr.receipt_rlp())
+                        tr.receipt_rlp().to_vec()
                     );
                 }
                 receipts_trie
@@ -546,7 +551,8 @@ mod test {
     use std::env;
     use std::str::FromStr;
 
-    use alloy::{primitives::Bytes, providers::ProviderBuilder};
+    use alloy::{primitives::Bytes, providers::ProviderBuilder, rpc::types::BlockTransactionsKind};
+    use eth_trie::Nibbles;
     use ethereum_types::U64;
     use ethers::{
         providers::{Http, Middleware},
@@ -554,7 +560,11 @@ mod test {
     };
     use hashbrown::HashMap;
 
-    use crate::utils::{Endianness, Packer};
+    use crate::{
+        mpt_sequential::utils::nibbles_to_bytes,
+        types::MAX_BLOCK_LEN,
+        utils::{Endianness, Packer},
+    };
     use mp2_test::eth::{get_mainnet_url, get_sepolia_url};
 
     use super::*;
@@ -589,14 +599,26 @@ mod test {
         // Each RLP(logs[0]) = RLP([ RLP(Address), RLP(topics), RLP(data)])
         // RLP(topics) is a list with up to 4 topics
         let rlp_encoding = tx_receipt.receipt().encoded_2718();
+        println!(
+            "Size of RLP encoded receipt in bytes: {}",
+            rlp_encoding.len()
+        );
         let state = rlp::Rlp::new(&rlp_encoding);
         assert!(state.is_list());
         //  index 0 -> status,
         //  index 1 -> gas used
         //  index 2 -> logs_bloom
         //  index 3 -> logs
+        let gas_used: Vec<u8> = state.val_at(1).context("can't access gas used")?;
+        println!("gas used byte length: {}", gas_used.len());
+        let bloom: Vec<u8> = state.val_at(2).context("can't access bloom")?;
+        println!("bloom byte length: {}", bloom.len());
+        //let logs: Vec<Vec<u8>> = state.list_at(3).context("can't access logs")?;
+        //println!("logs byte length: {}", logs.len());
+
         let logs_state = state.at(3).context("can't access logs field3")?;
         assert!(logs_state.is_list());
+        println!("logs in hex: {}", hex::encode(logs_state.data()?));
         let log_state = logs_state.at(0).context("can't access single log state")?;
         assert!(log_state.is_list());
         // log:
@@ -636,6 +658,41 @@ mod test {
         ));
         assert_eq!(expected_data, found_data);
 
+        let mpt_key = tx_receipt.0.transaction_index.unwrap();
+        let proof = block
+            .receipts_trie
+            .get_proof(&mpt_key.rlp_bytes())
+            .expect("can't retrieve mpt proof");
+        let mpt_node = proof.last().unwrap();
+        println!("MPT LEAF NODE: {:?}", mpt_node);
+        // First decode the top level header
+        let top_header = rlp::Rlp::new(mpt_node);
+        assert!(top_header.is_list());
+        // then extract the buffer containing all elements (key and value)
+        let top_info = top_header.payload_info()?;
+        println!("TOP level header: {:?}", top_info);
+        let list_buff = &mpt_node[top_info.header_len..top_info.header_len + top_info.value_len];
+        // then check the key and make sure it's equal to the RLP encoding of the index
+        let key_header = rlp::Rlp::new(list_buff);
+        assert!(!key_header.is_list());
+        // key is RLP( compact ( RLP(index)))
+        let key_info = key_header.payload_info()?;
+        let compact_key = &list_buff[key_info.header_len..key_info.header_len + key_info.value_len];
+        let decoded_key = rlp::encode(&nibbles_to_bytes(
+            Nibbles::from_compact(compact_key).nibbles(),
+        ));
+        assert_eq!(decoded_key, &mpt_key.rlp_bytes().to_vec(),);
+
+        // then check if the value portion fits what we tested above
+        // value is RLP ( RLP(status, etc...))
+        let outer_value_min = top_info.header_len + key_info.header_len + key_info.value_len;
+        let outer_value_buff = &mpt_node[outer_value_min..];
+        let outer_value_state = rlp::Rlp::new(outer_value_buff);
+        assert!(!outer_value_state.is_list());
+        let outer_payload = outer_value_state.payload_info()?;
+        let inner_value_min = outer_value_min + outer_payload.header_len;
+        let inner_value_buff = &mpt_node[inner_value_min..];
+        assert_eq!(rlp_encoding, inner_value_buff);
         Ok(())
     }
 
