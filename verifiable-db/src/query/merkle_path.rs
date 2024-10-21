@@ -506,6 +506,7 @@ where
         // the predecessor of end_node is an ancestor of end_node iff end_node has no left child
         let is_predecessor_in_path = b.not(end_node_info.left_child_exists);
         let zero_u256 = b.zero_u256();
+        let max_u256 = b.constant_u256(U256::MAX);
         // Initialize value of predecessor node of end_node to a dummy value if the predecessor node
         // will be found in the path; otherwise, the predecessor_value is the maximum value in
         // the subtree rooted in the left child of end_node
@@ -533,7 +534,8 @@ where
         // the subtree rooted in the right child of end_node
         let successor_value = b.select_u256(
             is_successor_in_path,
-            &zero_u256,
+            &max_u256, // set dummy value of success to `U256::MAX`, it allows to satisfy constraints of 
+                // `are_consecutive_nodes` gadget in case the node has no successor in the tree
             &end_node_info.right_child_info.min,
         );
         // the successor value is already found if end_node has a right child
@@ -843,7 +845,10 @@ pub(crate) mod tests {
     //          B       C
     //      D               G
     //   E      F
-    pub(crate) fn generate_test_tree(index_id: F) -> [NodeInfo; 7] {
+    pub(crate) fn generate_test_tree(
+        index_id: F,
+        value_range: Option<(U256, U256)>,
+    ) -> [NodeInfo; 7] {
         let rng = &mut thread_rng();
         // closure to generate a random node of the tree from the 2 children, if any
         let mut random_node =
@@ -851,10 +856,16 @@ pub(crate) mod tests {
                 let embedded_tree_hash =
                     HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap();
                 build_node(left_child, right_child, node_value, embedded_tree_hash, index_id)
-            };
+            }; 
         let mut values: [U256; 7] = array::from_fn(|_|
             gen_random_u256(rng)
         );
+        if let Some((min_range, max_range)) = value_range {
+            // trim random values to the range specified as input
+            values.iter_mut().for_each(|value|
+                *value = min_range + *value % (max_range - min_range + U256::from(1))
+            );
+        }
         values.sort(); 
         let node_E = random_node(None, None, values[0]); // it's a leaf node, so no children
         let node_F = random_node(None, None, values[2]);
@@ -870,7 +881,7 @@ pub(crate) mod tests {
     fn test_merkle_path() {
         // first, build the Merkle-tree
         let index_id = F::rand();
-        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] = generate_test_tree(index_id);
+        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] = generate_test_tree(index_id, None);
         let root = node_A.compute_node_hash(index_id);
         // verify Merkle-path related to leaf F
         const MAX_DEPTH: usize = 10;
@@ -934,7 +945,7 @@ pub(crate) mod tests {
     fn test_merkle_path_with_neighbors() {
         // first, build the Merkle-tree
         let index_id = F::rand();
-        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] = generate_test_tree(index_id);
+        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] = generate_test_tree(index_id, None);
         let root = node_A.compute_node_hash(index_id);
         // verify Merkle-path related to leaf F
         const MAX_DEPTH: usize = 10;
@@ -1169,7 +1180,7 @@ pub(crate) mod tests {
         let successor_info = NeighborInfo {
             is_found: false,
             is_in_path: true,
-            value: U256::ZERO,
+            value: U256::MAX,
             hash: *empty_poseidon_hash(),
         };
         check_public_inputs(proof, &node_G, "node G", predecessor_info, successor_info);

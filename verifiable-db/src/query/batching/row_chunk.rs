@@ -428,7 +428,7 @@ mod tests {
         //          B       C
         //      D               G
         //   E      F
-        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] = generate_test_tree(index_id);
+        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] = generate_test_tree(index_id, None);
 
         // test that nodes F and D are consecutive
         let path_F = vec![
@@ -741,7 +741,16 @@ mod tests {
         values.sort();
         let secondary_index_id = F::rand();
         let primary_index_id = F::rand();
-        let rows_tree_0 = RowsTree::from(generate_test_tree(secondary_index_id));
+        // generate rows tree with values in decreasing order. This is a simple trick to ensure
+        // that min_secondary <= max_secondary when using custom query bounds in tests, as we will always
+        // take max_secondary from the set of values of rows_tree_i and min_secondary from the set of values
+        // of rows_tree_{i+j}
+        let rows_tree_0_value_range = (U256::MAX/U256::from(2), U256::MAX);
+        let rows_tree_1_value_range = (U256::MAX/U256::from(4), U256::MAX/U256::from(2));
+        let rows_tree_2_value_range = (U256::MAX/U256::from(8), U256::MAX/U256::from(4));
+        let rows_tree_3_value_range = (U256::MAX/U256::from(16), U256::MAX/U256::from(8));
+        let rows_tree_4_value_range = (U256::ZERO, U256::MAX/U256::from(16));
+        let rows_tree_0 = RowsTree::from(generate_test_tree(secondary_index_id, Some(rows_tree_0_value_range)));
         let root = HashOutput::try_from(
             rows_tree_0.node_A.compute_node_hash(secondary_index_id)
         ).unwrap();
@@ -753,7 +762,7 @@ mod tests {
             root, 
             primary_index_id
         );
-        let rows_tree_2 = RowsTree::from(generate_test_tree(secondary_index_id));
+        let rows_tree_2 = RowsTree::from(generate_test_tree(secondary_index_id, Some(rows_tree_2_value_range)));
         let root = HashOutput::try_from(
             rows_tree_2.node_A.compute_node_hash(secondary_index_id)
         ).unwrap();
@@ -765,7 +774,7 @@ mod tests {
             root, 
             primary_index_id
         );
-        let rows_tree_4 = RowsTree::from(generate_test_tree(secondary_index_id));
+        let rows_tree_4 = RowsTree::from(generate_test_tree(secondary_index_id, Some(rows_tree_4_value_range)));
         let root = HashOutput::try_from(
             rows_tree_4.node_A.compute_node_hash(secondary_index_id)
         ).unwrap();
@@ -777,7 +786,7 @@ mod tests {
             root, 
             primary_index_id
         );
-        let rows_tree_3 = RowsTree::from(generate_test_tree(secondary_index_id));
+        let rows_tree_3 = RowsTree::from(generate_test_tree(secondary_index_id, Some(rows_tree_3_value_range)));
         let root = HashOutput::try_from(
             rows_tree_3.node_A.compute_node_hash(secondary_index_id)
         ).unwrap();
@@ -789,7 +798,7 @@ mod tests {
             root, 
             primary_index_id
         );
-        let rows_tree_1 = RowsTree::from(generate_test_tree(secondary_index_id));
+        let rows_tree_1 = RowsTree::from(generate_test_tree(secondary_index_id, Some(rows_tree_1_value_range)));
         let root = HashOutput::try_from(
             rows_tree_1.node_A.compute_node_hash(secondary_index_id)
         ).unwrap();
@@ -819,7 +828,7 @@ mod tests {
             (rows_tree_1.node_C.clone(), ChildPosition::Right),
             (rows_tree_1.node_A.clone(), ChildPosition::Right)
         ];
-        let siblings_1G = vec![None, Some(node_1B_hash)];
+        let siblings_1G = vec![None, Some(node_1B_hash.clone())];
         let merkle_inputs_1G = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
             &path_1G,
             &siblings_1G,
@@ -884,7 +893,7 @@ mod tests {
         ];
         let node_0_hash = HashOutput::try_from(node_0.compute_node_hash(primary_index_id)).unwrap();
         let node_4_hash = HashOutput::try_from(node_4.compute_node_hash(primary_index_id)).unwrap();
-        let siblings_2 = vec![Some(node_4_hash), Some(node_0_hash)];
+        let siblings_2 = vec![Some(node_4_hash), Some(node_0_hash.clone())];
         let merkle_inputs_index_2 = MerklePathWithNeighborsGadget::<INDEX_TREE_MAX_DEPTH>::new(
             &path_2,
             &siblings_2,
@@ -916,6 +925,371 @@ mod tests {
         let proof = run_circuit::<F, D, C, _>(circuit);
         // check that the nodes are consecutive
         assert!(proof.public_inputs[0].try_into_bool().unwrap());
+
+        // negative test: check that node_G of rows_tree_1 and node_F of rows_tree_2 are not consecutive
+        let path_2F = vec![
+            (rows_tree_2.node_D.clone(), ChildPosition::Right),
+            (rows_tree_2.node_B.clone(), ChildPosition::Left),
+            (rows_tree_2.node_A.clone(), ChildPosition::Left),
+        ];
+        let node_2E_hash = HashOutput::try_from(rows_tree_2.node_E.compute_node_hash(secondary_index_id)).unwrap();
+        let siblings_2F = vec![Some(node_2E_hash), None, Some(node_2C_hash.clone())];
+        let merkle_inputs_2F = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_2F,
+            &siblings_2F,
+            &rows_tree_2.node_F,
+            [None, None], // it's a leaf node
+        )
+        .unwrap();
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1G,
+                first_node_info: rows_tree_1.node_G.clone(),
+                second_node_path: merkle_inputs_2F,
+                second_node_info: rows_tree_2.node_F.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_2,
+                second_node_info: node_2.clone(),
+                index_id: primary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+        };
+
+
+        // negative test: check that node_C of rows_tree_1 and node_E of rows_tree_2 are not consecutive
+        let path_1C = vec![
+            (rows_tree_1.node_A.clone(), ChildPosition::Right),
+        ];
+        let siblings_1C = vec![Some(node_1B_hash)];
+        let merkle_inputs_1C = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_1C,
+            &siblings_1C,
+            &rows_tree_1.node_C,
+            [None, Some(rows_tree_1.node_G.clone())],
+        )
+        .unwrap();
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1C,
+                first_node_info: rows_tree_1.node_C.clone(),
+                second_node_path: merkle_inputs_2E,
+                second_node_info: rows_tree_2.node_E.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_2,
+                second_node_info: node_2.clone(),
+                index_id: primary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+        };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // check that the nodes are not consecutive
+        assert!(!proof.public_inputs[0].try_into_bool().unwrap());
+
+        // negative test: check that node_G of rows_tree_1 and node_E of rows_tree_3 are not consecutive
+        let path_3E = vec![
+            (rows_tree_3.node_D.clone(), ChildPosition::Left),
+            (rows_tree_3.node_B.clone(), ChildPosition::Left),
+            (rows_tree_3.node_A.clone(), ChildPosition::Left),
+        ];
+        let node_3F_hash = HashOutput::try_from(rows_tree_3.node_F.compute_node_hash(secondary_index_id)).unwrap();
+        let node_3C_hash = HashOutput::try_from(rows_tree_3.node_C.compute_node_hash(secondary_index_id)).unwrap();
+        let siblings_3E = vec![Some(node_3F_hash), None, Some(node_3C_hash.clone())];
+        let merkle_inputs_3E = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_3E,
+            &siblings_3E,
+            &rows_tree_3.node_E,
+            [None, None], // it's a leaf node
+        )
+        .unwrap();
+        let path_3 = vec![
+            (node_1.clone(), ChildPosition::Right),
+        ];
+        let siblings_3 = vec![Some(node_0_hash)];
+        let merkle_inputs_index_3 = MerklePathWithNeighborsGadget::<INDEX_TREE_MAX_DEPTH>::new(
+            &path_3,
+            &siblings_3,
+            &node_3,
+            [Some(node_2.clone()), Some(node_4.clone())],
+        )
+        .unwrap();
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1G,
+                first_node_info: rows_tree_1.node_G.clone(),
+                second_node_path: merkle_inputs_3E,
+                second_node_info: rows_tree_3.node_E.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_3,
+                second_node_info: node_3.clone(),
+                index_id: primary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+        };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // check that the nodes are not consecutive
+        assert!(!proof.public_inputs[0].try_into_bool().unwrap());
+
+        // test nodes at range boundaries across different rows trees: check that node_A of rows_tree_1 and node_D 
+        // of rows_tree_2 can be consecutive if the range on secondary index is [node_2D.value, node_1A.value]
+        let path_1A = vec![];
+        let siblings_1A = vec![];
+        let merkle_inputs_1A = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_1A,
+            &siblings_1A,
+            &rows_tree_1.node_A,
+            [Some(rows_tree_1.node_B.clone()), Some(rows_tree_1.node_C.clone())],
+        )
+        .unwrap();
+        let path_2D = vec![
+            (rows_tree_2.node_B.clone(), ChildPosition::Left),
+            (rows_tree_2.node_A.clone(), ChildPosition::Left),
+        ];
+        let siblings_2D = vec![None, Some(node_2C_hash.clone())];
+        let merkle_inputs_2D = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_2D,
+            &siblings_2D,
+            &rows_tree_2.node_D,
+            [Some(rows_tree_2.node_E.clone()), Some(rows_tree_2.node_F.clone())],
+        )
+        .unwrap();
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1A,
+                first_node_info: rows_tree_1.node_A.clone(),
+                second_node_path: merkle_inputs_2D,
+                second_node_info: rows_tree_2.node_D.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: Some(rows_tree_2.node_D.value),
+                max_query_bound: Some(rows_tree_1.node_A.value),
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_2,
+                second_node_info: node_2.clone(),
+                index_id: primary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+        };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // check that the nodes are consecutive
+        assert!(proof.public_inputs[0].try_into_bool().unwrap());
+
+        // negative test: check that node_A of rows_tree_1 and node_D of rows_tree_2 are not be consecutive 
+        // with a different range on secondary index
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1A,
+                first_node_info: rows_tree_1.node_A.clone(),
+                second_node_path: merkle_inputs_2D,
+                second_node_info: rows_tree_2.node_D.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: Some(rows_tree_2.node_E.value),
+                max_query_bound: Some(rows_tree_1.node_A.value),
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_2,
+                second_node_info: node_2.clone(),
+                index_id: primary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+        };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // check that the nodes are not consecutive
+        assert!(!proof.public_inputs[0].try_into_bool().unwrap());
+
+        // test rows tree without matching rows: check that node_A of rows_tree_1 is consecutive with node_G
+        // of rows_tree_2, if all the nodes in rows_tree_2 store values smaller than the query range
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1A,
+                first_node_info: rows_tree_1.node_A.clone(),
+                second_node_path: merkle_inputs_2D,
+                second_node_info: rows_tree_2.node_D.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: Some(rows_tree_1.node_F.value),
+                max_query_bound: Some(rows_tree_1.node_A.value),
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_2,
+                second_node_info: node_2.clone(),
+                index_id: primary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+        };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // check that the nodes are consecutive
+        assert!(proof.public_inputs[0].try_into_bool().unwrap());
+
+        // test rows tree without matching rows: check that node_A of rows_tree_1 is consecutive with node_D
+        // of rows_tree_2, if all the nodes in rows_tree_1 store values bigger than the query range
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1A,
+                first_node_info: rows_tree_1.node_A.clone(),
+                second_node_path: merkle_inputs_2D,
+                second_node_info: rows_tree_2.node_D.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: Some(rows_tree_2.node_D.value),
+                max_query_bound: Some(rows_tree_2.node_A.value),
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_2,
+                second_node_info: node_2.clone(),
+                index_id: primary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+        };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // check that the nodes are consecutive
+        assert!(proof.public_inputs[0].try_into_bool().unwrap());
+
+        // test rows tree without matching rows: check that we can merge 2 rows in rows trees where all
+        // the values are smaller than the query range. Node_G of rows_tree_1 is consecutive with node_E of
+        // rows_tree_2, if the query range is defined over values of rows_tree_0 (which are all bigger than 
+        // other rows trees by construction)
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1G,
+                first_node_info: rows_tree_1.node_G.clone(),
+                second_node_path: merkle_inputs_2E,
+                second_node_info: rows_tree_2.node_E.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: Some(rows_tree_0.node_D.value),
+                max_query_bound: Some(rows_tree_0.node_A.value),
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_2,
+                second_node_info: node_2.clone(),
+                index_id: primary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+        };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // check that the nodes are consecutive
+        assert!(proof.public_inputs[0].try_into_bool().unwrap());
+
+        // test rows tree without matching rows: check that we can merge 2 rows in rows trees where all
+        // the values are bigger than the query range. Node_G of rows_tree_1 is consecutive with node_E of
+        // rows_tree_2, if the query range is defined over values of rows_tree_4 (which are all smaller than 
+        // the other rows trees by construction)
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1G,
+                first_node_info: rows_tree_1.node_G.clone(),
+                second_node_path: merkle_inputs_2E,
+                second_node_info: rows_tree_2.node_E.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: Some(rows_tree_4.node_D.value),
+                max_query_bound: Some(rows_tree_4.node_A.value),
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_2,
+                second_node_info: node_2.clone(),
+                index_id: primary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+        };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // check that the nodes are consecutive
+        assert!(proof.public_inputs[0].try_into_bool().unwrap());
+
+        // negative test: check that node_G of rows_tree_1 and node_E of rows_tree_2 are not consecutive
+        // if the index tree node storing rows_tree_2 is out of the query range over the primary index
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1G,
+                first_node_info: rows_tree_1.node_G.clone(),
+                second_node_path: merkle_inputs_2E,
+                second_node_info: rows_tree_2.node_E.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_2,
+                second_node_info: node_2.clone(),
+                index_id: primary_index_id,
+                min_query_bound: None,
+                max_query_bound: Some(node_1.value),
+            },
+        };
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // check that the nodes are not consecutive
+        assert!(!proof.public_inputs[0].try_into_bool().unwrap());
+
+        // negative test: check that node_G of rows_tree_1 and node_E of rows_tree_2 are not consecutive
+        // if the index tree node storing rows_tree_1 is out of the query range over the primary index
+        let circuit = TestConsecutiveRows {
+            row_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_1G,
+                first_node_info: rows_tree_1.node_G.clone(),
+                second_node_path: merkle_inputs_2E,
+                second_node_info: rows_tree_2.node_E.clone(),
+                index_id: secondary_index_id,
+                min_query_bound: None,
+                max_query_bound: None,
+            },
+            index_tree_nodes: TestConsecutiveNodes {
+                first_node_path: merkle_inputs_index_1,
+                first_node_info: node_1.clone(),
+                second_node_path: merkle_inputs_index_2,
+                second_node_info: node_2.clone(),
+                index_id: primary_index_id,
+                min_query_bound: Some(node_2.value),
+                max_query_bound: None,
+            },
+        };
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // check that the nodes are not consecutive
+        assert!(!proof.public_inputs[0].try_into_bool().unwrap());
 
     }
 
