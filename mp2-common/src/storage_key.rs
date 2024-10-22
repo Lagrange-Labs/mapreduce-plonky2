@@ -153,6 +153,9 @@ impl KeccakStructMPT {
 
         // location = keccak(inputs) + offset
         let keccak_base = KeccakCircuit::<{ INPUT_PADDED_LEN }>::hash_to_bytes(b, &inputs);
+        // Do range-check on the output, since these bytes are converted for Uint256 computation
+        // (not fed as input to another Keccak directly).
+        keccak_base.output.assert_bytes(b);
         let base = keccak_base.output.arr.pack(b, Endianness::Big);
         let base = UInt256Target::new_from_be_target_limbs(&base).unwrap();
         let offset = UInt256Target::new_from_target_unsafe(b, offset);
