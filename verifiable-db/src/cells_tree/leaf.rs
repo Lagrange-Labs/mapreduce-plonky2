@@ -81,20 +81,13 @@ impl CircuitLogicWires<F, D, 0> for LeafWires {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::primitives::U256;
-    use mp2_common::{
-        group_hashing::map_to_curve_point,
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-        C,
-    };
+    use itertools::Itertools;
+    use mp2_common::{poseidon::H, utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::plonk::config::Hasher;
-    use rand::{thread_rng, Rng};
 
     impl UserCircuit<F, D> for LeafCircuit {
         type Wires = LeafWires;
@@ -115,45 +108,50 @@ mod tests {
     }
 
     fn test_cells_tree_leaf_multiplier(is_multiplier: bool) {
-        let mut rng = thread_rng();
+        let cell = Cell::sample(is_multiplier);
+        let id = cell.identifier;
+        let value = cell.value;
+        let values_digests = cell.split_values_digest();
+        let metadata_digests = cell.split_metadata_digest();
 
-        let identifier = rng.gen::<u32>().to_field();
-        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
-        let value_fields = value.to_fields();
-
-        let test_circuit: LeafCircuit = Cell {
-            identifier,
-            value,
-            is_multiplier,
-        }
-        .into();
-
+        let test_circuit: LeafCircuit = cell.into();
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        // Check the node Poseidon hash
+
+        // Check the node hash
         {
             let empty_hash = empty_poseidon_hash();
-            let inputs: Vec<_> = empty_hash
+            let inputs = empty_hash
                 .elements
                 .iter()
                 .cloned()
                 .chain(empty_hash.elements)
-                .chain(iter::once(identifier))
-                .chain(value_fields.clone())
-                .collect();
+                .chain(once(id))
+                .chain(value.to_fields())
+                .collect_vec();
             let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
         }
-        // Check the cells digest
-        {
-            let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
-            let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
-            match is_multiplier {
-                true => assert_eq!(pi.multiplier_digest_point(), exp_digest),
-                false => assert_eq!(pi.individual_digest_point(), exp_digest),
-            }
-        }
+        // Check individual values digest
+        assert_eq!(
+            pi.individual_values_digest_point(),
+            values_digests.individual.to_weierstrass(),
+        );
+        // Check multiplier values digest
+        assert_eq!(
+            pi.multiplier_values_digest_point(),
+            values_digests.multiplier.to_weierstrass(),
+        );
+        // Check individual metadata digest
+        assert_eq!(
+            pi.individual_metadata_digest_point(),
+            metadata_digests.individual.to_weierstrass(),
+        );
+        // Check multiplier metadata digest
+        assert_eq!(
+            pi.multiplier_metadata_digest_point(),
+            metadata_digests.multiplier.to_weierstrass(),
+        );
     }
 }
-*/

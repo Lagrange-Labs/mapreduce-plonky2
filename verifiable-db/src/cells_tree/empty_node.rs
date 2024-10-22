@@ -54,7 +54,6 @@ impl CircuitLogicWires<F, D, 0> for EmptyNodeWires {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,10 +81,25 @@ mod tests {
             let empty_hash = empty_poseidon_hash();
             assert_eq!(pi.h, empty_hash.elements);
         }
-        // Check the cells digest
-        {
-            assert_eq!(pi.individual_digest_point(), WeierstrassPoint::NEUTRAL);
-        }
+        // Check individual values digest
+        assert_eq!(
+            pi.individual_values_digest_point(),
+            WeierstrassPoint::NEUTRAL
+        );
+        // Check multiplier values digest
+        assert_eq!(
+            pi.multiplier_values_digest_point(),
+            WeierstrassPoint::NEUTRAL
+        );
+        // Check individual metadata digest
+        assert_eq!(
+            pi.individual_metadata_digest_point(),
+            WeierstrassPoint::NEUTRAL
+        );
+        // Check multiplier metadata digest
+        assert_eq!(
+            pi.multiplier_metadata_digest_point(),
+            WeierstrassPoint::NEUTRAL
+        );
     }
 }
-*/

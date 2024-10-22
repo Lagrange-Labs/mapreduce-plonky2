@@ -72,27 +72,27 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         offset..offset + Self::SIZES[pi_pos]
     }
 
-    pub(crate) const fn total_len() -> usize {
+    pub const fn total_len() -> usize {
         Self::to_range(CellsTreePublicInputs::MultiplierMetadataDigest).end
     }
 
-    pub(crate) fn to_node_hash_raw(&self) -> &[T] {
+    pub fn to_node_hash_raw(&self) -> &[T] {
         self.h
     }
 
-    pub(crate) fn to_individual_values_digest_raw(&self) -> &[T] {
+    pub fn to_individual_values_digest_raw(&self) -> &[T] {
         self.individual_vd
     }
 
-    pub(crate) fn to_multiplier_values_digest_raw(&self) -> &[T] {
+    pub fn to_multiplier_values_digest_raw(&self) -> &[T] {
         self.multiplier_vd
     }
 
-    pub(crate) fn to_individual_metadata_digest_raw(&self) -> &[T] {
+    pub fn to_individual_metadata_digest_raw(&self) -> &[T] {
         self.individual_md
     }
 
-    pub(crate) fn to_multiplier_metadata_digest_raw(&self) -> &[T] {
+    pub fn to_multiplier_metadata_digest_raw(&self) -> &[T] {
         self.multiplier_md
     }
 
@@ -218,14 +218,14 @@ impl<'a> PublicInputs<'a, F> {
 
     pub fn split_metadata_digest_point(&self) -> SplitDigestPoint {
         SplitDigestPoint {
-            individual: weierstrass_to_point(&&self.individual_metadata_digest_point()),
+            individual: weierstrass_to_point(&self.individual_metadata_digest_point()),
             multiplier: weierstrass_to_point(&self.multiplier_metadata_digest_point()),
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use mp2_common::{utils::ToFields, C, D, F};
     use mp2_test::{
@@ -240,8 +240,44 @@ mod tests {
         },
     };
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::thread_rng;
+    use rand::{thread_rng, Rng};
     use std::array;
+
+    impl<'a> PublicInputs<'a, F> {
+        pub(crate) fn sample(is_multiplier: bool) -> Vec<F> {
+            let rng = &mut thread_rng();
+
+            let h = random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
+
+            let point_zero = WeierstrassPoint::NEUTRAL.to_fields();
+            let [values_digest, metadata_digest] =
+                array::from_fn(|_| Point::sample(rng).to_weierstrass().to_fields());
+            let [individual_vd, multiplier_vd, individual_md, multiplier_md] = if is_multiplier {
+                [
+                    point_zero.clone(),
+                    values_digest,
+                    point_zero,
+                    metadata_digest,
+                ]
+            } else {
+                [
+                    values_digest,
+                    point_zero.clone(),
+                    metadata_digest,
+                    point_zero,
+                ]
+            };
+
+            PublicInputs::new(
+                &h,
+                &individual_vd,
+                &multiplier_vd,
+                &individual_md,
+                &multiplier_md,
+            )
+            .to_vec()
+        }
+    }
 
     #[derive(Clone, Debug)]
     struct TestPublicInputs<'a> {
@@ -266,20 +302,9 @@ mod tests {
     #[test]
     fn test_cells_tree_public_inputs() {
         let rng = &mut thread_rng();
+        let is_multiplier = rng.gen();
 
-        // Prepare the public inputs.
-        let h = random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
-        let [individual_vd, multiplier_vd, individual_md, multiplier_md] =
-            array::from_fn(|_| Point::sample(rng).to_weierstrass().to_fields());
-        let exp_pi = PublicInputs::new(
-            &h,
-            &individual_vd,
-            &multiplier_vd,
-            &individual_md,
-            &multiplier_md,
-        );
-        let exp_pi = &exp_pi.to_vec();
-
+        let exp_pi = &PublicInputs::sample(is_multiplier);
         let test_circuit = TestPublicInputs { exp_pi };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         assert_eq!(&proof.public_inputs, exp_pi);

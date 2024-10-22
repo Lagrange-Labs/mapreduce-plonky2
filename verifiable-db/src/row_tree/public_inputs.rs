@@ -91,35 +91,35 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         offset..offset + Self::SIZES[pi_pos]
     }
 
-    pub(crate) const fn total_len() -> usize {
+    pub const fn total_len() -> usize {
         Self::to_range(RowsTreePublicInputs::RowIdMultiplier).end
     }
 
-    pub(crate) fn to_root_hash_raw(&self) -> &[T] {
+    pub fn to_root_hash_raw(&self) -> &[T] {
         self.h
     }
 
-    pub(crate) fn to_individual_digest_raw(&self) -> &[T] {
+    pub fn to_individual_digest_raw(&self) -> &[T] {
         self.individual_digest
     }
 
-    pub(crate) fn to_multiplier_digest_raw(&self) -> &[T] {
+    pub fn to_multiplier_digest_raw(&self) -> &[T] {
         self.multiplier_digest
     }
 
-    pub(crate) fn to_row_id_multiplier_raw(&self) -> &[T] {
+    pub fn to_row_id_multiplier_raw(&self) -> &[T] {
         self.row_id_multiplier
     }
 
-    pub(crate) fn to_min_value_raw(&self) -> &[T] {
+    pub fn to_min_value_raw(&self) -> &[T] {
         self.min
     }
 
-    pub(crate) fn to_max_value_raw(&self) -> &[T] {
+    pub fn to_max_value_raw(&self) -> &[T] {
         self.max
     }
 
-    pub(crate) fn to_merge_flag_raw(&self) -> &T {
+    pub fn to_merge_flag_raw(&self) -> &T {
         self.merge
     }
 

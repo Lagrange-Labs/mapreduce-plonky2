@@ -115,8 +115,7 @@ impl RowWire {
     }
 }
 
-/*
 #[cfg(test)]
 mod test {
+    // gupeng
 }
-*/
