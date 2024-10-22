@@ -183,7 +183,7 @@ macro_rules! impl_branch_circuits {
                 // from the public inputs of the children proofs.
                 // Note this is done outside circuits, more as a sanity check. The circuits is enforcing
                 // this condition.
-                for arr in child_proofs.windows(2) {
+                for (i,arr) in child_proofs.windows(2).enumerate() {
                     if arr.len() > 1 {
                         let pi1 = PublicInputs::<F>::new(&arr[0].proof().public_inputs);
                         let (k1, p1) = pi1.mpt_key_info();
@@ -192,10 +192,10 @@ macro_rules! impl_branch_circuits {
                         let up1 = p1.to_canonical_u64() as usize;
                         let up2 = p2.to_canonical_u64() as usize;
 
-                        ensure!(up1 < k1.len(), "up1 ({}) >= |k1| ({})", up1, k1.len());
-                        ensure!(up2 < k2.len(), "up2 ({}) >= |k2| ({})", up2, k2.len());
-                        ensure!(p1 == p2, "p1 ({p1}) != p2 ({p2})");
-                        ensure!(k1[..up1] == k2[..up1], "k1[..up1] ({:?}) != k[2..up2] ({:?})", &k1[..up1], &k2[..up2]);
+                        ensure!(up1 < k1.len(), "(child proof: {}) up1 ({}) >= |k1| ({})", i, up1, k1.len());
+                        ensure!(up2 < k2.len(), "(child proof: {}) up2 ({}) >= |k2| ({})", i+1, up2, k2.len());
+                        ensure!(p1 == p2, "(idx child proof {}) p1 ({p1}) != p2 ({p2})",i);
+                        ensure!(k1[..up1] == k2[..up1], "(idx child proof {}) k1[..up1] ({:?}) != k[2..up2] ({:?})", i, &k1[..up1], &k2[..up2]);
                     }
 
                 }
