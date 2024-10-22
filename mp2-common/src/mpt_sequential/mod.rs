@@ -1000,4 +1000,76 @@ mod test {
         let proof = data.prove(pw).unwrap();
         data.verify(proof).unwrap();
     }
+
+    #[test]
+    fn test_empty_key() {
+        const DEPTH: usize = 4;
+        const NODE_LEN: usize = 42;
+        const VALUE_LEN: usize = 4;
+        let leaf_data: Vec<u8> = vec![0x12, 0x15, 0xff, 0xf2];
+        let leaf_value = rlp::encode_list(&leaf_data);
+        let key = vec![];
+        let key = Nibbles::from_raw(&key, true).encode_compact();
+        let full_list: Vec<Vec<u8>> = vec![key.clone(), leaf_value.to_vec()];
+        let mut leaf_node = rlp::encode_list::<Vec<u8>, _>(&full_list);
+        let leaf_tuple: Vec<Vec<u8>> = rlp::decode_list(&leaf_node);
+        let leaf_value: Vec<u8> = leaf_tuple[1].clone();
+        let partial_key_struct = Nibbles::from_compact(&leaf_tuple[0]);
+        let partial_key_nibbles = partial_key_struct.nibbles();
+        let partial_key_ptr = MAX_KEY_NIBBLE_LEN - 1 - partial_key_nibbles.len();
+        println!(
+            "[+] leaf partial key nibbles = {:?}",
+            hex::encode(nibbles_to_bytes(partial_key_nibbles))
+        );
+        println!("[+] key pointer = {}", partial_key_ptr);
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut pw = PartialWitness::new();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let zero = builder.zero();
+        let tt = builder._true();
+        let node = Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut builder);
+        let key_wire = MPTKeyWire::new(&mut builder);
+        let rlp_headers = decode_fixed_list::<F, D, NB_ITEMS_LEAF>(&mut builder, &node.arr, zero);
+        let (advanced_key, _value, _should_true) =
+            Circuit::<DEPTH, NODE_LEN>::advance_key_leaf_or_extension::<_, _, _, VALUE_LEN>(
+                &mut builder,
+                &node,
+                &key_wire,
+                &rlp_headers,
+            );
+        let exp_key_ptr = builder.add_virtual_target();
+        builder.connect(advanced_key.pointer, exp_key_ptr);
+        //let exp_value = Array::<Target, VALUE_LEN>::new(&mut builder);
+        //let should_be_true = exp_value.equals(&mut builder, &value);
+        //let all_true = builder.and(should_be_true, should_true);
+        //builder.connect(tt.target, all_true.target);
+        let data = builder.build::<C>();
+
+        leaf_node.resize(PAD_LEN(NODE_LEN), 0);
+        let leaf_f = leaf_node
+            .iter()
+            .map(|b| F::from_canonical_u8(*b))
+            .collect::<Vec<_>>();
+        node.assign(&mut pw, &leaf_f.try_into().unwrap());
+        let mut key_nibbles = bytes_to_nibbles(&key);
+        key_nibbles.resize(MAX_KEY_NIBBLE_LEN, 0);
+        key_wire.assign(
+            &mut pw,
+            &key_nibbles.try_into().unwrap(),
+            MAX_KEY_NIBBLE_LEN - 1,
+        );
+        pw.set_target(exp_key_ptr, F::from_canonical_usize(partial_key_ptr));
+        //exp_value.assign(
+        //    &mut pw,
+        //    &leaf_value
+        //        .into_iter()
+        //        .map(F::from_canonical_u8)
+        //        .collect::<Vec<_>>()
+        //        .try_into()
+        //        .unwrap(),
+        //);
+        let proof = data.prove(pw).unwrap();
+        data.verify(proof).unwrap();
+    }
 }
