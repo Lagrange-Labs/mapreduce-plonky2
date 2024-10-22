@@ -252,8 +252,8 @@ impl SimpleSlot {
     /// Derive the MPT key in circuit according to simple storage slot of single value.
     ///
     /// Remember the rules to get the MPT key is as follow:
-    /// * location = pad32(slot)
-    /// * mpt_key = keccak256(location)
+    /// location = pad32(slot)
+    /// mpt_key = keccak256(location)
     /// Note the simple slot wire and the contract address wires are NOT range
     /// checked, because they are expected to be given by the verifier.
     /// If that assumption is not true, then the caller should call
@@ -345,20 +345,7 @@ impl SimpleSlot {
     }
 
     pub fn assign_single<F: RichField>(&self, pw: &mut PartialWitness<F>, wires: &SimpleSlotWires) {
-        match self.0 {
-            StorageSlot::Simple(slot) => {
-                // Safe downcasting because it's assumed to be u8 in constructor.
-                pw.set_target(wires.slot, F::from_canonical_u8(slot as u8));
-            }
-            _ => panic!("Invalid storage slot type"), // should not happen using constructor
-        };
-        let inputs = self.0.location().as_slice().to_vec();
-        KeccakCircuit::assign(
-            pw,
-            &wires.keccak_mpt,
-            // Unwrap safe because input always fixed 32 bytes.
-            &InputData::Assigned(&Vector::from_vec(&inputs).unwrap()),
-        );
+        self.assign_with_offset(pw, wires, 0);
     }
 
     pub fn assign_struct<F: RichField>(
@@ -367,29 +354,46 @@ impl SimpleSlot {
         wires: &SimpleStructSlotWires,
         offset: u32,
     ) {
-        let slot = match self.0 {
-            // Safe downcasting because it's assumed to be u8 in constructor.
-            StorageSlot::Simple(slot) => slot as u8,
-            _ => panic!("Invalid storage slot type"), // should not happen using constructor
-        };
-        pw.set_target(wires.base.slot, F::from_canonical_u8(slot));
-        let location = offset
-            .checked_add(slot.into())
-            .expect("Simple slot plus offset is overflow");
-        let inputs = B256::left_padding_from(&location.to_be_bytes()).to_vec();
-        KeccakCircuit::assign(
-            pw,
-            &wires.base.keccak_mpt,
-            // Unwrap safe because input always fixed 32 bytes.
-            &InputData::Assigned(&Vector::from_vec(&inputs).unwrap()),
-        );
-        let location_bytes = inputs
+        let location_bytes = self.assign_with_offset(pw, &wires.base, offset);
+
+        // Assign the location bytes.
+        let location_bytes = location_bytes
             .into_iter()
             .map(F::from_canonical_u8)
             .collect_vec()
             .try_into()
             .unwrap();
         wires.location_bytes.assign(pw, &location_bytes);
+    }
+
+    // Assign with a specified offset.
+    // The offset could be zero for a single value.
+    // Return the location bytes as the final input.
+    fn assign_with_offset<F: RichField>(
+        &self,
+        pw: &mut PartialWitness<F>,
+        wires: &SimpleSlotWires,
+        offset: u32,
+    ) -> Vec<u8> {
+        let slot = match self.0 {
+            // Safe downcasting because it's assumed to be u8 in constructor.
+            StorageSlot::Simple(slot) => slot as u8,
+            _ => panic!("Invalid storage slot type"), // should not happen using constructor
+        };
+        pw.set_target(wires.slot, F::from_canonical_u8(slot));
+        // Should be same with the slot number if offset is zero.
+        let location = offset
+            .checked_add(slot.into())
+            .expect("Simple slot plus offset is overflow");
+        let location_bytes = B256::left_padding_from(&location.to_be_bytes()).to_vec();
+        KeccakCircuit::assign(
+            pw,
+            &wires.keccak_mpt,
+            // Unwrap safe because input always fixed 32 bytes.
+            &InputData::Assigned(&Vector::from_vec(&location_bytes).unwrap()),
+        );
+
+        location_bytes
     }
 }
 
@@ -593,16 +597,9 @@ impl MappingSlot {
         pw: &mut PartialWitness<F>,
         wires: &MappingSlotWires,
     ) {
-        pw.set_target(wires.mapping_slot, F::from_canonical_u8(self.mapping_slot));
+        let (inputs, location) =
+            self.assign_slot_and_mapping_key(pw, wires.mapping_slot, &wires.mapping_key);
 
-        let padded_slot = left_pad32(&[self.mapping_slot]);
-        let mapping_key = left_pad32(&self.mapping_key);
-        wires.mapping_key.assign_bytes(pw, &mapping_key);
-        // Compute the entire expected array to derive the MPT key:
-        // keccak(left_pad32(mapping_key), left_pad32(mapping_slot))
-        let inputs = mapping_key.into_iter().chain(padded_slot).collect_vec();
-        // Then compute the expected resulting hash for MPT key derivation.
-        let location = keccak256(&inputs).try_into().unwrap();
         KeccakMPT::assign(pw, &wires.keccak_mpt, inputs, location);
     }
 
@@ -612,17 +609,10 @@ impl MappingSlot {
         wires: &MappingStructSlotWires,
         offset: u32,
     ) {
-        pw.set_target(wires.mapping_slot, F::from_canonical_u8(self.mapping_slot));
+        let (inputs, location_base) =
+            self.assign_slot_and_mapping_key(pw, wires.mapping_slot, &wires.mapping_key);
 
-        let padded_slot = left_pad32(&[self.mapping_slot]);
-        let mapping_key = left_pad32(&self.mapping_key);
-        wires.mapping_key.assign_bytes(pw, &mapping_key);
-        // Compute the entire expected array to derive the MPT key:
-        // keccak(left_pad32(mapping_key), left_pad32(mapping_slot))
-        let inputs = mapping_key.into_iter().chain(padded_slot).collect_vec();
-        // Then compute the expected resulting hash for MPT key derivation.
-        let base = keccak256(&inputs).try_into().unwrap();
-        KeccakStructMPT::assign(pw, &wires.keccak_mpt, inputs, base, offset);
+        KeccakStructMPT::assign(pw, &wires.keccak_mpt, inputs, location_base, offset);
     }
 
     pub fn assign_mapping_of_mappings<F: RichField>(
@@ -632,16 +622,12 @@ impl MappingSlot {
         inner_key: &[u8],
         offset: u32,
     ) {
-        pw.set_target(wires.mapping_slot, F::from_canonical_u8(self.mapping_slot));
+        let (inputs, inner_mapping_slot) =
+            self.assign_slot_and_mapping_key(pw, wires.mapping_slot, &wires.outer_key);
 
-        let padded_slot = left_pad32(&[self.mapping_slot]);
-        let outer_key = left_pad32(&self.mapping_key);
         let inner_key = left_pad32(inner_key);
-        wires.outer_key.assign_bytes(pw, &outer_key);
         wires.inner_key.assign_bytes(pw, &inner_key);
-        // left_pad32(outer_key) || left_pad32(slot)
-        let inputs = outer_key.into_iter().chain(padded_slot).collect_vec();
-        let inner_mapping_slot = keccak256(&inputs);
+
         // Assign the keccak values for inner mapping slot.
         KeccakCircuit::<{ INPUT_PADDED_LEN }>::assign_byte_keccak(
             pw,
@@ -659,6 +645,34 @@ impl MappingSlot {
             .collect_vec();
         let base = keccak256(&inputs).try_into().unwrap();
         KeccakStructMPT::assign(pw, &wires.keccak_mpt, inputs, base, offset);
+    }
+
+    // Assign the slot and mapping key.
+    // Return the input and keccak output as base location.
+    fn assign_slot_and_mapping_key<F: RichField>(
+        &self,
+        pw: &mut PartialWitness<F>,
+        mapping_slot: Target,
+        mapping_key: &Array<Target, MAPPING_KEY_LEN>,
+    ) -> (Vec<u8>, [u8; HASH_LEN]) {
+        // Pad the slot and mapping key.
+        let padded_slot = left_pad32(&[self.mapping_slot]);
+        let padded_key = left_pad32(&self.mapping_key);
+
+        // Assign the mapping slot.
+        pw.set_target(mapping_slot, F::from_canonical_u8(self.mapping_slot));
+
+        // Assign the mapping key.
+        mapping_key.assign_bytes(pw, &padded_key);
+
+        // Compute the entire expected array to derive the MPT key:
+        // keccak(left_pad32(mapping_key), left_pad32(mapping_slot))
+        let inputs = padded_key.into_iter().chain(padded_slot).collect_vec();
+
+        // Then compute the expected resulting hash for MPT key derivation.
+        let base_location = keccak256(&inputs).try_into().unwrap();
+
+        (inputs, base_location)
     }
 }
 
