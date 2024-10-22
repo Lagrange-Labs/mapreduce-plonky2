@@ -14,9 +14,9 @@ use mp2_common::{
         deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
         serialize_long_array,
     },
-    types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{FromFields, HashBuilder, ToFields, ToTargets},
+    types::{CBuilder, CURVE_TARGET_LEN},
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
+    utils::{FromFields, FromTargets, HashBuilder, ToFields, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{
@@ -32,21 +32,18 @@ use plonky2::{
         proof::ProofWithPublicInputsTarget,
     },
 };
+use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
-    computational_hash_ids::{
+    aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds}, computational_hash_ids::{
         ColumnIDs, ComputationalHashCache, HashPermutation, Operation, Output,
         PlaceholderIdentifier,
-    },
-    public_inputs::PublicInputs,
-    universal_circuit::{
+    }, public_inputs::PublicInputs, universal_circuit::{
         basic_operation::BasicOperationInputs, column_extraction::ColumnExtractionValueWires,
         universal_circuit_inputs::OutputItem,
-    },
-    PI_LEN,
+    }, PI_LEN
 };
 
 use super::{
@@ -946,6 +943,140 @@ where
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct CurveOrU256<T>([T; CURVE_TARGET_LEN]);
+
+impl<T: Clone + Debug> CurveOrU256<T> {
+    fn from_slice(t: &[T]) -> Self {
+        let mut result = t.to_vec();
+        let diff = (CURVE_TARGET_LEN - result.len()).max(0);
+        result.extend_from_slice(vec![result[0].clone(); diff].as_slice());
+        Self(result.try_into().unwrap())
+    }
+
+    fn to_u256_raw(&self) -> &[T] {
+        &self.0[..NUM_LIMBS]
+    }
+}
+
+pub(crate) type CurveOrU256Target = CurveOrU256<Target>;
+
+impl CurveOrU256Target {
+    pub(crate) fn as_curve_target(&self) -> CurveTarget {
+        CurveTarget::from_targets(self.0.as_slice())
+    }
+
+    pub(crate) fn as_u256_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_u256_raw())
+    }
+}
+
+impl FromTargets for CurveOrU256Target {
+    fn from_targets(t: &[Target]) -> Self {
+        Self::from_slice(t)
+    }
+}
+
+impl ToTargets for CurveOrU256Target {
+    fn to_targets(&self) -> Vec<Target> {
+        self.0.to_vec()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OutputValuesTarget<const MAX_NUM_RESULTS: usize> 
+where [(); MAX_NUM_RESULTS-1]:,
+{
+    pub(crate) first_output: CurveOrU256Target,
+    pub(crate) other_outputs: [UInt256Target; MAX_NUM_RESULTS-1],
+}
+
+impl<const MAX_NUM_RESULTS: usize> OutputValuesTarget<MAX_NUM_RESULTS> 
+where [(); MAX_NUM_RESULTS-1]:,
+{
+    pub(crate) fn value_target_at_index(&self, i: usize) -> UInt256Target
+    {
+        if i == 0 {
+            self.first_output.as_u256_target()
+        } else {
+            self.other_outputs[i - 1].clone()
+        }
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> ToTargets for OutputValuesTarget<MAX_NUM_RESULTS> 
+where [(); MAX_NUM_RESULTS-1]:,
+{
+    fn to_targets(&self) -> Vec<Target> {
+        self.first_output.to_targets().into_iter()
+            .chain(
+                self.other_outputs.iter().flat_map(|out|
+                    out.to_targets()
+                )
+            ).collect()
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> FromTargets for OutputValuesTarget<MAX_NUM_RESULTS> 
+where [(); MAX_NUM_RESULTS-1]:,
+{
+    fn from_targets(t: &[Target]) -> Self {
+        let first_output = CurveOrU256Target::from_targets(&t[..CURVE_TARGET_LEN]);
+        let other_outputs = t[CURVE_TARGET_LEN..].chunks(NUM_LIMBS).map(|chunk|
+            UInt256Target::from_targets(chunk)
+        )
+        .take(MAX_NUM_RESULTS-1)
+        .collect_vec()
+        .try_into()
+        .unwrap();
+
+        Self {
+            first_output,
+            other_outputs,
+        }
+    }
+}
+
+pub(crate) struct OutputValues<const MAX_NUM_RESULTS: usize> 
+where [(); MAX_NUM_RESULTS-1]:,
+{
+    pub(crate) first_output: CurveOrU256<F>,
+    pub(crate) other_outputs: [U256; MAX_NUM_RESULTS-1],
+}
+
+impl<const MAX_NUM_RESULTS: usize> OutputValues<MAX_NUM_RESULTS> 
+where [(); MAX_NUM_RESULTS-1]:,
+{
+    pub(crate) fn first_value_as_curve_point(&self) -> WeierstrassPoint {
+        WeierstrassPoint::from_fields(&self.first_output.0)
+    }
+
+    pub fn first_value_as_u256(&self) -> U256 {
+        let fields = self.first_output.to_u256_raw();
+        U256::from_fields(fields)
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> FromFields<F> for OutputValues<MAX_NUM_RESULTS> 
+where [(); MAX_NUM_RESULTS-1]:,
+{
+    fn from_fields(t: &[F]) -> Self {
+        let first_output = CurveOrU256::from_slice(&t[..CURVE_TARGET_LEN]);
+        let other_outputs = t[CURVE_TARGET_LEN..].chunks(NUM_LIMBS).map(|chunk|
+            U256::from_fields(chunk)
+        )
+        .take(MAX_NUM_RESULTS-1)
+        .collect_vec()
+        .try_into()
+        .unwrap();
+
+        Self {
+            first_output,
+            other_outputs,
+        }
+    }
+}
+
 /// Input wires for the universal query value gadget
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub(crate) struct UniversalQueryValueInputWires<const MAX_NUM_COLUMNS: usize> {
@@ -960,9 +1091,11 @@ pub(crate) struct UniversalQueryValueInputWires<const MAX_NUM_COLUMNS: usize> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct UniversalQueryOutputWires<const MAX_NUM_RESULTS: usize> {
+pub(crate) struct UniversalQueryOutputWires<const MAX_NUM_RESULTS: usize> 
+where [(); MAX_NUM_RESULTS-1]:,
+{
     pub(crate) tree_hash: MembershipHashTarget,
-    pub(crate) values: [Vec<Target>; MAX_NUM_RESULTS],
+    pub(crate) values: OutputValuesTarget<MAX_NUM_RESULTS>,
     pub(crate) count: Target,
     pub(crate) num_overflows: Target,
 }
@@ -971,7 +1104,9 @@ pub(crate) struct UniversalQueryOutputWires<const MAX_NUM_RESULTS: usize> {
 pub(crate) struct UniversalQueryValueWires<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_RESULTS: usize,
-> {
+> 
+where [(); MAX_NUM_RESULTS-1]:,
+{
     pub(crate) input_wires: UniversalQueryValueInputWires<MAX_NUM_COLUMNS>,
     pub(crate) output_wires: UniversalQueryOutputWires<MAX_NUM_RESULTS>,
 }
@@ -1005,6 +1140,7 @@ impl<
     >
 where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); MAX_NUM_RESULTS-1]:,
 {
     pub(crate) fn new(row_cells: &RowCells, is_non_dummy_row: bool) -> Result<Self> {
         let num_columns = row_cells.num_columns();
@@ -1146,22 +1282,18 @@ where
             &hash_input_wires.output_component_wires,
         );
 
-        // compute output_values to be exposed; we call `pad_slice_to_curve_len` to ensure that the
-        // first output value is always padded to the size of a `CurveTarget`
-        let first_output_value = PublicInputs::<_, MAX_NUM_RESULTS>::pad_slice_to_curve_len(
+        // compute output_values to be exposed; we build the first output value as a `CurveOrU256Target`
+        let first_output = CurveOrU256Target::from_targets(
             &output_component_value_wires
                 .first_output_value()
                 .to_targets(),
         );
         // Append the other `MAX_NUM_RESULTS-1` output values
-        let output_values = once(first_output_value)
-            .chain(
-                output_component_value_wires
-                    .other_output_values()
-                    .iter()
-                    .map(|t| t.to_targets()),
-            )
-            .collect_vec();
+        let output_values = OutputValuesTarget {
+            first_output,
+            other_outputs: output_component_value_wires
+            .other_output_values().to_vec().try_into().unwrap(),
+        };
 
         // ensure that `num_overflows` is always 0 in case of dummy rows
         let num_overflows = b.mul(num_overflows, is_non_dummy_row.target);
@@ -1173,7 +1305,7 @@ where
             },
             output_wires: UniversalQueryOutputWires {
                 tree_hash,
-                values: output_values.try_into().unwrap(),
+                values: output_values,
                 count: predicate_value.target,
                 num_overflows,
             },

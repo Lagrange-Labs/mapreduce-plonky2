@@ -188,9 +188,7 @@ where
         let output_values_targets = value_wires
             .output_wires
             .values
-            .into_iter()
-            .flatten()
-            .collect_vec();
+            .to_targets();
 
         PublicInputs::<Target, MAX_NUM_RESULTS>::new(
             &tree_hash.to_targets(),

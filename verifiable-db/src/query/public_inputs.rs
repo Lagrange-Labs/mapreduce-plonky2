@@ -15,6 +15,8 @@ use plonky2::{
 };
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 
+use super::universal_circuit::universal_query_gadget::{CurveOrU256Target, OutputValues, OutputValuesTarget};
+
 /// Query circuits public inputs
 pub enum QueryPublicInputs {
     /// `H`: Hash of the tree
@@ -196,11 +198,6 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         result
     }
 
-    /// Remove the padding introduced by `pad_slice_to_curve_len`
-    pub(crate) fn truncate_slice_to_u256_raw(t: &[T]) -> &[T] {
-        &t[..NUM_LIMBS]
-    }
-
     pub fn from_slice(input: &'a [T]) -> Self {
         assert!(
             input.len() >= Self::total_len(),
@@ -303,24 +300,18 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
     /// Return the first output value as a `CurveTarget`
     pub fn first_value_as_curve_target(&self) -> CurveTarget {
         let targets = self.to_values_raw();
-        CurveTarget::from_targets(&targets[..CURVE_TARGET_LEN])
+        CurveOrU256Target::from_targets(targets).as_curve_target()
     }
 
     /// Return the first output value as a `UInt256Target`
     pub fn first_value_as_u256_target(&self) -> UInt256Target {
-        let targets = Self::truncate_slice_to_u256_raw(self.to_values_raw());
-        UInt256Target::from_targets(targets)
+        let targets = self.to_values_raw();
+        CurveOrU256Target::from_targets(targets).as_u256_target()
     }
 
     /// Return the `UInt256` targets for the last `S-1` values
     pub fn values_target(&self) -> [UInt256Target; S - 1] {
-        let targets = &self.to_values_raw()[CURVE_TARGET_LEN..];
-        targets
-            .chunks(NUM_LIMBS)
-            .map(UInt256Target::from_targets)
-            .collect_vec()
-            .try_into()
-            .unwrap()
+        OutputValuesTarget::from_targets(self.to_values_raw()).other_outputs
     }
 
     /// Return the value as a `UInt256Target` at the specified index
@@ -380,27 +371,23 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputs<'a, F, S> {
+impl<'a, const S: usize> PublicInputs<'a, F, S> 
+where [(); S-1]:,
+{
     pub fn tree_hash(&self) -> HashOut<F> {
         HashOut::try_from(self.to_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
     }
 
     pub fn first_value_as_curve_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(&self.to_values_raw()[..CURVE_TARGET_LEN])
+        OutputValues::<S>::from_fields(&self.to_values_raw()).first_value_as_curve_point()
     }
 
     pub fn first_value_as_u256(&self) -> U256 {
-        let fields = Self::truncate_slice_to_u256_raw(self.to_values_raw());
-        U256::from_fields(fields)
+        OutputValues::<S>::from_fields(&self.to_values_raw()).first_value_as_u256()
     }
 
     pub fn values(&self) -> [U256; S - 1] {
-        self.to_values_raw()[CURVE_TARGET_LEN..]
-            .chunks(NUM_LIMBS)
-            .map(U256::from_fields)
-            .collect_vec()
-            .try_into()
-            .unwrap()
+        OutputValues::<S>::from_fields(&self.to_values_raw()).other_outputs
     }
 
     /// Return the value as a UInt256 at the specified index

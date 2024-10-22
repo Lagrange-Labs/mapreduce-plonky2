@@ -34,6 +34,7 @@ pub(crate) struct RowProcessingGadgetWires<
 where
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
+    [(); MAX_NUM_RESULTS-1]:,
 {
     row_path: MerklePathWithNeighborsTargetInputs<ROW_TREE_MAX_DEPTH>,
     row_node_data: BoundaryRowNodeInfoTarget,
@@ -79,6 +80,7 @@ where
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); MAX_NUM_RESULTS-1]:,
 {
     pub(crate) fn new(
         row_path: MerklePathWithNeighborsGadget<ROW_TREE_MAX_DEPTH>,

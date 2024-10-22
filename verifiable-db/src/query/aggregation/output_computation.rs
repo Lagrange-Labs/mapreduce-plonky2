@@ -2,9 +2,10 @@
 
 use crate::query::{
     computational_hash_ids::{AggregationOperation, Identifiers},
-    public_inputs::PublicInputs,
+    public_inputs::PublicInputs, universal_circuit::universal_query_gadget::{CurveOrU256Target, OutputValuesTarget},
 };
 use alloy::primitives::U256;
+use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     group_hashing::CircuitBuilderGroupHashing,
@@ -56,22 +57,23 @@ pub(crate) fn compute_dummy_output_targets<const S: usize>(
     outputs
 }
 
-/// Compute the node output item at the specified index by the proofs,
-/// and return the output item with the overflow number.
-pub(crate) fn compute_output_item<const S: usize>(
-    b: &mut CBuilder,
-    i: usize,
-    proofs: &[&PublicInputs<Target, S>],
-) -> (Vec<Target>, Target)
-where
-    [(); S - 1]:,
+impl<const MAX_NUM_RESULTS: usize> OutputValuesTarget<MAX_NUM_RESULTS> 
+where [(); MAX_NUM_RESULTS-1]:,
 {
-    let zero = b.zero();
+    /// Aggregate the i-th output values in `outputs` according to the aggregation operation specified in
+    /// `op`. It returns the targets representing the aggregated output and a target yielding the number
+    /// of overflows occurred during aggregation
+    pub(crate) fn aggregate_outputs(
+        b: &mut CBuilder,
+        outputs: &[Self],
+        op: Target,
+        i: usize,
+    ) -> (Vec<Target>, Target) {
+        let zero = b.zero();
     let u32_zero = b.zero_u32();
     let u256_zero = b.zero_u256();
 
-    let proof0 = &proofs[0];
-    let op = proof0.operation_ids_target()[i];
+    let out0 = &outputs[0];
 
     let [op_id, op_min, op_max, op_sum, op_avg] = [
         AggregationOperation::IdOp,
@@ -88,14 +90,9 @@ where
     let is_op_sum = b.is_equal(op, op_sum);
     let is_op_avg = b.is_equal(op, op_avg);
 
-    // Check that the all proofs are employing the same aggregation operation.
-    proofs[1..]
-        .iter()
-        .for_each(|p| b.connect(p.operation_ids_target()[i], op));
-
     // Compute the SUM, MIN and MAX values.
     let mut sum_overflow = zero;
-    let mut sum_value = proof0.value_target_at_index(i);
+    let mut sum_value = out0.value_target_at_index(i);
     if i == 0 {
         // If it's the first proof and the operation is ID, the value is a curve point,
         // which each field may be out of range of an Uint32 (to combine an Uint256).
@@ -103,7 +100,7 @@ where
     }
     let mut min_value = sum_value.clone();
     let mut max_value = sum_value.clone();
-    for p in proofs[1..].iter() {
+    for p in outputs[1..].iter() {
         // Get the current proof value.
         let mut value = p.value_target_at_index(i);
         if i == 0 {
@@ -133,16 +130,16 @@ where
 
     if i == 0 {
         // We always accumulate order-agnostic digest of the proofs for the first item.
-        let points: Vec<_> = proofs
+        let points: Vec<_> = outputs
             .iter()
-            .map(|p| p.first_value_as_curve_target())
+            .map(|out| out.first_output.as_curve_target())
             .collect();
         let digest = b.add_curve_point(&points);
         let a = b.curve_select(
             is_op_id,
             digest,
             // Pad the current output to `CURVE_TARGET_LEN` for the first item.
-            CurveTarget::from_targets(&PublicInputs::<_, S>::pad_slice_to_curve_len(&output)),
+            CurveOrU256Target::from_targets(&output).as_curve_target(),
         );
         output = a.to_targets();
     }
@@ -153,6 +150,33 @@ where
     let overflow = b.mul(is_op_sum_or_avg.target, sum_overflow);
 
     (output, overflow)
+    }
+}
+
+/// Compute the node output item at the specified index by the proofs,
+/// and return the output item with the overflow number.
+pub(crate) fn compute_output_item<const S: usize>(
+    b: &mut CBuilder,
+    i: usize,
+    proofs: &[&PublicInputs<Target, S>],
+) -> (Vec<Target>, Target)
+where
+    [(); S - 1]:,
+{
+
+    let proof0 = &proofs[0];
+    let op = proof0.operation_ids_target()[i];
+
+    // Check that the all proofs are employing the same aggregation operation.
+    proofs[1..]
+        .iter()
+        .for_each(|p| b.connect(p.operation_ids_target()[i], op));
+
+    let outputs = proofs.iter().map(|p| 
+        OutputValuesTarget::from_targets(p.to_values_raw())
+    ).collect_vec();
+
+    OutputValuesTarget::aggregate_outputs(b, &outputs, op, i)
 }
 
 #[cfg(test)]

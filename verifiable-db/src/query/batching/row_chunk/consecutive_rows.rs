@@ -1,47 +1,7 @@
-//! This module contains data structures and gadgets employed to build and aggregate
-//! row chunks. A row chunk is a set of rows that have already been aggregated 
-//! and whose rows are all proven to be consecutive. The first and last rows in
-//! the chunk are labelled as the `left_boundary_row` and the `right_boundary_row`,
-//! respectively, and are the rows employed to aggregate 2 different chunks.
-
 use mp2_common::{types::CBuilder, u256::{CircuitBuilderU256, UInt256Target}, utils::HashBuilder, F};
-use plonky2::{hash::hash_types::HashOutTarget, iop::target::BoolTarget, field::types::Field};
+use plonky2::{iop::target::BoolTarget, field::types::Field};
 
-use crate::query::{merkle_path::NeighborInfoTarget, universal_circuit::universal_query_gadget::UniversalQueryOutputWires};
-
-
-/// Data structure containing the wires representing the data realted to the node of 
-/// the row/index tree containing a row that is on the boundary of a row chunk. 
-#[derive(Clone, Debug)]
-pub(crate) struct BoundaryRowNodeInfoTarget {
-    /// Hash of the node storing the row in the row/index tree
-    pub(crate) end_node_hash: HashOutTarget,
-    /// Data about the predecessor of end_node in the row/index tree
-    pub(crate) predecessor_info: NeighborInfoTarget,
-    /// Data about the predecessor of end_node in the row/index tree
-    pub(crate) successor_info: NeighborInfoTarget,
-}
-
-/// Data structure containing the `BoundaryRowNodeInfoTarget` wires for the nodes
-/// realted to a given boundary row. In particular, it contains the 
-/// `BoundaryRowNodeInfoTarget` related to the following nodes:
-/// - `row_node`: the node of the rows tree containing the given boundary row
-/// - `index_node`: the node of the index tree that stores the rows tree containing
-///     `row_node` 
-pub(crate) struct BoundaryRowData {
-    row_node_info: BoundaryRowNodeInfoTarget,
-    index_node_info: BoundaryRowNodeInfoTarget,
-}
-
-/// Data structure containing the wires associated to a given row chunk
-pub(crate) struct RowChunkData<
-    const MAX_NUM_RESULTS: usize,
->
-{
-    left_boundary_row: BoundaryRowData,
-    right_boundary_row: BoundaryRowData,
-    chunk_outputs: UniversalQueryOutputWires<MAX_NUM_RESULTS>,
-}
+use super::{BoundaryRowData, BoundaryRowNodeInfoTarget};
 
 fn are_consecutive_nodes(
     b: &mut CBuilder,
