@@ -150,35 +150,14 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
     }
 }
 
-/*
 #[cfg(test)]
 pub(crate) mod test {
-
+    use super::*;
     use alloy::primitives::U256;
-    use mp2_common::{
-        group_hashing::{cond_field_hashed_scalar_mul, map_to_curve_point},
-        poseidon::H,
-        utils::ToFields,
-        C, D, F,
-    };
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::weierstrass_to_point,
-    };
-    use plonky2::{
-        field::types::{Field, Sample},
-        hash::hash_types::HashOut,
-        iop::{
-            target::Target,
-            witness::{PartialWitness, WitnessWrite},
-        },
-        plonk::{circuit_builder::CircuitBuilder, config::Hasher},
-    };
-    use plonky2_ecgfp5::curve::curve::Point;
-
-    use crate::{cells_tree, row_tree::public_inputs::PublicInputs};
-
-    use super::{FullNodeCircuit, FullNodeWires, *};
+    use itertools::Itertools;
+    use mp2_common::{utils::ToFields, C, D, F};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::{iop::witness::WitnessWrite, plonk::config::Hasher};
 
     #[derive(Clone, Debug)]
     struct TestFullNodeCircuit {
@@ -211,82 +190,77 @@ pub(crate) mod test {
         }
     }
 
-    pub(crate) fn generate_random_pi(min: usize, max: usize, is_merge: bool) -> Vec<F> {
-        let hash = HashOut::rand();
-        let digest = Point::rand();
-        let min = U256::from(min);
-        let max = U256::from(max);
-        let merge = F::from_canonical_usize(is_merge as usize);
-        PublicInputs::new(
-            &hash.to_fields(),
-            &digest.to_weierstrass().to_fields(),
-            &min.to_fields(),
-            &max.to_fields(),
-            &[merge],
-        )
-        .to_vec()
-    }
-
     fn test_row_tree_full_circuit(is_multiplier: bool, cells_multiplier: bool) {
-        let cells_point = Point::rand();
-        let ind_cell_digest = cells_point.to_weierstrass().to_fields();
-        let mul_cell_digest = if cells_multiplier {
-            cells_point.to_weierstrass().to_fields()
-        } else {
-            Point::NEUTRAL.to_fields()
-        };
-        let cells_hash = HashOut::rand().to_fields();
-        let cells_pi_struct =
-            cells_tree::PublicInputs::new(&cells_hash, &ind_cell_digest, &mul_cell_digest);
-        let cells_pi = cells_pi_struct.to_vec();
-
+        let mut row = Row::sample(is_multiplier);
+        row.cell.value = U256::from(18);
+        let id = row.cell.identifier;
+        let cells_pi = cells_tree::PublicInputs::sample(cells_multiplier);
+        // Compute the row digest.
+        let row_digest = row.digest(&cells_tree::PublicInputs::from_slice(&cells_pi));
+        let node_circuit = FullNodeCircuit::from(row.clone());
         let (left_min, left_max) = (10, 15);
         // this should work since we allow multipleicities of indexes in the row tree
         let (right_min, right_max) = (18, 30);
-        let value = U256::from(18); // 15 < 18 < 23
-        let identifier = F::rand();
-        let tuple = Cell::new(identifier, value, is_multiplier);
-        let node_circuit = FullNodeCircuit::from(tuple.clone());
-        let left_pi = generate_random_pi(left_min, left_max, is_multiplier || cells_multiplier);
-        let right_pi = generate_random_pi(right_min, right_max, is_multiplier || cells_multiplier);
+        let left_pi = PublicInputs::sample(
+            row_digest.multiplier_vd,
+            row_digest.row_id_multiplier.clone(),
+            left_min,
+            left_max,
+            is_multiplier || cells_multiplier,
+        );
+        let right_pi = PublicInputs::sample(
+            row_digest.multiplier_vd,
+            row_digest.row_id_multiplier.clone(),
+            right_min,
+            right_max,
+            is_multiplier || cells_multiplier,
+        );
         let test_circuit = TestFullNodeCircuit {
             circuit: node_circuit,
             left_pi: left_pi.clone(),
             right_pi: right_pi.clone(),
-            cells_pi,
+            cells_pi: cells_pi.clone(),
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        let left_pis = PublicInputs::from_slice(&left_pi);
-        let right_pis = PublicInputs::from_slice(&right_pi);
+        let left_pi = PublicInputs::from_slice(&left_pi);
+        let right_pi = PublicInputs::from_slice(&right_pi);
+        let cells_pi = cells_tree::PublicInputs::from_slice(&cells_pi);
 
-        assert_eq!(U256::from(left_min), pi.min_value_u256());
-        assert_eq!(U256::from(right_max), pi.max_value_u256());
-        // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
-        let left_hash = PublicInputs::from_slice(&left_pi).root_hash_hashout();
-        let right_hash = PublicInputs::from_slice(&right_pi).root_hash_hashout();
-        let inputs = left_hash
-            .to_fields()
-            .iter()
-            .chain(right_hash.to_fields().iter())
-            .chain(left_pis.min_value_u256().to_fields().iter())
-            .chain(right_pis.max_value_u256().to_fields().iter())
-            .chain(Cell::new(identifier, value, false).to_fields().iter())
-            .chain(cells_hash.iter())
-            .cloned()
-            .collect::<Vec<_>>();
-        let hash = H::hash_no_pad(&inputs);
-        assert_eq!(hash, pi.root_hash_hashout());
-
-        // final_digest = HashToInt(mul_digest) * D(ind_digest) + p1.digest() + p2.digest()
-        let split_digest = tuple.split_and_accumulate_digest(cells_pi_struct.split_digest_point());
-        let row_digest = split_digest.cond_combine_to_row_digest();
-
-        let p1dr = weierstrass_to_point(&PublicInputs::from_slice(&left_pi).rows_digest_field());
-        let p2dr = weierstrass_to_point(&PublicInputs::from_slice(&right_pi).rows_digest_field());
-        let result_digest = p1dr + p2dr + row_digest;
-        assert_eq!(result_digest.to_weierstrass(), pi.rows_digest_field());
-        assert_eq!(split_digest.is_merge_case(), pi.is_merge_flag());
+        // Check root hash
+        {
+            // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
+            let inputs = left_pi
+                .root_hash()
+                .to_fields()
+                .into_iter()
+                .chain(right_pi.root_hash().to_fields())
+                .chain(left_pi.min_value().to_fields())
+                .chain(right_pi.max_value().to_fields())
+                .chain(once(id))
+                .chain(cells_pi.node_hash().to_fields())
+                .collect_vec();
+            let hash = H::hash_no_pad(&inputs);
+            assert_eq!(hash, pi.root_hash());
+        }
+        // Check individual digest
+        assert_eq!(
+            pi.individual_digest_point(),
+            row_digest.individual_vd.to_weierstrass()
+        );
+        // Check multiplier digest
+        assert_eq!(
+            pi.multiplier_digest_point(),
+            row_digest.multiplier_vd.to_weierstrass()
+        );
+        // Check row ID multiplier
+        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
+        // Check minimum value
+        assert_eq!(pi.min_value(), U256::from(left_min));
+        // Check maximum value
+        assert_eq!(pi.max_value(), U256::from(right_max));
+        // Check merge flag
+        assert_eq!(pi.merge_flag(), row_digest.is_merge);
     }
 
     #[test]
@@ -309,4 +283,3 @@ pub(crate) mod test {
         test_row_tree_full_circuit(true, true);
     }
 }
-*/

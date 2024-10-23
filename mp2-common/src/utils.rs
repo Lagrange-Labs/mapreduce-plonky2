@@ -373,6 +373,7 @@ impl<F: RichField> ToFields<F> for HashOut<F> {
         self.elements.to_vec()
     }
 }
+
 pub trait Fieldable<F: RichField> {
     fn to_field(&self) -> F;
 }

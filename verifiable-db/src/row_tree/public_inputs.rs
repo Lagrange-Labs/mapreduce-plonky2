@@ -92,7 +92,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
     }
 
     pub const fn total_len() -> usize {
-        Self::to_range(RowsTreePublicInputs::RowIdMultiplier).end
+        Self::to_range(RowsTreePublicInputs::MergeFlag).end
     }
 
     pub fn to_root_hash_raw(&self) -> &[T] {
@@ -263,7 +263,7 @@ impl<'a> PublicInputs<'a, F> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use mp2_common::{utils::ToFields, C, D, F};
     use mp2_test::{
@@ -280,6 +280,38 @@ mod tests {
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
     use std::{array, slice};
+
+    impl<'a> PublicInputs<'a, F> {
+        pub(crate) fn sample(
+            multiplier_digest: Point,
+            row_id_multiplier: BigUint,
+            min: usize,
+            max: usize,
+            is_merge: bool,
+        ) -> Vec<F> {
+            let h = HashOut::rand().to_fields();
+            let individual_digest = Point::rand();
+            let [individual_digest, multiplier_digest] =
+                [individual_digest, multiplier_digest].map(|p| p.to_weierstrass().to_fields());
+            let row_id_multiplier = row_id_multiplier
+                .to_u32_digits()
+                .into_iter()
+                .map(F::from_canonical_u32)
+                .collect_vec();
+            let [min, max] = [min, max].map(|v| U256::from(v).to_fields());
+            let merge = F::from_bool(is_merge);
+            PublicInputs::new(
+                &h,
+                &individual_digest,
+                &multiplier_digest,
+                &row_id_multiplier,
+                &min,
+                &max,
+                &[merge],
+            )
+            .to_vec()
+        }
+    }
 
     #[derive(Clone, Debug)]
     struct TestPublicInputs<'a> {

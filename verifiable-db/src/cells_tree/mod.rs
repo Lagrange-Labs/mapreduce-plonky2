@@ -165,14 +165,11 @@ pub(crate) mod tests {
     use super::*;
     use mp2_common::{
         types::CURVE_TARGET_LEN,
-        utils::{Fieldable, FromFields, ToFields},
+        utils::{Fieldable, FromFields},
         C, D, F,
     };
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
-    use plonky2::{field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::field::types::Sample;
     use plonky2_ecgfp5::{
         curve::curve::Point,
         gadgets::curve::{CircuitBuilderEcGFp5, PartialWitnessCurve},
@@ -186,8 +183,7 @@ pub(crate) mod tests {
 
             let identifier = rng.gen::<u32>().to_field();
             let value = U256::from_limbs(rng.gen());
-            let mpt_metadata =
-                HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
+            let mpt_metadata = HashOut::rand();
 
             Cell::new(identifier, value, is_multiplier, mpt_metadata)
         }
@@ -201,7 +197,7 @@ pub(crate) mod tests {
     }
 
     impl<'a> UserCircuit<F, D> for TestCellCircuit<'a> {
-        // Cell wires + child values digest + child metadata digest
+        // Cell wire + child values digest + child metadata digest
         type Wires = (CellWire, SplitDigestTarget, SplitDigestTarget);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
