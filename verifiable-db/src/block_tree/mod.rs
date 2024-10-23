@@ -115,20 +115,32 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::*;
+    use crate::row_tree;
     use alloy::primitives::U256;
-    use mp2_common::{keccak::PACKED_HASH_LEN, poseidon::HASH_TO_INT_LEN, utils::ToFields, F};
-    use mp2_test::utils::random_vector;
+    use mp2_common::{
+        keccak::PACKED_HASH_LEN,
+        poseidon::HASH_TO_INT_LEN,
+        types::CBuilder,
+        utils::{FromFields, ToFields},
+        C, F,
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::random_vector,
+    };
     use num::BigUint;
     use plonky2::{
         field::types::{Field, Sample},
         hash::hash_types::NUM_HASH_OUT_ELTS,
-        iop::target::Target,
+        iop::{
+            target::Target,
+            witness::{PartialWitness, WitnessWrite},
+        },
     };
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{rngs::ThreadRng, Rng};
+    use rand::{rngs::ThreadRng, thread_rng, Rng};
     use std::array;
-
-    use crate::row_tree;
 
     pub(crate) type TestPITargets<'a> = crate::extraction::test::PublicInputs<'a, Target>;
     pub(crate) type TestPIField<'a> = crate::extraction::test::PublicInputs<'a, F>;
@@ -195,5 +207,69 @@ pub(crate) mod tests {
             &is_merge,
         )
         .to_vec()
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestFinalDigestCircuit<'a> {
+        extraction_pi: &'a [F],
+        rows_tree_pi: &'a [F],
+    }
+
+    impl<'a> UserCircuit<F, D> for TestFinalDigestCircuit<'a> {
+        // Extraction PI + rows tree PI
+        type Wires = (Vec<Target>, Vec<Target>);
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let extraction_pi = b.add_virtual_targets(TestPITargets::TOTAL_LEN);
+            let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::total_len());
+
+            let final_digest = compute_final_digest_target::<TestPITargets>(
+                b,
+                &TestPITargets::from_slice(&extraction_pi),
+                &row_tree::PublicInputs::from_slice(&rows_tree_pi),
+            );
+
+            b.register_curve_public_input(final_digest);
+
+            (extraction_pi, rows_tree_pi)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            pw.set_target_arr(&wires.0, self.extraction_pi);
+            pw.set_target_arr(&wires.1, self.rows_tree_pi);
+        }
+    }
+
+    #[test]
+    fn test_block_tree_final_digest() {
+        test_final_digest(true);
+        test_final_digest(false);
+    }
+
+    fn test_final_digest(is_merge_case: bool) {
+        let rng = &mut thread_rng();
+
+        let rows_tree_pi = &random_rows_tree_pi(rng, is_merge_case);
+        let exp_final_digest = compute_final_digest(
+            is_merge_case,
+            &row_tree::PublicInputs::from_slice(rows_tree_pi),
+        );
+        let block_number = U256::from_limbs(rng.gen());
+        let extraction_pi = &random_extraction_pi(
+            rng,
+            block_number,
+            &exp_final_digest.to_fields(),
+            is_merge_case,
+        );
+
+        let test_circuit = TestFinalDigestCircuit {
+            extraction_pi,
+            rows_tree_pi,
+        };
+
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+        let final_digest = Point::from_fields(&proof.public_inputs);
+
+        assert_eq!(final_digest, exp_final_digest);
     }
 }

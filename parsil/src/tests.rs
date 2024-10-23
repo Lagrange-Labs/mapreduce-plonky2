@@ -149,6 +149,7 @@ fn test_serde_circuit_pis() {
 }
 
 #[test]
+#[ignore = "wait for non-aggregation SELECT to come back"]
 fn isolation() {
     fn isolated_to_string(q: &str, lo_sec: bool, hi_sec: bool) -> String {
         let settings = ParsilSettings {
