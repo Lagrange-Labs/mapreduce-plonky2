@@ -2,7 +2,7 @@
 //! an existing node (or if there is no existing node, which happens for the
 //! first block number).
 
-use super::{compute_final_digest, compute_index_digest, public_inputs::PublicInputs};
+use super::{compute_final_digest_target, compute_index_digest, public_inputs::PublicInputs};
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
@@ -54,7 +54,7 @@ impl LeafCircuit {
 
         let extraction_pi = E::PI::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
-        let final_digest = compute_final_digest::<E>(b, &extraction_pi, &rows_tree_pi);
+        let final_digest = compute_final_digest_target::<E>(b, &extraction_pi, &rows_tree_pi);
 
         // in our case, the extraction proofs extracts from the blockchain and sets
         // the block number as the primary index
@@ -208,29 +208,24 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{
-        block_tree::tests::{TestPIField, TestPITargets},
-        extraction,
-    };
-
     use super::{
         super::tests::{random_extraction_pi, random_rows_tree_pi},
         *,
+    };
+    use crate::{
+        block_tree::{
+            compute_final_digest,
+            tests::{TestPIField, TestPITargets},
+        },
+        extraction,
     };
     use alloy::primitives::U256;
     use mp2_common::{
         poseidon::{hash_to_int_value, H},
         utils::{Fieldable, ToFields},
     };
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::weierstrass_to_point,
-    };
-    use plonky2::{
-        field::types::{Field, Sample},
-        hash::hash_types::HashOut,
-        plonk::config::Hasher,
-    };
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
     use rand::{thread_rng, Rng};
 
@@ -248,6 +243,7 @@ pub mod tests {
     }
 
     pub fn compute_expected_set_digest(
+        is_merge_case: bool,
         identifier: F,
         value: Vec<F>,
         rows_tree_pi: row_tree::PublicInputs<F>,
@@ -258,8 +254,7 @@ pub mod tests {
         let hash = H::hash_no_pad(&inputs);
         let int = hash_to_int_value(hash);
         let scalar = Scalar::from_noncanonical_biguint(int);
-        let point = rows_tree_pi.individual_digest_point();
-        let point = weierstrass_to_point(&point);
+        let point = compute_final_digest(is_merge_case, &rows_tree_pi);
         point * scalar
     }
     #[derive(Clone, Debug)]
@@ -295,14 +290,27 @@ pub mod tests {
 
     #[test]
     fn test_block_index_leaf_circuit() {
+        test_leaf_circuit(true);
+        test_leaf_circuit(false);
+    }
+
+    fn test_leaf_circuit(is_merge_case: bool) {
         let mut rng = thread_rng();
 
         let block_id = rng.gen::<u32>().to_field();
         let block_number = U256::from_limbs(rng.gen::<[u64; 4]>());
 
-        let row_digest = Point::sample(&mut rng).to_weierstrass().to_fields();
-        let extraction_pi = &random_extraction_pi(&mut rng, block_number, &row_digest, false);
-        let rows_tree_pi = &random_rows_tree_pi(&mut rng, &row_digest, false);
+        let rows_tree_pi = &random_rows_tree_pi(&mut rng, is_merge_case);
+        let final_digest = compute_final_digest(
+            is_merge_case,
+            &row_tree::PublicInputs::from_slice(rows_tree_pi),
+        );
+        let extraction_pi = &random_extraction_pi(
+            &mut rng,
+            block_number,
+            &final_digest.to_fields(),
+            is_merge_case,
+        );
 
         let test_circuit = TestLeafCircuit {
             c: LeafCircuit {
@@ -368,8 +376,12 @@ pub mod tests {
         }
         // Check new node digest
         {
-            let exp_digest =
-                compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
+            let exp_digest = compute_expected_set_digest(
+                is_merge_case,
+                block_id,
+                block_number.to_vec(),
+                rows_tree_pi,
+            );
             assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
         }
     }

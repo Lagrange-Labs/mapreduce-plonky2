@@ -1,7 +1,7 @@
 //! This circuit is employed when the new node is inserted as parent of an existing node,
 //! referred to as old node.
 
-use super::{compute_final_digest, compute_index_digest, public_inputs::PublicInputs};
+use super::{compute_final_digest_target, compute_index_digest, public_inputs::PublicInputs};
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
@@ -83,7 +83,7 @@ impl ParentCircuit {
 
         let extraction_pi = E::PI::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
-        let final_digest = compute_final_digest::<E>(b, &extraction_pi, &rows_tree_pi);
+        let final_digest = compute_final_digest_target::<E>(b, &extraction_pi, &rows_tree_pi);
 
         let block_number = extraction_pi.primary_index_value();
 
@@ -276,6 +276,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::block_tree::{
+        compute_final_digest,
         leaf::tests::{compute_expected_hash, compute_expected_set_digest},
         tests::{TestPIField, TestPITargets},
     };
@@ -292,10 +293,7 @@ mod tests {
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
-    use plonky2::{
-        field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS, plonk::config::Hasher,
-    };
-    use plonky2_ecgfp5::curve::curve::Point;
+    use plonky2::{hash::hash_types::NUM_HASH_OUT_ELTS, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
 
     #[derive(Clone, Debug)]
@@ -332,18 +330,29 @@ mod tests {
 
     #[test]
     fn test_block_index_parent_circuit() {
+        test_parent_circuit(true);
+        test_parent_circuit(false);
+    }
+
+    fn test_parent_circuit(is_merge_case: bool) {
         let mut rng = thread_rng();
 
         let index_identifier = rng.gen::<u32>().to_field();
-        let [old_index_value, old_min, old_max] =
-            [0; 3].map(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
+        let [old_index_value, old_min, old_max] = [0; 3].map(|_| U256::from_limbs(rng.gen()));
         let [left_child, right_child, old_rows_tree_hash] =
             [0; 3].map(|_| HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields()));
 
-        let row_digest = Point::sample(&mut rng).to_weierstrass().to_fields();
-        let extraction_pi =
-            &random_extraction_pi(&mut rng, old_max + U256::from(1), &row_digest, true);
-        let rows_tree_pi = &random_rows_tree_pi(&mut rng, &row_digest, true);
+        let rows_tree_pi = &random_rows_tree_pi(&mut rng, is_merge_case);
+        let final_digest = compute_final_digest(
+            is_merge_case,
+            &row_tree::PublicInputs::from_slice(rows_tree_pi),
+        );
+        let extraction_pi = &random_extraction_pi(
+            &mut rng,
+            old_max + U256::from(1),
+            &final_digest.to_fields(),
+            is_merge_case,
+        );
 
         let test_circuit = TestParentCircuit {
             c: ParentCircuit {
@@ -429,8 +438,12 @@ mod tests {
         }
         // Check new node digest
         {
-            let exp_digest =
-                compute_expected_set_digest(index_identifier, block_number.to_vec(), rows_tree_pi);
+            let exp_digest = compute_expected_set_digest(
+                is_merge_case,
+                index_identifier,
+                block_number.to_vec(),
+                rows_tree_pi,
+            );
 
             assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
         }

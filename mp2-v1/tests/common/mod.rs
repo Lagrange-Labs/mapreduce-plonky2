@@ -51,7 +51,7 @@ fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
         .proof
         .public_inputs;
     verifiable_db::cells_tree::PublicInputs::from_slice(&root_pi)
-        .root_hash_hashout()
+        .node_hash()
         .to_bytes()
         .try_into()
         .unwrap()
@@ -63,7 +63,7 @@ fn row_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
         .proof
         .public_inputs;
     verifiable_db::row_tree::PublicInputs::from_slice(&root_pi)
-        .root_hash_hashout()
+        .root_hash()
         .to_bytes()
         .try_into()
         .unwrap()

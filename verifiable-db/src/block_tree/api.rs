@@ -274,7 +274,10 @@ mod tests {
         *,
     };
     use crate::{
-        block_tree::leaf::tests::{compute_expected_hash, compute_expected_set_digest},
+        block_tree::{
+            compute_final_digest,
+            leaf::tests::{compute_expected_hash, compute_expected_set_digest},
+        },
         extraction, row_tree,
     };
     use mp2_common::{
@@ -288,7 +291,6 @@ mod tests {
         iop::target::Target,
         plonk::config::Hasher,
     };
-    use plonky2_ecgfp5::curve::curve::Point;
     use rand::{rngs::ThreadRng, thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
     use std::iter;
@@ -346,10 +348,9 @@ mod tests {
         fn generate_rows_tree_proof(
             &self,
             rng: &mut ThreadRng,
-            row_digest: &[F],
             is_merge_case: bool,
         ) -> Result<ProofWithVK> {
-            let pi = random_rows_tree_pi(rng, row_digest, is_merge_case);
+            let pi = random_rows_tree_pi(rng, is_merge_case);
 
             let proof = self
                 .rows_tree_set
@@ -358,20 +359,23 @@ mod tests {
 
             Ok(ProofWithVK::from((proof[0].clone(), vk)))
         }
+
         fn generate_leaf_proof(
             &self,
             rng: &mut ThreadRng,
             block_id: F,
             block_number: U256,
         ) -> Result<ProofWithVK> {
-            let row_digest = Point::sample(rng).to_weierstrass().to_fields();
-            let extraction_proof =
-                self.generate_extraction_proof(rng, block_number, &row_digest, true)?;
-            let rows_tree_proof = self.generate_rows_tree_proof(rng, &row_digest, true)?;
-            let extraction_pi =
-                extraction::test::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
+            let rows_tree_proof = self.generate_rows_tree_proof(rng, true)?;
             let rows_tree_pi =
                 row_tree::PublicInputs::from_slice(&rows_tree_proof.proof.public_inputs);
+            let final_digest = compute_final_digest(true, &rows_tree_pi)
+                .to_weierstrass()
+                .to_fields();
+            let extraction_proof =
+                self.generate_extraction_proof(rng, block_number, &final_digest, true)?;
+            let extraction_pi =
+                extraction::test::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
 
             let input = CircuitInput::new_leaf(
                 block_id.to_canonical_u64(),
@@ -438,8 +442,12 @@ mod tests {
             }
             // Check new node digest
             {
-                let exp_digest =
-                    compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
+                let exp_digest = compute_expected_set_digest(
+                    true,
+                    block_id,
+                    block_number.to_vec(),
+                    rows_tree_pi,
+                );
                 assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
             }
 
@@ -458,14 +466,16 @@ mod tests {
             left_child: HashOut<F>,
             right_child: HashOut<F>,
         ) -> Result<ProofWithVK> {
-            let row_digest = Point::sample(rng).to_weierstrass().to_fields();
-            let extraction_proof =
-                self.generate_extraction_proof(rng, block_number, &row_digest, false)?;
-            let rows_tree_proof = self.generate_rows_tree_proof(rng, &row_digest, false)?;
-            let extraction_pi =
-                extraction::test::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
+            let rows_tree_proof = self.generate_rows_tree_proof(rng, false)?;
             let rows_tree_pi =
                 row_tree::PublicInputs::from_slice(&rows_tree_proof.proof.public_inputs);
+            let final_digest = compute_final_digest(false, &rows_tree_pi)
+                .to_weierstrass()
+                .to_fields();
+            let extraction_proof =
+                self.generate_extraction_proof(rng, block_number, &final_digest, false)?;
+            let extraction_pi =
+                extraction::test::PublicInputs::from_slice(&extraction_proof.proof.public_inputs);
 
             let old_rows_tree_hash =
                 HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
@@ -553,8 +563,12 @@ mod tests {
             }
             // Check new node digest
             {
-                let exp_digest =
-                    compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
+                let exp_digest = compute_expected_set_digest(
+                    false,
+                    block_id,
+                    block_number.to_vec(),
+                    rows_tree_pi,
+                );
                 assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
             }
 
