@@ -1,7 +1,7 @@
 use mp2_common::{types::CBuilder, u256::{CircuitBuilderU256, UInt256Target}, utils::HashBuilder, F};
 use plonky2::{iop::target::BoolTarget, field::types::Field};
 
-use super::{BoundaryRowData, BoundaryRowNodeInfoTarget};
+use super::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget};
 
 fn are_consecutive_nodes(
     b: &mut CBuilder,
@@ -133,8 +133,8 @@ fn are_consecutive_nodes(
 
 pub(crate) fn are_consecutive_rows(
     b: &mut CBuilder,
-    first: &BoundaryRowData,
-    second: &BoundaryRowData,
+    first: &BoundaryRowDataTarget,
+    second: &BoundaryRowDataTarget,
     min_primary: &UInt256Target,
     max_primary: &UInt256Target,
     min_secondary: &UInt256Target,
@@ -190,7 +190,7 @@ mod tests {
 
     use crate::query::{aggregation::{ChildPosition, NodeInfo}, merkle_path::{tests::{build_node, generate_test_tree}, EndNodeInputs, MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs}};
 
-    use super::{are_consecutive_nodes, are_consecutive_rows, BoundaryRowData, BoundaryRowNodeInfoTarget};
+    use super::{are_consecutive_nodes, are_consecutive_rows, BoundaryRowDataTarget, BoundaryRowNodeInfoTarget};
 
     const ROW_TREE_MAX_DEPTH: usize = 10;
     const INDEX_TREE_MAX_DEPTH: usize = 15;
@@ -348,11 +348,11 @@ mod tests {
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let (row_tree_nodes, first_row_node, second_row_node) = TestConsecutiveNodesWires::new(c);
             let (index_tree_nodes, first_index_node, second_index_node) = TestConsecutiveNodesWires::new(c);
-            let first = BoundaryRowData {
+            let first = BoundaryRowDataTarget {
                 row_node_info: first_row_node,
                 index_node_info: first_index_node,
             };
-            let second = BoundaryRowData {
+            let second = BoundaryRowDataTarget {
                 row_node_info: second_row_node,
                 index_node_info: second_index_node,
             };

@@ -9,20 +9,18 @@ use mp2_common::{
     hash::hash_maybe_first,
     poseidon::empty_poseidon_hash,
     serialization::{
-        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array, serialize, deserialize
+        circuit_data_serialization::SerializableRichField, deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array, serialize_long_array
     },
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
-    utils::{Fieldable, FromTargets, HashBuilder, ToTargets},
+    utils::{Fieldable, FromTargets, HashBuilder, SelectTarget, ToTargets},
     D, F,
 };
 use plonky2::{
-    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
-    iop::{
+    field::extension::Extendable, hash::hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS}, iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
-    },
-    plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
+    }, plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut}
 };
 use serde::{Deserialize, Serialize};
 
@@ -152,6 +150,31 @@ impl FromTargets for NeighborInfoTarget {
         }
     }
 }
+
+impl SelectTarget for NeighborInfoTarget {
+    fn select<F: SerializableRichField<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        cond: &BoolTarget,
+        first: &Self,
+        second: &Self,
+    ) -> Self {
+        Self {
+            is_found: BoolTarget::new_unsafe(b.select(*cond, first.is_found.target, second.is_found.target)),
+            is_in_path: BoolTarget::new_unsafe(b.select(*cond, first.is_in_path.target, second.is_in_path.target)),
+            value: b.select_u256(
+                *cond,
+                &first.value,
+                &second.value,
+            ),
+            hash: b.select_hash(
+                *cond,
+                &first.hash,
+                &second.hash,
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Set of input wires for the merkle path with neighbors gadget
 pub struct MerklePathWithNeighborsTargetInputs<const MAX_DEPTH: usize>

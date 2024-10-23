@@ -1,22 +1,22 @@
-use mp2_common::{types::CBuilder, u256::UInt256Target, utils::FromTargets};
+use mp2_common::{types::CBuilder, u256::UInt256Target, utils::{FromTargets, SelectTarget}};
 use plonky2::iop::target::{BoolTarget, Target};
 
 use crate::query::universal_circuit::universal_query_gadget::{OutputValuesTarget, UniversalQueryOutputWires};
 
-use super::{consecutive_rows::are_consecutive_rows, RowChunkData};
+use super::{consecutive_rows::are_consecutive_rows, BoundaryRowDataTarget, RowChunkDataTarget};
 
 
 pub(crate) fn aggregate_chunks<const MAX_NUM_RESULTS: usize>(
     b: &mut CBuilder,
-    first: &RowChunkData<MAX_NUM_RESULTS>,
-    second: &RowChunkData<MAX_NUM_RESULTS>,
+    first: &RowChunkDataTarget<MAX_NUM_RESULTS>,
+    second: &RowChunkDataTarget<MAX_NUM_RESULTS>,
     min_primary: &UInt256Target,
     max_primary: &UInt256Target,
     min_secondary: &UInt256Target,
     max_secondary: &UInt256Target,
     ops: &[Target; MAX_NUM_RESULTS],
     is_second_dummy: &BoolTarget
-) -> RowChunkData<MAX_NUM_RESULTS> 
+) -> RowChunkDataTarget<MAX_NUM_RESULTS> 
 where [(); MAX_NUM_RESULTS-1]:,
 {
     let _true = b._true();
@@ -62,14 +62,75 @@ where [(); MAX_NUM_RESULTS-1]:,
         num_overflows = b.add(num_overflows, overflows);
     }
     
-    RowChunkData {
+    RowChunkDataTarget {
         left_boundary_row: first.left_boundary_row.clone(),
-        right_boundary_row: todo!(),
+        right_boundary_row: // if `is_second_dummy`, then we keep right boundary row of first chunk for the 
+        // aggregated chunk, otherwise the right boundary row of the aggregated chunk will be the right boundary
+        // row of second chunk 
+            BoundaryRowDataTarget::select(
+                b, 
+                is_second_dummy, 
+                &first.right_boundary_row, 
+                &second.right_boundary_row,
+            ),
         chunk_outputs: UniversalQueryOutputWires {
             tree_hash: first.chunk_outputs.tree_hash, //  we check it's the same between the 2 chunks
             values: OutputValuesTarget::from_targets(&output_values),
             count,
             num_overflows,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy::primitives::U256;
+    use mp2_common::{u256::UInt256Target, D, F};
+    use mp2_test::circuit::UserCircuit;
+    use plonky2::{iop::{target::{BoolTarget, Target}, witness::PartialWitness}, plonk::circuit_builder::CircuitBuilder};
+
+    use crate::query::batching::row_chunk::{tests::RowChunkData, RowChunkDataTarget};
+
+
+    const MAX_NUM_RESULTS: usize = 10;
+    struct TestAggregateChunkWires {
+        first: RowChunkDataTarget<MAX_NUM_RESULTS>,
+        second: RowChunkDataTarget<MAX_NUM_RESULTS>,
+        min_primary: UInt256Target,
+        max_primary: UInt256Target,
+        min_secondary: UInt256Target,
+        max_secondary: UInt256Target,
+        ops: [Target; MAX_NUM_RESULTS],
+        is_second_dummy: BoolTarget,
+        expected_outputs: RowChunkDataTarget<MAX_NUM_RESULTS>,
+    }
+    #[derive(Clone, Debug)]
+    struct TestAggregateChunks {
+        first: RowChunkData<MAX_NUM_RESULTS>,
+        second: RowChunkData<MAX_NUM_RESULTS>,
+        min_primary: U256,
+        max_primary: U256,
+        min_secondary: U256,
+        max_secondary: U256,
+        ops: [F; MAX_NUM_RESULTS],
+        is_second_dummy: bool,
+        expected_outputs: RowChunkData<MAX_NUM_RESULTS>,
+    }
+
+    impl UserCircuit<F, D> for TestAggregateChunks {
+        type Wires = TestAggregateChunkWires;
+    
+        fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+            todo!()
+        }
+    
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            todo!()
+        }
+    } 
+
+    #[test]
+    fn test_aggregate_chunks() {
+
     }
 }

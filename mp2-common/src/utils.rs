@@ -19,6 +19,7 @@ use sha3::Keccak256;
 
 use crate::array::Targetable;
 use crate::poseidon::{HashableField, H};
+use crate::serialization::circuit_data_serialization::SerializableRichField;
 use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
 
 const TWO_POWER_8: usize = 256;
@@ -353,6 +354,16 @@ impl<F: RichField + Extendable<D>, const D: usize> HashBuilder for CircuitBuilde
                 self.and(acc, is_eq)
             })
     }
+}
+
+pub trait SelectTarget {
+    /// Return `first` if `cond` is true, `second` otherwise
+    fn select<F: SerializableRichField<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        cond: &BoolTarget,
+        first: &Self,
+        second: &Self,
+    ) -> Self;
 }
 
 pub trait ToFields<F: RichField> {

@@ -44,9 +44,7 @@ pub(crate) fn compute_dummy_output_targets<const S: usize>(
                     is_op_id,
                     curve_zero,
                     // Pad the current output to `CURVE_TARGET_LEN` for the first item.
-                    CurveTarget::from_targets(&PublicInputs::<_, S>::pad_slice_to_curve_len(
-                        &output,
-                    )),
+                    CurveOrU256Target::from_targets(&output).as_curve_target(),
                 )
                 .to_targets();
         }
@@ -183,7 +181,7 @@ where
 pub(crate) mod tests {
     use super::*;
     use crate::{
-        query::{aggregation::tests::compute_output_item_value, PI_LEN},
+        query::{aggregation::tests::compute_output_item_value, universal_circuit::universal_query_gadget::CurveOrU256, PI_LEN},
         test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
     use mp2_common::{types::CURVE_TARGET_LEN, u256::NUM_LIMBS, utils::ToFields, C, D, F};
@@ -216,7 +214,7 @@ pub(crate) mod tests {
                     Point::NEUTRAL.to_fields()
                 } else {
                     // Pad the current output to `CURVE_TARGET_LEN` for the first item.
-                    PublicInputs::<_, S>::pad_slice_to_curve_len(&output)
+                    CurveOrU256::from_slice(&output).to_vec()
                 };
             }
             outputs.append(&mut output);

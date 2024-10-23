@@ -533,23 +533,23 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
 pub(crate) mod tests {
     use crate::query::{
         computational_hash_ids::{AggregationOperation, Identifiers},
-        public_inputs::PublicInputs,
+        public_inputs::PublicInputs, universal_circuit::universal_query_gadget::{CurveOrU256, OutputValues},
     };
     use alloy::primitives::U256;
-    use mp2_common::{array::ToField, group_hashing::add_curve_point, utils::ToFields, F};
+    use itertools::Itertools;
+    use mp2_common::{array::ToField, group_hashing::add_curve_point, utils::{FromFields, ToFields}, F};
     use plonky2_ecgfp5::curve::curve::Point;
 
-    /// Compute the output values and the overflow number at the specified index by
-    /// the proofs. It's the test function corresponding to `compute_output_item`.
-    pub(crate) fn compute_output_item_value<const S: usize>(
+    /// Aggregate the i-th output values found in `outputs` according to the aggregation operation
+    /// with identifier `op`. It's the test function corresponding to `OutputValuesTarget::aggregate_outputs`
+    pub(crate) fn aggregate_output_values<const S: usize>(
         i: usize,
-        proofs: &[&PublicInputs<F, S>],
-    ) -> (Vec<F>, u32)
-    where
-        [(); S - 1]:,
-    {
-        let proof0 = &proofs[0];
-        let op = proof0.operation_ids()[i];
+        outputs: &[OutputValues<S>],
+        op: F,
+    ) -> (Vec<F>, u32) 
+    where [(); S-1]:,
+    {   
+        let out0 = &outputs[0];
 
         let [op_id, op_min, op_max, op_sum, op_avg] = [
             AggregationOperation::IdOp,
@@ -566,22 +566,17 @@ pub(crate) mod tests {
         let is_op_sum = op == op_sum;
         let is_op_avg = op == op_avg;
 
-        // Check that the all proofs are employing the same aggregation operation.
-        proofs[1..]
-            .iter()
-            .for_each(|p| assert_eq!(p.operation_ids()[i], op));
-
         // Compute the SUM, MIN or MAX value.
         let mut sum_overflow = 0;
-        let mut output = proof0.value_at_index(i);
+        let mut output = out0.value_at_index(i);
         if i == 0 && is_op_id {
             // If it's the first proof and the operation is ID,
             // the value is a curve point not a Uint256.
             output = U256::ZERO;
         }
-        for p in proofs[1..].iter() {
+        for out in outputs[1..].iter() {
             // Get the current proof value.
-            let mut value = p.value_at_index(i);
+            let mut value = out.value_at_index(i);
             if i == 0 && is_op_id {
                 // If it's the first proof and the operation is ID,
                 // the value is a curve point not a Uint256.
@@ -607,14 +602,14 @@ pub(crate) mod tests {
         if i == 0 {
             // We always accumulate order-agnostic digest of the proofs for the first item.
             output = if is_op_id {
-                let points: Vec<_> = proofs
+                let points: Vec<_> = outputs
                     .iter()
-                    .map(|p| Point::decode(p.first_value_as_curve_point().encode()).unwrap())
+                    .map(|out| Point::decode(out.first_value_as_curve_point().encode()).unwrap())
                     .collect();
                 add_curve_point(&points).to_fields()
             } else {
                 // Pad the current output to ``CURVE_TARGET_LEN` for the first item.
-                PublicInputs::<_, S>::pad_slice_to_curve_len(&output)
+                CurveOrU256::from_slice(&output).to_vec()
             };
         }
 
@@ -627,5 +622,29 @@ pub(crate) mod tests {
         };
 
         (output, overflow)
+    }
+
+    /// Compute the output values and the overflow number at the specified index by
+    /// the proofs. It's the test function corresponding to `compute_output_item`.
+    pub(crate) fn compute_output_item_value<const S: usize>(
+        i: usize,
+        proofs: &[&PublicInputs<F, S>],
+    ) -> (Vec<F>, u32)
+    where
+        [(); S - 1]:,
+    {
+        let proof0 = &proofs[0];
+        let op = proof0.operation_ids()[i];
+
+        // Check that the all proofs are employing the same aggregation operation.
+        proofs[1..]
+            .iter()
+            .for_each(|p| assert_eq!(p.operation_ids()[i], op));
+
+        let outputs = proofs.iter().map(|p| 
+            OutputValues::from_fields(p.to_values_raw())
+        ).collect_vec();
+        
+        aggregate_output_values(i, &outputs, op)
     }
 }

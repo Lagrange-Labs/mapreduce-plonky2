@@ -187,17 +187,6 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         self.ph
     }
 
-    /// Pad the input slice `t` to `CURVE_TARGET_LEN`; this method should be employed
-    /// to ensure that the slice representing the first output value has always the
-    /// expected length
-    pub(crate) fn pad_slice_to_curve_len(t: &[T]) -> Vec<T> {
-        let mut result = t.to_vec();
-        assert!(CURVE_TARGET_LEN >= result.len());
-        let diff = CURVE_TARGET_LEN - result.len();
-        result.extend_from_slice(vec![result[0].clone(); diff].as_slice());
-        result
-    }
-
     pub fn from_slice(input: &'a [T]) -> Self {
         assert!(
             input.len() >= Self::total_len(),
@@ -319,11 +308,7 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
     where
         [(); S - 1]:,
     {
-        if i == 0 {
-            self.first_value_as_u256_target()
-        } else {
-            self.values_target()[i - 1].clone()
-        }
+        OutputValuesTarget::from_targets(self.to_values_raw()).value_target_at_index(i)
     }
 
     pub fn num_matching_rows_target(&self) -> Target {
@@ -395,11 +380,7 @@ where [(); S-1]:,
     where
         [(); S - 1]:,
     {
-        if i == 0 {
-            self.first_value_as_u256()
-        } else {
-            self.values()[i - 1]
-        }
+        OutputValues::<S>::from_fields(&self.to_values_raw()).value_at_index(i)
     }
 
     pub fn num_matching_rows(&self) -> F {

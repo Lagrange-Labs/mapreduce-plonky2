@@ -947,7 +947,7 @@ where
 pub(crate) struct CurveOrU256<T>([T; CURVE_TARGET_LEN]);
 
 impl<T: Clone + Debug> CurveOrU256<T> {
-    fn from_slice(t: &[T]) -> Self {
+    pub(crate) fn from_slice(t: &[T]) -> Self {
         let mut result = t.to_vec();
         let diff = (CURVE_TARGET_LEN - result.len()).max(0);
         result.extend_from_slice(vec![result[0].clone(); diff].as_slice());
@@ -956,6 +956,10 @@ impl<T: Clone + Debug> CurveOrU256<T> {
 
     fn to_u256_raw(&self) -> &[T] {
         &self.0[..NUM_LIMBS]
+    }
+
+    pub(crate) fn to_vec(&self) -> Vec<T> {
+        self.0.to_vec()
     }
 }
 
@@ -1036,7 +1040,7 @@ where [(); MAX_NUM_RESULTS-1]:,
         }
     }
 }
-
+#[derive(Clone, Debug)]
 pub(crate) struct OutputValues<const MAX_NUM_RESULTS: usize> 
 where [(); MAX_NUM_RESULTS-1]:,
 {
@@ -1051,9 +1055,19 @@ where [(); MAX_NUM_RESULTS-1]:,
         WeierstrassPoint::from_fields(&self.first_output.0)
     }
 
-    pub fn first_value_as_u256(&self) -> U256 {
+    pub(crate) fn first_value_as_u256(&self) -> U256 {
         let fields = self.first_output.to_u256_raw();
         U256::from_fields(fields)
+    }
+
+    /// Return the value as a UInt256 at the specified index
+    pub(crate) fn value_at_index(&self, i: usize) -> U256
+    {
+        if i == 0 {
+            self.first_value_as_u256()
+        } else {
+            self.other_outputs[i - 1]
+        }
     }
 }
 
