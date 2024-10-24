@@ -6,7 +6,10 @@ use itertools::Itertools;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, HashPermutation},
     proof::ProofWithVK,
-    serialization::{deserialize_long_array, serialize_long_array, serialize, deserialize, serialize_array, deserialize_array},
+    serialization::{
+        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
+        serialize_long_array,
+    },
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{Fieldable, ToFields, ToTargets},
@@ -229,11 +232,14 @@ impl NodeInfo {
 pub(crate) struct NodeInfoTarget {
     /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
     /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
-    #[serde(serialize_with="serialize", deserialize_with="deserialize")]
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) embedded_tree_hash: HashOutTarget,
     /// Hashes of the children of the current node, first left child and then right child hash. The hash of left/right child
     /// is the empty hash (i.e., H("")) if there is no corresponding left/right child for the current node
-    #[serde(serialize_with="serialize_array", deserialize_with="deserialize_array")]
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     pub(crate) child_hashes: [HashOutTarget; 2],
     /// value stored in the node. It can be a primary index value if the node is a node in the index tree,
     /// a secondary index value if the node is a node in a rows tree
@@ -533,11 +539,17 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
 pub(crate) mod tests {
     use crate::query::{
         computational_hash_ids::{AggregationOperation, Identifiers},
-        public_inputs::PublicInputs, universal_circuit::universal_query_gadget::{CurveOrU256, OutputValues},
+        public_inputs::PublicInputs,
+        universal_circuit::universal_query_gadget::{CurveOrU256, OutputValues},
     };
     use alloy::primitives::U256;
     use itertools::Itertools;
-    use mp2_common::{array::ToField, group_hashing::add_curve_point, utils::{FromFields, ToFields}, F};
+    use mp2_common::{
+        array::ToField,
+        group_hashing::add_curve_point,
+        utils::{FromFields, ToFields},
+        F,
+    };
     use plonky2_ecgfp5::curve::curve::Point;
 
     /// Aggregate the i-th output values found in `outputs` according to the aggregation operation
@@ -546,9 +558,10 @@ pub(crate) mod tests {
         i: usize,
         outputs: &[OutputValues<S>],
         op: F,
-    ) -> (Vec<F>, u32) 
-    where [(); S-1]:,
-    {   
+    ) -> (Vec<F>, u32)
+    where
+        [(); S - 1]:,
+    {
         let out0 = &outputs[0];
 
         let [op_id, op_min, op_max, op_sum, op_avg] = [
@@ -641,10 +654,11 @@ pub(crate) mod tests {
             .iter()
             .for_each(|p| assert_eq!(p.operation_ids()[i], op));
 
-        let outputs = proofs.iter().map(|p| 
-            OutputValues::from_fields(p.to_values_raw())
-        ).collect_vec();
-        
+        let outputs = proofs
+            .iter()
+            .map(|p| OutputValues::from_fields(p.to_values_raw()))
+            .collect_vec();
+
         aggregate_output_values(i, &outputs, op)
     }
 }

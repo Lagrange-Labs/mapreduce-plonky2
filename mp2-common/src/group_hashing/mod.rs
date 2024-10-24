@@ -94,6 +94,8 @@ impl ToTargets for QuinticExtensionTarget {
 }
 
 impl FromTargets for CurveTarget {
+    const NUM_TARGETS: usize = CURVE_TARGET_LEN;
+
     fn from_targets(t: &[Target]) -> Self {
         assert!(t.len() >= CURVE_TARGET_LEN);
         let x = QuinticExtensionTarget(t[0..EXTENSION_DEGREE].try_into().unwrap());

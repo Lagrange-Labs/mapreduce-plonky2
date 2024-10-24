@@ -185,10 +185,7 @@ where
         // compute overflow flag
         let overflow = b.is_not_equal(value_wires.output_wires.num_overflows, zero);
 
-        let output_values_targets = value_wires
-            .output_wires
-            .values
-            .to_targets();
+        let output_values_targets = value_wires.output_wires.values.to_targets();
 
         PublicInputs::<Target, MAX_NUM_RESULTS>::new(
             &tree_hash.to_targets(),

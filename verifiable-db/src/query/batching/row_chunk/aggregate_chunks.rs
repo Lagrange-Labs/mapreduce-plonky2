@@ -1,10 +1,15 @@
-use mp2_common::{types::CBuilder, u256::UInt256Target, utils::{FromTargets, SelectTarget}};
+use mp2_common::{
+    types::CBuilder,
+    u256::UInt256Target,
+    utils::{FromTargets, SelectTarget},
+};
 use plonky2::iop::target::{BoolTarget, Target};
 
-use crate::query::universal_circuit::universal_query_gadget::{OutputValuesTarget, UniversalQueryOutputWires};
+use crate::query::universal_circuit::universal_query_gadget::{
+    OutputValuesTarget, UniversalQueryOutputWires,
+};
 
 use super::{consecutive_rows::are_consecutive_rows, BoundaryRowDataTarget, RowChunkDataTarget};
-
 
 pub(crate) fn aggregate_chunks<const MAX_NUM_RESULTS: usize>(
     b: &mut CBuilder,
@@ -15,62 +20,64 @@ pub(crate) fn aggregate_chunks<const MAX_NUM_RESULTS: usize>(
     min_secondary: &UInt256Target,
     max_secondary: &UInt256Target,
     ops: &[Target; MAX_NUM_RESULTS],
-    is_second_dummy: &BoolTarget
-) -> RowChunkDataTarget<MAX_NUM_RESULTS> 
-where [(); MAX_NUM_RESULTS-1]:,
+    is_second_dummy: &BoolTarget,
+) -> RowChunkDataTarget<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
 {
     let _true = b._true();
-    // check that right boundary row of chunk1 and left boundary row of chunk2 
-	// are consecutive
-	let are_consecutive = are_consecutive_rows(
+    // check that right boundary row of chunk1 and left boundary row of chunk2
+    // are consecutive
+    let are_consecutive = are_consecutive_rows(
         b,
-		&first.right_boundary_row, 
-		&second.left_boundary_row,
-		min_primary,
+        &first.right_boundary_row,
+        &second.left_boundary_row,
+        min_primary,
         max_primary,
         min_secondary,
-        max_secondary
-	);
-	// assert that the 2 chunks are consecutive only if the second one is not dummy
-	let are_consecutive = b.or(are_consecutive, *is_second_dummy);
+        max_secondary,
+    );
+    // assert that the 2 chunks are consecutive only if the second one is not dummy
+    let are_consecutive = b.or(are_consecutive, *is_second_dummy);
     b.connect(are_consecutive.target, _true.target);
 
-    // check the same root of the index tree is employed in both chunks to prove 
-	// membership of rows in the chunks
+    // check the same root of the index tree is employed in both chunks to prove
+    // membership of rows in the chunks
     b.connect_hashes(
-        first.chunk_outputs.tree_hash, 
-        second.chunk_outputs.tree_hash
+        first.chunk_outputs.tree_hash,
+        second.chunk_outputs.tree_hash,
     );
     // sum the number of matching rows of the 2 chunks
     let count = b.add(first.chunk_outputs.count, second.chunk_outputs.count);
 
     // aggregate output values. Note that we can aggregate outputs also if chunk2 is
-	// dummy, since the universal queyr gadget guarantees that dummy rows output
-	// values won't affect the final output values
+    // dummy, since the universal queyr gadget guarantees that dummy rows output
+    // values won't affect the final output values
     let mut output_values = vec![];
-    let values = [first.chunk_outputs.values.clone(), second.chunk_outputs.values.clone()];
+    let values = [
+        first.chunk_outputs.values.clone(),
+        second.chunk_outputs.values.clone(),
+    ];
 
-    let mut num_overflows = b.add(first.chunk_outputs.num_overflows, second.chunk_outputs.num_overflows);
+    let mut num_overflows = b.add(
+        first.chunk_outputs.num_overflows,
+        second.chunk_outputs.num_overflows,
+    );
     for i in 0..MAX_NUM_RESULTS {
-        let (output, overflows) = OutputValuesTarget::aggregate_outputs(
-            b, 
-            &values, 
-            ops[i], 
-            i
-        );
+        let (output, overflows) = OutputValuesTarget::aggregate_outputs(b, &values, ops[i], i);
         output_values.extend_from_slice(&output);
         num_overflows = b.add(num_overflows, overflows);
     }
-    
+
     RowChunkDataTarget {
         left_boundary_row: first.left_boundary_row.clone(),
         right_boundary_row: // if `is_second_dummy`, then we keep right boundary row of first chunk for the 
         // aggregated chunk, otherwise the right boundary row of the aggregated chunk will be the right boundary
         // row of second chunk 
             BoundaryRowDataTarget::select(
-                b, 
-                is_second_dummy, 
-                &first.right_boundary_row, 
+                b,
+                is_second_dummy,
+                &first.right_boundary_row,
                 &second.right_boundary_row,
             ),
         chunk_outputs: UniversalQueryOutputWires {
@@ -84,53 +91,675 @@ where [(); MAX_NUM_RESULTS-1]:,
 
 #[cfg(test)]
 mod tests {
+    use std::array;
+
     use alloy::primitives::U256;
-    use mp2_common::{u256::UInt256Target, D, F};
-    use mp2_test::circuit::UserCircuit;
-    use plonky2::{iop::{target::{BoolTarget, Target}, witness::PartialWitness}, plonk::circuit_builder::CircuitBuilder};
+    use itertools::Itertools;
+    use mp2_common::{
+        array::ToField,
+        check_panic,
+        types::{CBuilder, HashOutput},
+        u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+        utils::{FromFields, ToFields, ToTargets},
+        C, D, F,
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        utils::{gen_random_field_hash, gen_random_u256},
+    };
+    use plonky2::{
+        field::types::{Field, PrimeField64, Sample},
+        hash::hash_types::{HashOut, HashOutTarget},
+        iop::{
+            target::{BoolTarget, Target},
+            witness::{PartialWitness, WitnessWrite},
+        },
+        plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
+    };
+    use rand::thread_rng;
 
-    use crate::query::batching::row_chunk::{tests::RowChunkData, RowChunkDataTarget};
+    use crate::{
+        query::{
+            aggregation::{tests::aggregate_output_values, ChildPosition, NodeInfo},
+            batching::row_chunk::{
+                tests::{BoundaryRowData, BoundaryRowNodeInfo, RowChunkData},
+                BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget,
+            },
+            computational_hash_ids::{AggregationOperation, Identifiers},
+            merkle_path::{
+                tests::{build_node, generate_test_tree, NeighborInfo},
+                MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs,
+            },
+            public_inputs::PublicInputs,
+            universal_circuit::universal_query_gadget::{
+                OutputValues, OutputValuesTarget, UniversalQueryOutputWires,
+            },
+        },
+        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
+    };
 
+    use super::aggregate_chunks;
 
     const MAX_NUM_RESULTS: usize = 10;
+    const ROW_TREE_MAX_DEPTH: usize = 10;
+    const INDEX_TREE_MAX_DEPTH: usize = 3;
+
+    /// Data structure for the input wires necessary to compute the `RowChunkData` associated
+    /// to a row chunk being tested
+    #[derive(Clone, Debug)]
+    struct RowChunkDataInputTarget {
+        left_boundary_row_path: MerklePathWithNeighborsTargetInputs<ROW_TREE_MAX_DEPTH>,
+        left_boundary_index_path: MerklePathWithNeighborsTargetInputs<INDEX_TREE_MAX_DEPTH>,
+        left_boundary_row_value: UInt256Target,
+        left_boundary_row_subtree_hash: HashOutTarget,
+        left_boundary_index_value: UInt256Target,
+        right_boundary_row_path: MerklePathWithNeighborsTargetInputs<ROW_TREE_MAX_DEPTH>,
+        right_boundary_index_path: MerklePathWithNeighborsTargetInputs<INDEX_TREE_MAX_DEPTH>,
+        right_boundary_row_value: UInt256Target,
+        right_boundary_row_subtree_hash: HashOutTarget,
+        right_boundary_index_value: UInt256Target,
+        chunk_count: Target,
+        chunk_num_overflows: Target,
+        chunk_output_values: OutputValuesTarget<MAX_NUM_RESULTS>,
+    }
+
+    /// Data structure for input values necessary to compute the `RowChunkData` associated
+    /// to a row chunk being tested
+    #[derive(Clone, Debug)]
+    struct RowChunkDataInput {
+        left_boundary_row_path: MerklePathWithNeighborsGadget<ROW_TREE_MAX_DEPTH>,
+        left_boundary_row_node: NodeInfo,
+        left_boundary_index_path: MerklePathWithNeighborsGadget<INDEX_TREE_MAX_DEPTH>,
+        left_boundary_index_node: NodeInfo,
+        right_boundary_row_path: MerklePathWithNeighborsGadget<ROW_TREE_MAX_DEPTH>,
+        right_boundary_row_node: NodeInfo,
+        right_boundary_index_path: MerklePathWithNeighborsGadget<INDEX_TREE_MAX_DEPTH>,
+        right_boundary_index_node: NodeInfo,
+        chunk_count: F,
+        chunk_num_overflows: F,
+        chunk_output_values: OutputValues<MAX_NUM_RESULTS>,
+    }
+
+    impl RowChunkDataInput {
+        fn build(
+            b: &mut CBuilder,
+            primary_index_id: Target,
+            secondary_index_id: Target,
+        ) -> (RowChunkDataInputTarget, RowChunkDataTarget<MAX_NUM_RESULTS>) {
+            let [left_boundary_row_value, left_boundary_index_value, right_boundary_row_value, right_boundary_index_value] =
+                b.add_virtual_u256_arr_unsafe();
+            let [left_boundary_row_subtree_hash, right_boundary_row_subtree_hash] =
+                array::from_fn(|_| b.add_virtual_hash());
+            let left_boundary_row_path = MerklePathWithNeighborsGadget::build(
+                b,
+                left_boundary_row_value.clone(),
+                left_boundary_row_subtree_hash,
+                secondary_index_id,
+            );
+            let left_boundary_index_path = MerklePathWithNeighborsGadget::build(
+                b,
+                left_boundary_index_value.clone(),
+                left_boundary_row_path.root,
+                primary_index_id,
+            );
+            let right_boundary_row_path = MerklePathWithNeighborsGadget::build(
+                b,
+                right_boundary_row_value.clone(),
+                right_boundary_row_subtree_hash,
+                secondary_index_id,
+            );
+            let right_boundary_index_path = MerklePathWithNeighborsGadget::build(
+                b,
+                right_boundary_index_value.clone(),
+                right_boundary_row_path.root,
+                primary_index_id,
+            );
+
+            // Enforce that both boundary rows belong to the same tree
+            b.connect_hashes(
+                left_boundary_index_path.root,
+                right_boundary_index_path.root,
+            );
+
+            let left_boundary_row_info = BoundaryRowNodeInfoTarget::from(&left_boundary_row_path);
+            let left_boundary_index_info =
+                BoundaryRowNodeInfoTarget::from(&left_boundary_index_path);
+            let right_boundary_row_info = BoundaryRowNodeInfoTarget::from(&right_boundary_row_path);
+            let right_boundary_index_info =
+                BoundaryRowNodeInfoTarget::from(&right_boundary_index_path);
+
+            let chunk_inputs = RowChunkDataInputTarget {
+                left_boundary_row_path: left_boundary_row_path.inputs,
+                left_boundary_index_path: left_boundary_index_path.inputs,
+                left_boundary_row_value,
+                left_boundary_row_subtree_hash,
+                left_boundary_index_value,
+                right_boundary_row_path: right_boundary_row_path.inputs,
+                right_boundary_index_path: right_boundary_index_path.inputs,
+                right_boundary_row_value,
+                right_boundary_row_subtree_hash,
+                right_boundary_index_value,
+                chunk_count: b.add_virtual_target(),
+                chunk_num_overflows: b.add_virtual_target(),
+                chunk_output_values: OutputValuesTarget::build(b),
+            };
+
+            let row_chunk = RowChunkDataTarget {
+                left_boundary_row: BoundaryRowDataTarget {
+                    row_node_info: left_boundary_row_info,
+                    index_node_info: left_boundary_index_info,
+                },
+                right_boundary_row: BoundaryRowDataTarget {
+                    row_node_info: right_boundary_row_info,
+                    index_node_info: right_boundary_index_info,
+                },
+                chunk_outputs: UniversalQueryOutputWires {
+                    tree_hash: right_boundary_index_path.root,
+                    values: chunk_inputs.chunk_output_values.clone(),
+                    count: chunk_inputs.chunk_count,
+                    num_overflows: chunk_inputs.chunk_num_overflows,
+                },
+            };
+
+            (chunk_inputs, row_chunk)
+        }
+
+        fn assign(&self, pw: &mut PartialWitness<F>, wires: &RowChunkDataInputTarget) {
+            self.left_boundary_row_path
+                .assign(pw, &wires.left_boundary_row_path);
+            self.left_boundary_index_path
+                .assign(pw, &wires.left_boundary_index_path);
+            self.right_boundary_row_path
+                .assign(pw, &wires.right_boundary_row_path);
+            self.right_boundary_index_path
+                .assign(pw, &wires.right_boundary_index_path);
+            [
+                (
+                    &wires.left_boundary_row_value,
+                    self.left_boundary_row_node.value,
+                ),
+                (
+                    &wires.left_boundary_index_value,
+                    self.left_boundary_index_node.value,
+                ),
+                (
+                    &wires.right_boundary_row_value,
+                    self.right_boundary_row_node.value,
+                ),
+                (
+                    &wires.right_boundary_index_value,
+                    self.right_boundary_index_node.value,
+                ),
+            ]
+            .into_iter()
+            .for_each(|(t, v)| pw.set_u256_target(t, v));
+            [
+                (
+                    wires.left_boundary_row_subtree_hash,
+                    self.left_boundary_row_node.embedded_tree_hash,
+                ),
+                (
+                    wires.right_boundary_row_subtree_hash,
+                    self.right_boundary_row_node.embedded_tree_hash,
+                ),
+            ]
+            .into_iter()
+            .for_each(|(t, v)| pw.set_hash_target(t, v));
+            [
+                (wires.chunk_count, self.chunk_count),
+                (wires.chunk_num_overflows, self.chunk_num_overflows),
+            ]
+            .into_iter()
+            .for_each(|(t, v)| pw.set_target(t, v));
+            wires
+                .chunk_output_values
+                .set_target(pw, &self.chunk_output_values);
+        }
+    }
+
+    #[derive(Clone, Debug)]
     struct TestAggregateChunkWires {
-        first: RowChunkDataTarget<MAX_NUM_RESULTS>,
-        second: RowChunkDataTarget<MAX_NUM_RESULTS>,
+        first: RowChunkDataInputTarget,
+        second: RowChunkDataInputTarget,
         min_primary: UInt256Target,
         max_primary: UInt256Target,
         min_secondary: UInt256Target,
         max_secondary: UInt256Target,
+        primary_index_id: Target,
+        secondary_index_id: Target,
         ops: [Target; MAX_NUM_RESULTS],
         is_second_dummy: BoolTarget,
-        expected_outputs: RowChunkDataTarget<MAX_NUM_RESULTS>,
     }
     #[derive(Clone, Debug)]
     struct TestAggregateChunks {
-        first: RowChunkData<MAX_NUM_RESULTS>,
-        second: RowChunkData<MAX_NUM_RESULTS>,
-        min_primary: U256,
-        max_primary: U256,
-        min_secondary: U256,
-        max_secondary: U256,
+        first: RowChunkDataInput,
+        second: RowChunkDataInput,
+        min_primary: Option<U256>,
+        max_primary: Option<U256>,
+        min_secondary: Option<U256>,
+        max_secondary: Option<U256>,
+        primary_index_id: F,
+        secondary_index_id: F,
         ops: [F; MAX_NUM_RESULTS],
         is_second_dummy: bool,
-        expected_outputs: RowChunkData<MAX_NUM_RESULTS>,
     }
 
     impl UserCircuit<F, D> for TestAggregateChunks {
         type Wires = TestAggregateChunkWires;
-    
+
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            todo!()
+            let [primary_index_id, secondary_index_id] = c.add_virtual_target_arr();
+            let (first_chunk_inputs, first_chunk_data) =
+                RowChunkDataInput::build(c, primary_index_id, secondary_index_id);
+            let (second_chunk_inputs, second_chunk_data) =
+                RowChunkDataInput::build(c, primary_index_id, secondary_index_id);
+            let [min_primary, max_primary, min_secondary, max_secondary] =
+                c.add_virtual_u256_arr_unsafe();
+            let ops = c.add_virtual_target_arr();
+            let is_second_dummy = c.add_virtual_bool_target_unsafe();
+            let aggregated_chunk = aggregate_chunks(
+                c,
+                &first_chunk_data,
+                &second_chunk_data,
+                &min_primary,
+                &max_primary,
+                &min_secondary,
+                &max_secondary,
+                &ops,
+                &is_second_dummy,
+            );
+
+            c.register_public_inputs(&aggregated_chunk.to_targets());
+
+            TestAggregateChunkWires {
+                first: first_chunk_inputs,
+                second: second_chunk_inputs,
+                min_primary,
+                max_primary,
+                min_secondary,
+                max_secondary,
+                primary_index_id,
+                secondary_index_id,
+                ops,
+                is_second_dummy,
+            }
         }
-    
+
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            todo!()
+            self.first.assign(pw, &wires.first);
+            self.second.assign(pw, &wires.second);
+            [
+                (&wires.min_primary, self.min_primary.unwrap_or(U256::ZERO)),
+                (&wires.max_primary, self.max_primary.unwrap_or(U256::MAX)),
+                (
+                    &wires.min_secondary,
+                    self.min_secondary.unwrap_or(U256::ZERO),
+                ),
+                (
+                    &wires.max_secondary,
+                    self.max_secondary.unwrap_or(U256::MAX),
+                ),
+            ]
+            .into_iter()
+            .for_each(|(t, v)| pw.set_u256_target(t, v));
+            [
+                (wires.primary_index_id, self.primary_index_id),
+                (wires.secondary_index_id, self.secondary_index_id),
+            ]
+            .into_iter()
+            .chain(wires.ops.into_iter().zip(self.ops))
+            .for_each(|(t, v)| pw.set_target(t, v));
+            pw.set_bool_target(wires.is_second_dummy, self.is_second_dummy);
         }
-    } 
+    }
+
+    fn test_aggregate_chunks(ops: [F; MAX_NUM_RESULTS]) {
+        let [primary_index_id, secondary_index_id] = F::rand_array();
+        // generate a single rows tree that will contain the row chunks to be aggregated: no need to
+        // use multiple rows tree in this test, as we already test `are_consecutive_rows` gadget.
+        // The generated tree will have the following shape
+        //              A
+        //          B       C
+        //      D               G
+        //   E      F
+        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] =
+            generate_test_tree(secondary_index_id, None);
+        let rows_tree_root =
+            HashOutput::try_from(node_A.compute_node_hash(secondary_index_id)).unwrap();
+        // build the node of the index tree that stores the rows tree being generated
+        let rng = &mut thread_rng();
+        let index_node = build_node(
+            None,
+            None,
+            gen_random_u256(rng),
+            rows_tree_root.clone(),
+            primary_index_id,
+        );
+        let root = index_node.compute_node_hash(primary_index_id);
+
+        // generate the output values associated to each chunk
+        let inputs = random_aggregation_public_inputs::<2, MAX_NUM_RESULTS>(&ops);
+        let [(first_chunk_count, first_chunk_outputs, fist_chunk_num_overflows), (second_chunk_count, second_chunk_outputs, second_chunk_num_overflows)] =
+            inputs
+                .into_iter()
+                .map(|input| {
+                    let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(input.as_slice());
+                    (
+                        pis.num_matching_rows(),
+                        OutputValues::from_fields(pis.to_values_raw()),
+                        F::from_canonical_u8(pis.overflow_flag() as u8),
+                    )
+                })
+                .collect_vec()
+                .try_into()
+                .unwrap();
+
+        // the first row chunk for this test is given by nodes `B`, `D`, `E` and `F`. So left boundary row is `E` and
+        // right boundary row is `B`
+        let path_E = vec![
+            (node_D.clone(), ChildPosition::Left),
+            (node_B.clone(), ChildPosition::Left),
+            (node_A.clone(), ChildPosition::Left),
+        ];
+        let node_F_hash =
+            HashOutput::try_from(node_F.compute_node_hash(secondary_index_id)).unwrap();
+        let node_C_hash =
+            HashOutput::try_from(node_C.compute_node_hash(secondary_index_id)).unwrap();
+        let siblings_E = vec![Some(node_F_hash), None, Some(node_C_hash.clone())];
+        let merkle_path_inputs_E = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_E,
+            &siblings_E,
+            &node_E,
+            [None, None], // it's a leaf node
+        )
+        .unwrap();
+
+        let path_B = vec![(node_A.clone(), ChildPosition::Left)];
+        let siblings_B = vec![Some(node_C_hash.clone())];
+        let merkle_path_inputs_B = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_B,
+            &siblings_B,
+            &node_B,
+            [Some(node_D.clone()), None],
+        )
+        .unwrap();
+
+        let index_node_path = vec![];
+        let index_node_siblings = vec![];
+        let index_node_merkle_path = MerklePathWithNeighborsGadget::<INDEX_TREE_MAX_DEPTH>::new(
+            &index_node_path,
+            &index_node_siblings,
+            &index_node,
+            [None, None],
+        )
+        .unwrap();
+        let first_chunk = RowChunkDataInput {
+            left_boundary_row_path: merkle_path_inputs_E,
+            left_boundary_row_node: node_E.clone(),
+            left_boundary_index_path: index_node_merkle_path,
+            left_boundary_index_node: index_node.clone(),
+            right_boundary_row_path: merkle_path_inputs_B,
+            right_boundary_row_node: node_B.clone(),
+            right_boundary_index_path: index_node_merkle_path,
+            right_boundary_index_node: index_node.clone(),
+            chunk_count: first_chunk_count,
+            chunk_num_overflows: fist_chunk_num_overflows,
+            chunk_output_values: first_chunk_outputs.clone(),
+        };
+
+        // the second row chunk for this test is given by nodes `A`, `C`, and `G`. So left boundary row is `A` and
+        // right boundary row is `G`
+        let path_A = vec![];
+        let siblings_A = vec![];
+        let merkle_path_inputs_A = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_A,
+            &siblings_A,
+            &node_A,
+            [Some(node_B.clone()), Some(node_C.clone())],
+        )
+        .unwrap();
+
+        let path_G = vec![
+            (node_C.clone(), ChildPosition::Right),
+            (node_A.clone(), ChildPosition::Right),
+        ];
+        let node_B_hash =
+            HashOutput::try_from(node_B.compute_node_hash(secondary_index_id)).unwrap();
+        let siblings_G = vec![None, Some(node_B_hash.clone())];
+        let merkle_path_inputs_G = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_G,
+            &siblings_G,
+            &node_G,
+            [None, None],
+        )
+        .unwrap();
+
+        let second_chunk = RowChunkDataInput {
+            left_boundary_row_path: merkle_path_inputs_A,
+            left_boundary_row_node: node_A.clone(),
+            left_boundary_index_path: index_node_merkle_path,
+            left_boundary_index_node: index_node.clone(),
+            right_boundary_row_path: merkle_path_inputs_G,
+            right_boundary_row_node: node_G.clone(),
+            right_boundary_index_path: index_node_merkle_path,
+            right_boundary_index_node: index_node.clone(),
+            chunk_count: second_chunk_count,
+            chunk_num_overflows: second_chunk_num_overflows,
+            chunk_output_values: second_chunk_outputs.clone(),
+        };
+
+        let circuit = TestAggregateChunks {
+            first: first_chunk.clone(),
+            second: second_chunk.clone(),
+            min_primary: None,
+            max_primary: None,
+            min_secondary: None,
+            max_secondary: None,
+            primary_index_id,
+            secondary_index_id,
+            ops,
+            is_second_dummy: false,
+        };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // compute expected aggregated chunk
+        let node_E_info = BoundaryRowNodeInfo {
+            end_node_hash: node_E.compute_node_hash(secondary_index_id),
+            predecessor_info: NeighborInfo::new_dummy_predecessor(),
+            successor_info: NeighborInfo::new(
+                node_D.value,
+                Some(node_D.compute_node_hash(secondary_index_id)),
+            ),
+        };
+        let index_node_info = BoundaryRowNodeInfo {
+            end_node_hash: root,
+            predecessor_info: NeighborInfo::new_dummy_predecessor(),
+            successor_info: NeighborInfo::new_dummy_successor(),
+        };
+        let node_G_info = BoundaryRowNodeInfo {
+            end_node_hash: node_G.compute_node_hash(secondary_index_id),
+            predecessor_info: NeighborInfo::new(
+                node_C.value,
+                Some(HashOut::from_bytes((&node_C_hash).into())),
+            ),
+            successor_info: NeighborInfo::new_dummy_successor(),
+        };
+        let (expected_outputs, expected_num_overflows) = {
+            let outputs = [first_chunk_outputs.clone(), second_chunk_outputs.clone()];
+            let mut num_overflows = fist_chunk_num_overflows + second_chunk_num_overflows;
+            let outputs = ops
+                .into_iter()
+                .enumerate()
+                .flat_map(|(i, op)| {
+                    let (out, overflows) = aggregate_output_values(i, &outputs, op);
+                    num_overflows += F::from_canonical_u32(overflows);
+                    out
+                })
+                .collect_vec();
+            (
+                OutputValues::from_fields(&outputs),
+                num_overflows.to_canonical_u64(),
+            )
+        };
+        let expected_count = (first_chunk_count + second_chunk_count).to_canonical_u64();
+
+        let expected_chunk = RowChunkData::<MAX_NUM_RESULTS> {
+            left_boundary_row: BoundaryRowData {
+                row_node_info: node_E_info.clone(),
+                index_node_info: index_node_info.clone(),
+            },
+            right_boundary_row: BoundaryRowData {
+                row_node_info: node_G_info,
+                index_node_info: index_node_info.clone(),
+            },
+            chunk_tree_hash: root,
+            output_values: expected_outputs.clone(),
+            num_overflows: expected_num_overflows,
+            count: expected_count,
+        };
+
+        assert_eq!(proof.public_inputs, expected_chunk.to_fields());
+
+        // test with second chunk being dummy; we use a non-consecutive chunk as the dummy one: the row chunk
+        // given by node_G only
+        let second_chunk = RowChunkDataInput {
+            left_boundary_row_path: merkle_path_inputs_G,
+            left_boundary_row_node: node_G.clone(),
+            left_boundary_index_path: index_node_merkle_path,
+            left_boundary_index_node: index_node.clone(),
+            right_boundary_row_path: merkle_path_inputs_G.clone(),
+            right_boundary_row_node: node_G.clone(),
+            right_boundary_index_path: index_node_merkle_path,
+            right_boundary_index_node: index_node.clone(),
+            chunk_count: second_chunk_count,
+            chunk_num_overflows: second_chunk_num_overflows,
+            chunk_output_values: second_chunk_outputs.clone(),
+        };
+        let circuit = TestAggregateChunks {
+            first: first_chunk.clone(),
+            second: second_chunk.clone(),
+            min_primary: None,
+            max_primary: None,
+            min_secondary: None,
+            max_secondary: None,
+            primary_index_id,
+            secondary_index_id,
+            ops,
+            is_second_dummy: true,
+        };
+
+        let proof = run_circuit::<F, D, C, _>(circuit);
+        // compute expected aggregated chunk
+        // since we aggregate with a dummy chunk, we expect right boundary row to be the same as the
+        // first chunk, that is node_B
+        let node_B_info = BoundaryRowNodeInfo {
+            end_node_hash: HashOut::from_bytes((&node_B_hash).into()),
+            predecessor_info: NeighborInfo::new(node_F.value, None),
+            successor_info: NeighborInfo::new(
+                node_A.value,
+                Some(HashOut::from_bytes((&rows_tree_root).into())),
+            ),
+        };
+        let expected_chunk = RowChunkData::<MAX_NUM_RESULTS> {
+            left_boundary_row: BoundaryRowData {
+                row_node_info: node_E_info,
+                index_node_info: index_node_info.clone(),
+            },
+            right_boundary_row: BoundaryRowData {
+                row_node_info: node_B_info,
+                index_node_info: index_node_info.clone(),
+            },
+            chunk_tree_hash: root,
+            output_values: expected_outputs.clone(),
+            num_overflows: expected_num_overflows,
+            count: expected_count,
+        };
+        assert_eq!(proof.public_inputs, expected_chunk.to_fields());
+
+        // negative test: check that we cannot aggregate non-consecutive non-dummy chunks
+        let circuit = TestAggregateChunks {
+            first: first_chunk.clone(),
+            second: second_chunk.clone(),
+            min_primary: None,
+            max_primary: None,
+            min_secondary: None,
+            max_secondary: None,
+            primary_index_id,
+            secondary_index_id,
+            ops,
+            is_second_dummy: false,
+        };
+
+        check_panic!(
+            || run_circuit::<F, D, C, _>(circuit),
+            "circuit didn't fail when aggregating non-consecutive non-dummy chunks"
+        );
+
+        // negative test: check that we cannot aggregate a chunk with a wrong merkle root
+        // we build the second chunk employing a fake index node
+        let fake_node = build_node(
+            None,
+            None,
+            gen_random_u256(rng),
+            rows_tree_root,
+            primary_index_id,
+        );
+        println!("{:?}", fake_node.compute_node_hash(primary_index_id));
+        let fake_node_merkle_path = MerklePathWithNeighborsGadget::<INDEX_TREE_MAX_DEPTH>::new(
+            &vec![],
+            &vec![],
+            &fake_node,
+            [None, None],
+        )
+        .unwrap();
+        let second_chunk = RowChunkDataInput {
+            left_boundary_row_path: merkle_path_inputs_A,
+            left_boundary_row_node: node_A.clone(),
+            left_boundary_index_path: fake_node_merkle_path,
+            left_boundary_index_node: fake_node.clone(),
+            right_boundary_row_path: merkle_path_inputs_G,
+            right_boundary_row_node: node_G.clone(),
+            right_boundary_index_path: fake_node_merkle_path,
+            right_boundary_index_node: fake_node.clone(),
+            chunk_count: second_chunk_count,
+            chunk_num_overflows: second_chunk_num_overflows,
+            chunk_output_values: second_chunk_outputs.clone(),
+        };
+
+        let circuit = TestAggregateChunks {
+            first: first_chunk.clone(),
+            second: second_chunk.clone(),
+            min_primary: None,
+            max_primary: None,
+            min_secondary: None,
+            max_secondary: None,
+            primary_index_id,
+            secondary_index_id,
+            ops,
+            is_second_dummy: false,
+        };
+
+        check_panic!(
+            || run_circuit::<F, D, C, _>(circuit),
+            "circuit didn't fail when aggregating chunks with different merkle roots"
+        );
+    }
 
     #[test]
-    fn test_aggregate_chunks() {
+    fn test_aggregate_chunks_random_operations() {
+        let ops = random_aggregation_operations();
 
+        test_aggregate_chunks(ops);
+    }
+
+    #[test]
+    fn test_aggregate_chunks_with_id_operation() {
+        // Generate the random operations.
+        let mut ops = random_aggregation_operations();
+
+        // Set the first operation to ID for testing the digest computation.
+        ops[0] = Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
+
+        test_aggregate_chunks(ops);
     }
 }

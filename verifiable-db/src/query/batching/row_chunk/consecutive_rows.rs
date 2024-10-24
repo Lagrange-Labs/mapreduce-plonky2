@@ -1,5 +1,10 @@
-use mp2_common::{types::CBuilder, u256::{CircuitBuilderU256, UInt256Target}, utils::HashBuilder, F};
-use plonky2::{iop::target::BoolTarget, field::types::Field};
+use mp2_common::{
+    types::CBuilder,
+    u256::{CircuitBuilderU256, UInt256Target},
+    utils::HashBuilder,
+    F,
+};
+use plonky2::{field::types::Field, iop::target::BoolTarget};
 
 use super::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget};
 
@@ -13,60 +18,65 @@ fn are_consecutive_nodes(
 ) -> (BoolTarget, BoolTarget) {
     let mut are_consecutive = b._true();
     let first_node_successor_value = &first.successor_info.value;
-    // ensure that we don't prove nodes outside of the range: the successor of the 
+    // ensure that we don't prove nodes outside of the range: the successor of the
     // first node must store a value bigger that `min_query_bound`
-    let bigger_than_min = b.is_less_or_equal_than_u256(min_query_bound, &first_node_successor_value);
+    let bigger_than_min =
+        b.is_less_or_equal_than_u256(min_query_bound, &first_node_successor_value);
     are_consecutive = b.and(are_consecutive, bigger_than_min);
-    // determine whether the successor (if any) of the first node stores a value in the query range or not; 
+    // determine whether the successor (if any) of the first node stores a value in the query range or not;
     // note that, since we previously checked that such value is >= min_query_bound,
     // we only need to check whether this value is not dummy (i.e., if the successor exists) and if
     // such value is <= max_query_bound
-    let smaller_than_max = b.is_less_or_equal_than_u256(first_node_successor_value, &max_query_bound);
+    let smaller_than_max =
+        b.is_less_or_equal_than_u256(first_node_successor_value, &max_query_bound);
     let first_node_succ_in_range = b.and(smaller_than_max, first.successor_info.is_found);
-    // if first_node_succ_in_range is true, and the successor of the first node was found in the path from 
-    // such node to the root of the tree, then the hash of successor node will be placed in 
-    // `first.successor_info.hash` by `MerklePathWithNeighborsGadget: therefore, we can check that `second` 
+    // if first_node_succ_in_range is true, and the successor of the first node was found in the path from
+    // such node to the root of the tree, then the hash of successor node will be placed in
+    // `first.successor_info.hash` by `MerklePathWithNeighborsGadget: therefore, we can check that `second`
     // is consecutive of `first` by checking that `first.successor_info.hash` is the hash of the second node;
     // otherwise, we cannot check right now that the 2 nodes are consecutive, we will do it later
     let check_are_consecutive = b.and(first_node_succ_in_range, first.successor_info.is_in_path);
-    let is_second_node_successor = b.hash_eq(
-        &first.successor_info.hash, 
-        &second.end_node_hash,
-    );
-    // update are_consecutive as `are_consecutive && is_second_node_successor`` if `check_are_consecutive` is true 
+    let is_second_node_successor = b.hash_eq(&first.successor_info.hash, &second.end_node_hash);
+    // update are_consecutive as `are_consecutive && is_second_node_successor`` if `check_are_consecutive` is true
     let new_are_consecutive = b.and(are_consecutive, is_second_node_successor);
-    are_consecutive = BoolTarget::new_unsafe(
-        b.select(check_are_consecutive, new_are_consecutive.target, are_consecutive.target)
-    );
-    // we now look at the predecessor of second node, matching it with first node in case the 
+    are_consecutive = BoolTarget::new_unsafe(b.select(
+        check_are_consecutive,
+        new_are_consecutive.target,
+        are_consecutive.target,
+    ));
+    // we now look at the predecessor of second node, matching it with first node in case the
     // predecessor is found in the path of second node in the tree
     let second_node_predecessor_value = &second.predecessor_info.value;
-    // ensure that we don't prove nodes outside of the range: the predecessor of the second 
+    // ensure that we don't prove nodes outside of the range: the predecessor of the second
     // node must store a value smaller that `max_query_bound``
-    let smaller_than_max = b.is_less_or_equal_than_u256(second_node_predecessor_value, &max_query_bound);
+    let smaller_than_max =
+        b.is_less_or_equal_than_u256(second_node_predecessor_value, &max_query_bound);
     are_consecutive = b.and(are_consecutive, smaller_than_max);
-    // determine whether the predecessor (if any) of the second node stores a value in the query range or not; 
+    // determine whether the predecessor (if any) of the second node stores a value in the query range or not;
     // note that, since we previously checked that such value is <= max_query_bound,
     // we only need to check whether this value is not dummy (i.e., if the predecessor exists) and if
     // such value is >= min_query_bound
-    let bigger_than_min = b.is_less_or_equal_than_u256(min_query_bound, &second_node_predecessor_value);
+    let bigger_than_min =
+        b.is_less_or_equal_than_u256(min_query_bound, &second_node_predecessor_value);
     let second_node_pred_in_range = b.and(bigger_than_min, second.predecessor_info.is_found);
-    // if second_node_pred_in_range is true, and the predecessor of the second node was found in the path from 
-    // such node to the root of the tree, then the hash of predecessor node will be placed in 
-    // `second..predecessor_info.hash` by `MerklePathWithNeighborsGadget: therefore, we can check that `second` 
+    // if second_node_pred_in_range is true, and the predecessor of the second node was found in the path from
+    // such node to the root of the tree, then the hash of predecessor node will be placed in
+    // `second..predecessor_info.hash` by `MerklePathWithNeighborsGadget: therefore, we can check that `second`
     // is consecutive of `first` by checking that `second.predecessor_info.hash` is the hash of the first node;
-    // otherwise, we cannot check right now that the 2 nodes are consecutive, and it necessarily means we have 
+    // otherwise, we cannot check right now that the 2 nodes are consecutive, and it necessarily means we have
     // already done it before when checking that the successor of first node was the second node
-    let check_are_consecutive = b.and(second_node_pred_in_range, second.predecessor_info.is_in_path);
-    let is_second_node_successor = b.hash_eq(
-        &second.predecessor_info.hash, 
-        &first.end_node_hash,
+    let check_are_consecutive = b.and(
+        second_node_pred_in_range,
+        second.predecessor_info.is_in_path,
     );
-    // update are_consecutive as `are_consecutive && is_second_node_successor`` if `check_are_consecutive` is true 
+    let is_second_node_successor = b.hash_eq(&second.predecessor_info.hash, &first.end_node_hash);
+    // update are_consecutive as `are_consecutive && is_second_node_successor`` if `check_are_consecutive` is true
     let new_are_consecutive = b.and(are_consecutive, is_second_node_successor);
-    are_consecutive = BoolTarget::new_unsafe(
-        b.select(check_are_consecutive, new_are_consecutive.target, are_consecutive.target)
-    );
+    are_consecutive = BoolTarget::new_unsafe(b.select(
+        check_are_consecutive,
+        new_are_consecutive.target,
+        are_consecutive.target,
+    ));
 
     // lastly, check that either successor of first node is located in the path, or the predecessor of second node
     // is located in the path, which is necessarily true if the 2 nodes are consecutive. Note that we need to enforce
@@ -75,10 +85,13 @@ fn are_consecutive_nodes(
     // - if nodes are in a rows tree, but `first_node_succ_in_range` is true. Indeed, if the successor of first node
     //   is out of range or doesn't exist, then it means that second node belongs to another rows tree, and so it cannot
     //   be a successor of first node in the same rows tree
-    let either_is_in_path = b.or(first.successor_info.is_in_path, second.predecessor_info.is_in_path);
+    let either_is_in_path = b.or(
+        first.successor_info.is_in_path,
+        second.predecessor_info.is_in_path,
+    );
 
     if !are_rows_tree_nodes {
-        // in case of index tree, we need to enforce that `either_is_in_path` must be true 
+        // in case of index tree, we need to enforce that `either_is_in_path` must be true
         are_consecutive = b.and(are_consecutive, either_is_in_path);
         // furthermore, we also need to enforce that first_node_succ_in_range and second_node_pred_in_range
         // are both true; otherwise, the prover could provide the nodes at the boundary and prove them
@@ -86,10 +99,10 @@ fn are_consecutive_nodes(
         are_consecutive = b.and(are_consecutive, first_node_succ_in_range);
         are_consecutive = b.and(are_consecutive, second_node_pred_in_range);
     } else {
-        // in case of rows tree nodes, we need to check that `first_row_succ_in_range == second_row_pred_in_range`, 
+        // in case of rows tree nodes, we need to check that `first_row_succ_in_range == second_row_pred_in_range`,
         // which should always hold for consecutive rows since:
         // - if the successor of first row is in range, then second row must be its successor
-        //   in the same rows tree, and so the predecessor of second row is the first row itself, 
+        //   in the same rows tree, and so the predecessor of second row is the first row itself,
         //   which is expected to be in range since we never need to prove nodes not in range
         //   but with a successor in range
         // - if the successor of first row is out of range, then second row is expected to
@@ -98,34 +111,38 @@ fn are_consecutive_nodes(
         //   can be either:
         //	    - the first node of the "subsequent" rows tree with value >= min_secondary;
         //        in this case, the predecessor of second row is < min_secondary, and so out of range
-        //	    - if no such node can be found in the "subsequent" rows tree, then second row will be 
-        //        the last node in the "subsequent" rows tree with value < MIN_secondary; in 
+        //	    - if no such node can be found in the "subsequent" rows tree, then second row will be
+        //        the last node in the "subsequent" rows tree with value < MIN_secondary; in
         //	      this case, also its predecessor will necessarily be < MIN_secondary, and so
         //	      out of range
         // we first compute first_row_succ_in_range XOR second_row_pred_in_range: a XOR b = a + b - 2*a*b
-        let range_flags_sum = b.add(first_node_succ_in_range.target, second_node_pred_in_range.target);
+        let range_flags_sum = b.add(
+            first_node_succ_in_range.target,
+            second_node_pred_in_range.target,
+        );
         let range_flags_xor = b.arithmetic(
-            F::NEG_ONE+F::NEG_ONE, 
-            F::ONE, 
-            first_node_succ_in_range.target, 
-            second_node_pred_in_range.target, 
+            F::NEG_ONE + F::NEG_ONE,
+            F::ONE,
+            first_node_succ_in_range.target,
+            second_node_pred_in_range.target,
             range_flags_sum,
         );
         // then, `are_consecutive = are_consecutive AND NOT(range_flags_xor) = are_consecutive - are_consecutive*range_flags_xor`
-        are_consecutive = BoolTarget::new_unsafe(
-            b.arithmetic(
-                F::NEG_ONE, 
-                F::ONE, 
-                are_consecutive.target, 
-                range_flags_xor, 
-                are_consecutive.target
-            ));
+        are_consecutive = BoolTarget::new_unsafe(b.arithmetic(
+            F::NEG_ONE,
+            F::ONE,
+            are_consecutive.target,
+            range_flags_xor,
+            are_consecutive.target,
+        ));
         // in case of nodes in a rows tree, then we need to enforce that second is the successor of first only
         // if the nodes are in the same rows tree, that is if `first_node_succ_in_range` is true
         let new_are_consecutive = b.and(are_consecutive, either_is_in_path);
-        are_consecutive = BoolTarget::new_unsafe(
-            b.select(first_node_succ_in_range, new_are_consecutive.target, are_consecutive.target)
-        );
+        are_consecutive = BoolTarget::new_unsafe(b.select(
+            first_node_succ_in_range,
+            new_are_consecutive.target,
+            are_consecutive.target,
+        ));
     }
 
     (are_consecutive, first_node_succ_in_range)
@@ -140,14 +157,11 @@ pub(crate) fn are_consecutive_rows(
     min_secondary: &UInt256Target,
     max_secondary: &UInt256Target,
 ) -> BoolTarget {
-    let (
-        mut are_consecutive, 
-        first_row_succ_in_range, 
-    ) = are_consecutive_nodes(
-        b, 
-        &first.row_node_info, 
-        &second.row_node_info, 
-        min_secondary, 
+    let (mut are_consecutive, first_row_succ_in_range) = are_consecutive_nodes(
+        b,
+        &first.row_node_info,
+        &second.row_node_info,
+        min_secondary,
         max_secondary,
         true,
     );
@@ -156,25 +170,27 @@ pub(crate) fn are_consecutive_rows(
     // if first_row_succ_in_range is true, then both the rows must be in the same rows tree; so, we simply
     // check this and we are done
     let is_same_rows_tree = b.hash_eq(
-        &first.index_node_info.end_node_hash, 
-        &second.index_node_info.end_node_hash
+        &first.index_node_info.end_node_hash,
+        &second.index_node_info.end_node_hash,
     );
-   
+
     // otherwise, if the rows are in different rows trees, we need to check that they are stored in subsequent
     // rows trees
     let (are_index_nodes_consecutive, _) = are_consecutive_nodes(
-        b, 
-        &first.index_node_info, 
-        &second.index_node_info, 
-        &min_primary, 
+        b,
+        &first.index_node_info,
+        &second.index_node_info,
+        &min_primary,
         &max_primary,
         false,
     );
     // compute the flag to be accumulated in `are_consecutive`, depending on whether the 2 rows are in the same
     // rows tree or not (i.e., whether first_row_succ_in_range is true)
-    let index_tree_check = BoolTarget::new_unsafe(
-    b.select(first_row_succ_in_range, is_same_rows_tree.target, are_index_nodes_consecutive.target)
-    );
+    let index_tree_check = BoolTarget::new_unsafe(b.select(
+        first_row_succ_in_range,
+        is_same_rows_tree.target,
+        are_index_nodes_consecutive.target,
+    ));
     b.and(are_consecutive, index_tree_check)
 }
 
@@ -183,24 +199,47 @@ mod tests {
     use std::array;
 
     use alloy::primitives::U256;
-    use mp2_common::{types::HashOutput, u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256}, utils::TryIntoBool, C, D, F};
-    use mp2_test::{circuit::{self, run_circuit, UserCircuit}, utils::gen_random_u256};
-    use plonky2::{field::types::Sample, hash::hash_types::HashOutTarget, iop::{target::{BoolTarget, Target}, witness::{PartialWitness, WitnessWrite}}, plonk::circuit_builder::CircuitBuilder};
+    use mp2_common::{
+        types::HashOutput,
+        u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+        utils::TryIntoBool,
+        C, D, F,
+    };
+    use mp2_test::{
+        circuit::{self, run_circuit, UserCircuit},
+        utils::gen_random_u256,
+    };
+    use plonky2::{
+        field::types::Sample,
+        hash::hash_types::HashOutTarget,
+        iop::{
+            target::{BoolTarget, Target},
+            witness::{PartialWitness, WitnessWrite},
+        },
+        plonk::circuit_builder::CircuitBuilder,
+    };
     use rand::thread_rng;
 
-    use crate::query::{aggregation::{ChildPosition, NodeInfo}, merkle_path::{tests::{build_node, generate_test_tree}, EndNodeInputs, MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs}};
+    use crate::query::{
+        aggregation::{ChildPosition, NodeInfo},
+        merkle_path::{
+            tests::{build_node, generate_test_tree},
+            EndNodeInputs, MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs,
+        },
+    };
 
-    use super::{are_consecutive_nodes, are_consecutive_rows, BoundaryRowDataTarget, BoundaryRowNodeInfoTarget};
+    use super::{
+        are_consecutive_nodes, are_consecutive_rows, BoundaryRowDataTarget,
+        BoundaryRowNodeInfoTarget,
+    };
 
     const ROW_TREE_MAX_DEPTH: usize = 10;
     const INDEX_TREE_MAX_DEPTH: usize = 15;
 
     #[derive(Clone, Debug)]
-    struct TestConsecutiveNodes<
-        const ROWS_TREE_NODES: bool,
-        const MAX_DEPTH: usize,
-    > 
-    where [(); MAX_DEPTH - 1]:,
+    struct TestConsecutiveNodes<const ROWS_TREE_NODES: bool, const MAX_DEPTH: usize>
+    where
+        [(); MAX_DEPTH - 1]:,
     {
         first_node_path: MerklePathWithNeighborsGadget<MAX_DEPTH>,
         first_node_info: NodeInfo,
@@ -212,8 +251,9 @@ mod tests {
     }
 
     #[derive(Clone, Debug)]
-    struct TestConsecutiveNodesWires<const MAX_DEPTH: usize> 
-    where [(); MAX_DEPTH - 1]:,
+    struct TestConsecutiveNodesWires<const MAX_DEPTH: usize>
+    where
+        [(); MAX_DEPTH - 1]:,
     {
         first_node_path: MerklePathWithNeighborsTargetInputs<MAX_DEPTH>,
         first_node_value: UInt256Target,
@@ -226,29 +266,29 @@ mod tests {
         max_query_bound: UInt256Target,
     }
 
-    impl<
-        const MAX_DEPTH: usize,
-    > TestConsecutiveNodesWires<MAX_DEPTH> 
-    where [(); MAX_DEPTH - 1]:,
+    impl<const MAX_DEPTH: usize> TestConsecutiveNodesWires<MAX_DEPTH>
+    where
+        [(); MAX_DEPTH - 1]:,
     {
-        fn new(c: &mut CircuitBuilder<F, D>) -> (Self, BoundaryRowNodeInfoTarget, BoundaryRowNodeInfoTarget) {
-            let [first_node_value, second_node_value, 
-            min_query_bound, max_query_bound] = c.add_virtual_u256_arr_unsafe();
-            let [first_node_tree_hash, second_node_tree_hash] = array::from_fn(|_| 
-                c.add_virtual_hash()
-            );
+        fn new(
+            c: &mut CircuitBuilder<F, D>,
+        ) -> (Self, BoundaryRowNodeInfoTarget, BoundaryRowNodeInfoTarget) {
+            let [first_node_value, second_node_value, min_query_bound, max_query_bound] =
+                c.add_virtual_u256_arr_unsafe();
+            let [first_node_tree_hash, second_node_tree_hash] =
+                array::from_fn(|_| c.add_virtual_hash());
             let index_id = c.add_virtual_target();
             let first_node_path = MerklePathWithNeighborsGadget::build(
-                c, 
-                first_node_value.clone(), 
-                first_node_tree_hash, 
-                index_id
+                c,
+                first_node_value.clone(),
+                first_node_tree_hash,
+                index_id,
             );
             let second_node_path = MerklePathWithNeighborsGadget::build(
-                c, 
-                second_node_value.clone(), 
-                second_node_tree_hash, 
-                index_id
+                c,
+                second_node_value.clone(),
+                second_node_tree_hash,
+                index_id,
             );
 
             let first_node = BoundaryRowNodeInfoTarget {
@@ -272,30 +312,29 @@ mod tests {
                     second_node_tree_hash,
                     index_id,
                     min_query_bound,
-                    max_query_bound, 
+                    max_query_bound,
                 },
                 first_node,
-                second_node
+                second_node,
             )
         }
     }
 
-    impl<
-        const ROWS_TREE_NODES: bool,
-        const MAX_DEPTH: usize,
-    >  UserCircuit<F, D> for TestConsecutiveNodes<ROWS_TREE_NODES, MAX_DEPTH> 
-    where [(); MAX_DEPTH - 1]:,
+    impl<const ROWS_TREE_NODES: bool, const MAX_DEPTH: usize> UserCircuit<F, D>
+        for TestConsecutiveNodes<ROWS_TREE_NODES, MAX_DEPTH>
+    where
+        [(); MAX_DEPTH - 1]:,
     {
         type Wires = TestConsecutiveNodesWires<MAX_DEPTH>;
-    
+
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let (wires, first_node, second_node) = TestConsecutiveNodesWires::new(c);
-            
+
             let (are_consecutive, _) = are_consecutive_nodes(
-                c, 
-                &first_node, 
-                &second_node, 
-                &wires.min_query_bound, 
+                c,
+                &first_node,
+                &second_node,
+                &wires.min_query_bound,
                 &wires.max_query_bound,
                 ROWS_TREE_NODES,
             );
@@ -303,51 +342,61 @@ mod tests {
             c.register_public_input(are_consecutive.target);
 
             wires
-            
         }
-    
+
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.first_node_path.assign(pw, &wires.first_node_path);
             self.second_node_path.assign(pw, &wires.second_node_path);
             [
                 (self.first_node_info.value, &wires.first_node_value),
                 (self.second_node_info.value, &wires.second_node_value),
-                (self.min_query_bound.unwrap_or(U256::ZERO), &wires.min_query_bound),
-                (self.max_query_bound.unwrap_or(U256::MAX), &wires.max_query_bound),
-            ].into_iter().for_each(|(value, target)| 
-                pw.set_u256_target(target, value)
-            );
+                (
+                    self.min_query_bound.unwrap_or(U256::ZERO),
+                    &wires.min_query_bound,
+                ),
+                (
+                    self.max_query_bound.unwrap_or(U256::MAX),
+                    &wires.max_query_bound,
+                ),
+            ]
+            .into_iter()
+            .for_each(|(value, target)| pw.set_u256_target(target, value));
             [
-                (self.first_node_info.embedded_tree_hash, wires.first_node_tree_hash),
-                (self.second_node_info.embedded_tree_hash, wires.second_node_tree_hash)
-            ].into_iter().for_each(|(value, target)|
-                pw.set_hash_target(target, value)
-            );
+                (
+                    self.first_node_info.embedded_tree_hash,
+                    wires.first_node_tree_hash,
+                ),
+                (
+                    self.second_node_info.embedded_tree_hash,
+                    wires.second_node_tree_hash,
+                ),
+            ]
+            .into_iter()
+            .for_each(|(value, target)| pw.set_hash_target(target, value));
             pw.set_target(wires.index_id, self.index_id);
         }
     }
 
     #[derive(Clone, Debug)]
-    struct TestConsecutiveRows
-    {
+    struct TestConsecutiveRows {
         row_tree_nodes: TestConsecutiveNodes<true, ROW_TREE_MAX_DEPTH>,
         index_tree_nodes: TestConsecutiveNodes<false, INDEX_TREE_MAX_DEPTH>,
     }
 
-
     #[derive(Clone, Debug)]
-    struct TestConsecutiveRowsWires 
-    {
+    struct TestConsecutiveRowsWires {
         row_tree_nodes: TestConsecutiveNodesWires<ROW_TREE_MAX_DEPTH>,
-        index_tree_nodes: TestConsecutiveNodesWires<INDEX_TREE_MAX_DEPTH>, 
+        index_tree_nodes: TestConsecutiveNodesWires<INDEX_TREE_MAX_DEPTH>,
     }
 
     impl UserCircuit<F, D> for TestConsecutiveRows {
         type Wires = TestConsecutiveRowsWires;
-    
+
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let (row_tree_nodes, first_row_node, second_row_node) = TestConsecutiveNodesWires::new(c);
-            let (index_tree_nodes, first_index_node, second_index_node) = TestConsecutiveNodesWires::new(c);
+            let (row_tree_nodes, first_row_node, second_row_node) =
+                TestConsecutiveNodesWires::new(c);
+            let (index_tree_nodes, first_index_node, second_index_node) =
+                TestConsecutiveNodesWires::new(c);
             let first = BoundaryRowDataTarget {
                 row_node_info: first_row_node,
                 index_node_info: first_index_node,
@@ -357,12 +406,12 @@ mod tests {
                 index_node_info: second_index_node,
             };
             let are_consecutive = are_consecutive_rows(
-                c, 
-                &first, 
-                &second, 
-                &index_tree_nodes.min_query_bound, 
-                &index_tree_nodes.max_query_bound, 
-                &row_tree_nodes.min_query_bound, 
+                c,
+                &first,
+                &second,
+                &index_tree_nodes.min_query_bound,
+                &index_tree_nodes.max_query_bound,
+                &row_tree_nodes.min_query_bound,
                 &row_tree_nodes.max_query_bound,
             );
 
@@ -373,7 +422,7 @@ mod tests {
                 index_tree_nodes,
             }
         }
-    
+
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.row_tree_nodes.prove(pw, &wires.row_tree_nodes);
             self.index_tree_nodes.prove(pw, &wires.index_tree_nodes);
@@ -388,7 +437,8 @@ mod tests {
         //          B       C
         //      D               G
         //   E      F
-        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] = generate_test_tree(index_id, None);
+        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] =
+            generate_test_tree(index_id, None);
 
         // test that nodes F and D are consecutive
         let path_F = vec![
@@ -441,9 +491,7 @@ mod tests {
             [Some(node_B.clone()), Some(node_C.clone())],
         )
         .unwrap();
-        let path_C = vec![
-            (node_A.clone(), ChildPosition::Right),
-        ];
+        let path_C = vec![(node_A.clone(), ChildPosition::Right)];
         let node_B_hash = HashOutput::try_from(node_B.compute_node_hash(index_id)).unwrap();
         let siblings_C = vec![Some(node_B_hash.clone())];
         let merkle_path_inputs_C = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
@@ -469,9 +517,7 @@ mod tests {
         assert!(proof.public_inputs[0].try_into_bool().unwrap());
 
         // test that nodes F and B are consecutive
-        let path_B = vec![
-            (node_A.clone(), ChildPosition::Left),
-        ];
+        let path_B = vec![(node_A.clone(), ChildPosition::Left)];
         let siblings_B = vec![Some(node_C_hash.clone())];
         let merkle_path_inputs_B = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
             &path_B,
@@ -509,7 +555,7 @@ mod tests {
             [None, None], // it's a leaf node
         )
         .unwrap();
-        
+
         let circuit = TestConsecutiveNodes::<true, ROW_TREE_MAX_DEPTH> {
             first_node_path: merkle_path_inputs_E,
             first_node_info: node_E.clone(),
@@ -524,7 +570,7 @@ mod tests {
         // check that the nodes are not consecutive
         assert!(!proof.public_inputs[0].try_into_bool().unwrap());
 
-        // negative test: A and B are not consecutive (wrong order)        
+        // negative test: A and B are not consecutive (wrong order)
         let path_A = vec![];
         let siblings_A = vec![];
         let merkle_path_inputs_A = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
@@ -534,7 +580,7 @@ mod tests {
             [Some(node_B.clone()), Some(node_C.clone())],
         )
         .unwrap();
-        
+
         let circuit = TestConsecutiveNodes::<true, ROW_TREE_MAX_DEPTH> {
             first_node_path: merkle_path_inputs_A,
             first_node_info: node_A.clone(),
@@ -631,7 +677,7 @@ mod tests {
         // check that the nodes are not consecutive
         assert!(!proof.public_inputs[0].try_into_bool().unwrap());
 
-        // check that, even in a rows tree, we cannot prove nodes which are not at the boundaries of the query range 
+        // check that, even in a rows tree, we cannot prove nodes which are not at the boundaries of the query range
         // to be consecutive: test that C and E are not consecutive
         let circuit = TestConsecutiveNodes::<true, ROW_TREE_MAX_DEPTH> {
             first_node_path: merkle_path_inputs_C,
@@ -691,13 +737,11 @@ mod tests {
         // we build an index tree with the following nodes:
         //              1
         //       0              3
-        //                  2       4            
+        //                  2       4
         // where each node stores a rows tree generated with `generate_test_tree`
         // generate values to be stored in index tree nodes
         let rng = &mut thread_rng();
-        let mut values: [U256; 5] = array::from_fn(|_|
-            gen_random_u256(rng)
-        );
+        let mut values: [U256; 5] = array::from_fn(|_| gen_random_u256(rng));
         values.sort();
         let secondary_index_id = F::rand();
         let primary_index_id = F::rand();
@@ -705,77 +749,63 @@ mod tests {
         // that min_secondary <= max_secondary when using custom query bounds in tests, as we will always
         // take max_secondary from the set of values of rows_tree_i and min_secondary from the set of values
         // of rows_tree_{i+j}
-        let rows_tree_0_value_range = (U256::MAX/U256::from(2), U256::MAX);
-        let rows_tree_1_value_range = (U256::MAX/U256::from(4), U256::MAX/U256::from(2));
-        let rows_tree_2_value_range = (U256::MAX/U256::from(8), U256::MAX/U256::from(4));
-        let rows_tree_3_value_range = (U256::MAX/U256::from(16), U256::MAX/U256::from(8));
-        let rows_tree_4_value_range = (U256::ZERO, U256::MAX/U256::from(16));
-        let rows_tree_0 = RowsTree::from(generate_test_tree(secondary_index_id, Some(rows_tree_0_value_range)));
-        let root = HashOutput::try_from(
-            rows_tree_0.node_A.compute_node_hash(secondary_index_id)
-        ).unwrap();
-        let node_0 = build_node(
-            None, 
-            
-            None, 
-            values[0], 
-            root, 
-            primary_index_id
-        );
-        let rows_tree_2 = RowsTree::from(generate_test_tree(secondary_index_id, Some(rows_tree_2_value_range)));
-        let root = HashOutput::try_from(
-            rows_tree_2.node_A.compute_node_hash(secondary_index_id)
-        ).unwrap();
-        let node_2 = build_node(
-            None, 
-            
-            None, 
-            values[2], 
-            root, 
-            primary_index_id
-        );
-        let rows_tree_4 = RowsTree::from(generate_test_tree(secondary_index_id, Some(rows_tree_4_value_range)));
-        let root = HashOutput::try_from(
-            rows_tree_4.node_A.compute_node_hash(secondary_index_id)
-        ).unwrap();
-        let node_4 = build_node(
-            None, 
-            
-            None, 
-            values[4], 
-            root, 
-            primary_index_id
-        );
-        let rows_tree_3 = RowsTree::from(generate_test_tree(secondary_index_id, Some(rows_tree_3_value_range)));
-        let root = HashOutput::try_from(
-            rows_tree_3.node_A.compute_node_hash(secondary_index_id)
-        ).unwrap();
+        let rows_tree_0_value_range = (U256::MAX / U256::from(2), U256::MAX);
+        let rows_tree_1_value_range = (U256::MAX / U256::from(4), U256::MAX / U256::from(2));
+        let rows_tree_2_value_range = (U256::MAX / U256::from(8), U256::MAX / U256::from(4));
+        let rows_tree_3_value_range = (U256::MAX / U256::from(16), U256::MAX / U256::from(8));
+        let rows_tree_4_value_range = (U256::ZERO, U256::MAX / U256::from(16));
+        let rows_tree_0 = RowsTree::from(generate_test_tree(
+            secondary_index_id,
+            Some(rows_tree_0_value_range),
+        ));
+        let root =
+            HashOutput::try_from(rows_tree_0.node_A.compute_node_hash(secondary_index_id)).unwrap();
+        let node_0 = build_node(None, None, values[0], root, primary_index_id);
+        let rows_tree_2 = RowsTree::from(generate_test_tree(
+            secondary_index_id,
+            Some(rows_tree_2_value_range),
+        ));
+        let root =
+            HashOutput::try_from(rows_tree_2.node_A.compute_node_hash(secondary_index_id)).unwrap();
+        let node_2 = build_node(None, None, values[2], root, primary_index_id);
+        let rows_tree_4 = RowsTree::from(generate_test_tree(
+            secondary_index_id,
+            Some(rows_tree_4_value_range),
+        ));
+        let root =
+            HashOutput::try_from(rows_tree_4.node_A.compute_node_hash(secondary_index_id)).unwrap();
+        let node_4 = build_node(None, None, values[4], root, primary_index_id);
+        let rows_tree_3 = RowsTree::from(generate_test_tree(
+            secondary_index_id,
+            Some(rows_tree_3_value_range),
+        ));
+        let root =
+            HashOutput::try_from(rows_tree_3.node_A.compute_node_hash(secondary_index_id)).unwrap();
         let node_3 = build_node(
-            Some(&node_2), 
-            
-            Some(&node_4), 
-            values[3], 
-            root, 
-            primary_index_id
+            Some(&node_2),
+            Some(&node_4),
+            values[3],
+            root,
+            primary_index_id,
         );
-        let rows_tree_1 = RowsTree::from(generate_test_tree(secondary_index_id, Some(rows_tree_1_value_range)));
-        let root = HashOutput::try_from(
-            rows_tree_1.node_A.compute_node_hash(secondary_index_id)
-        ).unwrap();
+        let rows_tree_1 = RowsTree::from(generate_test_tree(
+            secondary_index_id,
+            Some(rows_tree_1_value_range),
+        ));
+        let root =
+            HashOutput::try_from(rows_tree_1.node_A.compute_node_hash(secondary_index_id)).unwrap();
         let node_1 = build_node(
-            Some(&node_0), 
-            
-            Some(&node_3), 
-            values[1], 
-            root, 
-            primary_index_id
+            Some(&node_0),
+            Some(&node_3),
+            values[1],
+            root,
+            primary_index_id,
         );
 
         // test consecutive rows in the same rows tree: check that node_C and node_G in rows_tree_1 are consecutive
-        let path_1C = vec![
-            (rows_tree_1.node_A.clone(), ChildPosition::Right)
-        ];
-        let node_1B_hash = HashOutput::try_from(rows_tree_1.node_B.compute_node_hash(secondary_index_id)).unwrap();
+        let path_1C = vec![(rows_tree_1.node_A.clone(), ChildPosition::Right)];
+        let node_1B_hash =
+            HashOutput::try_from(rows_tree_1.node_B.compute_node_hash(secondary_index_id)).unwrap();
         let siblings_1C = vec![Some(node_1B_hash.clone())];
         let merkle_inputs_1C = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
             &path_1C,
@@ -786,7 +816,7 @@ mod tests {
         .unwrap();
         let path_1G = vec![
             (rows_tree_1.node_C.clone(), ChildPosition::Right),
-            (rows_tree_1.node_A.clone(), ChildPosition::Right)
+            (rows_tree_1.node_A.clone(), ChildPosition::Right),
         ];
         let siblings_1G = vec![None, Some(node_1B_hash.clone())];
         let merkle_inputs_1G = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
@@ -829,16 +859,18 @@ mod tests {
         let proof = run_circuit::<F, D, C, _>(circuit);
         // check that the nodes are consecutive
         assert!(proof.public_inputs[0].try_into_bool().unwrap());
-        
-        // test consecutive rows in different rows trees: check that node_G of rows_tree_1 and node_E of rows_tree_2 
+
+        // test consecutive rows in different rows trees: check that node_G of rows_tree_1 and node_E of rows_tree_2
         // are consecutive
         let path_2E = vec![
             (rows_tree_2.node_D.clone(), ChildPosition::Left),
             (rows_tree_2.node_B.clone(), ChildPosition::Left),
             (rows_tree_2.node_A.clone(), ChildPosition::Left),
         ];
-        let node_2F_hash = HashOutput::try_from(rows_tree_2.node_F.compute_node_hash(secondary_index_id)).unwrap();
-        let node_2C_hash = HashOutput::try_from(rows_tree_2.node_C.compute_node_hash(secondary_index_id)).unwrap();
+        let node_2F_hash =
+            HashOutput::try_from(rows_tree_2.node_F.compute_node_hash(secondary_index_id)).unwrap();
+        let node_2C_hash =
+            HashOutput::try_from(rows_tree_2.node_C.compute_node_hash(secondary_index_id)).unwrap();
         let siblings_2E = vec![Some(node_2F_hash), None, Some(node_2C_hash.clone())];
         let merkle_inputs_2E = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
             &path_2E,
@@ -892,7 +924,8 @@ mod tests {
             (rows_tree_2.node_B.clone(), ChildPosition::Left),
             (rows_tree_2.node_A.clone(), ChildPosition::Left),
         ];
-        let node_2E_hash = HashOutput::try_from(rows_tree_2.node_E.compute_node_hash(secondary_index_id)).unwrap();
+        let node_2E_hash =
+            HashOutput::try_from(rows_tree_2.node_E.compute_node_hash(secondary_index_id)).unwrap();
         let siblings_2F = vec![Some(node_2E_hash), None, Some(node_2C_hash.clone())];
         let merkle_inputs_2F = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
             &path_2F,
@@ -922,11 +955,8 @@ mod tests {
             },
         };
 
-
         // negative test: check that node_C of rows_tree_1 and node_E of rows_tree_2 are not consecutive
-        let path_1C = vec![
-            (rows_tree_1.node_A.clone(), ChildPosition::Right),
-        ];
+        let path_1C = vec![(rows_tree_1.node_A.clone(), ChildPosition::Right)];
         let siblings_1C = vec![Some(node_1B_hash)];
         let merkle_inputs_1C = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
             &path_1C,
@@ -966,8 +996,10 @@ mod tests {
             (rows_tree_3.node_B.clone(), ChildPosition::Left),
             (rows_tree_3.node_A.clone(), ChildPosition::Left),
         ];
-        let node_3F_hash = HashOutput::try_from(rows_tree_3.node_F.compute_node_hash(secondary_index_id)).unwrap();
-        let node_3C_hash = HashOutput::try_from(rows_tree_3.node_C.compute_node_hash(secondary_index_id)).unwrap();
+        let node_3F_hash =
+            HashOutput::try_from(rows_tree_3.node_F.compute_node_hash(secondary_index_id)).unwrap();
+        let node_3C_hash =
+            HashOutput::try_from(rows_tree_3.node_C.compute_node_hash(secondary_index_id)).unwrap();
         let siblings_3E = vec![Some(node_3F_hash), None, Some(node_3C_hash.clone())];
         let merkle_inputs_3E = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
             &path_3E,
@@ -976,9 +1008,7 @@ mod tests {
             [None, None], // it's a leaf node
         )
         .unwrap();
-        let path_3 = vec![
-            (node_1.clone(), ChildPosition::Right),
-        ];
+        let path_3 = vec![(node_1.clone(), ChildPosition::Right)];
         let siblings_3 = vec![Some(node_0_hash)];
         let merkle_inputs_index_3 = MerklePathWithNeighborsGadget::<INDEX_TREE_MAX_DEPTH>::new(
             &path_3,
@@ -1012,7 +1042,7 @@ mod tests {
         // check that the nodes are not consecutive
         assert!(!proof.public_inputs[0].try_into_bool().unwrap());
 
-        // test nodes at range boundaries across different rows trees: check that node_A of rows_tree_1 and node_D 
+        // test nodes at range boundaries across different rows trees: check that node_A of rows_tree_1 and node_D
         // of rows_tree_2 can be consecutive if the range on secondary index is [node_2D.value, node_1A.value]
         let path_1A = vec![];
         let siblings_1A = vec![];
@@ -1020,7 +1050,10 @@ mod tests {
             &path_1A,
             &siblings_1A,
             &rows_tree_1.node_A,
-            [Some(rows_tree_1.node_B.clone()), Some(rows_tree_1.node_C.clone())],
+            [
+                Some(rows_tree_1.node_B.clone()),
+                Some(rows_tree_1.node_C.clone()),
+            ],
         )
         .unwrap();
         let path_2D = vec![
@@ -1032,7 +1065,10 @@ mod tests {
             &path_2D,
             &siblings_2D,
             &rows_tree_2.node_D,
-            [Some(rows_tree_2.node_E.clone()), Some(rows_tree_2.node_F.clone())],
+            [
+                Some(rows_tree_2.node_E.clone()),
+                Some(rows_tree_2.node_F.clone()),
+            ],
         )
         .unwrap();
         let circuit = TestConsecutiveRows {
@@ -1060,7 +1096,7 @@ mod tests {
         // check that the nodes are consecutive
         assert!(proof.public_inputs[0].try_into_bool().unwrap());
 
-        // negative test: check that node_A of rows_tree_1 and node_D of rows_tree_2 are not be consecutive 
+        // negative test: check that node_A of rows_tree_1 and node_D of rows_tree_2 are not be consecutive
         // with a different range on secondary index
         let circuit = TestConsecutiveRows {
             row_tree_nodes: TestConsecutiveNodes {
@@ -1143,7 +1179,7 @@ mod tests {
 
         // test rows tree without matching rows: check that we can merge 2 rows in rows trees where all
         // the values are smaller than the query range. Node_G of rows_tree_1 is consecutive with node_E of
-        // rows_tree_2, if the query range is defined over values of rows_tree_0 (which are all bigger than 
+        // rows_tree_2, if the query range is defined over values of rows_tree_0 (which are all bigger than
         // other rows trees by construction)
         let circuit = TestConsecutiveRows {
             row_tree_nodes: TestConsecutiveNodes {
@@ -1172,7 +1208,7 @@ mod tests {
 
         // test rows tree without matching rows: check that we can merge 2 rows in rows trees where all
         // the values are bigger than the query range. Node_G of rows_tree_1 is consecutive with node_E of
-        // rows_tree_2, if the query range is defined over values of rows_tree_4 (which are all smaller than 
+        // rows_tree_2, if the query range is defined over values of rows_tree_4 (which are all smaller than
         // the other rows trees by construction)
         let circuit = TestConsecutiveRows {
             row_tree_nodes: TestConsecutiveNodes {
@@ -1250,7 +1286,5 @@ mod tests {
         let proof = run_circuit::<F, D, C, _>(circuit);
         // check that the nodes are not consecutive
         assert!(!proof.public_inputs[0].try_into_bool().unwrap());
-
     }
-
 }

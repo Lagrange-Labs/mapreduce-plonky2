@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
+use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS};
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -25,6 +25,19 @@ use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
+
+// check that the closure $f actually panics, printing $msg as error message if the function
+// did not panic; this macro is employed in tests in place of #[should_panic] to ensure that a
+// panic occurred in the expected function rather than in other parts of the test
+#[macro_export]
+macro_rules! check_panic {
+    ($f: expr, $msg: expr) => {{
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe($f));
+        assert!(result.is_err(), $msg);
+    }};
+}
+
+pub use check_panic;
 
 pub fn verify_proof_tuple<
     F: RichField + Extendable<D>,
@@ -318,11 +331,7 @@ pub trait HashBuilder {
     ) -> HashOutTarget;
 
     /// Determine whether `first_hash == second_hash`
-    fn hash_eq(
-        &mut self,
-        first_hash: &HashOutTarget,
-        second_hash: &HashOutTarget
-    ) -> BoolTarget;
+    fn hash_eq(&mut self, first_hash: &HashOutTarget, second_hash: &HashOutTarget) -> BoolTarget;
 }
 
 impl<F: RichField + Extendable<D>, const D: usize> HashBuilder for CircuitBuilder<F, D> {
@@ -342,13 +351,12 @@ impl<F: RichField + Extendable<D>, const D: usize> HashBuilder for CircuitBuilde
         )
     }
 
-    fn hash_eq(
-            &mut self,
-            first_hash: &HashOutTarget,
-            second_hash: &HashOutTarget
-        ) -> BoolTarget {
+    fn hash_eq(&mut self, first_hash: &HashOutTarget, second_hash: &HashOutTarget) -> BoolTarget {
         let _true = self._true();
-        first_hash.elements.iter().zip(second_hash.elements.iter())
+        first_hash
+            .elements
+            .iter()
+            .zip(second_hash.elements.iter())
             .fold(_true, |acc, (first, second)| {
                 let is_eq = self.is_equal(*first, *second);
                 self.and(acc, is_eq)
@@ -426,10 +434,16 @@ impl<F: RichField> Fieldable<F> for u64 {
 }
 
 pub trait FromTargets {
+    /// Number of targets necessary to instantiate `Self`
+    const NUM_TARGETS: usize;
+
+    /// Number of targets in `t` must be at least `Self::NUM_TARGETS`
     fn from_targets(t: &[Target]) -> Self;
 }
 
 impl FromTargets for HashOutTarget {
+    const NUM_TARGETS: usize = NUM_HASH_OUT_ELTS;
+
     fn from_targets(t: &[Target]) -> Self {
         HashOutTarget {
             elements: create_array(|i| t[i]),

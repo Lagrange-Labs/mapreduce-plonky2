@@ -824,6 +824,7 @@ impl ToTargets for UInt256Target {
 }
 
 impl FromTargets for UInt256Target {
+    const NUM_TARGETS: usize = NUM_LIMBS;
     // Expects big endian limbs as the standard format for IO
     fn from_targets(t: &[Target]) -> Self {
         Self::new_from_be_target_limbs(&t[..NUM_LIMBS]).unwrap()

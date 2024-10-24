@@ -15,7 +15,9 @@ use plonky2::{
 };
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 
-use super::universal_circuit::universal_query_gadget::{CurveOrU256Target, OutputValues, OutputValuesTarget};
+use super::universal_circuit::universal_query_gadget::{
+    CurveOrU256Target, OutputValues, OutputValuesTarget,
+};
 
 /// Query circuits public inputs
 pub enum QueryPublicInputs {
@@ -356,8 +358,9 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputs<'a, F, S> 
-where [(); S-1]:,
+impl<'a, const S: usize> PublicInputs<'a, F, S>
+where
+    [(); S - 1]:,
 {
     pub fn tree_hash(&self) -> HashOut<F> {
         HashOut::try_from(self.to_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
