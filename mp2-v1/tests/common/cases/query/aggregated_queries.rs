@@ -703,8 +703,8 @@ pub fn generate_non_existence_proof<'a>(
     is_rows_tree_node: bool,
 ) -> Result<Vec<u8>> {
     let index_ids = [
-        planner.table.columns.primary_column().identifier,
-        planner.table.columns.secondary_column().identifier,
+        planner.table.columns.primary_column().identifier(),
+        planner.table.columns.secondary_column().identifier(),
     ];
     assert_eq!(index_ids[0], identifier_block_column());
     let column_ids = ColumnIDs::new(
@@ -715,7 +715,7 @@ pub fn generate_non_existence_proof<'a>(
             .columns
             .non_indexed_columns()
             .iter()
-            .map(|column| column.identifier)
+            .map(|column| column.identifier())
             .collect_vec(),
     );
     let query_hashes = QueryHashNonExistenceCircuits::new::<
@@ -1126,7 +1126,7 @@ pub async fn prove_single_row<T: TreeInfo<RowTreeKey, RowPayload<BlockPrimaryInd
     let rest_cells = columns
         .non_indexed_columns()
         .iter()
-        .map(|tc| tc.identifier)
+        .map(|tc| tc.identifier())
         .filter_map(|id| {
             row_payload
                 .cells

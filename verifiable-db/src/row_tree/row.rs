@@ -171,10 +171,10 @@ impl RowWire {
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
         let row_id_individual = hash_to_int_target(b, hash);
-        let row_id_individual = b.biguint_to_nonnative(&row_id_individual);
 
         // Multiply row ID to individual value digest:
         // individual_vd = row_id_individual * individual_vd
+        let row_id_individual = b.biguint_to_nonnative(&row_id_individual);
         let individual_vd = b.curve_scalar_mul(values_digests.individual, &row_id_individual);
 
         let multiplier_vd = values_digests.multiplier;

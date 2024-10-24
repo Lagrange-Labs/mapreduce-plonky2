@@ -150,9 +150,9 @@ where
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         let row_id = hash_to_int_target(b, hash);
-        let row_id = b.biguint_to_nonnative(&row_id);
 
         // values_digest = values_digest * row_id
+        let row_id = b.biguint_to_nonnative(&row_id);
         let values_digest = b.curve_scalar_mul(values_digest, &row_id);
 
         // Only one leaf in this node.

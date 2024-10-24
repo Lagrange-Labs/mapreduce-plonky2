@@ -48,7 +48,7 @@ pub(crate) fn compute_index_digest(
 }
 
 /// Compute the final digest value.
-pub(crate) fn compute_final_digest(
+pub fn compute_final_digest(
     is_merge_case: bool,
     rows_tree_pi: &row_tree::PublicInputs<F>,
 ) -> Point {
@@ -94,7 +94,7 @@ where
         .collect();
     let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
     let row_id_multiplier = hash_to_int_target(b, hash);
-    // multiplier_digest = rows_tree_proof.row_id_multiplier * rows_tree_proof.multiplier_vd
+    // multiplier_digest = row_id_multiplier * rows_tree_proof.multiplier_vd
     let multiplier_vd = rows_tree_pi.multiplier_digest_target();
     let row_id_multiplier = b.biguint_to_nonnative(&row_id_multiplier);
     let multiplier_digest = b.curve_scalar_mul(multiplier_vd, &row_id_multiplier);

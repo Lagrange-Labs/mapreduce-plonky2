@@ -1,7 +1,14 @@
 use alloy::primitives::U256;
 use anyhow::*;
+use itertools::Itertools;
 use log::debug;
-use mp2_common::proof::ProofWithVK;
+use mp2_common::{
+    poseidon::H,
+    proof::ProofWithVK,
+    types::MAPPING_KEY_LEN,
+    utils::{Endianness, Packer},
+    F,
+};
 use mp2_v1::{
     api::{self, CircuitInput},
     indexing::{
@@ -9,9 +16,17 @@ use mp2_v1::{
         cell::Cell,
         index::IndexNode,
         row::{RowPayload, RowTree, RowTreeKey, ToNonce},
+        LagrangeNode,
+    },
+    values_extraction::{
+        row_unique_data_for_mapping_leaf, row_unique_data_for_mapping_of_mappings_leaf,
+        row_unique_data_for_single_leaf,
     },
 };
-use plonky2::{field::types::Sample, hash::hash_types::HashOut, plonk::config::GenericHashOut};
+use plonky2::{
+    field::types::Field,
+    plonk::config::{GenericHashOut, Hasher},
+};
 use ryhope::{
     storage::{
         pgsql::PgsqlStorage,
@@ -20,9 +35,13 @@ use ryhope::{
     },
     MerkleTreeKvDb,
 };
-use verifiable_db::{cells_tree, row_tree::extract_hash_from_proof};
+use serde::Deserialize;
+use verifiable_db::{
+    cells_tree,
+    row_tree::{self, extract_hash_from_proof},
+};
 
-use crate::common::row_tree_proof_to_hash;
+use crate::common::{row_tree_proof_to_hash, table::TableRowUniqueID};
 
 use super::{
     proof_storage::{CellProofIdentifier, ProofKey, ProofStorage, RowProofIdentifier},
@@ -87,11 +106,47 @@ impl TestContext {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(wk)) = workplan.next() {
             let k = wk.k();
-            let (context, row) = t.fetch_with_context(&k).await;
+            let (context, row) = t.fetch_with_context(k).await;
             let id = row.secondary_index_column;
             // Sec. index value
             let value = row.secondary_index_value();
-            let multiplier = table.columns.column_info(id).multiplier;
+            let column_info = table.columns.column_info(id);
+            let multiplier = column_info.multiplier;
+            let row_unique_data = match table.row_unique_id {
+                TableRowUniqueID::Single => row_unique_data_for_single_leaf(),
+                TableRowUniqueID::Mapping(key_column_id) => {
+                    let mapping_key: [_; MAPPING_KEY_LEN] = row
+                        .column_value(key_column_id)
+                        .unwrap_or_else(|| {
+                            panic!("Cannot fetch the mapping key: key_column_id = {key_column_id}")
+                        })
+                        .to_be_bytes();
+                    debug!(
+                        "FETCHED mapping key to compute row_unique_data: mapping_key = {:?}",
+                        hex::encode(mapping_key),
+                    );
+                    row_unique_data_for_mapping_leaf(&mapping_key)
+                }
+                TableRowUniqueID::MappingOfMappings(outer_key_column_id, inner_key_column_id) => {
+                    let [outer_mapping_key, inner_mapping_key]: [[_; MAPPING_KEY_LEN]; 2] = [outer_key_column_id, inner_key_column_id].map(|key_column_id| {
+                        row.column_value(key_column_id)
+                        .unwrap_or_else(|| {
+                            panic!("Cannot fetch the key of mapping of mappings: key_column_id = {key_column_id}")
+                        })
+                        .to_be_bytes()
+                    });
+                    debug!(
+                        "FETCHED mapping of mappings keys to compute row_unique_data: outer_key = {:?}, inner_key = {:?}",
+                        hex::encode(outer_mapping_key),
+                        hex::encode(inner_mapping_key),
+                    );
+
+                    row_unique_data_for_mapping_of_mappings_leaf(
+                        &outer_mapping_key,
+                        &inner_mapping_key,
+                    )
+                }
+            };
             // NOTE remove that when playing more with sec. index
             assert!(!multiplier, "secondary index should be individual type");
             // find where the root cells proof has been stored. This comes from looking up the
@@ -127,15 +182,15 @@ impl TestContext {
                 row.cells,
             );
 
-            {
-                let pvk = ProofWithVK::deserialize(&cell_tree_proof)?;
-                let pis = cells_tree::PublicInputs::from_slice(&pvk.proof().public_inputs);
-                debug!(
-                    " Cell Root SPLIT digest: multiplier {:?}, individual {:?}",
-                    pis.multiplier_values_digest_point(),
-                    pis.individual_values_digest_point()
-                );
-            }
+            let cells_tree_proof_with_vk = ProofWithVK::deserialize(&cell_tree_proof)?;
+            let cells_tree_pi = cells_tree::PublicInputs::from_slice(
+                &cells_tree_proof_with_vk.proof().public_inputs,
+            );
+            debug!(
+                " Cell Root SPLIT digest:\n\tindividual_value {:?}\n\tmultiplier_value {:?}",
+                cells_tree_pi.individual_values_digest_point(),
+                cells_tree_pi.multiplier_values_digest_point(),
+            );
 
             let proof = if context.is_leaf() {
                 // Prove a leaf
@@ -151,18 +206,29 @@ impl TestContext {
                         id,
                         value,
                         multiplier,
-                        // TODO: row_unique_data
-                        HashOut::rand().into(),
+                        row_unique_data,
                         cell_tree_proof,
                     )
                     .unwrap(),
                 );
                 debug!("Before proving leaf node row tree key {:?}", k);
-                self.b
+                let proof = self
+                    .b
                     .bench("indexing::row_tree::leaf", || {
                         api::generate_proof(self.params(), inputs)
                     })
-                    .expect("while proving leaf")
+                    .expect("while proving leaf");
+                let pproof = ProofWithVK::deserialize(&proof).unwrap();
+                let pi = verifiable_db::row_tree::PublicInputs::from_slice(
+                    &pproof.proof().public_inputs,
+                );
+                debug!(
+                    "FINISH proving row leaf -->\n\tid = {:?}\n\tindividual digest = {:?}\n\tmultiplier digest = {:?}",
+                    id,
+                    pi.individual_digest_point(),
+                    pi.multiplier_digest_point(),
+                );
+                proof
             } else if context.is_partial() {
                 let child_key = context
                     .left
@@ -182,6 +248,16 @@ impl TestContext {
                     .storage
                     .get_proof_exact(&ProofKey::Row(proof_key.clone()))
                     .expect("UT guarantees proving in order");
+                {
+                    let child_pi = ProofWithVK::deserialize(&child_proof).unwrap();
+                    let child_pi =
+                        row_tree::PublicInputs::from_slice(&child_pi.proof().public_inputs);
+                    debug!(
+                        "BEFORE proving row partial node -->\n\tis_mulitplier = {}\n\tchild_individual_digest = {:?}",
+                        multiplier,
+                        child_pi.individual_digest_point(),
+                    );
+                }
 
                 let inputs = CircuitInput::RowsTree(
                     verifiable_db::row_tree::CircuitInput::partial_multiplier(
@@ -189,8 +265,7 @@ impl TestContext {
                         value,
                         multiplier,
                         context.left.is_some(),
-                        // TODO: row_unique_data
-                        HashOut::rand().into(),
+                        row_unique_data,
                         child_proof,
                         cell_tree_proof,
                     )
@@ -233,8 +308,7 @@ impl TestContext {
                         id,
                         value,
                         multiplier,
-                        // TODO: row_unique_data
-                        HashOut::rand().into(),
+                        row_unique_data,
                         left_proof,
                         right_proof,
                         cell_tree_proof,
@@ -321,7 +395,7 @@ impl TestContext {
 
         );
         Ok(IndexNode {
-            identifier: table.columns.primary_column().identifier,
+            identifier: table.columns.primary_column().identifier(),
             value: U256::from(primary).into(),
             row_tree_root_key: root_proof_key.tree_key,
             row_tree_hash: table.row.root_data().await.unwrap().hash,

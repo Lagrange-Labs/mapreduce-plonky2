@@ -74,9 +74,15 @@ impl FullNodeCircuit {
             .collect::<Vec<_>>();
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
+        let individual_vd = b.add_curve_point(&[
+            digest.individual_vd,
+            min_child.individual_digest_target(),
+            max_child.individual_digest_target(),
+        ]);
+
         PublicInputs::new(
             &hash.to_targets(),
-            &digest.individual_vd.to_targets(),
+            &individual_vd.to_targets(),
             &digest.multiplier_vd.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
@@ -145,7 +151,7 @@ pub(crate) mod test {
     use super::*;
     use alloy::primitives::U256;
     use itertools::Itertools;
-    use mp2_common::{utils::ToFields, C, D, F};
+    use mp2_common::{group_hashing::weierstrass_to_point, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{field::types::PrimeField64, iop::witness::WitnessWrite, plonk::config::Hasher};
 
@@ -233,7 +239,10 @@ pub(crate) mod test {
         // Check individual digest
         assert_eq!(
             pi.individual_digest_point(),
-            row_digest.individual_vd.to_weierstrass()
+            (row_digest.individual_vd
+                + weierstrass_to_point(&left_pi.individual_digest_point())
+                + weierstrass_to_point(&right_pi.individual_digest_point()))
+            .to_weierstrass()
         );
         // Check multiplier digest
         assert_eq!(

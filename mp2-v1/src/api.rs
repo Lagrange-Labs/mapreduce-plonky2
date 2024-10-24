@@ -21,6 +21,7 @@ use crate::{
 use alloy::primitives::Address;
 use anyhow::Result;
 use itertools::Itertools;
+use log::debug;
 use mp2_common::{
     digest::Digest,
     group_hashing::map_to_curve_point,
@@ -209,7 +210,7 @@ pub enum SlotInputs {
     MappingWithLength(Vec<SlotInput>, u8),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct SlotInput {
     /// Slot information of the variable
     pub(crate) slot: u8,
@@ -338,7 +339,7 @@ fn value_metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
 }
 
 /// Compute the table information for the value columns.
-fn compute_table_info(
+pub fn compute_table_info(
     inputs: Vec<SlotInput>,
     address: &Address,
     chain_id: u64,
@@ -438,8 +439,16 @@ pub fn metadata_hash<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
         chain_id,
         extra,
     );
+    // Correspond to the computation of final extraction base circuit.
+    let value_digest = map_to_curve_point(&value_digest.to_fields());
     // add contract digest
     let contract_digest = contract_metadata_digest(contract_address);
+    debug!(
+        "METADATA_HASH ->\n\tvalues_ext_md = {:?}\n\tcontract_md = {:?}\n\tfinal_ex_md(contract + values_ex) = {:?}",
+        value_digest.to_weierstrass(),
+        contract_digest.to_weierstrass(),
+        (contract_digest + value_digest).to_weierstrass(),
+    );
     // compute final hash
     combine_digest_and_block(contract_digest + value_digest)
 }

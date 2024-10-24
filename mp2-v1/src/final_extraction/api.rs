@@ -202,7 +202,9 @@ impl CircuitInput {
         Ok(Self::MergeTable(MergeCircuitInput {
             base,
             is_table_a_multiplier: true,
-            table_a_dimension: TableDimension::Single,
+            // TODO: May delete `TableDimension::Single`, we don't compute the wrapping digest for
+            // single dimension, otherwise the final digest is different with the block tree digest.
+            table_a_dimension: TableDimension::Compound,
             table_b_dimension: TableDimension::Compound,
         }))
     }

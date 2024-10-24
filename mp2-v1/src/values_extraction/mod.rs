@@ -8,12 +8,13 @@ use mp2_common::{
     eth::{left_pad32, StorageSlot},
     group_hashing::map_to_curve_point,
     poseidon::{empty_poseidon_hash, hash_to_int_value, H},
-    types::MAPPING_LEAF_VALUE_LEN,
+    types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
     F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
+    hash::hash_types::HashOut,
     plonk::config::Hasher,
 };
 use plonky2_ecgfp5::curve::{curve::Point as Digest, scalar_field::Scalar};
@@ -42,13 +43,13 @@ pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"\0OUT_KEY";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
-/// Storage slot information for generating the proof
+/// Storage slot information for generating the extraction proof
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct StorageSlotInfo<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
     slot: StorageSlot,
     metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    outer_key_id: u64,
-    inner_key_id: u64,
+    outer_key_id: Option<u64>,
+    inner_key_id: Option<u64>,
 }
 
 impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
@@ -60,8 +61,6 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
         outer_key_id: Option<u64>,
         inner_key_id: Option<u64>,
     ) -> Self {
-        let [outer_key_id, inner_key_id] =
-            [outer_key_id, inner_key_id].map(|key_id| key_id.unwrap_or_default());
         Self {
             slot,
             metadata,
@@ -78,12 +77,20 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
         &self.metadata
     }
 
-    pub fn outer_key_id(&self) -> u64 {
+    pub fn outer_key_id(&self) -> Option<u64> {
         self.outer_key_id
     }
 
-    pub fn inner_key_id(&self) -> u64 {
+    pub fn inner_key_id(&self) -> Option<u64> {
         self.inner_key_id
+    }
+
+    pub fn slot_inputs(&self) -> Vec<SlotInput> {
+        self.metadata()
+            .extracted_table_info()
+            .iter()
+            .map(Into::into)
+            .collect_vec()
     }
 }
 
@@ -93,7 +100,8 @@ pub fn identifier_block_column() -> u64 {
 }
 
 /// Compute identifier for value column.
-/// The value column could be either simple value or mapping value.
+///
+/// The value column could be either simple or mapping slot.
 /// `id = H(slot || byte_offset || bit_offset || length || evm_word || contract_address || chain_id)[0]`
 pub fn identifier_for_value_column(
     input: &SlotInput,
@@ -169,6 +177,39 @@ fn compute_id_with_prefix(
     H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
 }
 
+/// Compute the row unique data for single leaf.
+pub fn row_unique_data_for_single_leaf() -> HashOutput {
+    empty_poseidon_hash().into()
+}
+
+/// Compute the row unique data for mapping leaf.
+pub fn row_unique_data_for_mapping_leaf(mapping_key: &[u8]) -> HashOutput {
+    // row_unique_data = H(pack(left_pad32(key))
+    let packed_mapping_key = left_pad32(mapping_key)
+        .pack(Endianness::Big)
+        .into_iter()
+        .map(F::from_canonical_u32)
+        .collect_vec();
+    H::hash_no_pad(&packed_mapping_key).into()
+}
+
+/// Compute the row unique data for mapping of mappings leaf.
+pub fn row_unique_data_for_mapping_of_mappings_leaf(
+    outer_mapping_key: &[u8],
+    inner_mapping_key: &[u8],
+) -> HashOutput {
+    let [packed_outer_key, packed_inner_key] = [outer_mapping_key, inner_mapping_key].map(|key| {
+        left_pad32(key)
+            .pack(Endianness::Big)
+            .into_iter()
+            .map(F::from_canonical_u32)
+    });
+    // Compute the unique data to identify a row is the mapping key:
+    // row_unique_data = H(outer_key || inner_key)
+    let inputs = packed_outer_key.chain(packed_inner_key).collect_vec();
+    H::hash_no_pad(&inputs).into()
+}
+
 /// Compute the metadata digest for single variable leaf.
 pub fn compute_leaf_single_metadata_digest<
     const MAX_COLUMNS: usize,
@@ -192,7 +233,7 @@ pub fn compute_leaf_single_values_digest<const MAX_FIELD_PER_EVM: usize>(
             .digest();
 
     // row_id = H2int(H("") || num_actual_columns)
-    let inputs = empty_poseidon_hash()
+    let inputs = HashOut::from(row_unique_data_for_single_leaf())
         .to_fields()
         .into_iter()
         .chain(once(num_actual_columns))
@@ -263,8 +304,7 @@ pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
         let values_key_digest = map_to_curve_point(&inputs);
         values_digest += values_key_digest;
     }
-    // row_unique_data = H(pack(left_pad32(key))
-    let row_unique_data = H::hash_no_pad(&packed_mapping_key.collect_vec());
+    let row_unique_data = HashOut::from(row_unique_data_for_mapping_leaf(&mapping_key));
     // row_id = H2int(row_unique_data || num_actual_columns)
     let inputs = row_unique_data
         .to_fields()
@@ -336,12 +376,13 @@ pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: u
             .digest();
 
     // Compute the outer and inner key values digests.
-    let [packed_outer_key, packed_inner_key] = [outer_mapping_key, inner_mapping_key].map(|key| {
-        left_pad32(&key)
-            .pack(Endianness::Big)
-            .into_iter()
-            .map(F::from_canonical_u32)
-    });
+    let [packed_outer_key, packed_inner_key] =
+        [&outer_mapping_key, &inner_mapping_key].map(|key| {
+            left_pad32(key)
+                .pack(Endianness::Big)
+                .into_iter()
+                .map(F::from_canonical_u32)
+        });
     if evm_word == 0 {
         let [outer_key_digest, inner_key_digest] = [
             (outer_key_id, packed_outer_key.clone()),
@@ -358,10 +399,10 @@ pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: u
         values_digest += inner_key_digest + outer_key_digest;
     }
 
-    // Compute the unique data to identify a row is the mapping key:
-    // row_unique_data = H(outer_key || inner_key)
-    let inputs = packed_outer_key.chain(packed_inner_key).collect_vec();
-    let row_unique_data = H::hash_no_pad(&inputs);
+    let row_unique_data = HashOut::from(row_unique_data_for_mapping_of_mappings_leaf(
+        &outer_mapping_key,
+        &inner_mapping_key,
+    ));
     // row_id = H2int(row_unique_data || num_actual_columns)
     let inputs = row_unique_data
         .to_fields()

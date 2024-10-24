@@ -1,7 +1,7 @@
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{default_config, proof::ProofWithVK, types::HashOutput, C, D, F};
-use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::GenericHashOut};
+use plonky2::{field::types::Field, hash::hash_types::HashOut};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set as p, RecursiveCircuits},
@@ -289,6 +289,7 @@ mod test {
     use crate::cells_tree;
     use itertools::Itertools;
     use mp2_common::{
+        group_hashing::weierstrass_to_point,
         poseidon::{empty_poseidon_hash, H},
         utils::ToFields,
         F,
@@ -440,7 +441,8 @@ mod test {
         // Check individual digest
         assert_eq!(
             pi.individual_digest_point(),
-            row_digest.individual_vd.to_weierstrass()
+            (row_digest.individual_vd + weierstrass_to_point(&child_pi.individual_digest_point()))
+                .to_weierstrass()
         );
         // Check multiplier digest
         assert_eq!(
@@ -504,7 +506,10 @@ mod test {
         // Check individual digest
         assert_eq!(
             pi.individual_digest_point(),
-            row_digest.individual_vd.to_weierstrass()
+            (row_digest.individual_vd
+                + weierstrass_to_point(&left_pi.individual_digest_point())
+                + weierstrass_to_point(&right_pi.individual_digest_point()))
+            .to_weierstrass()
         );
         // Check multiplier digest
         assert_eq!(

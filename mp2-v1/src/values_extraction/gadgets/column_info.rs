@@ -1,5 +1,6 @@
 //! Column information for values extraction
 
+use crate::api::SlotInput;
 use itertools::{zip_eq, Itertools};
 use mp2_common::{
     group_hashing::map_to_curve_point,
@@ -9,6 +10,7 @@ use mp2_common::{
 };
 use plonky2::{
     field::types::{Field, Sample},
+    hash::hash_types::HashOut,
     iop::{target::Target, witness::WitnessWrite},
     plonk::config::Hasher,
 };
@@ -62,6 +64,17 @@ impl ColumnInfo {
         }
     }
 
+    pub fn new_from_slot_input(identifier: u64, slot_input: &SlotInput) -> Self {
+        Self::new(
+            slot_input.slot,
+            identifier,
+            slot_input.byte_offset,
+            slot_input.bit_offset,
+            slot_input.length,
+            slot_input.evm_word,
+        )
+    }
+
     /// Create a sample column info. It could be used in integration tests.
     pub fn sample() -> Self {
         let rng = &mut thread_rng();
@@ -82,8 +95,8 @@ impl ColumnInfo {
             evm_word,
         }
     }
-    /// Compute the column information digest.
-    pub fn digest(&self) -> Point {
+    /// Compute the MPT metadata.
+    pub fn mpt_metadata(&self) -> HashOut<F> {
         // metadata = H(info.slot || info.evm_word || info.byte_offset || info.bit_offset || info.length)
         let inputs = vec![
             self.slot,
@@ -92,7 +105,12 @@ impl ColumnInfo {
             self.bit_offset,
             self.length,
         ];
-        let metadata = H::hash_no_pad(&inputs);
+        H::hash_no_pad(&inputs)
+    }
+
+    /// Compute the column information digest.
+    pub fn digest(&self) -> Point {
+        let metadata = self.mpt_metadata();
 
         // digest = D(mpt_metadata || info.identifier)
         let inputs = metadata

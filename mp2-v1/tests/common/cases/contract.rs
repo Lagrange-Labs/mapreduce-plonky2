@@ -4,7 +4,7 @@ use log::info;
 
 use crate::common::{bindings::simple::Simple, TestContext};
 
-use super::indexing::{SimpleSingleValue, UpdateSimpleStorage};
+use super::indexing::{LargeStruct, SimpleSingleValue, UpdateSimpleStorage};
 
 pub struct Contract {
     pub address: Address,
@@ -26,6 +26,17 @@ impl Contract {
             s3: contract.s3().call().await.unwrap()._0,
             s4: contract.s4().call().await.unwrap()._0,
         })
+    }
+    pub async fn current_single_struct(&self, ctx: &TestContext) -> Result<LargeStruct> {
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse()?);
+
+        let contract = Simple::new(self.address, &provider);
+        let res = contract.simpleStruct().call().await?;
+
+        Ok(res.into())
     }
     // Returns the table updated
     pub async fn apply_update(

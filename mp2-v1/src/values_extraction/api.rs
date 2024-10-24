@@ -899,11 +899,12 @@ mod tests {
             }
             // Mapping variable
             StorageSlot::Mapping(mapping_key, slot) => {
+                let outer_key_id = test_slot.outer_key_id.unwrap();
                 let metadata_digest = compute_leaf_mapping_metadata_digest::<
                     TEST_MAX_COLUMNS,
                     TEST_MAX_FIELD_PER_EVM,
                 >(
-                    table_info.clone(), slot as u8, test_slot.outer_key_id
+                    table_info.clone(), slot as u8, outer_key_id
                 );
 
                 let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
@@ -912,14 +913,14 @@ mod tests {
                     value,
                     mapping_key.clone(),
                     evm_word,
-                    test_slot.outer_key_id,
+                    outer_key_id,
                 );
 
                 let circuit_input = CircuitInput::new_mapping_variable_leaf(
                     node,
                     slot as u8,
                     mapping_key,
-                    test_slot.outer_key_id,
+                    outer_key_id,
                     metadata,
                 );
 
@@ -946,12 +947,12 @@ mod tests {
                 }
                 // Mapping Struct
                 StorageSlot::Mapping(mapping_key, slot) => {
-                    let metadata_digest = compute_leaf_mapping_metadata_digest::<
-                        TEST_MAX_COLUMNS,
-                        TEST_MAX_FIELD_PER_EVM,
-                    >(
-                        table_info.clone(), slot as u8, test_slot.outer_key_id
-                    );
+                    let outer_key_id = test_slot.outer_key_id.unwrap();
+                    let metadata_digest =
+                        compute_leaf_mapping_metadata_digest::<
+                            TEST_MAX_COLUMNS,
+                            TEST_MAX_FIELD_PER_EVM,
+                        >(table_info.clone(), slot as u8, outer_key_id);
 
                     let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
                         table_info,
@@ -959,14 +960,14 @@ mod tests {
                         value,
                         mapping_key.clone(),
                         evm_word,
-                        test_slot.outer_key_id,
+                        outer_key_id,
                     );
 
                     let circuit_input = CircuitInput::new_mapping_variable_leaf(
                         node,
                         slot as u8,
                         mapping_key,
-                        test_slot.outer_key_id,
+                        outer_key_id,
                         metadata,
                     );
 
@@ -976,15 +977,15 @@ mod tests {
                 StorageSlot::Node(StorageSlotNode::Mapping(grand, inner_mapping_key)) => {
                     match *grand {
                         StorageSlot::Mapping(outer_mapping_key, slot) => {
-                            let metadata_digest = compute_leaf_mapping_of_mappings_metadata_digest::<
-                                TEST_MAX_COLUMNS,
-                                TEST_MAX_FIELD_PER_EVM,
-                            >(
-                                table_info.clone(),
-                                slot as u8,
-                                test_slot.outer_key_id,
-                                test_slot.inner_key_id,
-                            );
+                            let outer_key_id = test_slot.outer_key_id.unwrap();
+                            let inner_key_id = test_slot.inner_key_id.unwrap();
+                            let metadata_digest =
+                                compute_leaf_mapping_of_mappings_metadata_digest::<
+                                    TEST_MAX_COLUMNS,
+                                    TEST_MAX_FIELD_PER_EVM,
+                                >(
+                                    table_info.clone(), slot as u8, outer_key_id, inner_key_id
+                                );
 
                             let values_digest = compute_leaf_mapping_of_mappings_values_digest::<
                                 TEST_MAX_FIELD_PER_EVM,
@@ -995,8 +996,8 @@ mod tests {
                                 evm_word,
                                 outer_mapping_key.clone(),
                                 inner_mapping_key.clone(),
-                                test_slot.outer_key_id,
-                                test_slot.inner_key_id,
+                                outer_key_id,
+                                inner_key_id,
                             );
 
                             let circuit_input = CircuitInput::new_mapping_of_mappings_leaf(
@@ -1004,8 +1005,8 @@ mod tests {
                                 slot as u8,
                                 outer_mapping_key,
                                 inner_mapping_key,
-                                test_slot.outer_key_id,
-                                test_slot.inner_key_id,
+                                outer_key_id,
+                                inner_key_id,
                                 metadata,
                             );
 
