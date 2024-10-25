@@ -52,6 +52,7 @@ impl LeafCircuit {
             .chain(value.clone())
             .chain(value.clone())
             .chain(once(id))
+            .chain(value.clone())
             .chain(cells_pis.node_hash_target())
             .collect::<Vec<_>>();
         let row_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
@@ -188,6 +189,7 @@ mod test {
                 .chain(value.iter())
                 .chain(value.iter())
                 .chain(once(&id))
+                .chain(value.iter())
                 .chain(cells_pi.to_node_hash_raw())
                 .cloned()
                 .collect_vec();

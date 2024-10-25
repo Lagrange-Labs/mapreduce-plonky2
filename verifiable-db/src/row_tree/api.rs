@@ -475,6 +475,7 @@ mod test {
                 .chain(node_min.to_fields())
                 .chain(node_max.to_fields())
                 .chain(once(id))
+                .chain(value.to_fields())
                 .chain(p.cells_pi().node_hash().to_fields())
                 .collect_vec();
             let exp_root_hash = H::hash_no_pad(&inputs);
@@ -542,6 +543,7 @@ mod test {
                 .chain(left_pi.min_value().to_fields())
                 .chain(right_pi.max_value().to_fields())
                 .chain(once(id))
+                .chain(value.to_fields())
                 .chain(p.cells_pi().node_hash().to_fields())
                 .collect_vec();
             let hash = H::hash_no_pad(&inputs);
@@ -600,6 +602,7 @@ mod test {
                 .chain(value.iter())
                 .chain(value.iter())
                 .chain(once(&id))
+                .chain(value.iter())
                 .chain(p.cells_pi().to_node_hash_raw())
                 .cloned()
                 .collect_vec();

@@ -75,6 +75,7 @@ impl FullNodeCircuit {
             .chain(node_min.to_targets().iter())
             .chain(node_max.to_targets().iter())
             .chain(once(&id))
+            .chain(value.to_targets().iter())
             .chain(cells_pi.node_hash_target().iter())
             .cloned()
             .collect::<Vec<_>>();
@@ -194,6 +195,7 @@ pub(crate) mod test {
         let mut row = Row::sample(is_multiplier);
         row.cell.value = U256::from(18);
         let id = row.cell.identifier;
+        let value = row.cell.value;
         let cells_pi = cells_tree::PublicInputs::sample(cells_multiplier);
         // Compute the row digest.
         let row_digest = row.digest(&cells_tree::PublicInputs::from_slice(&cells_pi));
@@ -238,6 +240,7 @@ pub(crate) mod test {
                 .chain(left_pi.min_value().to_fields())
                 .chain(right_pi.max_value().to_fields())
                 .chain(once(id))
+                .chain(value.to_fields())
                 .chain(cells_pi.node_hash().to_fields())
                 .collect_vec();
             let hash = H::hash_no_pad(&inputs);

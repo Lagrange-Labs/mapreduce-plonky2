@@ -98,6 +98,7 @@ impl PartialNodeCircuit {
             .iter()
             .chain(node_max.to_targets().iter())
             .chain(once(&id))
+            .chain(value.to_targets().iter())
             .chain(cells_pi.node_hash_target().iter())
             .cloned()
             .collect::<Vec<_>>();
@@ -331,6 +332,7 @@ pub mod test {
                 .chain(node_min.to_fields())
                 .chain(node_max.to_fields())
                 .chain(once(id))
+                .chain(value.to_fields())
                 .chain(cells_pi.node_hash().to_fields())
                 .collect_vec();
             let exp_root_hash = H::hash_no_pad(&inputs);
