@@ -426,6 +426,10 @@ impl<
         self.storage.data().keys_at(epoch).await
     }
 
+    async fn random_key_at(&self, epoch: Epoch) -> Option<T::Key> {
+        self.storage.data().random_key_at(epoch).await
+    }
+
     async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, V>> {
         self.storage.data().pairs_at(epoch).await
     }

@@ -120,6 +120,10 @@ impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
         self.wrapped.keys_at(epoch).await
     }
 
+    async fn random_key_at(&self, epoch: Epoch) -> Option<T::Key> {
+        self.wrapped.random_key_at(epoch).await
+    }
+
     async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, T::Node>> {
         if epoch > self.current_epoch {
             unimplemented!(

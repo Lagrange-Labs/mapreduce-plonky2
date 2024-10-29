@@ -106,7 +106,7 @@ where
         db: DBPool,
         table: &str,
         epoch: Epoch,
-    ) -> impl std::future::Future<Output = Result<Vec<Self::Key>>> + std::marker::Send {
+    ) -> impl Future<Output = Result<Vec<Self::Key>>> + Send {
         async move {
             let connection = db.get().await.unwrap();
             Ok(connection
@@ -122,6 +122,30 @@ where
                 .iter()
                 .map(|row| Self::Key::from_bytea(row.get::<_, Vec<u8>>(0)))
                 .collect())
+        }
+    }
+
+    /// Return, if a any, a key alive at the give epoch
+    fn fetch_a_key(
+        db: DBPool,
+        table: &str,
+        epoch: Epoch,
+    ) -> impl Future<Output = Result<Option<Self::Key>>> + Send {
+        async move {
+            let connection = db.get().await.unwrap();
+            Ok(connection
+                .query(
+                    &format!(
+                        "SELECT {KEY} FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL} LIMIT 1",
+                        table
+                    ),
+                    &[&epoch],
+                )
+                .await
+                .context("while fetching all keys from database")?
+                .iter()
+                .map(|row| Self::Key::from_bytea(row.get::<_, Vec<u8>>(0)))
+                .collect::<Vec<_>>().into_iter().next())
         }
     }
 
@@ -1096,6 +1120,13 @@ where
         T::fetch_all_keys(db, &table, epoch).await.unwrap()
     }
 
+    async fn random_key_at(&self, epoch: Epoch) -> Option<T::Key> {
+        let db = self.wrapped.lock().unwrap().db.clone();
+        let table = self.wrapped.lock().unwrap().table.to_owned();
+
+        T::fetch_a_key(db, &table, epoch).await.unwrap()
+    }
+
     async fn pairs_at(&self, _epoch: Epoch) -> Result<HashMap<T::Key, T::Node>> {
         unimplemented!("should never be used");
     }
@@ -1216,6 +1247,13 @@ where
         let table = self.wrapped.lock().unwrap().table.to_owned();
 
         T::fetch_all_keys(db, &table, epoch).await.unwrap()
+    }
+
+    async fn random_key_at(&self, epoch: Epoch) -> Option<T::Key> {
+        let db = self.wrapped.lock().unwrap().db.clone();
+        let table = self.wrapped.lock().unwrap().table.to_owned();
+
+        T::fetch_a_key(db, &table, epoch).await.unwrap()
     }
 
     async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, V>> {
