@@ -3,7 +3,9 @@ use std::{array, iter::once};
 use alloy::primitives::U256;
 use anyhow::Result;
 use itertools::Itertools;
+use itertools::Itertools;
 use mp2_common::{
+    poseidon::{empty_poseidon_hash, HashPermutation},
     poseidon::{empty_poseidon_hash, HashPermutation},
     proof::ProofWithVK,
     serialization::{deserialize_long_array, serialize_long_array},

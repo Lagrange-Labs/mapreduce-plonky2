@@ -1,6 +1,9 @@
 use std::{array, cmp::Ordering, collections::BTreeSet, fmt::Debug, iter::repeat};
 
 use alloy::primitives::U256;
+use std::{array, cmp::Ordering, collections::BTreeSet, fmt::Debug, iter::repeat};
+
+use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 
 use itertools::Itertools;
