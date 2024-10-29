@@ -8,8 +8,8 @@ use verifiable_db::{
     api::WrapCircuitParams,
     revelation::api::Parameters as RevelationParameters,
     test_utils::{
-        MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
-        MAX_NUM_RESULT_OPS,
+        INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
+        MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH,
     },
 };
 
@@ -18,10 +18,14 @@ pub(crate) struct TestContext {
     pub(crate) preprocessing_circuits: TestingRecursiveCircuits<F, C, D, NUM_PREPROCESSING_IO>,
     pub(crate) query_circuits: TestingRecursiveCircuits<F, C, D, NUM_QUERY_IO>,
     pub(crate) revelation_params: RevelationParameters<
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
         MAX_NUM_OUTPUTS,
         MAX_NUM_ITEMS_PER_OUTPUT,
         MAX_NUM_PLACEHOLDERS,
-        { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
     >,
     pub(crate) wrap_circuit:
         WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>,
@@ -39,10 +43,14 @@ impl TestContext {
 
         // Create the revelation parameters.
         let revelation_params = RevelationParameters::<
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
             MAX_NUM_OUTPUTS,
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
-            { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
         >::build(
             query_circuits.get_recursive_circuit_set(),
             preprocessing_circuits.get_recursive_circuit_set(),

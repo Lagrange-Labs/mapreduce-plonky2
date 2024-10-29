@@ -142,7 +142,7 @@ pub fn parse_and_validate<C: ContextProvider>(
     settings: &ParsilSettings<C>,
 ) -> Result<Query> {
     let mut query = parser::parse(&settings, query)?;
-    expand::expand(&mut query);
+    expand::expand(&settings, &mut query);
 
     placeholders::validate(&settings, &query)?;
     validate::validate(&settings, &query)?;
@@ -157,7 +157,7 @@ pub fn str_to_u256(s: &str) -> Result<U256> {
     U256::from_str(&s).map_err(|e| anyhow!("{s}: invalid U256: {e}"))
 }
 
-fn val_to_expr(x: U256) -> Expr {
+pub(crate) fn val_to_expr(x: U256) -> Expr {
     if let Result::Ok(x_int) = TryInto::<i32>::try_into(x) {
         Expr::Value(Value::Number(x_int.to_string(), false))
     } else {
@@ -289,7 +289,7 @@ pub(crate) fn const_reduce(expr: &mut Expr) {
 ///
 /// NOTE: this will be used (i) in optimization and (ii) when boundaries
 /// will accept more complex expression.
-fn const_eval(expr: &Expr) -> Result<U256> {
+pub(crate) fn const_eval(expr: &Expr) -> Result<U256> {
     #[allow(non_snake_case)]
     let ONE = U256::from_str_radix("1", 2).unwrap();
     const ZERO: U256 = U256::ZERO;
