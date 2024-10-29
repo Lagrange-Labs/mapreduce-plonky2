@@ -10,8 +10,6 @@ use crate::query::{
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
-    array::ToField,
-    hash::hash_maybe_first,
     poseidon::{empty_poseidon_hash, H},
     public_inputs::PublicInputCommon,
     serialization::{

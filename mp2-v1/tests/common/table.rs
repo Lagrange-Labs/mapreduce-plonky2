@@ -10,7 +10,7 @@ use itertools::Itertools;
 use log::{debug, info};
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
-    cell::{self, Cell, CellTreeKey, MerkleCellTree},
+    cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},
     index::IndexNode,
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
@@ -60,6 +60,9 @@ pub struct TableColumn {
     pub name: String,
     pub identifier: ColumnID,
     pub index: IndexType,
+    /// multiplier means if this columns come from a "merged" table, then it either come from a
+    /// table a or table b. One of these table is the "multiplier" table, the other is not.
+    pub multiplier: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -80,6 +83,21 @@ impl TableColumns {
     }
     pub fn column_id_of_cells_index(&self, key: CellTreeKey) -> Option<ColumnID> {
         self.rest.get(key - 1).map(|tc| tc.identifier)
+    }
+    pub fn column_info(&self, identifier: ColumnIdentifier) -> TableColumn {
+        self.rest
+            .iter()
+            .chain(once(&self.secondary))
+            .find(|c| c.identifier == identifier)
+            .expect(&format!("can't find cell from identifier {}", identifier))
+            .clone()
+    }
+    pub fn ordered_cells(
+        &self,
+        mut rest_cells: Vec<MerkleCell<BlockPrimaryIndex>>,
+    ) -> Vec<MerkleCell<BlockPrimaryIndex>> {
+        rest_cells.sort_by_key(|c| self.cells_tree_index_of(c.identifier()));
+        rest_cells
     }
     // Returns the index of the column identifier in the index tree, ie. the order of columns  in
     // the cells tree
@@ -251,6 +269,7 @@ impl Table {
             .collect::<Vec<_>>();
         // because of lifetime issues in async
         let columns = self.columns.clone();
+        let rest_cells = columns.ordered_cells(rest_cells);
         // the first time we actually create the cells tree, there is nothing
         if !rest_cells.is_empty() {
             let _ = cell_tree
@@ -305,21 +324,22 @@ impl Table {
         // apply updates and save the update plan for the new values
         // clone for lifetime issues with async
         let columns = self.columns.clone();
+        let merkle_cells = update
+            .updated_cells
+            .iter()
+            .map(|c| cell::MerkleCell::new(c.identifier(), c.value(), update.primary))
+            .collect_vec();
+        let merkle_cells = self.columns.ordered_cells(merkle_cells);
         let cell_update = cell_tree
             .in_transaction(|t| {
                 async move {
-                    for new_cell in update.updated_cells.iter() {
-                        let merkle_cell = cell::MerkleCell::new(
-                            new_cell.identifier(),
-                            new_cell.value(),
-                            update.primary,
-                        );
+                    for merkle_cell in merkle_cells {
                         println!(
                             " --- TREE: inserting rest-cell: (index {}) : {:?}",
-                            columns.cells_tree_index_of(new_cell.identifier()),
+                            columns.cells_tree_index_of(merkle_cell.identifier()),
                             merkle_cell
                         );
-                        let cell_key = columns.cells_tree_index_of(new_cell.identifier());
+                        let cell_key = columns.cells_tree_index_of(merkle_cell.identifier());
                         match update_type {
                             TreeUpdateType::Update => t.update(cell_key, merkle_cell).await?,
                             // This should only happen at init time or at creation of a new row

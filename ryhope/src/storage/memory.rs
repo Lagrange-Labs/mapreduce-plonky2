@@ -184,22 +184,6 @@ where
         None
     }
 
-    async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, K)> + Send>(
-        &self,
-        data: I,
-    ) -> Result<Vec<Option<(Epoch, K, V)>>>
-    where
-        <I as IntoIterator>::IntoIter: Send,
-    {
-        let mut r = Vec::new();
-        for (epoch, k) in data.into_iter() {
-            let v = self.try_fetch_at(&k, epoch).await;
-
-            r.push(v.map(|v| (epoch, k, v)));
-        }
-        Ok(r)
-    }
-
     // Expensive, but only used in test context.
     async fn size(&self) -> usize {
         let all_keys = self
@@ -215,6 +199,66 @@ where
             }
         }
         count
+    }
+
+    async fn size_at(&self, epoch: Epoch) -> usize {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
+        let mut keys = HashSet::new();
+
+        for i in 0..=epoch as usize {
+            keys.extend(self.mem[i].keys())
+        }
+
+        keys.len()
+    }
+
+    async fn keys_at(&self, epoch: Epoch) -> Vec<K> {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
+        let mut keys = HashSet::new();
+
+        for i in 0..=epoch as usize {
+            for (k, v) in self.mem[i].iter() {
+                if v.is_some() {
+                    keys.insert(k);
+                } else {
+                    keys.remove(k);
+                }
+            }
+        }
+
+        keys.into_iter().cloned().collect()
+    }
+
+    async fn random_key_at(&self, epoch: Epoch) -> Option<K> {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
+
+        for i in (0..=epoch as usize).rev() {
+            for (k, v) in self.mem[i].iter() {
+                if v.is_some() {
+                    return Some(k.clone());
+                }
+            }
+        }
+
+        None
+    }
+
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<K, V>> {
+        assert!(epoch >= self.epoch_offset);
+        let mut pairs = HashMap::new();
+        for i in 0..=epoch as usize {
+            for (k, v) in self.mem[i].iter() {
+                if let Some(v) = v.clone() {
+                    pairs.insert(k.clone(), v);
+                } else {
+                    pairs.remove(k);
+                }
+            }
+        }
+        Ok(pairs)
     }
 }
 

@@ -15,7 +15,7 @@ use verifiable_db::query::aggregation::QueryBounds;
 use crate::common::{
     cases::query::aggregated_queries::prove_non_existence_row,
     index_tree::MerkleIndexTree,
-    proof_storage::{ProofKey, ProofStorage, QueryID},
+    proof_storage::{PlaceholderValues, ProofKey, ProofStorage, QueryID},
     rowtree::MerkleRowTree,
     table::{Table, TableColumns},
     TestContext,
@@ -43,6 +43,7 @@ pub trait TreeInfo<K, V> {
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &K,
+        placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>>;
     fn save_proof(
         &self,
@@ -50,6 +51,7 @@ pub trait TreeInfo<K, V> {
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &K,
+        placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()>;
 
@@ -85,9 +87,15 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
+        placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>> {
         // TODO export that in single function
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -97,10 +105,16 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
+        placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()> {
         // TODO export that in single function
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -170,8 +184,14 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
+        placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>> {
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -181,9 +201,15 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
+        placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()> {
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -240,10 +266,11 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
+        placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>> {
         // TODO export that in single function - repetition
         info!("loading proof for {primary} -> {key:?}");
-        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
+        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -253,10 +280,11 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
+        placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()> {
         // TODO export that in single function
-        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
+        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -310,10 +338,11 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
+        placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>> {
         //assert_eq!(primary, *key);
         info!("loading proof for {primary} -> {key:?}");
-        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
+        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -323,10 +352,11 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
+        placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()> {
         //assert_eq!(primary, *key);
-        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
+        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -369,6 +399,7 @@ async fn load_or_prove_embedded_index<
         // generate a non-existence proof for the row tree
         let row_root_proof_key = ProofKey::QueryAggregateRow((
             planner.query.query.clone(),
+            planner.query.placeholders.placeholder_values(),
             k.clone(),
             v.row_tree_root_key.clone(),
         ));

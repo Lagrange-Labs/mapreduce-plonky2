@@ -168,7 +168,7 @@ fn isolation() {
             false,
             false
         ),
-        "SELECT * FROM table1 WHERE (block >= 1 AND block <= 5)"
+        format!("SELECT * FROM table1 WHERE (block >= 1 AND block <= 5) LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Drop references to other columns
@@ -178,7 +178,7 @@ fn isolation() {
             false,
             false
         ),
-        "SELECT * FROM table2 WHERE (block >= 1 AND block <= 5)"
+        format!("SELECT * FROM table2 WHERE (block >= 1 AND block <= 5) LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Drop sec. ind. references if it has no kown bounds.
@@ -188,7 +188,7 @@ fn isolation() {
             false,
             false
         ),
-        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK)"
+        format!("SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Drop sec.ind. < [...] if it has a defined higher bound
@@ -198,7 +198,7 @@ fn isolation() {
             true,
             false
         ),
-        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK)"
+        format!("SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Keep sec.ind. < [...] if it has a defined higher bound
@@ -208,7 +208,7 @@ fn isolation() {
             false,
             true
         ),
-        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) AND foo < 5"
+        format!("SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) AND foo < 5 LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Nicholas's example
@@ -217,5 +217,6 @@ fn isolation() {
             "SELECT * FROM table2 WHERE block BETWEEN 5 AND 10 AND (foo = 4 OR foo = 15) AND bar = 12",
             false,
             false),
-        "SELECT * FROM table2 WHERE (block >= 5 AND block <= 10)");
+        format!("SELECT * FROM table2 WHERE (block >= 5 AND block <= 10) LIMIT {MAX_NUM_OUTPUTS}")
+    );
 }

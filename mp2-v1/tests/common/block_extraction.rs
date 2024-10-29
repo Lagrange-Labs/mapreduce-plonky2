@@ -7,7 +7,7 @@ use mp2_common::{
     utils::{Endianness, Packer, ToFields},
     C, D, F,
 };
-use mp2_v1::{api, block_extraction};
+use mp2_v1::{api, block_extraction, indexing::block::BlockPrimaryIndex};
 
 use super::TestContext;
 
@@ -18,8 +18,10 @@ pub(crate) fn block_number_to_u256_limbs(number: u64) -> Vec<F> {
 }
 
 impl TestContext {
-    pub(crate) async fn prove_block_extraction(&self) -> Result<Vec<u8>> {
-        let block = self.query_current_block().await;
+    pub(crate) async fn prove_block_extraction(&self, bn: BlockPrimaryIndex) -> Result<Vec<u8>> {
+        let block = self
+            .query_block_at(alloy::eips::BlockNumberOrTag::Number(bn as u64))
+            .await;
         let buffer = block.rlp();
         let proof = self.b.bench("indexing::extraction::block", || {
             api::generate_proof(
