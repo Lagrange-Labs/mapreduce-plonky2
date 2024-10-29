@@ -210,7 +210,7 @@ mod test {
         let test_circuit = TestLengthedCircuit {
             pis: pis.clone(),
             circuit: LengthedCircuit {},
-            len_pi: len_pi,
+            len_pi,
         };
         let len_pi = length_extraction::PublicInputs::<F>::from_slice(&test_circuit.len_pi);
         let len_dm = len_pi.metadata_point();

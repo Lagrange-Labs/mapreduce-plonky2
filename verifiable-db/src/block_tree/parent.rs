@@ -309,7 +309,7 @@ mod tests {
         rows_tree_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestParentCircuit<'a> {
+    impl UserCircuit<F, D> for TestParentCircuit<'_> {
         // Parent node wires + extraction public inputs + rows tree public inputs
         type Wires = (ParentWires, Vec<Target>, Vec<Target>);
 

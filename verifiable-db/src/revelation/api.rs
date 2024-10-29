@@ -179,19 +179,15 @@ impl<
         };
         let to_be_checked_placeholders = placeholder_hash_ids
             .into_iter()
-            .map(|placeholder_id| compute_checked_placeholder_for_id(placeholder_id))
+            .map(&compute_checked_placeholder_for_id)
             .collect::<Result<Vec<_>>>()?;
         // compute placeholders data to be hashed for secondary query bounds
-        let min_query_secondary = QueryBound::new_secondary_index_bound(
-            &placeholders,
-            &query_bounds.min_query_secondary(),
-        )
-        .unwrap();
-        let max_query_secondary = QueryBound::new_secondary_index_bound(
-            &placeholders,
-            &query_bounds.max_query_secondary(),
-        )
-        .unwrap();
+        let min_query_secondary =
+            QueryBound::new_secondary_index_bound(placeholders, query_bounds.min_query_secondary())
+                .unwrap();
+        let max_query_secondary =
+            QueryBound::new_secondary_index_bound(placeholders, query_bounds.max_query_secondary())
+                .unwrap();
         let secondary_query_bound_placeholders = [min_query_secondary, max_query_secondary]
             .into_iter()
             .flat_map(|query_bound| {

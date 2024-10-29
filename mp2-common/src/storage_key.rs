@@ -1,4 +1,6 @@
-//! Module handling the recursive proving of the correct derivation of the MPT path
+//! Module handling the recursive proving of the correct derivation
+//! of the MPT path
+//!
 //! depending on the type of variables the slot is holding (simple unit variable like uint256
 //! variable length & composite type like a mapping).
 
@@ -111,8 +113,8 @@ impl KeccakMPT {
 /// Deriving a MPT key from simple slot is done like:
 /// 1. location = left_pad32(slot)
 /// 2. mpt_key = keccak(location)
-/// WARNING: Currently takes the assumption that the storage slot number fits
-/// inside a single byte.
+///    WARNING: Currently takes the assumption that the storage slot number fits
+///    inside a single byte.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SimpleSlot(pub StorageSlot);
 
@@ -148,11 +150,14 @@ pub struct SimpleSlotWires {
 // TODO: refactor to extract common functions with MappingSlot.
 impl SimpleSlot {
     /// Derive the MPT key in circuit according to simple storage slot.
+    ///
     /// Remember the rules to get the MPT key is as follow:
     /// * location = pad32(slot)
     /// * mpt_key = keccak256(location)
+    ///
     /// Note the simple slot wire and the contract address wires are NOT range
     /// checked, because they are expected to be given by the verifier.
+    ///
     /// If that assumption is not true, then the caller should call
     /// `b.range_check(slot, 8)` to ensure its byteness.
     pub fn build<F: RichField + Extendable<D>, const D: usize>(
@@ -201,7 +206,7 @@ impl SimpleSlot {
 /// Deriving a MPT key from mapping slot is done like:
 /// 1. location = keccak(left_pad32(key), left_pad32(slot))
 /// 2. mpt_key = keccak(location)
-/// WARNING: Currently takes the assumption that the storage slot number fits inside a single byte.
+///    WARNING: Currently takes the assumption that the storage slot number fits inside a single byte.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MappingSlot {
     mapping_slot: u8,
@@ -239,9 +244,9 @@ impl MappingSlot {
     /// Remember the rules to get the mpt key is as follow:
     /// * location = keccak256(pad32(mapping_key), pad32(mapping_slot))
     /// * mpt_key = keccak256(location)
-    /// Note the mapping slot wire is NOT range checked, because it is expected to
-    /// be given by the verifier. If that assumption is not true, then the caller
-    /// should call `b.range_check(mapping_slot,8)` to ensure its byteness.
+    ///    Note the mapping slot wire is NOT range checked, because it is expected to
+    ///   be given by the verifier. If that assumption is not true, then the caller
+    ///   should call `b.range_check(mapping_slot,8)` to ensure its byteness.
     pub fn mpt_key<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
     ) -> MappingSlotWires {

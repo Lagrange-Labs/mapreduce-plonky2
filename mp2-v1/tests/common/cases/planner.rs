@@ -1,6 +1,5 @@
 use std::{collections::HashSet, future::Future};
 
-use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::Result;
 use log::info;
 use mp2_v1::indexing::{
@@ -9,8 +8,7 @@ use mp2_v1::indexing::{
     row::{RowPayload, RowTreeKey},
 };
 use parsil::{assembler::DynamicCircuitPis, ParsilSettings};
-use ryhope::{storage::WideLineage, tree::NodeContext, Epoch, NodePayload};
-use verifiable_db::query::aggregation::QueryBounds;
+use ryhope::{storage::WideLineage, tree::NodeContext, Epoch};
 
 use crate::common::{
     cases::query::prove_non_existence_row,
@@ -134,8 +132,8 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
                     self,
                     &planner.columns,
                     primary,
-                    &k,
-                    &planner.pis,
+                    k,
+                    planner.pis,
                     &planner.query,
                 )
                 .await?,
@@ -145,13 +143,12 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         })
     }
 
-    fn fetch_ctx_and_payload_at(
+    async fn fetch_ctx_and_payload_at(
         &self,
         epoch: Epoch,
         key: &RowTreeKey,
-    ) -> impl Future<Output = Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)>> + Send
-    {
-        async move { self.ctx_and_payload_at(epoch, key) }
+    ) -> Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)> {
+        self.ctx_and_payload_at(epoch, key)
     }
 }
 
@@ -228,8 +225,8 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
                     self,
                     &planner.columns,
                     primary,
-                    &k,
-                    &planner.pis,
+                    k,
+                    planner.pis,
                     &planner.query,
                 )
                 .await?,
@@ -239,13 +236,12 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         })
     }
 
-    fn fetch_ctx_and_payload_at(
+    async fn fetch_ctx_and_payload_at(
         &self,
         epoch: Epoch,
         key: &RowTreeKey,
-    ) -> impl Future<Output = Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)>> + Send
-    {
-        async move { self.tree.try_fetch_with_context_at(key, epoch).await }
+    ) -> Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)> {
+        self.tree.try_fetch_with_context_at(key, epoch).await
     }
 }
 
@@ -298,13 +294,12 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         load_or_prove_embedded_index(self, planner, primary, k, v).await
     }
 
-    fn fetch_ctx_and_payload_at(
+    async fn fetch_ctx_and_payload_at(
         &self,
         epoch: Epoch,
         key: &BlockPrimaryIndex,
-    ) -> impl Future<Output = Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)>>
-           + Send {
-        async move { self.ctx_and_payload_at(epoch, key) }
+    ) -> Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)> {
+        self.ctx_and_payload_at(epoch, key)
     }
 }
 
@@ -370,13 +365,12 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
         load_or_prove_embedded_index(self, planner, primary, k, v).await
     }
 
-    fn fetch_ctx_and_payload_at(
+    async fn fetch_ctx_and_payload_at(
         &self,
         epoch: Epoch,
         key: &BlockPrimaryIndex,
-    ) -> impl Future<Output = Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)>>
-           + Send {
-        async move { self.tree.try_fetch_with_context_at(key, epoch).await }
+    ) -> Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)> {
+        self.tree.try_fetch_with_context_at(key, epoch).await
     }
 }
 
@@ -400,7 +394,7 @@ async fn load_or_prove_embedded_index<
         let row_root_proof_key = ProofKey::QueryAggregateRow((
             planner.query.query.clone(),
             planner.query.placeholders.placeholder_values(),
-            k.clone(),
+            *k,
             v.row_tree_root_key.clone(),
         ));
         let proof = match planner.ctx.storage.get_proof_exact(&row_root_proof_key) {
@@ -413,12 +407,9 @@ async fn load_or_prove_embedded_index<
                     .ctx
                     .storage
                     .get_proof_exact(&row_root_proof_key)
-                    .expect(
-                        format!(
-                            "non-existence root proof not found for key {row_root_proof_key:?}"
-                        )
-                        .as_str(),
-                    )
+                    .unwrap_or_else(|_| {
+                        panic!("non-existence root proof not found for key {row_root_proof_key:?}")
+                    })
             }
         };
         Some(proof)

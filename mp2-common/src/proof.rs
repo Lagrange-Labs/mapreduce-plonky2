@@ -15,8 +15,10 @@ use plonky2::plonk::{
 };
 use serde::{Deserialize, Serialize};
 
-/// This data structure allows to specify the inputs for a circuit that needs to
-/// recursively verify proofs; the generic type `T` allows to specify the
+/// This data structure allows to specify the inputs for a circuit
+/// that needs to recursively verify proofs.
+///
+/// The generic type `T` allows to specify the
 /// specific inputs of each circuits besides the proofs that need to be
 /// recursively verified, while the proofs are serialized in byte format.
 #[derive(Serialize, Deserialize)]

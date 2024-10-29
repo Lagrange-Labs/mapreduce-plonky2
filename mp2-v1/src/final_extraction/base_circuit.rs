@@ -313,9 +313,9 @@ pub(crate) mod test {
             }
         }
         pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, pis: &ProofsPi) {
-            pw.set_target_arr(&self.values_pi, &pis.values_pi.as_ref());
-            pw.set_target_arr(&self.contract_pi, &pis.contract_pi.as_ref());
-            pw.set_target_arr(&self.blocks_pi, &pis.blocks_pi.as_ref());
+            pw.set_target_arr(&self.values_pi, pis.values_pi.as_ref());
+            pw.set_target_arr(&self.contract_pi, pis.contract_pi.as_ref());
+            pw.set_target_arr(&self.blocks_pi, pis.blocks_pi.as_ref());
         }
     }
 
@@ -411,10 +411,9 @@ pub(crate) mod test {
             // metadata is addition of contract and value
             // ToDo: make it a trait once we understand it's sound
             let weierstrass_to_point = |wp: WeierstrassPoint| {
-                Point::decode(wp.encode()).map(|p| {
+                Point::decode(wp.encode()).inspect(|p| {
                     // safety-check
                     assert_eq!(p.to_weierstrass(), wp);
-                    p
                 })
             };
             let contract_pi = contract_extraction::PublicInputs::from_slice(&self.contract_pi);
