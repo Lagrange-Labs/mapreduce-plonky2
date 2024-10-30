@@ -311,19 +311,10 @@ pub(crate) mod tests {
         let rng = &mut thread_rng();
 
         // Prepare the public inputs.
-        let h = random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
-        let [individual_digest, multiplier_digest] =
-            array::from_fn(|_| Point::sample(rng).to_weierstrass().to_fields());
-        let row_id_multiplier = rng.gen::<[u32; 4]>().map(F::from_canonical_u32);
-        let [min, max] = array::from_fn(|_| U256::from_limbs(rng.gen()).to_fields());
-        let exp_pi = PublicInputs::new(
-            &h,
-            &individual_digest,
-            &multiplier_digest,
-            &row_id_multiplier,
-            &min,
-            &max,
-        );
+        let multiplier_digest = Point::sample(rng);
+        let row_id_multiplier = BigUint::from_slice(&random_vector::<u32>(HASH_TO_INT_LEN));
+        let [min, max] = array::from_fn(|_| rng.gen());
+        let exp_pi = PublicInputs::sample(multiplier_digest, row_id_multiplier, min, max);
         let exp_pi = &exp_pi.to_vec();
 
         let test_circuit = TestPublicInputs { exp_pi };
