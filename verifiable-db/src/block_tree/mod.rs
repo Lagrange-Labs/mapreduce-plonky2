@@ -94,21 +94,11 @@ where
 
     // Enforce that if we aren't in merge case, then no cells were accumulated in
     // multiplier digest:
-    // assert extraction_proof.is_merge or rows_tree_proof.multiplier_vd != 0
-    // => (1 - is_merge) * is_multiplier_vd_zero == false
-    let ffalse = b._false();
+    // assert extraction_proof.is_merge or rows_tree_proof.multiplier_vd == 0
     let curve_zero = b.curve_zero();
-    let is_multiplier_vd_zero = b
-        .curve_eq(rows_tree_pi.multiplier_digest_target(), curve_zero)
-        .target;
-    let should_be_false = b.arithmetic(
-        F::NEG_ONE,
-        F::ONE,
-        extraction_pi.is_merge_case().target,
-        is_multiplier_vd_zero,
-        is_multiplier_vd_zero,
-    );
-    b.connect(should_be_false, ffalse.target);
+    let is_multiplier_vd_zero = b.curve_eq(rows_tree_pi.multiplier_digest_target(), curve_zero);
+    let acc = b.or(extraction_pi.is_merge_case(), is_multiplier_vd_zero);
+    b.assert_one(acc.target);
 
     final_digest
 }
