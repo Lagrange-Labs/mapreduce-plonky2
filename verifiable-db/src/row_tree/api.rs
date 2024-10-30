@@ -416,17 +416,17 @@ mod test {
         log::info!("Generating full proof (from leaf 1 and leaf 2)");
         let full_proof = generate_full_proof(&params, children_proof)?;
         log::info!("Generating partial proof (from full proof)");
-        let _ = generate_partial_proof(&params, params.partial.clone(), true, full_proof)?;
+        let _ = generate_partial_proof(&params, true, full_proof)?;
         log::info!("Test done");
         Ok(())
     }
 
     fn generate_partial_proof(
         p: &TestParams,
-        row: Row,
         is_left: bool,
         child_proof_buff: Vec<u8>,
     ) -> Result<Vec<u8>> {
+        let row = &p.partial;
         let id = row.cell.identifier;
         let value = row.cell.value;
         let mpt_metadata = row.cell.mpt_metadata;
