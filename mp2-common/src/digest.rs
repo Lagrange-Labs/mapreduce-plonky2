@@ -30,11 +30,12 @@ pub enum TableDimension {
     /// uint256 or a bytes32 will only generate a single row per block.
     Single,
     /// Set to Compound for types that
-    /// * have multiple entries (like an mapping, unlike a single uin256 for example)
-    /// * don't need or have an associated length slot to combine with
-    /// It happens contracts don't have a length slot associated with the mapping
-    /// like ERC20 and thus there is no proof circuits have looked at _all_ the entries
-    /// due to limitations on EVM (there is no mapping.len()).
+    /// 1. have multiple entries (like an mapping, unlike a single uin256 for example)
+    /// 2. don't need or have an associated length slot to combine with
+    ///
+    /// It happens contracts don't have a length slot associated with the mapping like ERC20 and
+    /// thus there is no proof circuits have looked at _all_ the entries due to limitations on EVM
+    /// (there is no mapping.len()).
     Compound,
 }
 

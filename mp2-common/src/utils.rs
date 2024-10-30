@@ -26,6 +26,7 @@ const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
 
+#[allow(dead_code)]
 trait ConnectSlice {
     fn connect_slice(&mut self, a: &[Target], b: &[Target]);
 }
