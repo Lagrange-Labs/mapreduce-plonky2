@@ -112,12 +112,22 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table, info: &TableInfo) -
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     let query_info = cook_query_too_big_offset(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
-    let query_info = cook_query_with_wildcard_no_distinct(table, info).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     let query_info = cook_query_with_distinct(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
-    let query_info = cook_query_with_wildcard_and_distinct(table, info).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // test queries with wilcards only if the number of columns of the table
+    // doesn't make the number of items returned for each row bigger than
+    // the maximum allowed value (i.e, MAX_NUM_ITEMS_PER_OUTPUT), as
+    // otherwise query validation on Parsil will fail
+    let num_output_items_wildcard_queries = info.columns.non_indexed_columns().len()
+	+ 2 // primary and secondary indexed columns
+	+ 1 // there is an additional item besides columns of the tables in SELECT
+    ;
+    if num_output_items_wildcard_queries <= MAX_NUM_ITEMS_PER_OUTPUT {
+        let query_info = cook_query_with_wildcard_no_distinct(table, info).await?;
+        test_query_mapping(ctx, table, query_info, &table_hash).await?;
+        let query_info = cook_query_with_wildcard_and_distinct(table, info).await?;
+        test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    }
     Ok(())
 }
 
