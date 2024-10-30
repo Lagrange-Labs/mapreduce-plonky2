@@ -48,7 +48,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) merge: &'a [T],
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, PH_RANGE, DV_RANGE, DM_RANGE, BN_RANGE, MERGE_RANGE];
 
@@ -220,7 +220,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     pub fn is_merge_raw(&self) -> &[T] {
-        &self.merge
+        self.merge
     }
 }
 
