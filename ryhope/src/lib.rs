@@ -53,7 +53,7 @@ pub trait NodePayload: Debug + Sized + Serialize + for<'a> Deserialize<'a> {
     fn aggregate_with_context<I: Iterator<Item = Option<Self>>, T>(
         &mut self,
         _children: I,
-        _context: T,
+        _context: &mut T,
     ) {
     }
 }
