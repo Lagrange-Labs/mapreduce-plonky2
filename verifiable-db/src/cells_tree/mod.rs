@@ -126,18 +126,18 @@ impl CellWire {
     pub fn split_and_accumulate_metadata_digest(
         &self,
         b: &mut CBuilder,
-        child_digest: SplitDigestTarget,
+        child_digest: &SplitDigestTarget,
     ) -> SplitDigestTarget {
         let split_digest = self.split_metadata_digest(b);
-        split_digest.accumulate(b, &child_digest)
+        split_digest.accumulate(b, child_digest)
     }
     pub fn split_and_accumulate_values_digest(
         &self,
         b: &mut CBuilder,
-        child_digest: SplitDigestTarget,
+        child_digest: &SplitDigestTarget,
     ) -> SplitDigestTarget {
         let split_digest = self.split_values_digest(b);
-        split_digest.accumulate(b, &child_digest)
+        split_digest.accumulate(b, child_digest)
     }
     fn metadata_digest(&self, b: &mut CBuilder) -> CurveTarget {
         // D(mpt_metadata || identifier)
@@ -214,11 +214,9 @@ pub(crate) mod tests {
             };
 
             let cell = CellWire::new(b);
-            let values_digest = cell.split_values_digest(b);
-            let metadata_digest = cell.split_metadata_digest(b);
-
-            let values_digest = values_digest.accumulate(b, &child_values_digest);
-            let metadata_digest = metadata_digest.accumulate(b, &child_metadata_digest);
+            let values_digest = cell.split_and_accumulate_values_digest(b, &child_values_digest);
+            let metadata_digest =
+                cell.split_and_accumulate_metadata_digest(b, &child_metadata_digest);
 
             b.register_curve_public_input(values_digest.individual);
             b.register_curve_public_input(values_digest.multiplier);
