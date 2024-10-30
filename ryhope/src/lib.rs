@@ -44,10 +44,18 @@ pub type Epoch = i64;
 pub trait NodePayload: Debug + Sized + Serialize + for<'a> Deserialize<'a> {
     /// Set an aggregate value for the current node, computable from the payload
     /// of its children.
-    ///
-    /// Return true if the payload has been modified and must be updated in the
-    /// storage, false otherwise.
-    fn aggregate<I: Iterator<Item = Option<Self>>>(&mut self, _children: I) {}
+    fn aggregate<I: Iterator<Item = Option<Self>>>(&mut self, children: I) {
+        self.aggregate_with_context(children, ())
+    }
+
+    /// Set an aggregate value for the current node, computable from the payload
+    /// of its children and some external generic data.
+    fn aggregate_with_context<I: Iterator<Item = Option<Self>>, T>(
+        &mut self,
+        _children: I,
+        _context: T,
+    ) {
+    }
 }
 
 impl NodePayload for serde_json::Value {
