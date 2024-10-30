@@ -165,16 +165,14 @@ pub(crate) mod tests {
     /// Generate a random rows tree public inputs.
     pub(crate) fn random_rows_tree_pi(rng: &mut ThreadRng, is_merge_case: bool) -> Vec<F> {
         let [min, max] = array::from_fn(|_| rng.gen());
-        let multiplier_digest = Point::rand();
+        let multiplier_digest = if is_merge_case {
+            Point::rand()
+        } else {
+            Point::NEUTRAL
+        };
         let row_id_multiplier = BigUint::from_slice(&random_vector::<u32>(HASH_TO_INT_LEN));
 
-        row_tree::PublicInputs::sample(
-            multiplier_digest,
-            row_id_multiplier,
-            min,
-            max,
-            is_merge_case,
-        )
+        row_tree::PublicInputs::sample(multiplier_digest, row_id_multiplier, min, max)
     }
 
     /// Generate a random extraction public inputs.

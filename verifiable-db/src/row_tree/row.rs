@@ -16,7 +16,7 @@ use plonky2::{
     field::types::{Field, PrimeField64},
     hash::hash_types::{HashOut, HashOutTarget},
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::config::Hasher,
@@ -30,7 +30,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RowDigest {
-    pub(crate) is_merge: bool,
     pub(crate) row_id_multiplier: BigUint,
     pub(crate) individual_vd: Point,
     pub(crate) multiplier_vd: Point,
@@ -39,9 +38,6 @@ pub(crate) struct RowDigest {
 impl FromFields<F> for RowDigest {
     fn from_fields(t: &[F]) -> Self {
         let mut pos = 0;
-
-        let is_merge = t[pos].is_nonzero();
-        pos += 1;
 
         let row_id_multiplier = BigUint::new(
             t[pos..pos + HASH_TO_INT_LEN]
@@ -57,7 +53,6 @@ impl FromFields<F> for RowDigest {
         let multiplier_vd = Point::from_fields(&t[pos..pos + CURVE_TARGET_LEN]);
 
         Self {
-            is_merge,
             row_id_multiplier,
             individual_vd,
             multiplier_vd,
@@ -67,7 +62,6 @@ impl FromFields<F> for RowDigest {
 
 #[derive(Clone, Debug)]
 pub(crate) struct RowDigestTarget {
-    pub(crate) is_merge: BoolTarget,
     pub(crate) row_id_multiplier: BigUintTarget,
     pub(crate) individual_vd: CurveTarget,
     pub(crate) multiplier_vd: CurveTarget,
@@ -120,11 +114,9 @@ impl Row {
         let hash = H::hash_no_pad(&inputs);
         let row_id_multiplier = hash_to_int_value(hash);
 
-        let is_merge = values_digests.is_merge_case();
         let multiplier_vd = values_digests.multiplier;
 
         RowDigest {
-            is_merge,
             row_id_multiplier,
             individual_vd,
             multiplier_vd,
@@ -196,11 +188,9 @@ impl RowWire {
         let row_id_multiplier = hash_to_int_target(b, hash);
         assert_eq!(row_id_multiplier.num_limbs(), HASH_TO_INT_LEN);
 
-        let is_merge = values_digests.is_merge_case(b);
         let multiplier_vd = values_digests.multiplier;
 
         RowDigestTarget {
-            is_merge,
             row_id_multiplier,
             individual_vd,
             multiplier_vd,
@@ -242,7 +232,6 @@ pub(crate) mod tests {
 
             let digest = row.digest(b, &cells_pi);
 
-            b.register_public_input(digest.is_merge.target);
             b.register_public_inputs(&digest.row_id_multiplier.to_targets());
             b.register_public_inputs(&digest.individual_vd.to_targets());
             b.register_public_inputs(&digest.multiplier_vd.to_targets());

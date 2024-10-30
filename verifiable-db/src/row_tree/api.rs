@@ -497,8 +497,6 @@ mod test {
         assert_eq!(pi.min_value(), value.min(child_min));
         // Check maximum value
         assert_eq!(pi.max_value(), value.max(child_max));
-        // Check merge flag
-        assert_eq!(pi.merge_flag(), row_digest.is_merge);
 
         Ok(vec![])
     }
@@ -561,8 +559,6 @@ mod test {
         );
         // Check row ID multiplier
         assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
-        // Check merge flag
-        assert_eq!(pi.merge_flag(), row_digest.is_merge);
 
         Ok(proof)
     }
@@ -625,8 +621,6 @@ mod test {
         assert_eq!(pi.min_value(), value);
         // Check maximum value
         assert_eq!(pi.max_value(), value);
-        // Check merge flag
-        assert_eq!(pi.merge_flag(), row_digest.is_merge);
 
         Ok(proof)
     }

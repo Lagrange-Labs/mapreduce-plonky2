@@ -112,9 +112,6 @@ impl PartialNodeCircuit {
             &rest,
         );
 
-        // assert is_merge is the same between this row and `child_pi`
-        b.connect(digest.is_merge.target, child_pi.merge_flag_target().target);
-
         PublicInputs::new(
             &node_hash,
             &digest.individual_vd.to_targets(),
@@ -122,7 +119,6 @@ impl PartialNodeCircuit {
             &digest.row_id_multiplier.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
-            &[digest.is_merge.target],
         )
         .register(b);
         PartialNodeWires {
@@ -299,7 +295,6 @@ pub mod test {
             row_digest.row_id_multiplier.clone(),
             child_min.to(),
             child_max.to(),
-            is_cell_multiplier || is_multiplier,
         );
         let test_circuit = TestPartialNodeCircuit {
             circuit: node_circuit,
@@ -354,7 +349,5 @@ pub mod test {
         assert_eq!(pi.min_value(), value.min(child_min));
         // Check maximum value
         assert_eq!(pi.max_value(), value.max(child_max));
-        // Check merge flag
-        assert_eq!(pi.merge_flag(), row_digest.is_merge);
     }
 }

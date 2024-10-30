@@ -63,7 +63,6 @@ impl LeafCircuit {
             &digest.row_id_multiplier.to_targets(),
             &value,
             &value,
-            &[digest.is_merge.target],
         )
         .register(b);
 
@@ -212,8 +211,6 @@ mod test {
         assert_eq!(pi.min_value(), value);
         // Check maximum value
         assert_eq!(pi.max_value(), value);
-        // Check merge flag
-        assert_eq!(pi.merge_flag(), row_digest.is_merge);
     }
 
     #[test]

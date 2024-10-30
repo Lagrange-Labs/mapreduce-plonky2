@@ -7,19 +7,18 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, CURVE_TARGET_LEN},
     u256::{self, UInt256Target},
-    utils::{FromFields, FromTargets, TryIntoBool},
+    utils::{FromFields, FromTargets},
     F,
 };
 use num::BigUint;
 use plonky2::{
     field::types::PrimeField64,
     hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
-    iop::target::{BoolTarget, Target},
+    iop::target::Target,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
-use std::iter::once;
 
 pub enum RowsTreePublicInputs {
     // `H : F[4]` - Poseidon hash of the leaf
@@ -34,8 +33,6 @@ pub enum RowsTreePublicInputs {
     MinValue,
     // `max : Uint256` - Maximum value of the secondary index stored up to this node
     MaxValue,
-    // `merge : bool` - Flag specifying whether we are building rows for a merge table or not
-    MergeFlag,
 }
 
 /// Public inputs for Rows Tree Construction
@@ -47,10 +44,9 @@ pub struct PublicInputs<'a, T> {
     pub(crate) row_id_multiplier: &'a [T],
     pub(crate) min: &'a [T],
     pub(crate) max: &'a [T],
-    pub(crate) merge: &'a T,
 }
 
-const NUM_PUBLIC_INPUTS: usize = RowsTreePublicInputs::MergeFlag as usize + 1;
+const NUM_PUBLIC_INPUTS: usize = RowsTreePublicInputs::MaxValue as usize + 1;
 
 impl<'a, T: Clone> PublicInputs<'a, T> {
     const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
@@ -60,7 +56,6 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         Self::to_range(RowsTreePublicInputs::RowIdMultiplier),
         Self::to_range(RowsTreePublicInputs::MinValue),
         Self::to_range(RowsTreePublicInputs::MaxValue),
-        Self::to_range(RowsTreePublicInputs::MergeFlag),
     ];
 
     const SIZES: [usize; NUM_PUBLIC_INPUTS] = [
@@ -76,8 +71,6 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         u256::NUM_LIMBS,
         // Maximum value of the secondary index stored up to this node
         u256::NUM_LIMBS,
-        // Flag specifying whether we are building rows for a merge table or not
-        1,
     ];
 
     pub(crate) const fn to_range(pi: RowsTreePublicInputs) -> PublicInputRange {
@@ -92,7 +85,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
     }
 
     pub const fn total_len() -> usize {
-        Self::to_range(RowsTreePublicInputs::MergeFlag).end
+        Self::to_range(RowsTreePublicInputs::MaxValue).end
     }
 
     pub fn to_root_hash_raw(&self) -> &[T] {
@@ -119,10 +112,6 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         self.max
     }
 
-    pub fn to_merge_flag_raw(&self) -> &T {
-        self.merge
-    }
-
     pub fn from_slice(input: &'a [T]) -> Self {
         assert!(
             input.len() >= Self::total_len(),
@@ -137,7 +126,6 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
             row_id_multiplier: &input[Self::PI_RANGES[3].clone()],
             min: &input[Self::PI_RANGES[4].clone()],
             max: &input[Self::PI_RANGES[5].clone()],
-            merge: &input[Self::PI_RANGES[6].clone()][0],
         }
     }
 
@@ -148,7 +136,6 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         row_id_multiplier: &'a [T],
         min: &'a [T],
         max: &'a [T],
-        merge: &'a [T],
     ) -> Self {
         Self {
             h,
@@ -157,7 +144,6 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
             row_id_multiplier,
             min,
             max,
-            merge: &merge[0],
         }
     }
 
@@ -169,7 +155,6 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
             .chain(self.row_id_multiplier)
             .chain(self.min)
             .chain(self.max)
-            .chain(once(self.merge))
             .cloned()
             .collect()
     }
@@ -185,7 +170,6 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
         cb.register_public_inputs(self.row_id_multiplier);
         cb.register_public_inputs(self.min);
         cb.register_public_inputs(self.max);
-        cb.register_public_input(*self.merge);
     }
 }
 
@@ -220,10 +204,6 @@ impl<'a> PublicInputs<'a, Target> {
     pub fn max_value_target(&self) -> UInt256Target {
         UInt256Target::from_targets(self.max)
     }
-
-    pub fn merge_flag_target(&self) -> BoolTarget {
-        BoolTarget::new_unsafe(*self.merge)
-    }
 }
 
 impl<'a> PublicInputs<'a, F> {
@@ -256,10 +236,6 @@ impl<'a> PublicInputs<'a, F> {
     pub fn max_value(&self) -> U256 {
         U256::from_fields(self.max)
     }
-
-    pub fn merge_flag(&self) -> bool {
-        self.merge.try_into_bool().unwrap()
-    }
 }
 
 #[cfg(test)]
@@ -279,7 +255,7 @@ pub(crate) mod tests {
     };
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
-    use std::{array, slice};
+    use std::array;
 
     impl<'a> PublicInputs<'a, F> {
         pub(crate) fn sample(
@@ -287,7 +263,6 @@ pub(crate) mod tests {
             row_id_multiplier: BigUint,
             min: usize,
             max: usize,
-            is_merge: bool,
         ) -> Vec<F> {
             let h = HashOut::rand().to_fields();
             let individual_digest = Point::rand();
@@ -299,7 +274,6 @@ pub(crate) mod tests {
                 .map(F::from_canonical_u32)
                 .collect_vec();
             let [min, max] = [min, max].map(|v| U256::from(v).to_fields());
-            let merge = F::from_bool(is_merge);
             PublicInputs::new(
                 &h,
                 &individual_digest,
@@ -307,7 +281,6 @@ pub(crate) mod tests {
                 &row_id_multiplier,
                 &min,
                 &max,
-                &[merge],
             )
             .to_vec()
         }
@@ -343,7 +316,6 @@ pub(crate) mod tests {
             array::from_fn(|_| Point::sample(rng).to_weierstrass().to_fields());
         let row_id_multiplier = rng.gen::<[u32; 4]>().map(F::from_canonical_u32);
         let [min, max] = array::from_fn(|_| U256::from_limbs(rng.gen()).to_fields());
-        let merge = [F::from_bool(rng.gen_bool(0.5))];
         let exp_pi = PublicInputs::new(
             &h,
             &individual_digest,
@@ -351,7 +323,6 @@ pub(crate) mod tests {
             &row_id_multiplier,
             &min,
             &max,
-            &merge,
         );
         let exp_pi = &exp_pi.to_vec();
 
@@ -384,10 +355,6 @@ pub(crate) mod tests {
         assert_eq!(
             &exp_pi[PublicInputs::<F>::to_range(RowsTreePublicInputs::MaxValue)],
             pi.to_max_value_raw(),
-        );
-        assert_eq!(
-            &exp_pi[PublicInputs::<F>::to_range(RowsTreePublicInputs::MergeFlag)],
-            slice::from_ref(pi.to_merge_flag_raw()),
         );
     }
 }

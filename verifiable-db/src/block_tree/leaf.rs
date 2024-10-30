@@ -97,12 +97,6 @@ impl LeafCircuit {
             .collect();
         let h_new = b.hash_n_to_hash_no_pad::<CHasher>(inputs).to_targets();
 
-        // check that the rows tree built is for a merged table iff we extract data from MPT for a merged table
-        b.connect(
-            rows_tree_pi.merge_flag_target().target,
-            extraction_pi.is_merge_case().target,
-        );
-
         // Register the public inputs.
         PublicInputs::new(
             &h_new,

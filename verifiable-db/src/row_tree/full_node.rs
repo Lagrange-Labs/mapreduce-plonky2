@@ -81,9 +81,6 @@ impl FullNodeCircuit {
             .collect::<Vec<_>>();
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        // assert `is_merge` is the same as the flags in children pis
-        b.connect(min_child.merge_flag_target().target, digest.is_merge.target);
-        b.connect(max_child.merge_flag_target().target, digest.is_merge.target);
         PublicInputs::new(
             &hash.to_targets(),
             &digest.individual_vd.to_targets(),
@@ -91,7 +88,6 @@ impl FullNodeCircuit {
             &digest.row_id_multiplier.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
-            &[digest.is_merge.target],
         )
         .register(b);
         FullNodeWires(row)
@@ -208,14 +204,12 @@ pub(crate) mod test {
             row_digest.row_id_multiplier.clone(),
             left_min,
             left_max,
-            is_multiplier || cells_multiplier,
         );
         let right_pi = PublicInputs::sample(
             row_digest.multiplier_vd,
             row_digest.row_id_multiplier.clone(),
             right_min,
             right_max,
-            is_multiplier || cells_multiplier,
         );
         let test_circuit = TestFullNodeCircuit {
             circuit: node_circuit,
@@ -262,8 +256,6 @@ pub(crate) mod test {
         assert_eq!(pi.min_value(), U256::from(left_min));
         // Check maximum value
         assert_eq!(pi.max_value(), U256::from(right_max));
-        // Check merge flag
-        assert_eq!(pi.merge_flag(), row_digest.is_merge);
     }
 
     #[test]
