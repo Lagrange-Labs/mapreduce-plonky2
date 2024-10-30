@@ -25,13 +25,11 @@ impl FullNodeCircuit {
         let [p1, p2] = child_proofs;
 
         let cell = CellWire::new(b);
-        let metadata_digests = cell.split_metadata_digest(b);
-        let values_digests = cell.split_values_digest(b);
-
-        let metadata_digests = metadata_digests.accumulate(b, &p1.split_metadata_digest_target());
+        let metadata_digests =
+            cell.split_and_accumulate_metadata_digest(b, &p1.split_metadata_digest_target());
+        let values_digests =
+            cell.split_and_accumulate_values_digest(b, &p1.split_values_digest_target());
         let metadata_digests = metadata_digests.accumulate(b, &p2.split_metadata_digest_target());
-
-        let values_digests = values_digests.accumulate(b, &p1.split_values_digest_target());
         let values_digests = values_digests.accumulate(b, &p2.split_values_digest_target());
 
         // H(p1.H || p2.H || identifier || value)

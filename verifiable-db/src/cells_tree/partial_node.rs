@@ -27,11 +27,10 @@ pub struct PartialNodeCircuit(Cell);
 impl PartialNodeCircuit {
     pub fn build(b: &mut CBuilder, p: PublicInputs<Target>) -> PartialNodeWires {
         let cell = CellWire::new(b);
-        let metadata_digests = cell.split_metadata_digest(b);
-        let values_digests = cell.split_values_digest(b);
-
-        let metadata_digests = metadata_digests.accumulate(b, &p.split_metadata_digest_target());
-        let values_digests = values_digests.accumulate(b, &p.split_values_digest_target());
+        let metadata_digests =
+            cell.split_and_accumulate_metadata_digest(b, &p.split_metadata_digest_target());
+        let values_digests =
+            cell.split_and_accumulate_values_digest(b, &p.split_values_digest_target());
 
         /*
         # since there is no sorting constraint among the nodes of this tree, to simplify
