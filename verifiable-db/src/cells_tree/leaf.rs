@@ -1,45 +1,28 @@
 //! Module handling the leaf node inside a cells tree
 
-use super::public_inputs::PublicInputs;
-use alloy::primitives::U256;
+use super::{public_inputs::PublicInputs, Cell, CellWire};
+use derive_more::{From, Into};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing,
-    poseidon::empty_poseidon_hash,
-    public_inputs::PublicInputCommon,
-    types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::ToTargets,
-    CHasher, D, F,
+    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, types::CBuilder,
+    utils::ToTargets, CHasher, D, F,
 };
 use plonky2::{
-    iop::{
-        target::Target,
-        witness::{PartialWitness, WitnessWrite},
-    },
+    iop::witness::PartialWitness,
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LeafWires {
-    identifier: Target,
-    value: UInt256Target,
-}
+#[derive(Clone, Debug, Serialize, Deserialize, From, Into)]
+pub struct LeafWires(CellWire);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LeafCircuit {
-    /// The same identifier derived from the MPT extraction
-    pub(crate) identifier: F,
-    /// Uint256 value
-    pub(crate) value: U256,
-}
+#[derive(Clone, Debug, Serialize, Deserialize, From, Into)]
+pub struct LeafCircuit(Cell);
 
 impl LeafCircuit {
     fn build(b: &mut CBuilder) -> LeafWires {
-        let identifier = b.add_virtual_target();
-        let value = b.add_virtual_u256();
+        let cell = CellWire::new(b);
 
         // h = Poseidon(Poseidon("") || Poseidon("") || identifier || value)
         let empty_hash = empty_poseidon_hash();
@@ -49,25 +32,28 @@ impl LeafCircuit {
             .iter()
             .cloned()
             .chain(empty_hash.elements)
-            .chain(iter::once(identifier))
-            .chain(value.to_targets())
+            .chain(iter::once(cell.identifier))
+            .chain(cell.value.to_targets())
             .collect();
         let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
         // digest_cell = D(identifier || value)
-        let inputs: Vec<_> = iter::once(identifier).chain(value.to_targets()).collect();
-        let dc = b.map_to_curve_point(&inputs).to_targets();
+        let split_digest = cell.split_digest(b);
 
         // Register the public inputs.
-        PublicInputs::new(&h, &dc).register(b);
+        PublicInputs::new(
+            &h,
+            &split_digest.individual.to_targets(),
+            &split_digest.multiplier.to_targets(),
+        )
+        .register(b);
 
-        LeafWires { identifier, value }
+        cell.into()
     }
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
-        pw.set_target(wires.identifier, self.identifier);
-        pw.set_u256_target(&wires.value, self.value);
+        self.0.assign_wires(pw, &wires.0);
     }
 }
 
@@ -96,6 +82,7 @@ impl CircuitLogicWires<F, D, 0> for LeafWires {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::primitives::U256;
     use mp2_common::{
         group_hashing::map_to_curve_point,
         poseidon::H,
@@ -120,13 +107,23 @@ mod tests {
 
     #[test]
     fn test_cells_tree_leaf_circuit() {
+        test_cells_tree_leaf_multiplier(true);
+        test_cells_tree_leaf_multiplier(false);
+    }
+
+    fn test_cells_tree_leaf_multiplier(is_multiplier: bool) {
         let mut rng = thread_rng();
 
         let identifier = rng.gen::<u32>().to_field();
         let value = U256::from_limbs(rng.gen::<[u64; 4]>());
         let value_fields = value.to_fields();
 
-        let test_circuit = LeafCircuit { identifier, value };
+        let test_circuit: LeafCircuit = Cell {
+            identifier,
+            value,
+            is_multiplier,
+        }
+        .into();
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
@@ -149,8 +146,10 @@ mod tests {
         {
             let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
             let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
-
-            assert_eq!(pi.digest_point(), exp_digest);
+            match is_multiplier {
+                true => assert_eq!(pi.multiplier_digest_point(), exp_digest),
+                false => assert_eq!(pi.individual_digest_point(), exp_digest),
+            }
         }
     }
 }

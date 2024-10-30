@@ -20,10 +20,25 @@ use sha3::Keccak256;
 use crate::array::Targetable;
 use crate::poseidon::{HashableField, H};
 use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
+use crate::{D, F};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
+
+#[allow(dead_code)]
+trait ConnectSlice {
+    fn connect_slice(&mut self, a: &[Target], b: &[Target]);
+}
+
+impl ConnectSlice for CircuitBuilder<F, D> {
+    fn connect_slice(&mut self, a: &[Target], b: &[Target]) {
+        assert_eq!(a.len(), b.len());
+        for (ai, bi) in a.iter().zip(b) {
+            self.connect(*ai, *bi);
+        }
+    }
+}
 
 pub fn verify_proof_tuple<
     F: RichField + Extendable<D>,

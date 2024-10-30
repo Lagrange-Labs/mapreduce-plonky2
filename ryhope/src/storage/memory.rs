@@ -221,10 +221,31 @@ where
         let mut keys = HashSet::new();
 
         for i in 0..=epoch as usize {
-            keys.extend(self.mem[i].keys())
+            for (k, v) in self.mem[i].iter() {
+                if v.is_some() {
+                    keys.insert(k);
+                } else {
+                    keys.remove(k);
+                }
+            }
         }
 
         keys.into_iter().cloned().collect()
+    }
+
+    async fn random_key_at(&self, epoch: Epoch) -> Option<K> {
+        assert!(epoch >= self.epoch_offset);
+        let epoch = epoch - self.epoch_offset;
+
+        for i in (0..=epoch as usize).rev() {
+            for (k, v) in self.mem[i].iter() {
+                if v.is_some() {
+                    return Some(k.clone());
+                }
+            }
+        }
+
+        None
     }
 
     async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<K, V>> {

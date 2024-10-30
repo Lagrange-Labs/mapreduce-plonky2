@@ -16,6 +16,7 @@ use poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
 use serde::{Deserialize, Serialize};
 
 pub mod array;
+pub mod digest;
 pub mod eth;
 pub mod group_hashing;
 pub mod hash;

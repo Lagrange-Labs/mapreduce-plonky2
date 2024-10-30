@@ -34,7 +34,6 @@ type LeafSingleWire = LeafSingleWires<MAX_LEAF_NODE_LEN>;
 type LeafMappingWire = LeafMappingWires<MAX_LEAF_NODE_LEN>;
 type ExtensionInput = ProofInputSerialized<InputNode>;
 type BranchInput = ProofInputSerialized<InputNode>;
-
 const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 
 /// CircuitInput is a wrapper around the different specialized circuits that can
@@ -306,6 +305,7 @@ impl PublicParameters {
         let branches = BranchCircuits::new(&circuit_builder);
         #[cfg(test)]
         let branches = TestBranchCircuits::new(&circuit_builder);
+
         let mut circuits_set = vec![
             leaf_single.get_verifier_data().circuit_digest,
             leaf_mapping.get_verifier_data().circuit_digest,
@@ -335,6 +335,7 @@ impl PublicParameters {
             CircuitInput::LeafMapping(leaf) => set
                 .generate_proof(&self.leaf_mapping, [], [], leaf)
                 .map(|p| (p, self.leaf_mapping.get_verifier_data().clone()).into()),
+
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
                 let (child_proof, child_vk) = child_proofs

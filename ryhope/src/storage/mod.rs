@@ -282,6 +282,9 @@ where
     /// Return all the keys existing at the given epoch.
     fn keys_at(&self, epoch: Epoch) -> impl Future<Output = Vec<K>>;
 
+    /// Return a key alive at epoch, if any.
+    fn random_key_at(&self, epoch: Epoch) -> impl Future<Output = Option<K>>;
+
     /// Return all the valid key/value pairs at the given `epoch`.
     ///
     /// NOTE: be careful when using this function, it is not lazy.
