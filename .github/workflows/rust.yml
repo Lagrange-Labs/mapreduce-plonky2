@@ -49,6 +49,7 @@ jobs:
         run: |
                 docker run --rm base cargo check --tests
 
+
   test:
     name: Test Suite
     runs-on: ['nix-128g']
