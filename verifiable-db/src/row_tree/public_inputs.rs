@@ -1,24 +1,19 @@
 //! Public inputs for rows trees creation circuits
 
 use alloy::primitives::U256;
-use itertools::Itertools;
 use mp2_common::{
-    poseidon::HASH_TO_INT_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, CURVE_TARGET_LEN},
     u256::{self, UInt256Target},
     utils::{FromFields, FromTargets},
     F,
 };
-use num::BigUint;
 use plonky2::{
-    field::types::PrimeField64,
     hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
     iop::target::Target,
 };
-use plonky2_crypto::u32::arithmetic_u32::U32Target;
-use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
+use std::iter::once;
 
 pub enum RowsTreePublicInputs {
     // `H : F[4]` - Poseidon hash of the leaf
@@ -27,12 +22,12 @@ pub enum RowsTreePublicInputs {
     IndividualDigest,
     // `multiplier_digest : Digest`  - Cumulative digest of the values of the cells which are accumulated in multiplier digest
     MultiplierDigest,
-    // `row_id_multiplier : F[4]` - `H2Int(H("") || multiplier_md)`, where `multiplier_md` is the metadata digest of cells accumulated in `multiplier_digest`
-    RowIdMultiplier,
     // `min : Uint256` - Minimum alue of the secondary index stored up to this node
     MinValue,
     // `max : Uint256` - Maximum value of the secondary index stored up to this node
     MaxValue,
+    // `multiplier_counter : F` - Number of cells accumulated as multiplier
+    MultiplierCounter,
 }
 
 /// Public inputs for Rows Tree Construction
@@ -41,21 +36,21 @@ pub struct PublicInputs<'a, T> {
     pub(crate) h: &'a [T],
     pub(crate) individual_digest: &'a [T],
     pub(crate) multiplier_digest: &'a [T],
-    pub(crate) row_id_multiplier: &'a [T],
     pub(crate) min: &'a [T],
     pub(crate) max: &'a [T],
+    pub(crate) multiplier_cnt: &'a T,
 }
 
-const NUM_PUBLIC_INPUTS: usize = RowsTreePublicInputs::MaxValue as usize + 1;
+const NUM_PUBLIC_INPUTS: usize = RowsTreePublicInputs::MultiplierCounter as usize + 1;
 
 impl<'a, T: Clone> PublicInputs<'a, T> {
     const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
         Self::to_range(RowsTreePublicInputs::RootHash),
         Self::to_range(RowsTreePublicInputs::IndividualDigest),
         Self::to_range(RowsTreePublicInputs::MultiplierDigest),
-        Self::to_range(RowsTreePublicInputs::RowIdMultiplier),
         Self::to_range(RowsTreePublicInputs::MinValue),
         Self::to_range(RowsTreePublicInputs::MaxValue),
+        Self::to_range(RowsTreePublicInputs::MultiplierCounter),
     ];
 
     const SIZES: [usize; NUM_PUBLIC_INPUTS] = [
@@ -65,12 +60,12 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         CURVE_TARGET_LEN,
         // Cumulative digest of the values of the cells which are accumulated in multiplier digest
         CURVE_TARGET_LEN,
-        // `H2Int(H("") || multiplier_md)`, where `multiplier_md` is the metadata digest of cells accumulated in `multiplier_digest`
-        HASH_TO_INT_LEN,
         // Minimum value of the secondary index stored up to this node
         u256::NUM_LIMBS,
         // Maximum value of the secondary index stored up to this node
         u256::NUM_LIMBS,
+        // Counter of the number of cells accumulated so far as multiplier
+        1,
     ];
 
     pub(crate) const fn to_range(pi: RowsTreePublicInputs) -> PublicInputRange {
@@ -85,7 +80,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
     }
 
     pub const fn total_len() -> usize {
-        Self::to_range(RowsTreePublicInputs::MaxValue).end
+        Self::to_range(RowsTreePublicInputs::MultiplierCounter).end
     }
 
     pub fn to_root_hash_raw(&self) -> &[T] {
@@ -100,16 +95,16 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         self.multiplier_digest
     }
 
-    pub fn to_row_id_multiplier_raw(&self) -> &[T] {
-        self.row_id_multiplier
-    }
-
     pub fn to_min_value_raw(&self) -> &[T] {
         self.min
     }
 
     pub fn to_max_value_raw(&self) -> &[T] {
         self.max
+    }
+
+    pub fn to_multiplier_counter_raw(&self) -> &T {
+        self.multiplier_cnt
     }
 
     pub fn from_slice(input: &'a [T]) -> Self {
@@ -123,9 +118,9 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
             h: &input[Self::PI_RANGES[0].clone()],
             individual_digest: &input[Self::PI_RANGES[1].clone()],
             multiplier_digest: &input[Self::PI_RANGES[2].clone()],
-            row_id_multiplier: &input[Self::PI_RANGES[3].clone()],
-            min: &input[Self::PI_RANGES[4].clone()],
-            max: &input[Self::PI_RANGES[5].clone()],
+            min: &input[Self::PI_RANGES[3].clone()],
+            max: &input[Self::PI_RANGES[4].clone()],
+            multiplier_cnt: &input[Self::PI_RANGES[5].clone()][0],
         }
     }
 
@@ -133,17 +128,17 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         h: &'a [T],
         individual_digest: &'a [T],
         multiplier_digest: &'a [T],
-        row_id_multiplier: &'a [T],
         min: &'a [T],
         max: &'a [T],
+        multiplier_cnt: &'a T,
     ) -> Self {
         Self {
             h,
             individual_digest,
             multiplier_digest,
-            row_id_multiplier,
             min,
             max,
+            multiplier_cnt,
         }
     }
 
@@ -152,9 +147,9 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
             .iter()
             .chain(self.individual_digest)
             .chain(self.multiplier_digest)
-            .chain(self.row_id_multiplier)
             .chain(self.min)
             .chain(self.max)
+            .chain(once(self.multiplier_cnt))
             .cloned()
             .collect()
     }
@@ -167,9 +162,9 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
         cb.register_public_inputs(self.h);
         cb.register_public_inputs(self.individual_digest);
         cb.register_public_inputs(self.multiplier_digest);
-        cb.register_public_inputs(self.row_id_multiplier);
         cb.register_public_inputs(self.min);
         cb.register_public_inputs(self.max);
+        cb.register_public_input(*self.multiplier_cnt);
     }
 }
 
@@ -186,23 +181,16 @@ impl<'a> PublicInputs<'a, Target> {
         CurveTarget::from_targets(self.multiplier_digest)
     }
 
-    pub fn row_id_multiplier_target(&self) -> BigUintTarget {
-        let limbs = self
-            .row_id_multiplier
-            .iter()
-            .cloned()
-            .map(U32Target)
-            .collect();
-
-        BigUintTarget { limbs }
-    }
-
     pub fn min_value_target(&self) -> UInt256Target {
         UInt256Target::from_targets(self.min)
     }
 
     pub fn max_value_target(&self) -> UInt256Target {
         UInt256Target::from_targets(self.max)
+    }
+
+    pub fn multiplier_counter_target(&self) -> Target {
+        *self.to_multiplier_counter_raw()
     }
 }
 
@@ -219,16 +207,6 @@ impl<'a> PublicInputs<'a, F> {
         WeierstrassPoint::from_fields(self.multiplier_digest)
     }
 
-    pub fn row_id_multiplier(&self) -> BigUint {
-        let limbs = self
-            .row_id_multiplier
-            .iter()
-            .map(|f| u32::try_from(f.to_canonical_u64()).unwrap())
-            .collect_vec();
-
-        BigUint::from_slice(&limbs)
-    }
-
     pub fn min_value(&self) -> U256 {
         U256::from_fields(self.min)
     }
@@ -236,16 +214,17 @@ impl<'a> PublicInputs<'a, F> {
     pub fn max_value(&self) -> U256 {
         U256::from_fields(self.max)
     }
+
+    pub fn multiplier_counter(&self) -> F {
+        *self.to_multiplier_counter_raw()
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use mp2_common::{utils::ToFields, C, D, F};
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
+    use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::{Field, Sample},
         iop::{
@@ -255,32 +234,28 @@ pub(crate) mod tests {
     };
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
-    use std::array;
+    use std::{array, slice};
 
     impl<'a> PublicInputs<'a, F> {
         pub(crate) fn sample(
             multiplier_digest: Point,
-            row_id_multiplier: BigUint,
             min: usize,
             max: usize,
+            multiplier_cnt: u64,
         ) -> Vec<F> {
             let h = HashOut::rand().to_fields();
             let individual_digest = Point::rand();
             let [individual_digest, multiplier_digest] =
                 [individual_digest, multiplier_digest].map(|p| p.to_weierstrass().to_fields());
-            let row_id_multiplier = row_id_multiplier
-                .to_u32_digits()
-                .into_iter()
-                .map(F::from_canonical_u32)
-                .collect_vec();
             let [min, max] = [min, max].map(|v| U256::from(v).to_fields());
+            let multiplier_cnt = F::from_canonical_u64(multiplier_cnt);
             PublicInputs::new(
                 &h,
                 &individual_digest,
                 &multiplier_digest,
-                &row_id_multiplier,
                 &min,
                 &max,
+                &multiplier_cnt,
             )
             .to_vec()
         }
@@ -312,9 +287,9 @@ pub(crate) mod tests {
 
         // Prepare the public inputs.
         let multiplier_digest = Point::sample(rng);
-        let row_id_multiplier = BigUint::from_slice(&random_vector::<u32>(HASH_TO_INT_LEN));
         let [min, max] = array::from_fn(|_| rng.gen());
-        let exp_pi = PublicInputs::sample(multiplier_digest, row_id_multiplier, min, max);
+        let multiplier_cnt = rng.gen();
+        let exp_pi = PublicInputs::sample(multiplier_digest, min, max, multiplier_cnt);
         let exp_pi = &exp_pi.to_vec();
 
         let test_circuit = TestPublicInputs { exp_pi };
@@ -336,16 +311,16 @@ pub(crate) mod tests {
             pi.to_multiplier_digest_raw(),
         );
         assert_eq!(
-            &exp_pi[PublicInputs::<F>::to_range(RowsTreePublicInputs::RowIdMultiplier)],
-            pi.to_row_id_multiplier_raw(),
-        );
-        assert_eq!(
             &exp_pi[PublicInputs::<F>::to_range(RowsTreePublicInputs::MinValue)],
             pi.to_min_value_raw(),
         );
         assert_eq!(
             &exp_pi[PublicInputs::<F>::to_range(RowsTreePublicInputs::MaxValue)],
             pi.to_max_value_raw(),
+        );
+        assert_eq!(
+            &exp_pi[PublicInputs::<F>::to_range(RowsTreePublicInputs::MultiplierCounter)],
+            slice::from_ref(pi.to_multiplier_counter_raw()),
         );
     }
 }

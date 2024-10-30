@@ -184,33 +184,19 @@ impl CircuitInput {
     pub fn leaf(
         identifier: u64,
         value: U256,
-        mpt_metadata: HashOut<F>,
         row_unique_data: HashOut<F>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        Self::leaf_multiplier(
-            identifier,
-            value,
-            false,
-            mpt_metadata,
-            row_unique_data,
-            cells_proof,
-        )
+        Self::leaf_multiplier(identifier, value, false, row_unique_data, cells_proof)
     }
     pub fn leaf_multiplier(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
-        mpt_metadata: HashOut<F>,
         row_unique_data: HashOut<F>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let cell = Cell::new(
-            F::from_canonical_u64(identifier),
-            value,
-            is_multiplier,
-            mpt_metadata,
-        );
+        let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         let row = Row::new(cell, row_unique_data);
         Ok(CircuitInput::Leaf {
             witness: row.into(),
@@ -221,7 +207,6 @@ impl CircuitInput {
     pub fn full(
         identifier: u64,
         value: U256,
-        mpt_metadata: HashOut<F>,
         row_unique_data: HashOut<F>,
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
@@ -231,7 +216,6 @@ impl CircuitInput {
             identifier,
             value,
             false,
-            mpt_metadata,
             row_unique_data,
             left_proof,
             right_proof,
@@ -242,18 +226,12 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
-        mpt_metadata: HashOut<F>,
         row_unique_data: HashOut<F>,
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let cell = Cell::new(
-            F::from_canonical_u64(identifier),
-            value,
-            is_multiplier,
-            mpt_metadata,
-        );
+        let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         let row = Row::new(cell, row_unique_data);
         Ok(CircuitInput::Full {
             witness: row.into(),
@@ -266,7 +244,6 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_child_left: bool,
-        mpt_metadata: HashOut<F>,
         row_unique_data: HashOut<F>,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
@@ -276,7 +253,6 @@ impl CircuitInput {
             value,
             false,
             is_child_left,
-            mpt_metadata,
             row_unique_data,
             child_proof,
             cells_proof,
@@ -287,17 +263,11 @@ impl CircuitInput {
         value: U256,
         is_multiplier: bool,
         is_child_left: bool,
-        mpt_metadata: HashOut<F>,
         row_unique_data: HashOut<F>,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let cell = Cell::new(
-            F::from_canonical_u64(identifier),
-            value,
-            is_multiplier,
-            mpt_metadata,
-        );
+        let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         let row = Row::new(cell, row_unique_data);
         let witness = PartialNodeCircuit::new(row, is_child_left);
         Ok(CircuitInput::Partial {
@@ -376,22 +346,10 @@ mod test {
                 params,
                 cells_proof: cells_proof[0].clone(),
                 cells_vk,
-                leaf1: Row::new(
-                    Cell::new(identifier, v1, false, HashOut::rand()),
-                    HashOut::rand(),
-                ),
-                leaf2: Row::new(
-                    Cell::new(identifier, v2, false, HashOut::rand()),
-                    HashOut::rand(),
-                ),
-                full: Row::new(
-                    Cell::new(identifier, v_full, false, HashOut::rand()),
-                    HashOut::rand(),
-                ),
-                partial: Row::new(
-                    Cell::new(identifier, v_partial, false, HashOut::rand()),
-                    HashOut::rand(),
-                ),
+                leaf1: Row::new(Cell::new(identifier, v1, false), HashOut::rand()),
+                leaf2: Row::new(Cell::new(identifier, v2, false), HashOut::rand()),
+                full: Row::new(Cell::new(identifier, v_full, false), HashOut::rand()),
+                partial: Row::new(Cell::new(identifier, v_partial, false), HashOut::rand()),
             })
         }
 
@@ -429,7 +387,6 @@ mod test {
         let row = &p.partial;
         let id = row.cell.identifier;
         let value = row.cell.value;
-        let mpt_metadata = row.cell.mpt_metadata;
         let row_unique_data = row.row_unique_data;
         let row_digest = row.digest(&p.cells_pi());
 
@@ -444,7 +401,6 @@ mod test {
             id.to_canonical_u64(),
             value,
             is_left,
-            mpt_metadata,
             row_unique_data,
             child_proof_buff.clone(),
             p.cells_proof_vk().serialize()?,
@@ -491,12 +447,12 @@ mod test {
             pi.multiplier_digest_point(),
             row_digest.multiplier_vd.to_weierstrass()
         );
-        // Check row ID multiplier
-        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
         // Check minimum value
         assert_eq!(pi.min_value(), value.min(child_min));
         // Check maximum value
         assert_eq!(pi.max_value(), value.max(child_max));
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
 
         Ok(vec![])
     }
@@ -505,14 +461,12 @@ mod test {
         let row = &p.full;
         let id = row.cell.identifier;
         let value = row.cell.value;
-        let mpt_metadata = row.cell.mpt_metadata;
         let row_unique_data = row.row_unique_data;
         let row_digest = row.digest(&p.cells_pi());
 
         let input = CircuitInput::full(
             id.to_canonical_u64(),
             value,
-            mpt_metadata,
             row_unique_data,
             child_proof[0].to_vec(),
             child_proof[1].to_vec(),
@@ -557,8 +511,8 @@ mod test {
             pi.multiplier_digest_point(),
             row_digest.multiplier_vd.to_weierstrass()
         );
-        // Check row ID multiplier
-        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
 
         Ok(proof)
     }
@@ -566,7 +520,6 @@ mod test {
     fn generate_leaf_proof(p: &TestParams, row: &Row) -> Result<Vec<u8>> {
         let id = row.cell.identifier;
         let value = row.cell.value;
-        let mpt_metadata = row.cell.mpt_metadata;
         let row_unique_data = row.row_unique_data;
         let row_digest = row.digest(&p.cells_pi());
 
@@ -574,7 +527,6 @@ mod test {
         let input = CircuitInput::leaf(
             id.to_canonical_u64(),
             value,
-            mpt_metadata,
             row_unique_data,
             p.cells_proof_vk().serialize()?,
         )?;
@@ -615,12 +567,12 @@ mod test {
             pi.multiplier_digest_point(),
             row_digest.multiplier_vd.to_weierstrass()
         );
-        // Check row ID multiplier
-        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
         // Check minimum value
         assert_eq!(pi.min_value(), value);
         // Check maximum value
         assert_eq!(pi.max_value(), value);
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
 
         Ok(proof)
     }

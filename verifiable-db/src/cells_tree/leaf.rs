@@ -26,8 +26,9 @@ pub struct LeafCircuit(Cell);
 impl LeafCircuit {
     fn build(b: &mut CBuilder) -> LeafWires {
         let cell = CellWire::new(b);
-        let metadata_digests = cell.split_metadata_digest(b);
         let values_digests = cell.split_values_digest(b);
+        let individual_cnt = cell.is_individual(b).target;
+        let multiplier_cnt = cell.is_multiplier().target;
 
         // H(H("") || H("") || identifier || pack_u32(value))
         let empty_hash = b.constant_hash(*empty_poseidon_hash()).to_targets();
@@ -45,8 +46,8 @@ impl LeafCircuit {
             &h.to_targets(),
             &values_digests.individual.to_targets(),
             &values_digests.multiplier.to_targets(),
-            &metadata_digests.individual.to_targets(),
-            &metadata_digests.multiplier.to_targets(),
+            &individual_cnt,
+            &multiplier_cnt,
         )
         .register(b);
 
@@ -87,7 +88,7 @@ mod tests {
     use itertools::Itertools;
     use mp2_common::{poseidon::H, utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::plonk::config::Hasher;
+    use plonky2::{field::types::Field, plonk::config::Hasher};
 
     impl UserCircuit<F, D> for LeafCircuit {
         type Wires = LeafWires;
@@ -112,7 +113,6 @@ mod tests {
         let id = cell.identifier;
         let value = cell.value;
         let values_digests = cell.split_values_digest();
-        let metadata_digests = cell.split_metadata_digest();
 
         let test_circuit: LeafCircuit = cell.into();
         let proof = run_circuit::<F, D, C, _>(test_circuit);
@@ -143,15 +143,10 @@ mod tests {
             pi.multiplier_values_digest_point(),
             values_digests.multiplier.to_weierstrass(),
         );
-        // Check individual metadata digest
-        assert_eq!(
-            pi.individual_metadata_digest_point(),
-            metadata_digests.individual.to_weierstrass(),
-        );
-        // Check multiplier metadata digest
-        assert_eq!(
-            pi.multiplier_metadata_digest_point(),
-            metadata_digests.multiplier.to_weierstrass(),
-        );
+        // Check individual counter
+        let individual_cnt = if is_multiplier { F::ZERO } else { F::ONE };
+        assert_eq!(pi.individual_counter(), individual_cnt);
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), F::ONE - individual_cnt);
     }
 }

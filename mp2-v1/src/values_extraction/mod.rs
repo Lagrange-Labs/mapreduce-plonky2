@@ -182,20 +182,20 @@ pub fn compute_leaf_single_metadata_digest<
 
 /// Compute the values digest for single variable leaf.
 pub fn compute_leaf_single_values_digest<const MAX_FIELD_PER_EVM: usize>(
-    metadata_digest: &Digest,
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[u64],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
 ) -> Digest {
+    let num_actual_columns = F::from_canonical_usize(table_info.len());
     let values_digest =
         ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
             .digest();
 
-    // row_id = H2int(H("") || metadata_digest)
+    // row_id = H2int(H("") || num_actual_columns)
     let inputs = empty_poseidon_hash()
         .to_fields()
         .into_iter()
-        .chain(metadata_digest.to_fields())
+        .chain(once(num_actual_columns))
         .collect_vec();
     let hash = H::hash_no_pad(&inputs);
     let row_id = hash_to_int_value(hash);
@@ -238,7 +238,6 @@ pub fn compute_leaf_mapping_metadata_digest<
 
 /// Compute the values digest for mapping variable leaf.
 pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
-    metadata_digest: &Digest,
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[u64],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
@@ -246,6 +245,8 @@ pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
     evm_word: u32,
     key_id: u64,
 ) -> Digest {
+    // We add key column to number of actual columns.
+    let num_actual_columns = F::from_canonical_usize(table_info.len() + 1);
     let mut values_digest =
         ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
             .digest();
@@ -264,11 +265,11 @@ pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
     }
     // row_unique_data = H(pack(left_pad32(key))
     let row_unique_data = H::hash_no_pad(&packed_mapping_key.collect_vec());
-    // row_id = H2int(row_unique_data || metadata_digest)
+    // row_id = H2int(row_unique_data || num_actual_columns)
     let inputs = row_unique_data
         .to_fields()
         .into_iter()
-        .chain(metadata_digest.to_fields())
+        .chain(once(num_actual_columns))
         .collect_vec();
     let hash = H::hash_no_pad(&inputs);
     let row_id = hash_to_int_value(hash);
@@ -319,7 +320,6 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
 
 /// Compute the values digest for mapping of mappings leaf.
 pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: usize>(
-    metadata_digest: &Digest,
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[u64],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
@@ -329,6 +329,8 @@ pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: u
     outer_key_id: u64,
     inner_key_id: u64,
 ) -> Digest {
+    // Add inner key and outer key columns to the number of actual columns.
+    let num_actual_columns = F::from_canonical_usize(table_info.len() + 2);
     let mut values_digest =
         ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
             .digest();
@@ -360,11 +362,11 @@ pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: u
     // row_unique_data = H(outer_key || inner_key)
     let inputs = packed_outer_key.chain(packed_inner_key).collect_vec();
     let row_unique_data = H::hash_no_pad(&inputs);
-    // row_id = H2int(row_unique_data || metadata_digest)
+    // row_id = H2int(row_unique_data || num_actual_columns)
     let inputs = row_unique_data
         .to_fields()
         .into_iter()
-        .chain(metadata_digest.to_fields())
+        .chain(once(num_actual_columns))
         .collect_vec();
     let hash = H::hash_no_pad(&inputs);
     let row_id = hash_to_int_value(hash);

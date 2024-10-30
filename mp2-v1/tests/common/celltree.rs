@@ -69,8 +69,6 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
-                        // TODO: Check mpt_metadata = cell.hash?
-                        HashOut::rand(),
                     ),
                 );
                 self.b.bench("indexing::cell_tree::leaf", || {
@@ -96,8 +94,6 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
-                        // TODO: Check mpt_metadata = cell.hash?
-                        HashOut::rand(),
                         left_proof.clone(),
                     ),
                 );
@@ -153,8 +149,6 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
-                        // TODO: Check mpt_metadata = cell.hash?
-                        HashOut::rand(),
                         [left_proof, right_proof],
                     ),
                 );

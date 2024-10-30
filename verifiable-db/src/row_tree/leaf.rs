@@ -60,9 +60,9 @@ impl LeafCircuit {
             &row_hash.elements,
             &digest.individual_vd.to_targets(),
             &digest.multiplier_vd.to_targets(),
-            &digest.row_id_multiplier.to_targets(),
             &value,
             &value,
+            &digest.multiplier_cnt,
         )
         .register(b);
 
@@ -206,7 +206,7 @@ mod test {
             row_digest.multiplier_vd.to_weierstrass()
         );
         // Check row ID multiplier
-        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
         // Check minimum value
         assert_eq!(pi.min_value(), value);
         // Check maximum value

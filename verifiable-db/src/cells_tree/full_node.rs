@@ -25,12 +25,21 @@ impl FullNodeCircuit {
         let [p1, p2] = child_proofs;
 
         let cell = CellWire::new(b);
-        let metadata_digests =
-            cell.split_and_accumulate_metadata_digest(b, &p1.split_metadata_digest_target());
         let values_digests =
             cell.split_and_accumulate_values_digest(b, &p1.split_values_digest_target());
-        let metadata_digests = metadata_digests.accumulate(b, &p2.split_metadata_digest_target());
         let values_digests = values_digests.accumulate(b, &p2.split_values_digest_target());
+
+        let is_individual = cell.is_individual(b);
+        let individual_cnt = b.add_many([
+            is_individual.target,
+            p1.individual_counter_target(),
+            p2.individual_counter_target(),
+        ]);
+        let multiplier_cnt = b.add_many([
+            cell.is_multiplier().target,
+            p1.multiplier_counter_target(),
+            p2.multiplier_counter_target(),
+        ]);
 
         // H(p1.H || p2.H || identifier || value)
         let inputs = p1
@@ -47,8 +56,8 @@ impl FullNodeCircuit {
             &h.to_targets(),
             &values_digests.individual.to_targets(),
             &values_digests.multiplier.to_targets(),
-            &metadata_digests.individual.to_targets(),
-            &metadata_digests.multiplier.to_targets(),
+            &individual_cnt,
+            &multiplier_cnt,
         )
         .register(b);
 
@@ -91,7 +100,7 @@ mod tests {
     use itertools::Itertools;
     use mp2_common::{poseidon::H, utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{iop::witness::WitnessWrite, plonk::config::Hasher};
+    use plonky2::{field::types::Field, iop::witness::WitnessWrite, plonk::config::Hasher};
 
     #[derive(Clone, Debug)]
     struct TestFullNodeCircuit<'a> {
@@ -162,7 +171,6 @@ mod tests {
         let id = cell.identifier;
         let value = cell.value;
         let values_digests = cell.split_values_digest();
-        let metadata_digests = cell.split_metadata_digest();
 
         let child_pis = &[
             PublicInputs::<F>::sample(is_left_child_multiplier),
@@ -183,9 +191,6 @@ mod tests {
 
         let values_digests = child_pis.iter().fold(values_digests, |acc, pi| {
             acc.accumulate(&pi.split_values_digest_point())
-        });
-        let metadata_digests = child_pis.iter().fold(metadata_digests, |acc, pi| {
-            acc.accumulate(&pi.split_metadata_digest_point())
         });
 
         // Check the node hash
@@ -212,15 +217,19 @@ mod tests {
             pi.multiplier_values_digest_point(),
             values_digests.multiplier.to_weierstrass(),
         );
-        // Check individual metadata digest
+        // Check individual counter
+        let individual_cnt = if is_multiplier { F::ZERO } else { F::ONE };
         assert_eq!(
-            pi.individual_metadata_digest_point(),
-            metadata_digests.individual.to_weierstrass(),
+            pi.individual_counter(),
+            child_pis
+                .iter()
+                .fold(individual_cnt, |acc, pi| acc + pi.individual_counter()),
         );
-        // Check multiplier metadata digest
+        // Check multiplier counter
         assert_eq!(
-            pi.multiplier_metadata_digest_point(),
-            metadata_digests.multiplier.to_weierstrass(),
+            pi.multiplier_counter(),
+            child_pis.iter().fold(F::ONE - individual_cnt, |acc, pi| acc
+                + pi.multiplier_counter()),
         );
     }
 }

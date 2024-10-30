@@ -9,23 +9,29 @@ use crate::{
     row_tree,
 };
 pub use api::{CircuitInput, PublicParameters};
+use itertools::Itertools;
 use mp2_common::{
     group_hashing::{
         circuit_hashed_scalar_mul, field_hashed_scalar_mul, weierstrass_to_point,
         CircuitBuilderGroupHashing,
     },
-    poseidon::hash_to_int_target,
+    poseidon::{empty_poseidon_hash, hash_to_int_target, hash_to_int_value, H},
     types::CBuilder,
-    utils::ToFields,
+    utils::{ToFields, ToTargets},
     CHasher, D, F,
 };
-use plonky2::{field::types::Field, iop::target::Target, plonk::circuit_builder::CircuitBuilder};
+use plonky2::{
+    field::types::Field,
+    iop::target::Target,
+    plonk::{circuit_builder::CircuitBuilder, config::Hasher},
+};
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
-
 use plonky2_ecgfp5::{
     curve::{curve::Point, scalar_field::Scalar},
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
+use std::iter::once;
+
 pub use public_inputs::PublicInputs;
 
 /// Common function to compute the digest of the block tree which uses a special format using
@@ -50,11 +56,19 @@ pub(crate) fn compute_final_digest(
     if !is_merge_case {
         return individual_digest;
     }
-
     // Compute the final row digest from rows_tree_proof for merge case:
+    // row_id_multiplier = H2Int(H("") || rows_tree_proof.multiplier_counter)
+    let empty_hash = empty_poseidon_hash();
+    let inputs = empty_hash
+        .to_fields()
+        .into_iter()
+        .chain(once(rows_tree_pi.multiplier_counter()))
+        .collect_vec();
+    let hash = H::hash_no_pad(&inputs);
+    let row_id_multiplier = hash_to_int_value(hash);
     // multiplier_digest = rows_tree_proof.row_id_multiplier * rows_tree_proof.multiplier_vd
     let multiplier_vd = weierstrass_to_point(&rows_tree_pi.multiplier_digest_point());
-    let row_id_multiplier = Scalar::from_noncanonical_biguint(rows_tree_pi.row_id_multiplier());
+    let row_id_multiplier = Scalar::from_noncanonical_biguint(row_id_multiplier);
     let multiplier_digest = multiplier_vd * row_id_multiplier;
     // rows_digest_merge = multiplier_digest * rows_tree_proof.DR
     let individual_digest = weierstrass_to_point(&rows_tree_pi.individual_digest_point());
@@ -71,9 +85,18 @@ where
     E: ExtractionPIWrap,
 {
     // Compute the final row digest from rows_tree_proof for merge case:
+    // row_id_multiplier = H2Int(H("") || rows_tree_proof.multiplier_counter)
+    let empty_hash = b.constant_hash(*empty_poseidon_hash());
+    let inputs = empty_hash
+        .to_targets()
+        .into_iter()
+        .chain(once(rows_tree_pi.multiplier_counter_target()))
+        .collect();
+    let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
+    let row_id_multiplier = hash_to_int_target(b, hash);
     // multiplier_digest = rows_tree_proof.row_id_multiplier * rows_tree_proof.multiplier_vd
     let multiplier_vd = rows_tree_pi.multiplier_digest_target();
-    let row_id_multiplier = b.biguint_to_nonnative(&rows_tree_pi.row_id_multiplier_target());
+    let row_id_multiplier = b.biguint_to_nonnative(&row_id_multiplier);
     let multiplier_digest = b.curve_scalar_mul(multiplier_vd, &row_id_multiplier);
     // rows_digest_merge = multiplier_digest * rows_tree_proof.DR
     let individual_digest = rows_tree_pi.individual_digest_target();
@@ -110,7 +133,6 @@ pub(crate) mod tests {
     use alloy::primitives::U256;
     use mp2_common::{
         keccak::PACKED_HASH_LEN,
-        poseidon::HASH_TO_INT_LEN,
         types::CBuilder,
         utils::{FromFields, ToFields},
         C, F,
@@ -119,7 +141,6 @@ pub(crate) mod tests {
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
-    use num::BigUint;
     use plonky2::{
         field::types::{Field, Sample},
         hash::hash_types::NUM_HASH_OUT_ELTS,
@@ -170,9 +191,9 @@ pub(crate) mod tests {
         } else {
             Point::NEUTRAL
         };
-        let row_id_multiplier = BigUint::from_slice(&random_vector::<u32>(HASH_TO_INT_LEN));
+        let mulitplier_cnt = rng.gen_range(1..100);
 
-        row_tree::PublicInputs::sample(multiplier_digest, row_id_multiplier, min, max)
+        row_tree::PublicInputs::sample(multiplier_digest, min, max, mulitplier_cnt)
     }
 
     /// Generate a random extraction public inputs.

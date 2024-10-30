@@ -21,12 +21,9 @@ use mp2_common::{
 use serde::{Deserialize, Serialize};
 use std::iter::once;
 
-use plonky2::{
-    hash::hash_types::{HashOut, HashOutTarget},
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
+use plonky2::iop::{
+    target::{BoolTarget, Target},
+    witness::{PartialWitness, WitnessWrite},
 };
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 pub use public_inputs::PublicInputs;
@@ -41,8 +38,6 @@ pub struct Cell {
     pub(crate) value: U256,
     /// is the secondary value should be included in multiplier digest or not
     pub(crate) is_multiplier: bool,
-    /// Hash of the metadata associated to this cell, as computed in MPT extraction circuits
-    pub(crate) mpt_metadata: HashOut<F>,
 }
 
 impl Cell {
@@ -50,22 +45,16 @@ impl Cell {
         pw.set_u256_target(&wires.value, self.value);
         pw.set_target(wires.identifier, self.identifier);
         pw.set_bool_target(wires.is_multiplier, self.is_multiplier);
-        pw.set_hash_target(wires.mpt_metadata, self.mpt_metadata);
     }
-    pub fn split_metadata_digest(&self) -> SplitDigestPoint {
-        let digest = self.metadata_digest();
-        SplitDigestPoint::from_single_digest_point(digest, self.is_multiplier)
+    pub fn is_multiplier(&self) -> bool {
+        self.is_multiplier
+    }
+    pub fn is_individual(&self) -> bool {
+        !self.is_multiplier
     }
     pub fn split_values_digest(&self) -> SplitDigestPoint {
         let digest = self.values_digest();
         SplitDigestPoint::from_single_digest_point(digest, self.is_multiplier)
-    }
-    pub fn split_and_accumulate_metadata_digest(
-        &self,
-        child_digest: SplitDigestPoint,
-    ) -> SplitDigestPoint {
-        let split_digest = self.split_metadata_digest();
-        split_digest.accumulate(&child_digest)
     }
     pub fn split_and_accumulate_values_digest(
         &self,
@@ -73,17 +62,6 @@ impl Cell {
     ) -> SplitDigestPoint {
         let split_digest = self.split_values_digest();
         split_digest.accumulate(&child_digest)
-    }
-    fn metadata_digest(&self) -> Digest {
-        // D(mpt_metadata || identifier)
-        let inputs = self
-            .mpt_metadata
-            .to_fields()
-            .into_iter()
-            .chain(once(self.identifier))
-            .collect_vec();
-
-        map_to_curve_point(&inputs)
     }
     fn values_digest(&self) -> Digest {
         // D(identifier || pack_u32(value))
@@ -102,8 +80,6 @@ pub struct CellWire {
     pub(crate) identifier: Target,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) is_multiplier: BoolTarget,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    pub(crate) mpt_metadata: HashOutTarget,
 }
 
 impl CellWire {
@@ -112,24 +88,17 @@ impl CellWire {
             value: b.add_virtual_u256(),
             identifier: b.add_virtual_target(),
             is_multiplier: b.add_virtual_bool_target_safe(),
-            mpt_metadata: b.add_virtual_hash(),
         }
     }
-    pub fn split_metadata_digest(&self, b: &mut CBuilder) -> SplitDigestTarget {
-        let digest = self.metadata_digest(b);
-        SplitDigestTarget::from_single_digest_target(b, digest, self.is_multiplier)
+    pub fn is_multiplier(&self) -> BoolTarget {
+        self.is_multiplier
+    }
+    pub fn is_individual(&self, b: &mut CBuilder) -> BoolTarget {
+        b.not(self.is_multiplier)
     }
     pub fn split_values_digest(&self, b: &mut CBuilder) -> SplitDigestTarget {
         let digest = self.values_digest(b);
         SplitDigestTarget::from_single_digest_target(b, digest, self.is_multiplier)
-    }
-    pub fn split_and_accumulate_metadata_digest(
-        &self,
-        b: &mut CBuilder,
-        child_digest: &SplitDigestTarget,
-    ) -> SplitDigestTarget {
-        let split_digest = self.split_metadata_digest(b);
-        split_digest.accumulate(b, child_digest)
     }
     pub fn split_and_accumulate_values_digest(
         &self,
@@ -138,17 +107,6 @@ impl CellWire {
     ) -> SplitDigestTarget {
         let split_digest = self.split_values_digest(b);
         split_digest.accumulate(b, child_digest)
-    }
-    fn metadata_digest(&self, b: &mut CBuilder) -> CurveTarget {
-        // D(mpt_metadata || identifier)
-        let inputs = self
-            .mpt_metadata
-            .to_targets()
-            .into_iter()
-            .chain(once(self.identifier))
-            .collect_vec();
-
-        b.map_to_curve_point(&inputs)
     }
     fn values_digest(&self, b: &mut CBuilder) -> CurveTarget {
         // D(identifier || pack_u32(value))
@@ -183,9 +141,8 @@ pub(crate) mod tests {
 
             let identifier = rng.gen::<u32>().to_field();
             let value = U256::from_limbs(rng.gen());
-            let mpt_metadata = HashOut::rand();
 
-            Cell::new(identifier, value, is_multiplier, mpt_metadata)
+            Cell::new(identifier, value, is_multiplier)
         }
     }
 
@@ -215,13 +172,9 @@ pub(crate) mod tests {
 
             let cell = CellWire::new(b);
             let values_digest = cell.split_and_accumulate_values_digest(b, &child_values_digest);
-            let metadata_digest =
-                cell.split_and_accumulate_metadata_digest(b, &child_metadata_digest);
 
             b.register_curve_public_input(values_digest.individual);
             b.register_curve_public_input(values_digest.multiplier);
-            b.register_curve_public_input(metadata_digest.individual);
-            b.register_curve_public_input(metadata_digest.multiplier);
 
             (cell, child_values_digest, child_metadata_digest)
         }
@@ -264,9 +217,7 @@ pub(crate) mod tests {
 
         let cell = &Cell::sample(rng.gen());
         let values_digests = cell.split_values_digest();
-        let metadata_digests = cell.split_metadata_digest();
         let exp_values_digests = values_digests.accumulate(child_values_digest);
-        let exp_metadata_digests = metadata_digests.accumulate(child_metadata_digest);
 
         let test_circuit = TestCellCircuit {
             cell,
@@ -276,16 +227,13 @@ pub(crate) mod tests {
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
 
-        let [values_individual, values_multiplier, metadata_individual, metadata_multiplier] =
-            array::from_fn(|i| {
-                Point::from_fields(
-                    &proof.public_inputs[i * CURVE_TARGET_LEN..(i + 1) * CURVE_TARGET_LEN],
-                )
-            });
+        let [values_individual, values_multiplier] = array::from_fn(|i| {
+            Point::from_fields(
+                &proof.public_inputs[i * CURVE_TARGET_LEN..(i + 1) * CURVE_TARGET_LEN],
+            )
+        });
 
         assert_eq!(values_individual, exp_values_digests.individual);
         assert_eq!(values_multiplier, exp_values_digests.multiplier);
-        assert_eq!(metadata_individual, exp_metadata_digests.individual);
-        assert_eq!(metadata_multiplier, exp_metadata_digests.multiplier);
     }
 }

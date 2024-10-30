@@ -151,8 +151,6 @@ impl TestContext {
                         id,
                         value,
                         multiplier,
-                        // TODO: mpt_metadata
-                        HashOut::rand(),
                         // TODO: row_unique_data
                         HashOut::rand(),
                         cell_tree_proof,
@@ -191,8 +189,6 @@ impl TestContext {
                         value,
                         multiplier,
                         context.left.is_some(),
-                        // TODO: mpt_metadata
-                        HashOut::rand(),
                         // TODO: row_unique_data
                         HashOut::rand(),
                         child_proof,
@@ -237,8 +233,6 @@ impl TestContext {
                         id,
                         value,
                         multiplier,
-                        // TODO: mpt_metadata
-                        HashOut::rand(),
                         // TODO: row_unique_data
                         HashOut::rand(),
                         left_proof,

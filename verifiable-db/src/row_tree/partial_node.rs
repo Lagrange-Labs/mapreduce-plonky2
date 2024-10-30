@@ -20,7 +20,6 @@ use plonky2::{
     },
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
-use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
@@ -64,14 +63,11 @@ impl PartialNodeCircuit {
         let value = row.value();
         let digest = row.digest(b, &cells_pi);
 
-        // Check multiplier_vd and row_id_multiplier are the same as child proof
-        // assert multiplier_vd == child_proof.multiplier_vd
+        // Check multiplier_vd and multiplier_counter are the same as children proof.
+        // assert multiplier_vd == p.multiplier_vd
         b.connect_curve_points(digest.multiplier_vd, child_pi.multiplier_digest_target());
-        //assert row_id_multiplier == child_proof.row_id_multiplier
-        b.connect_biguint(
-            &digest.row_id_multiplier,
-            &child_pi.row_id_multiplier_target(),
-        );
+        // assert multiplier_counter == p.multiplier_counter
+        b.connect(digest.multiplier_cnt, child_pi.multiplier_counter_target());
 
         // bool target range checked in poseidon gate
         let is_child_at_left = b.add_virtual_bool_target_unsafe();
@@ -116,9 +112,9 @@ impl PartialNodeCircuit {
             &node_hash,
             &digest.individual_vd.to_targets(),
             &digest.multiplier_vd.to_targets(),
-            &digest.row_id_multiplier.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
+            &digest.multiplier_cnt,
         )
         .register(b);
         PartialNodeWires {
@@ -193,7 +189,7 @@ pub mod test {
         C, D, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::plonk::config::Hasher;
+    use plonky2::{field::types::PrimeField64, plonk::config::Hasher};
     use std::iter::once;
 
     #[derive(Clone, Debug)]
@@ -292,9 +288,9 @@ pub mod test {
         let node_circuit = PartialNodeCircuit::new(row.clone(), child_at_left);
         let child_pi = PublicInputs::sample(
             row_digest.multiplier_vd,
-            row_digest.row_id_multiplier.clone(),
             child_min.to(),
             child_max.to(),
+            row_digest.multiplier_cnt.to_canonical_u64(),
         );
         let test_circuit = TestPartialNodeCircuit {
             circuit: node_circuit,
@@ -343,11 +339,11 @@ pub mod test {
             pi.multiplier_digest_point(),
             row_digest.multiplier_vd.to_weierstrass()
         );
-        // Check row ID multiplier
-        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
         // Check minimum value
         assert_eq!(pi.min_value(), value.min(child_min));
         // Check maximum value
         assert_eq!(pi.max_value(), value.max(child_max));
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
     }
 }
