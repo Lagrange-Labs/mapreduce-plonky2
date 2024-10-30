@@ -4,7 +4,7 @@ use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
     proof::{deserialize_proof, verify_proof_fixed_circuit, ProofWithVK},
-    serialization::{deserialize, deserialize_vec, serialize, serialize_vec},
+    serialization::{deserialize, serialize},
     u256::UInt256Target,
     C, D, F,
 };
@@ -16,7 +16,6 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        config::AlgebraicHasher,
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -25,7 +24,6 @@ use recursion_framework::framework::{
     RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
 };
 use serde::{Deserialize, Serialize};
-use std::array::from_fn as create_array;
 
 use crate::{block_extraction, contract_extraction, values_extraction};
 
@@ -115,8 +113,6 @@ pub(crate) struct BaseCircuitProofWires {
 
 pub(crate) const CONTRACT_SET_NUM_IO: usize = contract_extraction::PublicInputs::<F>::TOTAL_LEN;
 pub(crate) const VALUE_SET_NUM_IO: usize = values_extraction::PublicInputs::<F>::TOTAL_LEN;
-pub(crate) const BLOCK_SET_NUM_IO: usize =
-    block_extraction::public_inputs::PublicInputs::<F>::TOTAL_LEN;
 
 #[derive(Clone, Debug)]
 pub struct BaseCircuitInput {
@@ -206,7 +202,7 @@ impl BaseCircuitProofInputs {
             .zip(self.proofs.value_proofs.iter())
         {
             let (p, vd) = proof.into();
-            w.set_target(pw, &self.value_circuit_set, &p, &vd)?;
+            w.set_target(pw, &self.value_circuit_set, p, vd)?;
         }
         Ok(())
     }

@@ -11,5 +11,4 @@ pub use public_inputs::PublicInputs;
 pub(crate) use base_circuit::BaseCircuitProofInputs;
 pub(crate) use lengthed_circuit::LengthedCircuitInput as LengthedCircuit;
 pub(crate) use merge_circuit::MergeCircuitInput as MergeCircuit;
-use serde::{Deserialize, Serialize};
 pub(crate) use simple_circuit::SimpleCircuitInput as SimpleCircuit;

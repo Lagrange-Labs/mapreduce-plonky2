@@ -68,7 +68,7 @@ impl<'a, C: ContextProvider> PlaceholderValidator<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstVisitor for PlaceholderValidator<'a, C> {
+impl<C: ContextProvider> AstVisitor for PlaceholderValidator<'_, C> {
     type Error = anyhow::Error;
 
     fn pre_expr(&mut self, expr: &Expr) -> anyhow::Result<()> {
