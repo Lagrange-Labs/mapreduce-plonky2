@@ -46,7 +46,7 @@ pub struct Cell {
 }
 
 impl Cell {
-    pub(crate) fn assign_wires(&self, pw: &mut PartialWitness<F>, wires: &CellWire) {
+    pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &CellWire) {
         pw.set_u256_target(&wires.value, self.value);
         pw.set_target(wires.identifier, self.identifier);
         pw.set_bool_target(wires.is_multiplier, self.is_multiplier);
@@ -227,7 +227,7 @@ pub(crate) mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.cell.assign_wires(pw, &wires.0);
+            self.cell.assign(pw, &wires.0);
             pw.set_curve_target(
                 wires.1.individual,
                 self.child_values_digest.individual.to_weierstrass(),

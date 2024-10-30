@@ -59,7 +59,7 @@ impl FullNodeCircuit {
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &FullNodeWires) {
-        self.0.assign_wires(pw, &wires.0);
+        self.0.assign(pw, &wires.0);
     }
 }
 

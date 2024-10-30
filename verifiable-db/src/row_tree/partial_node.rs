@@ -128,7 +128,7 @@ impl PartialNodeCircuit {
     }
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &PartialNodeWires) {
-        self.row.assign_wires(pw, &wires.row);
+        self.row.assign(pw, &wires.row);
         pw.set_bool_target(wires.is_child_at_left, self.is_child_at_left);
     }
 }

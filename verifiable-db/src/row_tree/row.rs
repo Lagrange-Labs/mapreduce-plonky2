@@ -74,8 +74,8 @@ pub(crate) struct Row {
 }
 
 impl Row {
-    pub(crate) fn assign_wires(&self, pw: &mut PartialWitness<F>, wires: &RowWire) {
-        self.cell.assign_wires(pw, &wires.cell);
+    pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &RowWire) {
+        self.cell.assign(pw, &wires.cell);
         pw.set_hash_target(wires.row_unique_data, self.row_unique_data);
     }
 
@@ -240,7 +240,7 @@ pub(crate) mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.row.assign_wires(pw, &wires.0);
+            self.row.assign(pw, &wires.0);
             pw.set_target_arr(&wires.1, self.cells_pi);
         }
     }
