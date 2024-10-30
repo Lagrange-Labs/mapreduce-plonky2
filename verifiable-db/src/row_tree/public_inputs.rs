@@ -72,7 +72,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         CURVE_TARGET_LEN,
         // `H2Int(H("") || multiplier_md)`, where `multiplier_md` is the metadata digest of cells accumulated in `multiplier_digest`
         HASH_TO_INT_LEN,
-        // Minimum alue of the secondary index stored up to this node
+        // Minimum value of the secondary index stored up to this node
         u256::NUM_LIMBS,
         // Maximum value of the secondary index stored up to this node
         u256::NUM_LIMBS,
