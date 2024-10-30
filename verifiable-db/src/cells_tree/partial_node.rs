@@ -124,19 +124,25 @@ mod tests {
     }
 
     #[test]
-    fn test_cells_tree_partial_node_circuit() {
-        test_cells_tree_partial_multiplier(true);
-        test_cells_tree_partial_multiplier(false);
+    fn test_cells_tree_partial_node_individual() {
+        test_cells_tree_partial_multiplier(false, true);
+        test_cells_tree_partial_multiplier(false, false);
     }
 
-    fn test_cells_tree_partial_multiplier(is_multiplier: bool) {
+    #[test]
+    fn test_cells_tree_partial_node_multiplier() {
+        test_cells_tree_partial_multiplier(true, true);
+        test_cells_tree_partial_multiplier(true, false);
+    }
+
+    fn test_cells_tree_partial_multiplier(is_multiplier: bool, is_child_multiplier: bool) {
         let cell = Cell::sample(is_multiplier);
         let id = cell.identifier;
         let value = cell.value;
         let values_digests = cell.split_values_digest();
         let metadata_digests = cell.split_metadata_digest();
 
-        let child_pi = &PublicInputs::<F>::sample(is_multiplier);
+        let child_pi = &PublicInputs::<F>::sample(is_child_multiplier);
 
         let test_circuit = TestPartialNodeCircuit {
             c: cell.into(),

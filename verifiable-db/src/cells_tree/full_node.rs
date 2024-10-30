@@ -128,19 +128,48 @@ mod tests {
     }
 
     #[test]
-    fn test_cells_tree_full_node_circuit() {
-        test_cells_tree_full_multiplier(true);
-        test_cells_tree_full_multiplier(false);
+    fn test_cells_tree_full_node_individual() {
+        [true, false]
+            .into_iter()
+            .cartesian_product([true, false])
+            .for_each(|(is_left_child_multiplier, is_right_child_multiplier)| {
+                test_cells_tree_full_multiplier(
+                    false,
+                    is_left_child_multiplier,
+                    is_right_child_multiplier,
+                );
+            });
     }
 
-    fn test_cells_tree_full_multiplier(is_multiplier: bool) {
+    #[test]
+    fn test_cells_tree_full_node_multiplier() {
+        [true, false]
+            .into_iter()
+            .cartesian_product([true, false])
+            .for_each(|(is_left_child_multiplier, is_right_child_multiplier)| {
+                test_cells_tree_full_multiplier(
+                    true,
+                    is_left_child_multiplier,
+                    is_right_child_multiplier,
+                );
+            });
+    }
+
+    fn test_cells_tree_full_multiplier(
+        is_multiplier: bool,
+        is_left_child_multiplier: bool,
+        is_right_child_multiplier: bool,
+    ) {
         let cell = Cell::sample(is_multiplier);
         let id = cell.identifier;
         let value = cell.value;
         let values_digests = cell.split_values_digest();
         let metadata_digests = cell.split_metadata_digest();
 
-        let child_pis = &array::from_fn(|_| PublicInputs::<F>::sample(is_multiplier));
+        let child_pis = &[
+            PublicInputs::<F>::sample(is_left_child_multiplier),
+            PublicInputs::<F>::sample(is_right_child_multiplier),
+        ];
 
         let test_circuit = TestFullNodeCircuit {
             c: cell.into(),
