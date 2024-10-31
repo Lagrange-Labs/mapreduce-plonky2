@@ -21,8 +21,6 @@ derive_more = "0.99.18"
 itertools.workspace = true
 
 [dev-dependencies]
-env_logger.workspace = true
-futures = "0.3.30"
 mp2_test = { path = "../mp2-test" }
 rand.workspace = true
 serial_test.workspace = true
