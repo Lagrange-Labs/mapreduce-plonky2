@@ -1,7 +1,7 @@
 use alloy::primitives::U256;
 use anyhow::Result;
-use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
-use plonky2::{field::types::Field, hash::hash_types::HashOut};
+use mp2_common::{default_config, proof::ProofWithVK, types::HashOutput, C, D, F};
+use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::GenericHashOut};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set as p, RecursiveCircuits},
@@ -184,7 +184,7 @@ impl CircuitInput {
     pub fn leaf(
         identifier: u64,
         value: U256,
-        row_unique_data: HashOut<F>,
+        row_unique_data: HashOutput,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
         Self::leaf_multiplier(identifier, value, false, row_unique_data, cells_proof)
@@ -193,11 +193,11 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
-        row_unique_data: HashOut<F>,
+        row_unique_data: HashOutput,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
         let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
-        let row = Row::new(cell, row_unique_data);
+        let row = Row::new(cell, row_unique_data.into());
         Ok(CircuitInput::Leaf {
             witness: row.into(),
             cells_proof,
@@ -207,7 +207,7 @@ impl CircuitInput {
     pub fn full(
         identifier: u64,
         value: U256,
-        row_unique_data: HashOut<F>,
+        row_unique_data: HashOutput,
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
@@ -226,13 +226,13 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
-        row_unique_data: HashOut<F>,
+        row_unique_data: HashOutput,
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
         let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
-        let row = Row::new(cell, row_unique_data);
+        let row = Row::new(cell, row_unique_data.into());
         Ok(CircuitInput::Full {
             witness: row.into(),
             left_proof,
@@ -244,7 +244,7 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_child_left: bool,
-        row_unique_data: HashOut<F>,
+        row_unique_data: HashOutput,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
@@ -263,12 +263,12 @@ impl CircuitInput {
         value: U256,
         is_multiplier: bool,
         is_child_left: bool,
-        row_unique_data: HashOut<F>,
+        row_unique_data: HashOutput,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
         let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
-        let row = Row::new(cell, row_unique_data);
+        let row = Row::new(cell, row_unique_data.into());
         let witness = PartialNodeCircuit::new(row, is_child_left);
         Ok(CircuitInput::Partial {
             witness,
@@ -387,7 +387,7 @@ mod test {
         let row = &p.partial;
         let id = row.cell.identifier;
         let value = row.cell.value;
-        let row_unique_data = row.row_unique_data;
+        let row_unique_data = row.row_unique_data.into();
         let row_digest = row.digest(&p.cells_pi());
 
         let child_proof = ProofWithVK::deserialize(&child_proof_buff)?;
@@ -461,7 +461,7 @@ mod test {
         let row = &p.full;
         let id = row.cell.identifier;
         let value = row.cell.value;
-        let row_unique_data = row.row_unique_data;
+        let row_unique_data = row.row_unique_data.into();
         let row_digest = row.digest(&p.cells_pi());
 
         let input = CircuitInput::full(
@@ -520,7 +520,7 @@ mod test {
     fn generate_leaf_proof(p: &TestParams, row: &Row) -> Result<Vec<u8>> {
         let id = row.cell.identifier;
         let value = row.cell.value;
-        let row_unique_data = row.row_unique_data;
+        let row_unique_data = row.row_unique_data.into();
         let row_digest = row.digest(&p.cells_pi());
 
         //  generate row leaf proof
