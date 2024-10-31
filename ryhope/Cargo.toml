@@ -25,7 +25,6 @@ futures = "0.3.30"
 delegate = "0.12.0"
 tracing = "0.1.40"
 log.workspace = true
-simple_logger = { version = "5.0.0", default-features = false, features = ["colors"] }
 
 [dev-dependencies]
 rand = "0.8.5"

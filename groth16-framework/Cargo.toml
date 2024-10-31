@@ -11,21 +11,17 @@ log.workspace = true
 plonky2.workspace = true
 plonky2x.workspace = true
 revm.workspace = true
-rlp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
 gnark-utils = { path = "../gnark-utils" }
 mp2_common = { path = "../mp2-common" }
-recursion_framework = { path = "../recursion-framework" }
 
 [dev-dependencies]
 env_logger.workspace = true
 itertools.workspace = true
-plonky2_ecgfp5.workspace = true
 rand.workspace = true
 serial_test.workspace = true
 sha2.workspace = true
 
-mp2_test = { path = "../mp2-test" }
 verifiable-db = { path = "../verifiable-db" }
