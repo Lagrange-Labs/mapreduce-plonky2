@@ -150,24 +150,19 @@ pub(crate) mod tests {
     struct TestCellCircuit<'a> {
         cell: &'a Cell,
         child_values_digest: &'a SplitDigestPoint,
-        child_metadata_digest: &'a SplitDigestPoint,
     }
 
     impl<'a> UserCircuit<F, D> for TestCellCircuit<'a> {
         // Cell wire + child values digest + child metadata digest
-        type Wires = (CellWire, SplitDigestTarget, SplitDigestTarget);
+        type Wires = (CellWire, SplitDigestTarget);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let [values_individual, values_multiplier, metadata_individual, metadata_multiplier] =
+            let [values_individual, values_multiplier] =
                 array::from_fn(|_| b.add_virtual_curve_target());
 
             let child_values_digest = SplitDigestTarget {
                 individual: values_individual,
                 multiplier: values_multiplier,
-            };
-            let child_metadata_digest = SplitDigestTarget {
-                individual: metadata_individual,
-                multiplier: metadata_multiplier,
             };
 
             let cell = CellWire::new(b);
@@ -176,7 +171,7 @@ pub(crate) mod tests {
             b.register_curve_public_input(values_digest.individual);
             b.register_curve_public_input(values_digest.multiplier);
 
-            (cell, child_values_digest, child_metadata_digest)
+            (cell, child_values_digest)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -189,14 +184,6 @@ pub(crate) mod tests {
                 wires.1.multiplier,
                 self.child_values_digest.multiplier.to_weierstrass(),
             );
-            pw.set_curve_target(
-                wires.2.individual,
-                self.child_metadata_digest.individual.to_weierstrass(),
-            );
-            pw.set_curve_target(
-                wires.2.multiplier,
-                self.child_metadata_digest.multiplier.to_weierstrass(),
-            );
         }
     }
 
@@ -204,15 +191,10 @@ pub(crate) mod tests {
     fn test_cells_tree_cell_circuit() {
         let rng = &mut thread_rng();
 
-        let [values_individual, values_multiplier, metadata_individual, metadata_multiplier] =
-            array::from_fn(|_| Point::sample(rng));
+        let [values_individual, values_multiplier] = array::from_fn(|_| Point::sample(rng));
         let child_values_digest = &SplitDigestPoint {
             individual: values_individual,
             multiplier: values_multiplier,
-        };
-        let child_metadata_digest = &SplitDigestPoint {
-            individual: metadata_individual,
-            multiplier: metadata_multiplier,
         };
 
         let cell = &Cell::sample(rng.gen());
@@ -222,7 +204,6 @@ pub(crate) mod tests {
         let test_circuit = TestCellCircuit {
             cell,
             child_values_digest,
-            child_metadata_digest,
         };
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
