@@ -144,9 +144,9 @@ mod tests {
             values_digests.multiplier.to_weierstrass(),
         );
         // Check individual counter
-        let individual_cnt = if is_multiplier { F::ZERO } else { F::ONE };
-        assert_eq!(pi.individual_counter(), individual_cnt);
+        let multiplier_cnt = F::from_bool(is_multiplier);
+        assert_eq!(pi.individual_counter(), F::ONE - multiplier_cnt);
         // Check multiplier counter
-        assert_eq!(pi.multiplier_counter(), F::ONE - individual_cnt);
+        assert_eq!(pi.multiplier_counter(), multiplier_cnt);
     }
 }

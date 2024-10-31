@@ -326,10 +326,10 @@ mod tests {
             values_digests.multiplier.to_weierstrass(),
         );
         // Check individual counter
-        let individual_cnt = if is_multiplier { F::ZERO } else { F::ONE };
-        assert_eq!(pi.individual_counter(), individual_cnt);
+        let multiplier_cnt = F::from_bool(is_multiplier);
+        assert_eq!(pi.individual_counter(), F::ONE - multiplier_cnt);
         // Check multiplier counter
-        assert_eq!(pi.multiplier_counter(), F::ONE - individual_cnt);
+        assert_eq!(pi.multiplier_counter(), multiplier_cnt);
 
         proof
     }
@@ -425,18 +425,18 @@ mod tests {
             values_digests.multiplier.to_weierstrass(),
         );
         // Check individual counter
-        let individual_cnt = if is_multiplier { F::ZERO } else { F::ONE };
+        let multiplier_cnt = F::from_bool(is_multiplier);
         assert_eq!(
             pi.individual_counter(),
-            child_pis
-                .iter()
-                .fold(individual_cnt, |acc, pi| acc + pi.individual_counter()),
+            child_pis.iter().fold(F::ONE - multiplier_cnt, |acc, pi| acc
+                + pi.individual_counter()),
         );
         // Check multiplier counter
         assert_eq!(
             pi.multiplier_counter(),
-            child_pis.iter().fold(F::ONE - individual_cnt, |acc, pi| acc
-                + pi.multiplier_counter()),
+            child_pis
+                .iter()
+                .fold(multiplier_cnt, |acc, pi| acc + pi.multiplier_counter()),
         );
 
         proof
@@ -497,15 +497,15 @@ mod tests {
             values_digests.multiplier.to_weierstrass(),
         );
         // Check individual counter
-        let individual_cnt = if is_multiplier { F::ZERO } else { F::ONE };
+        let multiplier_cnt = F::from_bool(is_multiplier);
         assert_eq!(
             pi.individual_counter(),
-            individual_cnt + child_pi.individual_counter(),
+            F::ONE - multiplier_cnt + child_pi.individual_counter(),
         );
         // Check multiplier counter
         assert_eq!(
             pi.multiplier_counter(),
-            F::ONE - individual_cnt + child_pi.multiplier_counter(),
+            multiplier_cnt + child_pi.multiplier_counter(),
         );
 
         proof

@@ -88,20 +88,12 @@ impl Row {
             .split_and_accumulate_values_digest(cells_pi.split_values_digest_point());
 
         // individual_counter = p.individual_counter + is_individual
-        let individual_cnt = cells_pi.individual_counter()
-            + if self.cell.is_individual() {
-                F::ONE
-            } else {
-                F::ZERO
-            };
+        let individual_cnt =
+            cells_pi.individual_counter() + F::from_bool(self.cell.is_individual());
 
         // multiplier_counter = p.multiplier_counter + not is_individual
-        let multiplier_cnt = cells_pi.multiplier_counter()
-            + if self.cell.is_multiplier() {
-                F::ONE
-            } else {
-                F::ZERO
-            };
+        let multiplier_cnt =
+            cells_pi.multiplier_counter() + F::from_bool(self.cell.is_multiplier());
 
         // Compute row ID for individual cells:
         // row_id_individual = H2Int(row_unique_data || individual_counter)
