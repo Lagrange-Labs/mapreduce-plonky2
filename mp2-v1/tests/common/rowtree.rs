@@ -152,7 +152,7 @@ impl TestContext {
                         value,
                         multiplier,
                         // TODO: row_unique_data
-                        HashOut::rand(),
+                        HashOut::rand().into(),
                         cell_tree_proof,
                     )
                     .unwrap(),
@@ -190,7 +190,7 @@ impl TestContext {
                         multiplier,
                         context.left.is_some(),
                         // TODO: row_unique_data
-                        HashOut::rand(),
+                        HashOut::rand().into(),
                         child_proof,
                         cell_tree_proof,
                     )
@@ -234,7 +234,7 @@ impl TestContext {
                         value,
                         multiplier,
                         // TODO: row_unique_data
-                        HashOut::rand(),
+                        HashOut::rand().into(),
                         left_proof,
                         right_proof,
                         cell_tree_proof,
