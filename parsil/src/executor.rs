@@ -715,11 +715,7 @@ impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
             assert_eq!(select.from.len(), 1); // single table queries
             let table = &select.from.first().unwrap().relation;
             match table {
-                TableFactor::Derived {
-                    lateral,
-                    subquery,
-                    alias,
-                } => {
+                TableFactor::Derived { subquery, .. } => {
                     subquery
                         .as_ref()
                         .body
@@ -730,7 +726,7 @@ impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
                         .iter()
                         .filter_map(|item| {
                             let expr = match item {
-                                SelectItem::ExprWithAlias { expr, alias } => {
+                                SelectItem::ExprWithAlias { alias, .. } => {
                                     Expr::Identifier(alias.clone())
                                 }
                                 SelectItem::UnnamedExpr(expr) => expr.clone(),
@@ -765,7 +761,7 @@ impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
                 .flat_map(|item| {
                     match item {
                         SelectItem::UnnamedExpr(expr) => vec![expr.clone()],
-                        SelectItem::ExprWithAlias { expr, alias } => vec![expr.clone()], // we don't care about alias here
+                        SelectItem::ExprWithAlias { expr, .. } => vec![expr.clone()], // we don't care about alias here
                         SelectItem::QualifiedWildcard(_, _) => unreachable!(),
                         SelectItem::Wildcard(_) => replace_wildcard(),
                     }

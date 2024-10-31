@@ -13,7 +13,7 @@ use mp2_common::{
     },
     types::HashOutput,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{Fieldable, SelectHashBuilder, ToTargets},
+    utils::{SelectHashBuilder, ToTargets},
     D, F,
 };
 use plonky2::{

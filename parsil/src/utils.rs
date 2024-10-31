@@ -13,44 +13,6 @@ use crate::{
     validate::{self},
 };
 
-/// This register handle all operations related to placeholder registration,
-/// lookup an validation.
-#[derive(Debug, Clone)]
-pub struct PlaceholderRegister {
-    /// The set of available placeholders.
-    register: Vec<(String, PlaceholderIdentifier)>,
-}
-impl PlaceholderRegister {
-    /// Create a placeholder register with $min_block, $max_block, and `n`
-    /// freestanding placeholders.
-    pub fn default(n: usize) -> Self {
-        Self {
-            register: vec![
-                (
-                    "$min_block".to_string(),
-                    PlaceholderIdentifier::MinQueryOnIdx1,
-                ),
-                (
-                    "$max_block".to_string(),
-                    PlaceholderIdentifier::MaxQueryOnIdx1,
-                ),
-            ]
-            .into_iter()
-            .chain((0..n).map(|i| (format!("${i}"), PlaceholderIdentifier::Generic(i))))
-            .collect(),
-        }
-    }
-
-    /// Given a placeholder name, return, if it exists, the associated
-    /// [`Placeholder`].
-    pub(crate) fn resolve(&self, s: &str) -> Option<PlaceholderIdentifier> {
-        self.register
-            .iter()
-            .find(|(name, _)| name == s)
-            .map(|(_, placeholder)| placeholder.to_owned())
-    }
-}
-
 #[derive(Debug)]
 pub struct ParsilSettings<C: ContextProvider> {
     /// A handle to an object providing a register of the existing virtual

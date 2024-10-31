@@ -1,7 +1,6 @@
 use derive_more::{From, Into};
 use mp2_common::{
     default_config,
-    group_hashing::{cond_circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -10,7 +9,7 @@ use mp2_common::{
 };
 use plonky2::{
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::PartialWitness,
     },
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},

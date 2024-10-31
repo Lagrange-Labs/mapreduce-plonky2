@@ -2,9 +2,9 @@
 
 use super::{
     empty_node::{EmptyNodeCircuit, EmptyNodeWires},
-    full_node::{FullNodeCircuit, FullNodeWires},
+    full_node::FullNodeWires,
     leaf::{LeafCircuit, LeafWires},
-    partial_node::{PartialNodeCircuit, PartialNodeWires},
+    partial_node::PartialNodeWires,
     public_inputs::PublicInputs,
     Cell,
 };

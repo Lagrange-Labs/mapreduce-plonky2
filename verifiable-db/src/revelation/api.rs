@@ -5,7 +5,6 @@ use anyhow::{ensure, Result};
 
 use itertools::Itertools;
 use mp2_common::{
-    array::ToField,
     default_config,
     poseidon::H,
     proof::{deserialize_proof, ProofWithVK},
@@ -29,28 +28,24 @@ use crate::{
         self,
         aggregation::QueryBounds,
         api::{CircuitInput as QueryCircuitInput, Parameters as QueryParams},
-        computational_hash_ids::{ColumnIDs, PlaceholderIdentifier},
-        universal_circuit::{
-            universal_circuit_inputs::{
-                BasicOperation, PlaceholderId, Placeholders, ResultStructure,
+        computational_hash_ids::ColumnIDs,
+        universal_circuit::universal_circuit_inputs::{
+                BasicOperation, Placeholders, ResultStructure,
             },
-            universal_query_circuit::QueryBound,
-        },
         PI_LEN as QUERY_PI_LEN,
     },
     revelation::{
-        placeholders_check::{CheckPlaceholderGadget, CheckedPlaceholder},
+        placeholders_check::CheckPlaceholderGadget,
         revelation_unproven_offset::{
             generate_dummy_row_proof_inputs,
             RecursiveCircuitWires as RecursiveCircuitWiresUnprovenOffset,
         },
     },
-    test_utils::MAX_NUM_OUTPUTS,
 };
 
 use super::{
     revelation_unproven_offset::{
-        self, RecursiveCircuitInputs as RecursiveCircuitInputsUnporvenOffset,
+        RecursiveCircuitInputs as RecursiveCircuitInputsUnporvenOffset,
         RevelationCircuit as RevelationCircuitUnprovenOffset, RowPath,
     },
     revelation_without_results_tree::{
@@ -213,7 +208,7 @@ pub enum CircuitInput<
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
-    [(); { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) }]:,
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
     NoResultsTree {
         query_proof: ProofWithVK,

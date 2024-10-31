@@ -1,11 +1,9 @@
 use alloy::primitives::U256;
-use anyhow::bail;
 use sqlparser::ast::{
     BinaryOperator, Distinct, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr,
     JoinOperator, Offset, OffsetRows, OrderBy, OrderByExpr, Query, Select, SelectItem, SetExpr,
     TableFactor, UnaryOperator, Value,
 };
-use verifiable_db::test_utils::MAX_NUM_OUTPUTS;
 
 use crate::{
     errors::ValidationError,

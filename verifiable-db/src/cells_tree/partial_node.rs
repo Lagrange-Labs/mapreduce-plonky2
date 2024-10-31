@@ -1,26 +1,22 @@
 //! Module handling the intermediate node with 1 child inside a cells tree
 
 use super::{public_inputs::PublicInputs, Cell, CellWire};
-use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{From, Into};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing,
     poseidon::empty_poseidon_hash,
     public_inputs::PublicInputCommon,
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
     CHasher, D, F,
 };
 use plonky2::{
     iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
+        target::Target,
+        witness::PartialWitness,
     },
     plonk::proof::ProofWithPublicInputsTarget,
 };
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter;

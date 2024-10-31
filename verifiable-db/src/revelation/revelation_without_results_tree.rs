@@ -6,9 +6,8 @@ use crate::{
         computational_hash_ids::AggregationOperation,
         public_inputs::PublicInputs as QueryProofPublicInputs,
     },
-    revelation::{placeholders_check::check_placeholders, PublicInputs},
+    revelation::PublicInputs,
 };
-use alloy::primitives::U256;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
@@ -18,17 +17,16 @@ use mp2_common::{
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{
-        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
-        serialize_long_array,
+        deserialize, serialize,
     },
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    u256::{CircuitBuilderU256, UInt256Target},
     utils::ToTargets,
     C, D, F,
 };
 use plonky2::{
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -45,12 +43,10 @@ use recursion_framework::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::array;
 
 use super::{
     placeholders_check::{
-        CheckPlaceholderGadget, CheckPlaceholderInputWires, CheckedPlaceholder,
-        CheckedPlaceholderTarget, NUM_SECONDARY_INDEX_PLACEHOLDERS,
+        CheckPlaceholderGadget, CheckPlaceholderInputWires,
     },
     NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
 };

@@ -29,7 +29,7 @@ use mp2_common::{
 };
 use plonky2::{
     field::types::PrimeField64,
-    hash::hash_types::{HashOut, HashOutTarget},
+    hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -52,8 +52,8 @@ use crate::{
     ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
         aggregation::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
-        api::{CircuitInput as QueryCircuitInput, Parameters},
-        computational_hash_ids::{AggregationOperation, ColumnIDs, Identifiers, ResultIdentifier},
+        api::CircuitInput as QueryCircuitInput,
+        computational_hash_ids::{AggregationOperation, ColumnIDs, ResultIdentifier},
         merkle_path::{MerklePathGadget, MerklePathTargetInputs},
         public_inputs::PublicInputs as QueryProofPublicInputs,
         universal_circuit::{

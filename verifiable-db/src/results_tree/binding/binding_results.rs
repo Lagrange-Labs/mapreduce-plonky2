@@ -17,7 +17,7 @@ use mp2_common::{
 };
 use plonky2::iop::target::Target;
 use serde::{Deserialize, Serialize};
-use std::{iter::once, slice};
+use std::slice;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BindingResultsWires<const S: usize>;
