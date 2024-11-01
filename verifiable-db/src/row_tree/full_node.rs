@@ -1,12 +1,7 @@
 use derive_more::{From, Into};
 use mp2_common::{
-    default_config,
-    poseidon::H,
-    proof::ProofWithVK,
-    public_inputs::PublicInputCommon,
-    u256::CircuitBuilderU256,
-    utils::ToTargets,
-    C, D, F,
+    default_config, poseidon::H, proof::ProofWithVK, public_inputs::PublicInputCommon,
+    u256::CircuitBuilderU256, utils::ToTargets, C, D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},

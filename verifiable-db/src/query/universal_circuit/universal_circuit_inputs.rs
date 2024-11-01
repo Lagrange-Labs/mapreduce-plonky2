@@ -344,6 +344,7 @@ impl ResultStructure {
     /// `column_values` as the operands for the operations having `InputOperand::Column`
     /// operands, and the provided `placeholders` for the operations having `InputOperand::Placeholder`
     /// operands.
+    #[cfg(test)]
     pub(crate) fn compute_output_values(
         &self,
         column_values: &[U256],

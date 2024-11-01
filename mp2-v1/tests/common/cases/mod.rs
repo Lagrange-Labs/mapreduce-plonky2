@@ -2,9 +2,9 @@
 
 use contract::Contract;
 use mp2_v1::values_extraction::{
-        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column,
-    };
+    identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+    identifier_single_var_column,
+};
 use table_source::{ContractExtractionArgs, TableSource};
 
 use super::table::Table;

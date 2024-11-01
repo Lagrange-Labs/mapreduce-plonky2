@@ -632,6 +632,7 @@ impl<F: RichField> FromFields<F> for AggregationOperation {
 
 impl AggregationOperation {
     /// Return the identity value for `self` operation
+    #[allow(dead_code)]
     pub(crate) fn identity_value(&self) -> Vec<F> {
         match self {
             AggregationOperation::SumOp => U256::ZERO.to_fields(),
