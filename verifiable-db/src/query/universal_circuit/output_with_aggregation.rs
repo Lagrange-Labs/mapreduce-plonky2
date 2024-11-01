@@ -214,7 +214,6 @@ mod tests {
         utils::{gen_random_field_hash, gen_random_u256},
     };
     use plonky2::{
-        field::types::Field,
         iop::{
             target::{BoolTarget, Target},
             witness::{PartialWitness, WitnessWrite},

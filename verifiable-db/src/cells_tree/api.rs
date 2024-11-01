@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::array;
 
 type LeafInput = LeafCircuit;
-type ChildInput = ProofInputSerialized<Cell>;
+pub type ChildInput = ProofInputSerialized<Cell>;
 
 /// CircuitInput is a wrapper around the different specialized circuits that can
 /// be used to prove a node recursively.
@@ -204,6 +204,7 @@ impl PublicParameters {
     }
 
     /// Get the proof of an empty node.
+    #[allow(dead_code)]
     pub(crate) fn empty_node_proof(&self) -> &ProofWithVK {
         &self.empty_node_proof
     }

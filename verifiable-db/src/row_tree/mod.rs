@@ -1,4 +1,3 @@
-
 mod api;
 mod full_node;
 mod leaf;

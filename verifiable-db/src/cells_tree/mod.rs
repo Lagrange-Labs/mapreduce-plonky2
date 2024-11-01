@@ -33,7 +33,7 @@ pub use public_inputs::PublicInputs;
 /// A cell represents a column || value tuple. it can be given in the cells tree or as the
 /// secondary index value in the row tree.
 #[derive(Clone, Debug, Serialize, Deserialize, Constructor)]
-pub(crate) struct Cell {
+pub struct Cell {
     /// identifier of the column for the secondary index
     pub(crate) identifier: F,
     /// secondary index value
@@ -48,13 +48,16 @@ impl Cell {
         pw.set_target(wires.identifier, self.identifier);
         pw.set_bool_target(wires.is_multiplier, self.is_multiplier);
     }
+    #[allow(dead_code)]
     pub(crate) fn digest(&self) -> Digest {
         map_to_curve_point(&self.to_fields())
     }
+    #[allow(dead_code)]
     pub(crate) fn split_digest(&self) -> SplitDigestPoint {
         let digest = self.digest();
         SplitDigestPoint::from_single_digest_point(digest, self.is_multiplier)
     }
+    #[allow(dead_code)]
     pub(crate) fn split_and_accumulate_digest(
         &self,
         child_digest: SplitDigestPoint,
