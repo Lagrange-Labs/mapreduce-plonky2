@@ -4,8 +4,7 @@ use super::{public_inputs::PublicInputs, Cell, CellWire};
 use anyhow::Result;
 use derive_more::{From, Into};
 use mp2_common::{
-    group_hashing::CircuitBuilderGroupHashing, public_inputs::PublicInputCommon, types::CBuilder,
-    u256::CircuitBuilderU256, utils::ToTargets, CHasher, D, F,
+    public_inputs::PublicInputCommon, types::CBuilder, utils::ToTargets, CHasher, D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},

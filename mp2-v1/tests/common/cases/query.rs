@@ -25,7 +25,7 @@ use super::{
 };
 use alloy::primitives::U256;
 use anyhow::{bail, Context, Result};
-use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
+use futures::{stream, FutureExt, StreamExt};
 
 use super::TableSource;
 use itertools::Itertools;
@@ -76,7 +76,6 @@ use verifiable_db::{
         },
     },
     revelation::PublicInputs,
-    row_tree,
 };
 
 pub const MAX_NUM_RESULT_OPS: usize = 20;

@@ -23,7 +23,7 @@ use crate::common::{
         identifier_single_var_column,
         table_source::{
             LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs, MergeSource,
-            SingleValuesExtractionArgs, UniqueMappingEntry, DEFAULT_ADDRESS,
+            SingleValuesExtractionArgs, DEFAULT_ADDRESS,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
