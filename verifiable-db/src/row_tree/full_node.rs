@@ -1,7 +1,6 @@
 use derive_more::{From, Into};
 use mp2_common::{
     default_config,
-    group_hashing::{cond_circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     poseidon::H,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,

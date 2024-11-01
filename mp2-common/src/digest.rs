@@ -184,17 +184,14 @@ mod test {
     use crate::{types::CBuilder, utils::FromFields, C, D, F};
 
     use super::{
-        Digest, DigestTarget, SplitDigest, SplitDigestPoint, SplitDigestTarget, TableDimension,
+        Digest, DigestTarget, SplitDigestPoint, SplitDigestTarget, TableDimension,
         TableDimensionWire,
     };
     use crate::utils::TryIntoBool;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Sample,
-        iop::{
-            target::BoolTarget,
-            witness::{PartialWitness, WitnessWrite},
-        },
+        iop::witness::PartialWitness,
     };
     use plonky2_ecgfp5::{
         curve::curve::Point,
