@@ -1,12 +1,14 @@
 use super::{
-    indexing::MappingUpdate,
-    storage_slot_value::{LargeStruct, StorageSlotValue},
+    slot_info::{LargeStruct, MappingKey, MappingOfMappingsKey, StorageSlotValue},
     table_source::DEFAULT_ADDRESS,
 };
 use crate::common::{
     bindings::simple::{
         Simple,
-        Simple::{MappingChange, MappingOperation, MappingStructChange},
+        Simple::{
+            MappingChange, MappingOfSingleValueMappingsChange, MappingOfStructMappingsChange,
+            MappingOperation, MappingStructChange,
+        },
     },
     TestContext,
 };
@@ -121,7 +123,27 @@ impl ContractController for LargeStruct {
     }
 }
 
-impl ContractController for Vec<MappingUpdate<Address>> {
+#[derive(Clone, Debug)]
+pub enum MappingUpdate<K, V> {
+    // key and value
+    Insertion(K, V),
+    // key and value
+    Deletion(K, V),
+    // key, previous value and new value
+    Update(K, V, V),
+}
+
+impl<K, V> From<&MappingUpdate<K, V>> for MappingOperation {
+    fn from(update: &MappingUpdate<K, V>) -> Self {
+        Self::from(match update {
+            MappingUpdate::Deletion(_, _) => 0,
+            MappingUpdate::Update(_, _, _) => 1,
+            MappingUpdate::Insertion(_, _) => 2,
+        })
+    }
+}
+
+impl ContractController for Vec<MappingUpdate<MappingKey, Address>> {
     async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
         unimplemented!("Unimplemented for fetching the all mapping values")
     }
@@ -178,7 +200,7 @@ impl ContractController for Vec<MappingUpdate<Address>> {
     }
 }
 
-impl ContractController for Vec<MappingUpdate<LargeStruct>> {
+impl ContractController for Vec<MappingUpdate<MappingKey, LargeStruct>> {
     async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
         unimplemented!("Unimplemented for fetching the all mapping values")
     }
@@ -230,5 +252,144 @@ impl ContractController for Vec<MappingUpdate<LargeStruct>> {
             }
         }
         log::info!("Updated simple contract for mapping values of LargeStruct");
+    }
+}
+
+impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, U256>> {
+    async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
+        unimplemented!("Unimplemented for fetching the all mapping of mappings")
+    }
+
+    async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+        let contract = Simple::new(contract.address, &provider);
+
+        let changes = self
+            .iter()
+            .map(|tuple| {
+                let operation: MappingOperation = tuple.into();
+                let operation = operation.into();
+                let (k, v) = match tuple {
+                    MappingUpdate::Insertion(k, v)
+                    | MappingUpdate::Deletion(k, v)
+                    | MappingUpdate::Update(k, _, v) => (k, v),
+                };
+
+                MappingOfSingleValueMappingsChange {
+                    operation,
+                    outerKey: k.outer_key,
+                    innerKey: k.inner_key,
+                    value: *v,
+                }
+            })
+            .collect_vec();
+
+        let call = contract.changeMappingOfSingleValueMappings(changes);
+        call.send().await.unwrap().watch().await.unwrap();
+        // Sanity check
+        for update in self.iter() {
+            match update {
+                MappingUpdate::Insertion(k, v) => {
+                    let res = contract
+                        .mappingOfSingleValueMappings(k.outer_key, k.inner_key)
+                        .call()
+                        .await
+                        .unwrap();
+                    assert_eq!(&res._0, v, "Insertion is wrong on contract");
+                }
+                MappingUpdate::Deletion(k, _) => {
+                    let res = contract
+                        .mappingOfSingleValueMappings(k.outer_key, k.inner_key)
+                        .call()
+                        .await
+                        .unwrap();
+                    assert_eq!(res._0, U256::ZERO, "Deletion is wrong on contract");
+                }
+                MappingUpdate::Update(k, _, v) => {
+                    let res = contract
+                        .mappingOfSingleValueMappings(k.outer_key, k.inner_key)
+                        .call()
+                        .await
+                        .unwrap();
+                    assert_eq!(&res._0, v, "Update is wrong on contract");
+                }
+            }
+        }
+        log::info!("Updated simple contract for mapping of single value mappings");
+    }
+}
+
+impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, LargeStruct>> {
+    async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
+        unimplemented!("Unimplemented for fetching the all mapping of mappings")
+    }
+
+    async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+        let contract = Simple::new(contract.address, &provider);
+
+        let changes = self
+            .iter()
+            .map(|tuple| {
+                let operation: MappingOperation = tuple.into();
+                let operation = operation.into();
+                let (k, v) = match tuple {
+                    MappingUpdate::Insertion(k, v)
+                    | MappingUpdate::Deletion(k, v)
+                    | MappingUpdate::Update(k, _, v) => (k, v),
+                };
+
+                MappingOfStructMappingsChange {
+                    operation,
+                    outerKey: k.outer_key,
+                    innerKey: k.inner_key,
+                    field1: v.field1,
+                    field2: v.field2,
+                    field3: v.field3,
+                }
+            })
+            .collect_vec();
+
+        let call = contract.changeMappingOfStructMappings(changes);
+        call.send().await.unwrap().watch().await.unwrap();
+        // Sanity check
+        for update in self.iter() {
+            match update {
+                MappingUpdate::Insertion(k, v) => {
+                    let res = contract
+                        .mappingOfStructMappings(k.outer_key, k.inner_key)
+                        .call()
+                        .await
+                        .unwrap();
+                    let res = LargeStruct::from(res);
+                    assert_eq!(&res, v, "Insertion is wrong on contract");
+                }
+                MappingUpdate::Deletion(k, _) => {
+                    let res = contract
+                        .mappingOfStructMappings(k.outer_key, k.inner_key)
+                        .call()
+                        .await
+                        .unwrap();
+                    let res = LargeStruct::from(res);
+                    assert_eq!(res, LargeStruct::default(), "Deletion is wrong on contract");
+                }
+                MappingUpdate::Update(k, _, v) => {
+                    let res = contract
+                        .mappingOfStructMappings(k.outer_key, k.inner_key)
+                        .call()
+                        .await
+                        .unwrap();
+                    let res = LargeStruct::from(res);
+                    assert_eq!(&res, v, "Update is wrong on contract");
+                }
+            }
+        }
+        log::info!("Updated simple contract for mapping of LargeStruct mappings");
     }
 }

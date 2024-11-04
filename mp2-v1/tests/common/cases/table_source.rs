@@ -29,7 +29,8 @@ use mp2_v1::{
     },
     values_extraction::{
         gadgets::{column_gadget::extract_value, column_info::ColumnInfo},
-        identifier_for_mapping_key_column, identifier_for_value_column, StorageSlotInfo,
+        identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
+        identifier_for_outer_mapping_key_column, identifier_for_value_column, StorageSlotInfo,
     },
 };
 use plonky2::field::types::PrimeField64;
@@ -49,12 +50,13 @@ use crate::common::{
 };
 
 use super::{
-    contract::{Contract, ContractController, SimpleSingleValues},
+    contract::{Contract, ContractController, MappingUpdate, SimpleSingleValues},
     indexing::{
-        ChangeType, MappingUpdate, TableRowUpdate, TableRowValues, UpdateType, SINGLE_SLOTS,
-        SINGLE_STRUCT_SLOT,
+        ChangeType, TableRowUpdate, TableRowValues, UpdateType, SINGLE_SLOTS, SINGLE_STRUCT_SLOT,
     },
-    storage_slot_value::{LargeStruct, StorageSlotValue},
+    slot_info::{
+        LargeStruct, MappingKey, MappingOfMappingsKey, StorageSlotMappingKey, StorageSlotValue,
+    },
 };
 
 /// Save the columns information of same slot and EVM word.
@@ -101,13 +103,13 @@ pub enum MappingIndex {
 /// The key,value such that the combination is unique. This can be turned into a RowTreeKey.
 /// to store in the row tree.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UniqueMappingEntry<V: StorageSlotValue> {
-    key: U256,
+pub struct UniqueMappingEntry<K: StorageSlotMappingKey, V: StorageSlotValue> {
+    key: K,
     value: V,
 }
 
-impl<V: StorageSlotValue> From<(U256, V)> for UniqueMappingEntry<V> {
-    fn from(pair: (U256, V)) -> Self {
+impl<K: StorageSlotMappingKey, V: StorageSlotValue> From<(K, V)> for UniqueMappingEntry<K, V> {
+    fn from(pair: (K, V)) -> Self {
         Self {
             key: pair.0,
             value: pair.1,
@@ -115,8 +117,8 @@ impl<V: StorageSlotValue> From<(U256, V)> for UniqueMappingEntry<V> {
     }
 }
 
-impl<V: StorageSlotValue> UniqueMappingEntry<V> {
-    pub fn new(key: U256, value: V) -> Self {
+impl<K: StorageSlotMappingKey, V: StorageSlotValue> UniqueMappingEntry<K, V> {
+    pub fn new(key: K, value: V) -> Self {
         Self { key, value }
     }
     pub fn to_update(
@@ -151,15 +153,42 @@ impl<V: StorageSlotValue> UniqueMappingEntry<V> {
         slot_inputs[1..]
             .iter()
             .for_each(|slot_input| assert_eq!(slot_input.slot(), slot));
-        let key_cell = {
-            let key_id = identifier_for_mapping_key_column(
-                slot,
-                &contract.address,
-                contract.chain_id,
-                vec![],
-            );
+        let [outer_key_cell, inner_key_cell] = match self.key.to_u256_vec().as_slice() {
+            [mapping_key] => {
+                let key_id = identifier_for_mapping_key_column(
+                    slot,
+                    &contract.address,
+                    contract.chain_id,
+                    vec![],
+                );
 
-            Cell::new(key_id, self.key)
+                [Some(Cell::new(key_id, *mapping_key)), None]
+            }
+            [outer_key, inner_key] => {
+                let outer_key_cell = {
+                    let id = identifier_for_outer_mapping_key_column(
+                        slot,
+                        &contract.address,
+                        contract.chain_id,
+                        vec![],
+                    );
+
+                    Cell::new(id, *outer_key)
+                };
+                let inner_key_cell = {
+                    let id = identifier_for_inner_mapping_key_column(
+                        slot,
+                        &contract.address,
+                        contract.chain_id,
+                        vec![],
+                    );
+
+                    Cell::new(id, *inner_key)
+                };
+
+                [Some(outer_key_cell), Some(inner_key_cell)]
+            }
+            _ => unreachable!(),
         };
         let mut current_cells = slot_inputs
             .iter()
@@ -177,7 +206,20 @@ impl<V: StorageSlotValue> UniqueMappingEntry<V> {
             .collect_vec();
 
         let secondary_cell = match index {
-            MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => key_cell,
+            MappingIndex::OuterKey(_) => {
+                if let Some(cell) = inner_key_cell {
+                    current_cells.push(cell);
+                }
+
+                outer_key_cell.unwrap()
+            }
+            MappingIndex::InnerKey(_) => {
+                if let Some(cell) = outer_key_cell {
+                    current_cells.push(cell);
+                }
+
+                inner_key_cell.unwrap()
+            }
             MappingIndex::Value(secondary_value_id) => {
                 let pos = current_cells
                     .iter()
@@ -185,7 +227,13 @@ impl<V: StorageSlotValue> UniqueMappingEntry<V> {
                     .unwrap();
                 let secondary_cell = current_cells.remove(pos);
 
-                current_cells.push(key_cell);
+                [outer_key_cell, inner_key_cell]
+                    .into_iter()
+                    .for_each(|cell| {
+                        if let Some(cell) = cell {
+                            current_cells.push(cell);
+                        }
+                    });
 
                 secondary_cell
             }
@@ -210,9 +258,21 @@ impl<V: StorageSlotValue> UniqueMappingEntry<V> {
         slot_inputs: &[SlotInput],
     ) -> RowTreeKey {
         let (row_key, rest) = match index {
-            MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => {
-                // The mapping key is unique for rows.
-                (self.key, vec![])
+            MappingIndex::OuterKey(_) => {
+                // The mapping keys are unique for rows.
+                let mapping_keys = self.key.to_u256_vec();
+                let key = mapping_keys[0];
+                let rest = mapping_keys.get(1).unwrap_or(&U256::ZERO).to_be_bytes_vec();
+
+                (key, rest)
+            }
+            MappingIndex::InnerKey(_) => {
+                // The mapping keys are unique for rows.
+                let mapping_keys = self.key.to_u256_vec();
+                let key = mapping_keys[1];
+                let rest = mapping_keys[0].to_be_bytes_vec();
+
+                (key, rest)
             }
             MappingIndex::Value(secondary_value_id) => {
                 let pos = slot_inputs
@@ -229,7 +289,14 @@ impl<V: StorageSlotValue> UniqueMappingEntry<V> {
                 let secondary_value = self.value.to_u256_vec().remove(pos);
 
                 // The mapping key is unique for rows.
-                (secondary_value, self.key.to_be_bytes_vec())
+                let rest = self
+                    .key
+                    .to_u256_vec()
+                    .into_iter()
+                    .flat_map(|u| u.to_be_bytes_vec())
+                    .collect_vec();
+
+                (secondary_value, rest)
             }
             MappingIndex::None => unreachable!(),
         };
@@ -246,12 +313,19 @@ pub(crate) enum TableSource {
     /// Test arguments for simple slots which stores both single values and Struct values
     Single(SingleExtractionArgs),
     /// Test arguments for mapping slots which stores single values
-    MappingValues(MappingExtractionArgs<Address>, Option<LengthExtractionArgs>),
-    /// Test arguments for mapping slots which stores the Struct values
-    MappingStruct(
-        MappingExtractionArgs<LargeStruct>,
+    MappingValues(
+        MappingExtractionArgs<MappingKey, Address>,
         Option<LengthExtractionArgs>,
     ),
+    /// Test arguments for mapping slots which stores the Struct values
+    MappingStruct(
+        MappingExtractionArgs<MappingKey, LargeStruct>,
+        Option<LengthExtractionArgs>,
+    ),
+    /// Test arguments for mapping of mappings slot which stores single values
+    MappingOfSingleValueMappings(MappingExtractionArgs<MappingOfMappingsKey, U256>),
+    /// Test arguments for mapping of mappings slot which stores the Struct values
+    MappingOfStructMappings(MappingExtractionArgs<MappingOfMappingsKey, LargeStruct>),
     /// Test arguments for the merge source of both simple and mapping values
     Merge(MergeSource),
 }
@@ -276,6 +350,14 @@ impl TableSource {
                 args.generate_extraction_proof_inputs(ctx, contract, value_key)
                     .await
             }
+            TableSource::MappingOfSingleValueMappings(ref args) => {
+                args.generate_extraction_proof_inputs(ctx, contract, value_key)
+                    .await
+            }
+            TableSource::MappingOfStructMappings(ref args) => {
+                args.generate_extraction_proof_inputs(ctx, contract, value_key)
+                    .await
+            }
             TableSource::Merge(ref args) => {
                 args.generate_extraction_proof_inputs(ctx, contract, value_key)
                     .await
@@ -296,6 +378,12 @@ impl TableSource {
                     args.init_contract_data(ctx, contract).await
                 }
                 TableSource::MappingStruct(ref mut args, _) => {
+                    args.init_contract_data(ctx, contract).await
+                }
+                TableSource::MappingOfSingleValueMappings(ref mut args) => {
+                    args.init_contract_data(ctx, contract).await
+                }
+                TableSource::MappingOfStructMappings(ref mut args) => {
                     args.init_contract_data(ctx, contract).await
                 }
                 TableSource::Merge(ref mut args) => args.init_contract_data(ctx, contract).await,
@@ -325,6 +413,14 @@ impl TableSource {
                     args.random_contract_update(ctx, contract, change_type)
                         .await
                 }
+                TableSource::MappingOfSingleValueMappings(ref mut args) => {
+                    args.random_contract_update(ctx, contract, change_type)
+                        .await
+                }
+                TableSource::MappingOfStructMappings(ref mut args) => {
+                    args.random_contract_update(ctx, contract, change_type)
+                        .await
+                }
                 TableSource::Merge(ref mut args) => {
                     args.random_contract_update(ctx, contract, change_type)
                         .await
@@ -341,11 +437,14 @@ pub struct MergeSource {
     // Extending to full merge between any table is not far - it requires some quick changes in
     // circuit but quite a lot of changes in integrated test.
     pub(crate) single: SingleExtractionArgs,
-    pub(crate) mapping: MappingExtractionArgs<LargeStruct>,
+    pub(crate) mapping: MappingExtractionArgs<MappingKey, LargeStruct>,
 }
 
 impl MergeSource {
-    pub fn new(single: SingleExtractionArgs, mapping: MappingExtractionArgs<LargeStruct>) -> Self {
+    pub fn new(
+        single: SingleExtractionArgs,
+        mapping: MappingExtractionArgs<MappingKey, LargeStruct>,
+    ) -> Self {
         Self { single, mapping }
     }
 
@@ -483,8 +582,8 @@ impl MergeSource {
                 // we fetch the value of all mapping entries, and
                 let mut all_updates = Vec::new();
                 for mk in &self.mapping.mapping_keys {
-                    let current_value = self.mapping.query_value(ctx, contract, mk.clone()).await;
-                    let current_key = U256::from_be_slice(mk);
+                    let current_value = self.mapping.query_value(ctx, contract, mk).await;
+                    let current_key = *mk;
                     let entry = UniqueMappingEntry::new(current_key, current_value);
                     // create one update for each update of the first table (note again there
                     // should be only one update since it's single var)
@@ -578,19 +677,11 @@ lazy_static! {
 pub fn rotate() -> usize {
     ROTATOR.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 2
 }
-pub fn next_mapping_key() -> U256 {
-    next_value()
-}
 pub fn next_address() -> Address {
     let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(shift);
     let slice = rng.gen::<[u8; 20]>();
     Address::from_slice(&slice)
-}
-pub fn next_value() -> U256 {
-    let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let bv: U256 = *BASE_VALUE;
-    bv + U256::from(shift)
 }
 
 /// Extraction arguments for simple slots which stores both single values (Address or U256) and
@@ -891,7 +982,7 @@ impl SingleExtractionArgs {
 
 /// Mapping extraction arguments
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
-pub(crate) struct MappingExtractionArgs<V: StorageSlotValue> {
+pub(crate) struct MappingExtractionArgs<K: StorageSlotMappingKey, V: StorageSlotValue> {
     /// Mapping slot number
     slot: u8,
     /// Mapping index type
@@ -903,15 +994,16 @@ pub(crate) struct MappingExtractionArgs<V: StorageSlotValue> {
     /// need to know an existing key
     ///     * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
     /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
-    mapping_keys: BTreeSet<Vec<u8>>,
+    mapping_keys: BTreeSet<K>,
     /// Phantom
-    _phantom: PhantomData<V>,
+    _phantom: PhantomData<(K, V)>,
 }
 
-impl<V> MappingExtractionArgs<V>
+impl<K, V> MappingExtractionArgs<K, V>
 where
+    K: StorageSlotMappingKey,
     V: StorageSlotValue,
-    Vec<MappingUpdate<V>>: ContractController,
+    Vec<MappingUpdate<K, V>>: ContractController,
 {
     pub fn new(slot: u8, index: MappingIndex, slot_inputs: Vec<SlotInput>) -> Self {
         Self {
@@ -932,14 +1024,10 @@ where
         ctx: &mut TestContext,
         contract: &Contract,
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        let init_key_and_value: [_; 3] = array::from_fn(|_| (next_mapping_key(), V::sample()));
+        let init_key_and_value: [_; 3] = array::from_fn(|_| (K::sample_key(), V::sample_value()));
         // Save the mapping keys.
-        self.mapping_keys.extend(
-            init_key_and_value
-                .iter()
-                .map(|u| u.0.to_be_bytes_trimmed_vec())
-                .collect_vec(),
-        );
+        self.mapping_keys
+            .extend(init_key_and_value.iter().map(|u| u.0.clone()).collect_vec());
         let updates = init_key_and_value
             .into_iter()
             .map(|(key, value)| MappingUpdate::Insertion(key, value))
@@ -979,32 +1067,38 @@ where
         // In the backend, we translate that in the "table world" to a deletion and an insertion.
         // Having such optimization could be done later on, need to properly evaluate the cost
         // of it.
-        let current_key = self.mapping_keys.first().unwrap().clone();
-        let current_value = self.query_value(ctx, contract, current_key.clone()).await;
-        let current_key = U256::from_be_slice(&current_key);
-        let new_key = next_mapping_key();
+        let current_key = self.mapping_keys.first().unwrap();
+        let current_value = self.query_value(ctx, contract, current_key).await;
+        let new_key = K::sample_key();
         let updates = match c {
             ChangeType::Silent => vec![],
             ChangeType::Insertion => {
-                vec![MappingUpdate::Insertion(new_key, V::sample())]
+                vec![MappingUpdate::Insertion(new_key, V::sample_value())]
             }
             ChangeType::Deletion => {
-                vec![MappingUpdate::Deletion(current_key, current_value)]
+                vec![MappingUpdate::Deletion(current_key.clone(), current_value)]
             }
             ChangeType::Update(u) => {
                 match u {
                     UpdateType::Rest => {
-                        let new_value = V::sample();
+                        let new_value = V::sample_value();
                         match self.index {
                             MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => {
                                 // we simply change the mapping value since the key is the secondary index
-                                vec![MappingUpdate::Update(current_key, current_value, new_value)]
+                                vec![MappingUpdate::Update(
+                                    current_key.clone(),
+                                    current_value,
+                                    new_value,
+                                )]
                             }
                             MappingIndex::Value(_) => {
                                 // TRICKY: in this case, the mapping key must change. But from the
                                 // onchain perspective, it means a transfer mapping(old_key -> new_key,value)
                                 vec![
-                                    MappingUpdate::Deletion(current_key, current_value.clone()),
+                                    MappingUpdate::Deletion(
+                                        current_key.clone(),
+                                        current_value.clone(),
+                                    ),
                                     MappingUpdate::Insertion(new_key, current_value),
                                 ]
                             }
@@ -1013,7 +1107,11 @@ where
                                 // not impacting the secondary index of the table since the mapping
                                 // doesn't contain the column which is the secondary index, in case
                                 // of the merge table case.
-                                vec![MappingUpdate::Update(current_key, current_value, new_value)]
+                                vec![MappingUpdate::Update(
+                                    current_key.clone(),
+                                    current_value,
+                                    new_value,
+                                )]
                             }
                         }
                     }
@@ -1023,7 +1121,10 @@ where
                                 // TRICKY: if the mapping key changes, it's a deletion then
                                 // insertion from onchain perspective
                                 vec![
-                                    MappingUpdate::Deletion(current_key, current_value.clone()),
+                                    MappingUpdate::Deletion(
+                                        current_key.clone(),
+                                        current_value.clone(),
+                                    ),
                                     // we insert the same value but with a new mapping key
                                     MappingUpdate::Insertion(new_key, current_value),
                                 ]
@@ -1045,7 +1146,11 @@ where
                                 let mut new_value = current_value.clone();
                                 new_value.random_update(slot_input_to_update);
                                 // if the value changes, it's a simple update in mapping
-                                vec![MappingUpdate::Update(current_key, current_value, new_value)]
+                                vec![MappingUpdate::Update(
+                                    current_key.clone(),
+                                    current_value,
+                                    new_value,
+                                )]
                             }
                             MappingIndex::None => {
                                 // empty vec since this table has no secondary index so it should
@@ -1060,14 +1165,13 @@ where
         // small iteration to always have a good updated list of mapping keys
         for update in &updates {
             match update {
-                MappingUpdate::Deletion(key, _) => {
-                    info!("Removing key {} from mappping keys tracking", key);
-                    let key_stored = key.to_be_bytes_trimmed_vec();
-                    self.mapping_keys.retain(|u| u != &key_stored);
+                MappingUpdate::Deletion(key_to_delete, _) => {
+                    info!("Removing key {key_to_delete:?} from tracking mapping keys");
+                    self.mapping_keys.retain(|u| u != key_to_delete);
                 }
-                MappingUpdate::Insertion(key, _) => {
-                    info!("Inserting key {} to mappping keys tracking", key);
-                    self.mapping_keys.insert(key.to_be_bytes_trimmed_vec());
+                MappingUpdate::Insertion(key_to_insert, _) => {
+                    info!("Inserting key {key_to_insert:?} to tracking mapping keys");
+                    self.mapping_keys.insert(key_to_insert.clone());
                 }
                 // the mapping key doesn't change here so no need to update the list
                 MappingUpdate::Update(_, _, _) => {}
@@ -1127,7 +1231,7 @@ where
             }
         };
         let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-            SlotInputs::Mapping(self.slot_inputs.clone()),
+            K::slot_inputs(self.slot_inputs.clone()),
             &contract.address,
             contract.chain_id,
             vec![],
@@ -1145,7 +1249,7 @@ where
         &self,
         block_number: BlockPrimaryIndex,
         contract: &Contract,
-        updates: &[MappingUpdate<V>],
+        updates: &[MappingUpdate<K, V>],
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         updates
             .iter()
@@ -1153,7 +1257,7 @@ where
                 match update {
                     MappingUpdate::Insertion(key, value) => {
                         // we transform the mapping entry into the "table notion" of row
-                        let entry = UniqueMappingEntry::new(*key, value.clone());
+                        let entry = UniqueMappingEntry::new(key.clone(), value.clone());
                         let (cells, index) = entry.to_update(
                             block_number,
                             contract,
@@ -1175,7 +1279,7 @@ where
                         // * passing inside the deletion the value deleted as well, so we can
                         // reconstruct the row key
                         // * or have this extra list of mapping keys
-                        let entry = UniqueMappingEntry::new(*key, value.clone());
+                        let entry = UniqueMappingEntry::new(key.clone(), value.clone());
                         vec![TableRowUpdate::Deletion(entry.to_row_key(
                             contract,
                             &self.index,
@@ -1188,10 +1292,11 @@ where
                         // row is uniquely identified by its pair (key,value) then if one of those
                         // change, that means the row tree key needs to change as well, i.e. it's a
                         // deletion and addition.
-                        let previous_entry = UniqueMappingEntry::new(*key, old_value.clone());
+                        let previous_entry =
+                            UniqueMappingEntry::new(key.clone(), old_value.clone());
                         let previous_row_key =
                             previous_entry.to_row_key(contract, &self.index, &self.slot_inputs);
-                        let new_entry = UniqueMappingEntry::new(*key, new_value.clone());
+                        let new_entry = UniqueMappingEntry::new(key.clone(), new_value.clone());
 
                         let (mut cells, mut secondary_index) = new_entry.to_update(
                             block_number,
@@ -1247,9 +1352,9 @@ where
         &self,
         evm_word: u32,
         table_info: Vec<ColumnInfo>,
-        mapping_key: Vec<u8>,
+        mapping_key: &K,
     ) -> StorageSlotInfo {
-        let storage_slot = V::mapping_storage_slot(self.slot, evm_word, mapping_key);
+        let storage_slot = mapping_key.storage_slot(self.slot, evm_word);
 
         StorageSlotInfo::new(storage_slot, table_info)
     }
@@ -1262,27 +1367,17 @@ where
             .iter()
             .cartesian_product(self.mapping_keys.iter())
             .map(|(evm_word_col, mapping_key)| {
-                self.storage_slot_info(
-                    evm_word_col.evm_word(),
-                    table_info.clone(),
-                    mapping_key.clone(),
-                )
+                self.storage_slot_info(evm_word_col.evm_word(), table_info.clone(), mapping_key)
             })
             .collect()
     }
 
     /// Query a storage slot value by a mapping key.
-    async fn query_value(
-        &self,
-        ctx: &mut TestContext,
-        contract: &Contract,
-        mapping_key: Vec<u8>,
-    ) -> V {
+    async fn query_value(&self, ctx: &mut TestContext, contract: &Contract, mapping_key: &K) -> V {
         let mut extracted_values = vec![];
         let evm_word_cols = self.evm_word_column_info(contract);
         for evm_word_col in evm_word_cols {
-            let storage_slot =
-                V::mapping_storage_slot(self.slot, evm_word_col.evm_word(), mapping_key.clone());
+            let storage_slot = mapping_key.storage_slot(self.slot, evm_word_col.evm_word());
             let query = ProofQuery::new(contract.address, storage_slot);
             let value = ctx
                 .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
