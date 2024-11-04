@@ -16,7 +16,7 @@ use crate::query::{
     },
 };
 
-use super::row_chunk::BoundaryRowNodeInfoTarget;
+use super::row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct RowProcessingGadgetInputWires<
@@ -27,10 +27,47 @@ pub(crate) struct RowProcessingGadgetInputWires<
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
 {
-    row_path: MerklePathWithNeighborsTargetInputs<ROW_TREE_MAX_DEPTH>,
-    index_path: MerklePathWithNeighborsTargetInputs<INDEX_TREE_MAX_DEPTH>,
-    input_values: UniversalQueryValueInputWires<MAX_NUM_COLUMNS>,
+    pub(crate) row_path: MerklePathWithNeighborsTargetInputs<ROW_TREE_MAX_DEPTH>,
+    pub(crate) index_path: MerklePathWithNeighborsTargetInputs<INDEX_TREE_MAX_DEPTH>,
+    pub(crate) input_values: UniversalQueryValueInputWires<MAX_NUM_COLUMNS>,
 }
+
+impl<
+        'a,
+        const ROW_TREE_MAX_DEPTH: usize,
+        const INDEX_TREE_MAX_DEPTH: usize,
+        const MAX_NUM_COLUMNS: usize,
+        const MAX_NUM_RESULTS: usize,
+    >
+    From<
+        &'a RowProcessingGadgetWires<
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
+            MAX_NUM_COLUMNS,
+            MAX_NUM_RESULTS,
+        >,
+    > for RowProcessingGadgetInputWires<ROW_TREE_MAX_DEPTH, INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS>
+where
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    fn from(
+        value: &'a RowProcessingGadgetWires<
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
+            MAX_NUM_COLUMNS,
+            MAX_NUM_RESULTS,
+        >,
+    ) -> Self {
+        RowProcessingGadgetInputWires {
+            row_path: value.row_path.clone(),
+            index_path: value.index_path.clone(),
+            input_values: value.value_wires.input_wires.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct RowProcessingGadgetWires<
     const ROW_TREE_MAX_DEPTH: usize,
@@ -42,14 +79,46 @@ pub(crate) struct RowProcessingGadgetWires<
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_RESULTS - 1]:,
 {
-    row_path: MerklePathWithNeighborsTargetInputs<ROW_TREE_MAX_DEPTH>,
-    row_node_data: BoundaryRowNodeInfoTarget,
-    index_path: MerklePathWithNeighborsTargetInputs<INDEX_TREE_MAX_DEPTH>,
-    index_node_data: BoundaryRowNodeInfoTarget,
-    value_wires: UniversalQueryValueWires<MAX_NUM_COLUMNS, MAX_NUM_RESULTS>,
+    pub(crate) row_path: MerklePathWithNeighborsTargetInputs<ROW_TREE_MAX_DEPTH>,
+    pub(crate) row_node_data: BoundaryRowNodeInfoTarget,
+    pub(crate) index_path: MerklePathWithNeighborsTargetInputs<INDEX_TREE_MAX_DEPTH>,
+    pub(crate) index_node_data: BoundaryRowNodeInfoTarget,
+    pub(crate) value_wires: UniversalQueryValueWires<MAX_NUM_COLUMNS, MAX_NUM_RESULTS>,
 }
 
-#[derive(Clone, Debug)]
+impl<
+        const ROW_TREE_MAX_DEPTH: usize,
+        const INDEX_TREE_MAX_DEPTH: usize,
+        const MAX_NUM_COLUMNS: usize,
+        const MAX_NUM_RESULTS: usize,
+    > Into<RowChunkDataTarget<MAX_NUM_RESULTS>>
+    for RowProcessingGadgetWires<
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
+        MAX_NUM_COLUMNS,
+        MAX_NUM_RESULTS,
+    >
+where
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    fn into(self) -> RowChunkDataTarget<MAX_NUM_RESULTS> {
+        RowChunkDataTarget {
+            left_boundary_row: BoundaryRowDataTarget {
+                row_node_info: self.row_node_data.clone(),
+                index_node_info: self.index_node_data.clone(),
+            },
+            right_boundary_row: BoundaryRowDataTarget {
+                row_node_info: self.row_node_data,
+                index_node_info: self.index_node_data,
+            },
+            chunk_outputs: self.value_wires.output_wires,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct RowProcessingGadgetInputs<
     const ROW_TREE_MAX_DEPTH: usize,
     const INDEX_TREE_MAX_DEPTH: usize,
@@ -97,13 +166,34 @@ where
         row_path: MerklePathWithNeighborsGadget<ROW_TREE_MAX_DEPTH>,
         index_path: MerklePathWithNeighborsGadget<INDEX_TREE_MAX_DEPTH>,
         row_cells: &RowCells,
-        is_non_dummy_row: bool,
     ) -> Result<Self> {
         Ok(Self {
             row_path,
             index_path,
-            input_values: UniversalQueryValueInputs::new(row_cells, is_non_dummy_row)?,
+            input_values: UniversalQueryValueInputs::new(row_cells, true)?,
         })
+    }
+
+    pub(crate) fn new_dummy_row(
+        row_path: MerklePathWithNeighborsGadget<ROW_TREE_MAX_DEPTH>,
+        index_path: MerklePathWithNeighborsGadget<INDEX_TREE_MAX_DEPTH>,
+        row_cells: &RowCells,
+    ) -> Result<Self> {
+        Ok(Self {
+            row_path,
+            index_path,
+            input_values: UniversalQueryValueInputs::new(row_cells, false)?,
+        })
+    }
+
+    pub(crate) fn clone_to_dummy_row(&self) -> Self {
+        let mut input_values = self.input_values.clone();
+        input_values.is_non_dummy_row = false;
+        Self {
+            row_path: self.row_path.clone(),
+            index_path: self.index_path.clone(),
+            input_values,
+        }
     }
 
     pub(crate) fn build<T: OutputComponent<MAX_NUM_RESULTS>>(
@@ -119,13 +209,13 @@ where
         max_secondary: &UInt256Target,
         min_primary: &UInt256Target,
         max_primary: &UInt256Target,
-        num_overflows: &Target,
     ) -> RowProcessingGadgetWires<
         ROW_TREE_MAX_DEPTH,
         INDEX_TREE_MAX_DEPTH,
         MAX_NUM_COLUMNS,
         MAX_NUM_RESULTS,
     > {
+        let zero = b.zero();
         let mut value_wires = UniversalQueryValueInputs::build(
             b,
             hash_input_wires,
@@ -133,7 +223,7 @@ where
             max_secondary,
             Some(min_primary),
             Some(max_primary),
-            num_overflows,
+            &zero,
         );
         let [primary_index_id, secondary_index_id] =
             array::from_fn(|i| hash_input_wires.column_extraction_wires.column_ids[i]);

@@ -20,7 +20,7 @@ pub(crate) fn aggregate_chunks<const MAX_NUM_RESULTS: usize>(
     min_secondary: &UInt256Target,
     max_secondary: &UInt256Target,
     ops: &[Target; MAX_NUM_RESULTS],
-    is_second_dummy: &BoolTarget,
+    is_second_non_dummy: &BoolTarget,
 ) -> RowChunkDataTarget<MAX_NUM_RESULTS>
 where
     [(); MAX_NUM_RESULTS - 1]:,
@@ -38,8 +38,8 @@ where
         max_secondary,
     );
     // assert that the 2 chunks are consecutive only if the second one is not dummy
-    let are_consecutive = b.or(are_consecutive, *is_second_dummy);
-    b.connect(are_consecutive.target, _true.target);
+    let are_consecutive = b.and(are_consecutive, *is_second_non_dummy);
+    b.connect(are_consecutive.target, is_second_non_dummy.target);
 
     // check the same root of the index tree is employed in both chunks to prove
     // membership of rows in the chunks
@@ -71,17 +71,17 @@ where
 
     RowChunkDataTarget {
         left_boundary_row: first.left_boundary_row.clone(),
-        right_boundary_row: // if `is_second_dummy`, then we keep right boundary row of first chunk for the 
-        // aggregated chunk, otherwise the right boundary row of the aggregated chunk will be the right boundary
-        // row of second chunk 
+        right_boundary_row: // if `is_second_non_dummy`, then the right boundary row of the aggregated chunk will 
+        // be the right boundary row of second chunk, otherwise we keep right boundary row of first chunk for the 
+        // aggregated chunk  
             BoundaryRowDataTarget::select(
                 b,
-                is_second_dummy,
-                &first.right_boundary_row,
+                is_second_non_dummy,
                 &second.right_boundary_row,
+                &first.right_boundary_row,
             ),
         chunk_outputs: UniversalQueryOutputWires {
-            tree_hash: first.chunk_outputs.tree_hash, //  we check it's the same between the 2 chunks
+            tree_hash: second.chunk_outputs.tree_hash, //  we check it's the same between the 2 chunks
             values: OutputValuesTarget::from_targets(&output_values),
             count,
             num_overflows,
@@ -328,7 +328,7 @@ mod tests {
         primary_index_id: Target,
         secondary_index_id: Target,
         ops: [Target; MAX_NUM_RESULTS],
-        is_second_dummy: BoolTarget,
+        is_second_non_dummy: BoolTarget,
     }
     #[derive(Clone, Debug)]
     struct TestAggregateChunks {
@@ -356,7 +356,7 @@ mod tests {
             let [min_primary, max_primary, min_secondary, max_secondary] =
                 c.add_virtual_u256_arr_unsafe();
             let ops = c.add_virtual_target_arr();
-            let is_second_dummy = c.add_virtual_bool_target_unsafe();
+            let is_second_non_dummy = c.add_virtual_bool_target_unsafe();
             let aggregated_chunk = aggregate_chunks(
                 c,
                 &first_chunk_data,
@@ -366,7 +366,7 @@ mod tests {
                 &min_secondary,
                 &max_secondary,
                 &ops,
-                &is_second_dummy,
+                &is_second_non_dummy,
             );
 
             c.register_public_inputs(&aggregated_chunk.to_targets());
@@ -381,7 +381,7 @@ mod tests {
                 primary_index_id,
                 secondary_index_id,
                 ops,
-                is_second_dummy,
+                is_second_non_dummy,
             }
         }
 
@@ -409,7 +409,7 @@ mod tests {
             .into_iter()
             .chain(wires.ops.into_iter().zip(self.ops))
             .for_each(|(t, v)| pw.set_target(t, v));
-            pw.set_bool_target(wires.is_second_dummy, self.is_second_dummy);
+            pw.set_bool_target(wires.is_second_non_dummy, !self.is_second_dummy);
         }
     }
 

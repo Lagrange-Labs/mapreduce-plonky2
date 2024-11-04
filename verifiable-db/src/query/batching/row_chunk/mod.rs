@@ -109,8 +109,8 @@ impl ToTargets for BoundaryRowNodeInfoTarget {
 ///     `row_node`
 #[derive(Clone, Debug)]
 pub(crate) struct BoundaryRowDataTarget {
-    row_node_info: BoundaryRowNodeInfoTarget,
-    index_node_info: BoundaryRowNodeInfoTarget,
+    pub(crate) row_node_info: BoundaryRowNodeInfoTarget,
+    pub(crate) index_node_info: BoundaryRowNodeInfoTarget,
 }
 
 impl FromTargets for BoundaryRowDataTarget {

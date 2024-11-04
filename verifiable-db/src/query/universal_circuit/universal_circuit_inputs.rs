@@ -1,4 +1,4 @@
-use anyhow::{ensure, Context, Result};
+use anyhow::{ensure, Context, Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_set, BTreeSet, HashMap};
 
@@ -315,6 +315,15 @@ impl BasicOperation {
         }
 
         Ok((results, arithmetic_error))
+    }
+
+    // utility function to locate operation `op` in the set of `previous_ops`
+    pub(crate) fn locate_previous_operation(previous_ops: &[Self], op: &Self) -> Result<usize> {
+        previous_ops
+            .iter()
+            .find_position(|current_op| *current_op == op)
+            .map(|(pos, _)| pos)
+            .ok_or(Error::msg("operation {} not found in set of previous ops"))
     }
 }
 
