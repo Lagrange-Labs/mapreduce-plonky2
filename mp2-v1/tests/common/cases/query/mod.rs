@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use itertools::Itertools;
 use log::info;
 use mp2_v1::{api::MetadataHash, indexing::block::BlockPrimaryIndex};
-use parsil::{parse_and_validate, ParsilSettings, PlaceholderSettings};
+use parsil::{parse_and_validate, utils::ParsilSettingsBuilder, PlaceholderSettings};
 use simple_select_queries::{
     cook_query_no_matching_rows, cook_query_too_big_offset, cook_query_with_distinct,
     cook_query_with_matching_rows, cook_query_with_max_num_matching_rows,
@@ -119,8 +119,8 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table, info: &TableInfo) -
     // the maximum allowed value (i.e, MAX_NUM_ITEMS_PER_OUTPUT), as
     // otherwise query validation on Parsil will fail
     let num_output_items_wildcard_queries = info.columns.non_indexed_columns().len()
-	+ 2 // primary and secondary indexed columns
-	+ 1 // there is an additional item besides columns of the tables in SELECT
+    + 2 // primary and secondary indexed columns
+    + 1 // there is an additional item besides columns of the tables in SELECT
     ;
     if num_output_items_wildcard_queries <= MAX_NUM_ITEMS_PER_OUTPUT {
         let query_info = cook_query_with_wildcard_no_distinct(table, info).await?;
@@ -138,10 +138,13 @@ async fn test_query_mapping(
     query_info: QueryCooking,
     table_hash: &MetadataHash,
 ) -> Result<()> {
-    let settings = ParsilSettings {
-        context: table,
-        placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
-    };
+    let settings = ParsilSettingsBuilder::default()
+        .context(table)
+        .placeholders(PlaceholderSettings::with_freestanding(
+            MAX_NUM_PLACEHOLDERS - 2,
+        ))
+        .build()
+        .unwrap();
 
     info!("QUERY on the testcase: {}", query_info.query);
     let mut parsed = parse_and_validate(&query_info.query, &settings)?;

@@ -21,7 +21,7 @@ pub mod queries;
 pub mod symbols;
 #[cfg(test)]
 mod tests;
-mod utils;
+pub mod utils;
 mod validate;
 mod visitor;
 

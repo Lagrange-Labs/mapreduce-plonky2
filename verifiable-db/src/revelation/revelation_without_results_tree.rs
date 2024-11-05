@@ -16,9 +16,7 @@ use mp2_common::{
     poseidon::{flatten_poseidon_hash_target, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
-    serialization::{
-        deserialize, serialize,
-    },
+    serialization::{deserialize, serialize},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
     utils::ToTargets,
@@ -45,9 +43,7 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    placeholders_check::{
-        CheckPlaceholderGadget, CheckPlaceholderInputWires,
-    },
+    placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
     NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
 };
 
@@ -291,6 +287,7 @@ mod tests {
             random_original_tree_proof,
         },
     };
+    use alloy::primitives::U256;
     use mp2_common::{poseidon::flatten_poseidon_hash_value, utils::ToFields, C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{field::types::Field, plonk::config::Hasher};
@@ -512,7 +509,7 @@ mod tests {
     fn test_revelation_without_results_tree_for_no_op_avg_with_no_entries() {
         // Initialize the all operations to SUM or COUNT (not AVG).
         let mut rng = thread_rng();
-        let ops = array::from_fn(|_| {
+        let ops = std::array::from_fn(|_| {
             [AggregationOperation::SumOp, AggregationOperation::CountOp]
                 .choose(&mut rng)
                 .unwrap()

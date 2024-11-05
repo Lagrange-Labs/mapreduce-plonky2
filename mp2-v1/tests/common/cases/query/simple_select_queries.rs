@@ -195,8 +195,8 @@ where
             )))?;
         let child_pos = node_ctx
             .iter_children()
-            .position(|child| child.map(|c| c == previous_node_key).unwrap_or(false));
-        let is_left_child = child_pos.unwrap().0 == 0; // unwrap is safe
+            .position(|child| child.map(|c| *c == previous_node_key).unwrap_or(false));
+        let is_left_child = child_pos.unwrap() == 0; // unwrap is safe
         let (left_child_hash, right_child_hash) = if is_left_child {
             (
                 Some(previous_node_hash),

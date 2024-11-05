@@ -4,17 +4,11 @@ use super::{public_inputs::PublicInputs, Cell, CellWire};
 use anyhow::Result;
 use derive_more::{From, Into};
 use mp2_common::{
-    poseidon::empty_poseidon_hash,
-    public_inputs::PublicInputCommon,
-    types::CBuilder,
-    utils::ToTargets,
-    CHasher, D, F,
+    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, types::CBuilder,
+    utils::ToTargets, CHasher, D, F,
 };
 use plonky2::{
-    iop::{
-        target::Target,
-        witness::PartialWitness,
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::proof::ProofWithPublicInputsTarget,
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
@@ -92,6 +86,7 @@ impl CircuitLogicWires<F, D, 1> for PartialNodeWires {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::primitives::U256;
     use mp2_common::{
         group_hashing::{add_curve_point, map_to_curve_point},
         poseidon::H,

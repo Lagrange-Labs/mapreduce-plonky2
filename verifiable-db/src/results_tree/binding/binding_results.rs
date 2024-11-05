@@ -199,7 +199,7 @@ mod tests {
             };
 
             // H(res_id || pQ.C)
-            let inputs = once(&res_id.to_field())
+            let inputs = std::iter::once(&res_id.to_field())
                 .chain(query_pi.to_computational_hash_raw())
                 .cloned()
                 .collect_vec();
