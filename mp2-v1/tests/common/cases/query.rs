@@ -935,7 +935,7 @@ pub async fn prove_non_existence_row<'a>(
     planner: &mut QueryPlanner<'a>,
     primary: BlockPrimaryIndex,
 ) -> Result<()> {
-    let info = find_row_node_for_non_existence(
+    let (chosen_node, plan) = find_row_node_for_non_existence(
         &planner.table.row,
         planner.table.public_name.clone(),
         &planner.table.db_pool,
@@ -944,21 +944,24 @@ pub async fn prove_non_existence_row<'a>(
         &planner.pis.bounds,
     )
     .await?;
-    let key_to_prove = info.node_key.clone();
+    let (node_info, left_child_info, right_child_info) =
+        mp2_v1::query::planner::get_node_info(&planner.table.row, &chosen_node, primary as Epoch)
+            .await;
+
     let proof_key = ProofKey::QueryAggregateRow((
         planner.query.query.clone(),
         planner.query.placeholders.placeholder_values(),
         primary,
-        key_to_prove.clone(),
+        chosen_node.clone(),
     ));
     info!(
         "Non-existence circuit proof RUNNING for {primary} -> {:?} ",
         proof_key
     );
     let proof = generate_non_existence_proof(
-        info.node_info,
-        info.left_child_info,
-        info.right_child_info,
+        node_info,
+        left_child_info,
+        right_child_info,
         primary,
         planner,
         true,
@@ -966,12 +969,12 @@ pub async fn prove_non_existence_row<'a>(
     .unwrap_or_else(|_| {
         panic!(
             "unable to generate non-existence proof for {primary} -> {:?}",
-            key_to_prove
+            chosen_node
         )
     });
     info!(
         "Non-existence circuit proof DONE for {primary} -> {:?} ",
-        key_to_prove
+        chosen_node
     );
     planner.ctx.storage.store_proof(proof_key, proof.clone())?;
 
@@ -984,7 +987,7 @@ pub async fn prove_non_existence_row<'a>(
         columns: planner.columns.clone(),
         settings: planner.settings,
     };
-    prove_query_on_tree(&mut planner, tree_info, info.proving_plan, primary).await?;
+    prove_query_on_tree(&mut planner, tree_info, plan, primary).await?;
 
     Ok(())
 }

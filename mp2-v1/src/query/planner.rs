@@ -34,15 +34,11 @@ pub type DBRowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 
 pub struct NonExistenceInfo<K: Clone + std::hash::Hash + std::cmp::Eq> {
-    pub node_key: K,
-    pub node_info: NodeInfo,
-    pub right_child_info: Option<NodeInfo>,
-    pub left_child_info: Option<NodeInfo>,
     pub proving_plan: UpdateTree<K>,
 }
 
-/// Returns the information necessary to prove that a secondary index value / range doesn't exist
-/// in a row tree
+/// Returns the proving plan to prove the non existence of node of the query in this row tree at
+/// the epoch primary. It also returns the leaf node chosen.
 ///
 /// The row tree is given and specialized to psql storage since that is the only official storage
 /// supported.
@@ -60,7 +56,7 @@ pub async fn find_row_node_for_non_existence<C>(
     primary: BlockPrimaryIndex,
     settings: &ParsilSettings<C>,
     bounds: &QueryBounds,
-) -> anyhow::Result<NonExistenceInfo<RowTreeKey>>
+) -> anyhow::Result<(RowTreeKey, UpdateTree<RowTreeKey>)>
 where
     C: ContextProvider,
 {
@@ -75,8 +71,6 @@ where
                 .await?
                 .expect("No valid node found to prove non-existence, something is wrong"),
         };
-    let (node_info, left_child_info, right_child_info) =
-        get_node_info(&row_tree, &to_be_proven_node, primary as Epoch).await;
 
     let path = row_tree
         // since the epoch starts at genesis we can directly give the block number !
@@ -86,13 +80,7 @@ where
         .into_full_path()
         .collect_vec();
     let proving_tree = UpdateTree::from_paths([path], primary as Epoch);
-    Ok(NonExistenceInfo {
-        node_key: to_be_proven_node.clone(),
-        node_info,
-        right_child_info,
-        left_child_info,
-        proving_plan: proving_tree,
-    })
+    Ok((to_be_proven_node.clone(), proving_tree))
 }
 
 // this method returns the `NodeContext` of the successor of the node provided as input,
@@ -361,7 +349,7 @@ pub async fn execute_row_query(
     Ok(res)
 }
 
-async fn get_node_info<T, V, S>(
+pub async fn get_node_info<T, V, S>(
     lookup: &MerkleTreeKvDb<T, V, S>,
     k: &T::Key,
     at: Epoch,
