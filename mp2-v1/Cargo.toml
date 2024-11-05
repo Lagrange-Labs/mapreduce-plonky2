@@ -22,10 +22,14 @@ serde.workspace = true
 mp2_common = { path = "../mp2-common" }
 recursion_framework = { path = "../recursion-framework" }
 ryhope = { path = "../ryhope" }
+parsil = { path = "../parsil" }
 verifiable-db = { path = "../verifiable-db" }
 derive_more = "0.99.18"
 hex.workspace = true
 serde_json.workspace = true
+bb8 = "0.8.5"
+bb8-postgres = "0.8.1"
+tokio-postgres = "0.7.12"
 
 [dev-dependencies]
 alloy.workspace = true
