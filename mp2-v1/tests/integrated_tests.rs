@@ -135,11 +135,8 @@ async fn integrated_querying(table_info: TableInfo) -> Result<()> {
 async fn integrated_querying_mapping_table() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test for mapping table");
-    tokio::spawn(async move {
-        let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
-        integrated_querying(table_info).await
-    });
-    Ok(())
+    let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
+    integrated_querying(table_info).await
 }
 
 #[test(tokio::test)]
