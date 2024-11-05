@@ -48,7 +48,7 @@ impl TestContext {
         let preprocessing_proof = serialize_proof(&preprocessing_proof).unwrap();
 
         // Generate the revelation proof.
-        let input = CircuitInput::new_revelation_no_results_tree(
+        let input = CircuitInput::new_revelation_aggregated(
             query_proof,
             preprocessing_proof,
             test_data.query_bounds(),

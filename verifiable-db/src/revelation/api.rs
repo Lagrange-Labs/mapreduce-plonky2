@@ -30,8 +30,8 @@ use crate::{
         api::{CircuitInput as QueryCircuitInput, Parameters as QueryParams},
         computational_hash_ids::ColumnIDs,
         universal_circuit::universal_circuit_inputs::{
-                BasicOperation, Placeholders, ResultStructure,
-            },
+            BasicOperation, Placeholders, ResultStructure,
+        },
         PI_LEN as QUERY_PI_LEN,
     },
     revelation::{
@@ -280,7 +280,7 @@ where
     /// - `placeholders`: set of placeholders employed in the query. They must be less than `MAX_NUM_PLACEHOLDERS`
     /// - `placeholder_hash_ids`: Identifiers of the placeholders employed to compute the placeholder hash; they can be
     ///     obtained by the method `ids_for_placeholder_hash` of `query::api::Parameters`
-    pub fn new_revelation_no_results_tree(
+    pub fn new_revelation_aggregated(
         query_proof: Vec<u8>,
         preprocessing_proof: Vec<u8>,
         query_bounds: &QueryBounds,
@@ -331,7 +331,7 @@ where
     /// - `results_structure`: Data about the operations and items returned in the `SELECT` clause of the query
     /// - `limit, offset`: limit and offset values specified in the query
     /// - `distinct`: Flag specifying whether the DISTINCT keyword was specified in the query
-    pub fn new_revelation_unproven_offset(
+    pub fn new_revelation_tabular(
         preprocessing_proof: Vec<u8>,
         matching_rows: Vec<MatchingRow>,
         query_bounds: &QueryBounds,
@@ -655,7 +655,7 @@ mod tests {
         let preprocessing_pi = PreprocessingPI::from_slice(&preprocessing_proof.public_inputs);
         let preprocessing_proof = serialize_proof(&preprocessing_proof).unwrap();
 
-        let input = CircuitInput::new_revelation_no_results_tree(
+        let input = CircuitInput::new_revelation_aggregated(
             query_proof,
             preprocessing_proof,
             test_data.query_bounds(),

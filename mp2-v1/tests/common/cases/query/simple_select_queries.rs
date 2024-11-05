@@ -133,7 +133,7 @@ pub(crate) async fn prove_query<'a>(
     };
     let column_ids = ColumnIDs::from(&planner.table.columns);
     let num_matching_rows = matching_rows_input.len();
-    let input = RevelationCircuitInput::new_revelation_unproven_offset(
+    let input = RevelationCircuitInput::new_revelation_tabular(
         indexing_proof,
         matching_rows_input,
         &planner.pis.bounds,
@@ -195,7 +195,7 @@ where
             )))?;
         let child_pos = node_ctx
             .iter_children()
-            .find_position(|child| child.is_some() && child.unwrap() == &previous_node_key);
+            .position(|child| child.map(|c| c == previous_node_key).unwrap_or(false));
         let is_left_child = child_pos.unwrap().0 == 0; // unwrap is safe
         let (left_child_hash, right_child_hash) = if is_left_child {
             (

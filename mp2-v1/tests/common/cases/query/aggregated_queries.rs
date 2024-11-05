@@ -211,23 +211,24 @@ pub(crate) async fn prove_query(
     info!("Query proofs done! Generating revelation proof...");
     let proof = prove_revelation(ctx, table, &query, &pis, table.index.current_epoch()).await?;
     info!("Revelation proof done! Checking public inputs...");
+
+    // get number of matching rows
+    let num_touched_rows = {
+        let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
+        let query_params = exec_query.convert_placeholders(&query.placeholders);
+        table
+            .execute_row_query(
+                &exec_query
+                    .normalize_placeholder_names()
+                    .to_pgsql_string_with_placeholder(),
+                &query_params,
+            )
+            .await?
+            .len()
+    };
     // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
     // to check the public inputs
     let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
-
-    // get number of matching rows
-    let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
-    let query_params = exec_query.convert_placeholders(&query.placeholders);
-    let num_touched_rows = table
-        .execute_row_query(
-            &exec_query
-                .normalize_placeholder_names()
-                .to_pgsql_string_with_placeholder(),
-            &query_params,
-        )
-        .await?
-        .len();
-
     check_final_outputs(
         proof,
         ctx,
@@ -265,7 +266,7 @@ async fn prove_revelation(
         let pk = ProofKey::IVC(tree_epoch as BlockPrimaryIndex);
         ctx.storage.get_proof_exact(&pk)?
     };
-    let input = RevelationCircuitInput::new_revelation_no_results_tree(
+    let input = RevelationCircuitInput::new_revelation_aggregated(
         query_proof,
         indexing_proof,
         &pis.bounds,

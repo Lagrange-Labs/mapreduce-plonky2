@@ -229,7 +229,7 @@ async fn test_andrus_query() -> Result<()> {
     info!("Building querying params");
     ctx.build_params(ParamsType::Query).unwrap();
 
-    let input = RevelationCircuitInput::new_revelation_no_results_tree(
+    let input = RevelationCircuitInput::new_revelation_aggregated(
         root_query_proof,
         ivc_proof,
         &computed_pis.bounds,
