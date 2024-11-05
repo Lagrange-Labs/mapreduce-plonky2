@@ -2,12 +2,10 @@ use alloy::primitives::U256;
 use anyhow::Context;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
+use futures::stream::TryStreamExt;
 use itertools::Itertools;
 use mp2_common::types::HashOutput;
-use parsil::{
-    assembler::DynamicCircuitPis, bracketer::bracket_secondary_index, symbols::ContextProvider,
-    ParsilSettings,
-};
+use parsil::{bracketer::bracket_secondary_index, symbols::ContextProvider, ParsilSettings};
 use ryhope::{
     storage::{
         pgsql::{PgsqlStorage, ToFromBytea},
@@ -323,8 +321,7 @@ async fn find_node_for_proof(
 
     Ok(Some(node_ctx.node_id))
 }
-
-pub async fn execute_row_query(
+pub async fn execute_row_query2(
     pool: &DBPool,
     query: &str,
     params: &[U256],
@@ -347,6 +344,19 @@ pub async fn execute_row_query(
         .await
         .context("while fetching current epoch")?;
     Ok(res)
+}
+pub async fn execute_row_query(
+    pool: &DBPool,
+    query: &str,
+    params: &[U256],
+) -> anyhow::Result<Vec<PsqlRow>> {
+    let connection = pool.get().await.unwrap();
+    let res = connection
+        .query_raw(query, params)
+        .await
+        .context("while fetching current epoch")?;
+    let rows: Vec<PsqlRow> = res.try_collect().await?;
+    Ok(rows)
 }
 
 pub async fn get_node_info<T, V, S>(

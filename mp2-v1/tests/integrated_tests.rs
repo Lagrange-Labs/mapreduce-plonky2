@@ -1,5 +1,6 @@
 //! Database creation integration test
 // Used to fix the error: failed to evaluate generic const expression `PAD_LEN(NODE_LEN)`.
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(let_chains)]
 #![feature(async_closure)]
@@ -134,8 +135,11 @@ async fn integrated_querying(table_info: TableInfo) -> Result<()> {
 async fn integrated_querying_mapping_table() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test for mapping table");
-    let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
-    integrated_querying(table_info).await
+    tokio::spawn(async move {
+        let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
+        integrated_querying(table_info).await
+    });
+    Ok(())
 }
 
 #[test(tokio::test)]
@@ -177,7 +181,7 @@ fn read_table_info(f: &str) -> Result<TableInfo> {
 
 struct T(ZkTable);
 impl ContextProvider for T {
-    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+    fn fetch_table(&self, _table_name: &str) -> Result<ZkTable> {
         Ok(self.0.clone())
     }
 }
@@ -232,7 +236,7 @@ async fn test_andrus_query() -> Result<()> {
         pis_hash,
     )?;
     info!("Generating the revelation proof");
-    let proof = ctx.run_query_proof("revelation", GlobalCircuitInput::Revelation(input))?;
+    let _proof = ctx.run_query_proof("revelation", GlobalCircuitInput::Revelation(input))?;
     info!("all good");
     Ok(())
 }

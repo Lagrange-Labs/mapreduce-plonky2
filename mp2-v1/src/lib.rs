@@ -1,5 +1,5 @@
 //! Circuits for v1 of Lagrange Proof Network (LPN)
-
+#![allow(incomplete_features)]
 // Add this to allow generic const expressions, e.g. `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
 // Add this so we don't need to always specify const generic in generic

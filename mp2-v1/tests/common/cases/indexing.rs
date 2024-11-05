@@ -69,9 +69,6 @@ pub(crate) const MAPPING_VALUE_COLUMN: &str = "map_value";
 pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
 
 impl TableIndexing {
-    pub fn table(&self) -> &Table {
-        &self.table
-    }
     pub(crate) async fn merge_table_test_case(
         ctx: &mut TestContext,
     ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {

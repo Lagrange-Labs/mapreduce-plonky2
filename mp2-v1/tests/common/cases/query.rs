@@ -45,12 +45,11 @@ use mp2_v1::{
         row::{Row, RowPayload, RowTreeKey},
         LagrangeNode,
     },
-    query::planner::find_row_node_for_non_existence,
+    query::planner::{execute_row_query, find_row_node_for_non_existence},
     values_extraction::identifier_block_column,
 };
 use parsil::{
     assembler::{DynamicCircuitPis, StaticCircuitPis},
-    bracketer::bracket_secondary_index,
     parse_and_validate,
     queries::{core_keys_for_index_tree, core_keys_for_row_tree},
     ParsilSettings, PlaceholderSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER,
@@ -58,7 +57,6 @@ use parsil::{
 };
 use ryhope::{
     storage::{
-        pgsql::ToFromBytea,
         updatetree::{Next, UpdateTree, WorkplanItem},
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage, WideLineage,
     },
@@ -169,14 +167,14 @@ async fn test_query_mapping(
     // the query to use to actually get the outputs expected
     let mut exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
     let query_params = exec_query.convert_placeholders(&query_info.placeholders);
-    let res = table
-        .execute_row_query(
-            &exec_query
-                .normalize_placeholder_names()
-                .to_pgsql_string_with_placeholder(),
-            &query_params,
-        )
-        .await?;
+    let res = execute_row_query(
+        &table.db_pool,
+        &exec_query
+            .normalize_placeholder_names()
+            .to_pgsql_string_with_placeholder(),
+        &query_params,
+    )
+    .await?;
     let res = if is_empty_result(&res, SqlType::Numeric) {
         vec![] // empty results, but Postgres still return 1 row
     } else {
@@ -236,7 +234,6 @@ async fn prove_query(
     // the query to use to fetch all the rows keys involved in the result tree.
     let pis = parsil::assembler::assemble_dynamic(&parsed, settings, &query.placeholders)?;
     let row_keys_per_epoch = row_cache.keys_by_epochs();
-    let all_epochs = query.min_block as Epoch..=query.max_block as Epoch;
     let mut planner = QueryPlanner {
         ctx,
         query: query.clone(),
@@ -350,15 +347,15 @@ async fn prove_query(
     // get number of matching rows
     let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
     let query_params = exec_query.convert_placeholders(&query.placeholders);
-    let num_touched_rows = table
-        .execute_row_query(
-            &exec_query
-                .normalize_placeholder_names()
-                .to_pgsql_string_with_placeholder(),
-            &query_params,
-        )
-        .await?
-        .len();
+    let num_touched_rows = execute_row_query(
+        &table.db_pool,
+        &exec_query
+            .normalize_placeholder_names()
+            .to_pgsql_string_with_placeholder(),
+        &query_params,
+    )
+    .await?
+    .len();
 
     check_final_outputs(
         proof,
@@ -1400,7 +1397,7 @@ async fn find_longest_lived_key(
                 Some((k, l, start))
             }
         })
-        .max_by_key(|(k, l, start)| *l)
+        .max_by_key(|(_k, l, _start)| *l)
         .unwrap_or_else(|| {
             panic!(
                 "unable to find longest row? -> length all _table {}, max {}",
@@ -1463,6 +1460,7 @@ fn find_longest_consecutive_sequence(v: Vec<i64>) -> (usize, i64) {
     (longest, v[starting_idx])
 }
 
+#[allow(dead_code)]
 async fn check_correct_cells_tree(
     all_cells: &[ColumnCell],
     payload: &RowPayload<BlockPrimaryIndex>,

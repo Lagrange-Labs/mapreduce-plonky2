@@ -30,6 +30,7 @@ serde_json.workspace = true
 bb8 = "0.8.5"
 bb8-postgres = "0.8.1"
 tokio-postgres = "0.7.12"
+futures = "0.3.30"
 
 [dev-dependencies]
 alloy.workspace = true
