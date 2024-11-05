@@ -25,7 +25,7 @@ use crate::{
 
 /// Safely wraps a [`Query`], ensuring its meaning and the status of its
 /// placeholders.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SafeQuery {
     /// A query featuring placeholders as defined in a [`PlaceholderRegister`]
     ZkQuery(Query),
@@ -87,7 +87,7 @@ impl AsMut<Query> for SafeQuery {
 
 /// A data structure wrapping a zkSQL query converted into a pgSQL able to be
 /// executed on zkTables and its accompanying metadata.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TranslatedQuery {
     /// The translated query, should be converted to string
     pub query: SafeQuery,

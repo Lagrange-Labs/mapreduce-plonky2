@@ -1,4 +1,3 @@
-use alloy::primitives::U256;
 use sqlparser::ast::{
     BinaryOperator, Distinct, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr,
     JoinOperator, Offset, OffsetRows, OrderBy, OrderByExpr, Query, Select, SelectItem, SetExpr,
@@ -8,7 +7,7 @@ use sqlparser::ast::{
 use crate::{
     errors::ValidationError,
     symbols::ContextProvider,
-    utils::{const_eval, str_to_u256, ParsilSettings},
+    utils::{str_to_u256, ParsilSettings},
     visitor::{AstVisitor, Visit},
 };
 
@@ -390,14 +389,6 @@ impl<'a, C: ContextProvider> AstVisitor for SqlValidator<'a, C> {
             q.order_by.is_none(),
             ValidationError::UnsupportedFeature("ORDER BY".into())
         );
-        if let Some(l) = &q.limit {
-            let limit_value = const_eval(l).map_err(|_| ValidationError::InvalidLimitExpression)?;
-            let max_limit = U256::from(C::MAX_NUM_OUTPUTS);
-            ensure!(
-                limit_value <= max_limit,
-                ValidationError::LimitTooHigh(C::MAX_NUM_OUTPUTS)
-            );
-        }
         Ok(())
     }
 }

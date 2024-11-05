@@ -729,7 +729,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
 /// place them in a [`CircuitPis`] that may be either build in static mode (i.e.
 /// no reference to runtime value) at query registration time, or in dynamic
 /// mode at query execution time.
-pub trait BuildableBounds: Sized {
+pub trait BuildableBounds: Sized + Serialize {
     fn without_values(low: Option<QueryBoundSource>, high: Option<QueryBoundSource>) -> Self;
 
     fn with_values(
@@ -741,7 +741,7 @@ pub trait BuildableBounds: Sized {
 
 /// Similar to [`QueryBounds`], but only containing the static expressions
 /// defining the query bounds, without any reference to runtime values.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct StaticQueryBounds {
     pub min_query_secondary: Option<QueryBoundSource>,
     pub max_query_secondary: Option<QueryBoundSource>,
@@ -826,6 +826,10 @@ impl<T: BuildableBounds> CircuitPis<T> {
         );
         self.result
             .validate(C::MAX_NUM_RESULT_OPS, C::MAX_NUM_ITEMS_PER_OUTPUT)
+    }
+
+    pub fn to_json(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap()
     }
 }
 

@@ -28,6 +28,7 @@ verifiable-db = { path = "../verifiable-db" }
 clap = { version = "4.5.4", features = ["derive"], optional = true }
 stderrlog = { version = "0.6.0", default-features = false, optional = true }
 thiserror = "1.0.63"
+derive_builder = "0.20.2"
 
 [features]
 cli = ["dep:stderrlog", "dep:clap"]
