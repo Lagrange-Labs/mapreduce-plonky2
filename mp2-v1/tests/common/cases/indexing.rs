@@ -429,7 +429,7 @@ impl TableIndexing {
         updates: Vec<TableRowUpdate<BlockPrimaryIndex>>,
         expected_metadata_hash: &HashOutput,
     ) -> Result<()> {
-        let current_block = ctx.block_number().await;
+        let current_block = ctx.block_number().await as BlockPrimaryIndex;
         // apply the new cells to the trees
         // NOTE ONLY the rest of the cells, not including the secondary one !
         let mut rows_update = Vec::new();
@@ -462,7 +462,7 @@ impl TableIndexing {
                     let row_payload = ctx
                         .prove_cells_tree(
                             &self.table,
-                            current_block as usize,
+                            current_block,
                             previous_row,
                             new_cell_collection,
                             tree_update,
@@ -495,7 +495,7 @@ impl TableIndexing {
                     let row_payload = ctx
                         .prove_cells_tree(
                             &self.table,
-                            current_block as usize,
+                            current_block,
                             Row {
                                 k: new_cells.previous_row_key.clone(),
                                 payload: old_row,

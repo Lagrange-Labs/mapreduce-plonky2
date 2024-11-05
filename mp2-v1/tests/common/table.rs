@@ -9,7 +9,7 @@ use futures::{
 use itertools::Itertools;
 use log::debug;
 use mp2_v1::indexing::{
-    block::BlockPrimaryIndex,
+    block::{BlockPrimaryIndex, BlockTreeKey},
     cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},
     index::IndexNode,
     row::{CellCollection, Row, RowTreeKey},
@@ -433,12 +433,12 @@ impl Table {
     pub async fn apply_index_update(
         &mut self,
         updates: IndexUpdate<BlockPrimaryIndex>,
-    ) -> Result<IndexUpdateResult<BlockPrimaryIndex>> {
+    ) -> Result<IndexUpdateResult<BlockTreeKey>> {
         let plan = self
             .index
             .in_transaction(|t| {
                 async move {
-                    t.store(updates.added_index.0, updates.added_index.1)
+                    t.store(updates.added_index.0 as usize, updates.added_index.1)
                         .await?;
                     Ok(())
                 }
