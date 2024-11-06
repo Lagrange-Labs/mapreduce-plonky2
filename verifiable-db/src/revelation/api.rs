@@ -339,8 +339,8 @@ where
         column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
         results_structure: &ResultStructure,
-        limit: u64,
-        offset: u64,
+        limit: u32,
+        offset: u32,
     ) -> Result<Self>
     where
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,

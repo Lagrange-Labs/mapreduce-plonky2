@@ -72,8 +72,8 @@ pub struct QueryCooking {
     pub(crate) placeholders: Placeholders,
     pub(crate) min_block: BlockPrimaryIndex,
     pub(crate) max_block: BlockPrimaryIndex,
-    pub(crate) limit: Option<u64>,
-    pub(crate) offset: Option<u64>,
+    pub(crate) limit: Option<u32>,
+    pub(crate) offset: Option<u32>,
 }
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
@@ -138,20 +138,15 @@ async fn test_query_mapping(
     query_info: QueryCooking,
     table_hash: &MetadataHash,
 ) -> Result<()> {
-    let settings = {
-        let mut builder = ParsilSettingsBuilder::default()
-            .context(table)
-            .placeholders(PlaceholderSettings::with_freestanding(
-                MAX_NUM_PLACEHOLDERS - 2,
-            ));
-        if let Some(limit) = query_info.limit {
-            builder = builder.limit(limit);
-        }
-        if let Some(offset) = query_info.offset {
-            builder = builder.offset(offset)
-        }
-        builder.build().unwrap()
-    };
+    let settings = ParsilSettingsBuilder::default()
+        .context(table)
+        .placeholders(PlaceholderSettings::with_freestanding(
+            MAX_NUM_PLACEHOLDERS - 2,
+        ))
+        .maybe_limit(query_info.limit)
+        .maybe_offset(query_info.offset)
+        .build()
+        .unwrap();
 
     info!("QUERY on the testcase: {}", query_info.query);
     let mut parsed = parse_and_validate(&query_info.query, &settings)?;

@@ -1,8 +1,5 @@
-use std::collections::HashMap;
-
 use alloy::primitives::U256;
 use anyhow::{Error, Result};
-use futures::{stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use log::info;
 use mp2_common::types::HashOutput;
@@ -11,9 +8,8 @@ use mp2_v1::{
     indexing::{block::BlockPrimaryIndex, row::RowTreeKey, LagrangeNode},
 };
 use parsil::{
-    assembler::DynamicCircuitPis,
-    executor::{generate_query_execution_with_keys, generate_query_keys},
-    ParsilSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
+    executor::generate_query_execution_with_keys, DEFAULT_MAX_BLOCK_PLACEHOLDER,
+    DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{pgsql::ToFromBytea, RoEpochKvStorage},
@@ -40,12 +36,12 @@ use crate::common::{
             aggregated_queries::{
                 check_final_outputs, find_longest_lived_key, get_node_info, prove_single_row,
             },
-            GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, SqlReturn, SqlType,
+            GlobalCircuitInput, RevelationCircuitInput, SqlReturn, SqlType,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
     table::Table,
-    TableInfo, TestContext,
+    TableInfo,
 };
 
 use super::QueryCooking;
@@ -279,7 +275,7 @@ pub(crate) async fn cook_query_with_max_num_matching_rows(
         U256::from(max_block),
     ));
 
-    let limit = MAX_NUM_OUTPUTS;
+    let limit = MAX_NUM_OUTPUTS as u32;
     let offset = 0;
 
     let query_str = format!(
@@ -294,7 +290,7 @@ pub(crate) async fn cook_query_with_max_num_matching_rows(
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
+        limit: Some(limit),
         offset: Some(offset),
     })
 }
@@ -322,8 +318,10 @@ pub(crate) async fn cook_query_with_matching_rows(
         U256::from(max_block),
     ));
 
-    let limit = (MAX_NUM_OUTPUTS - 2).min(1);
-    let offset = max_block - min_block + 1 - limit; // get the matching rows in the last blocks
+    let limit: u32 = (MAX_NUM_OUTPUTS - 2).min(1).try_into().unwrap();
+    let offset: u32 = (max_block - min_block + 1 - limit as usize)
+        .try_into()
+        .unwrap(); // get the matching rows in the last blocks
 
     let query_str = format!(
         "SELECT {BLOCK_COLUMN_NAME}, {value_column} + $1
@@ -337,8 +335,8 @@ pub(crate) async fn cook_query_with_matching_rows(
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
-        offset: Some(offset as u64),
+        limit: Some(limit),
+        offset: Some(offset),
     })
 }
 
@@ -366,7 +364,7 @@ pub(crate) async fn cook_query_too_big_offset(
         U256::from(max_block),
     ));
 
-    let limit = MAX_NUM_OUTPUTS;
+    let limit: u32 = MAX_NUM_OUTPUTS.try_into().unwrap();
     let offset = 100;
 
     let query_str = format!(
@@ -381,7 +379,7 @@ pub(crate) async fn cook_query_too_big_offset(
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
+        limit: Some(limit),
         offset: Some(offset),
     })
 }
@@ -412,7 +410,7 @@ pub(crate) async fn cook_query_no_matching_rows(
         U256::from(max_block),
     ));
 
-    let limit = MAX_NUM_OUTPUTS;
+    let limit: u32 = MAX_NUM_OUTPUTS.try_into().unwrap();
     let offset = 0;
 
     let query_str = format!(
@@ -427,7 +425,7 @@ pub(crate) async fn cook_query_no_matching_rows(
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
+        limit: Some(limit),
         offset: Some(offset),
     })
 }
@@ -455,7 +453,7 @@ pub(crate) async fn cook_query_with_distinct(
         U256::from(max_block),
     ));
 
-    let limit = MAX_NUM_OUTPUTS;
+    let limit: u32 = MAX_NUM_OUTPUTS.try_into().unwrap();
     let offset = 0;
 
     let query_str = format!(
@@ -470,7 +468,7 @@ pub(crate) async fn cook_query_with_distinct(
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
+        limit: Some(limit),
         offset: Some(offset),
     })
 }
@@ -499,7 +497,7 @@ pub(crate) async fn cook_query_with_wildcard(
         U256::from(max_block),
     ));
 
-    let limit = MAX_NUM_OUTPUTS;
+    let limit: u32 = MAX_NUM_OUTPUTS.try_into().unwrap();
     let offset = 0;
 
     let query_str = if distinct {
@@ -524,7 +522,7 @@ pub(crate) async fn cook_query_with_wildcard(
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
+        limit: Some(limit),
         offset: Some(offset),
     })
 }

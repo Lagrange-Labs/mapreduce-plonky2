@@ -1,6 +1,5 @@
 use alloy::primitives::U256;
 use anyhow::{bail, ensure};
-use derive_builder::Builder;
 use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
 use std::str::FromStr;
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
@@ -14,29 +13,99 @@ use crate::{
     validate::{self},
 };
 
-#[derive(Builder)]
-#[builder(pattern = "owned", setter(strip_option))]
 pub struct ParsilSettings<C: ContextProvider> {
     /// A handle to an object providing a register of the existing virtual
     /// tables and their columns.
     pub context: C,
     pub placeholders: PlaceholderSettings,
-    #[builder(default)]
-    pub limit: Option<u64>,
-    #[builder(default)]
-    pub offset: Option<u64>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
 }
 impl<C: ContextProvider> ParsilSettings<C> {
+    pub fn builder() -> ParsilSettingsBuilder<C> {
+        Default::default()
+    }
+
     pub fn max_num_outputs() -> usize {
         C::MAX_NUM_OUTPUTS
     }
 
-    pub fn limit(&self) -> u64 {
+    pub fn limit(&self) -> u32 {
         self.limit.unwrap_or(C::MAX_NUM_OUTPUTS.try_into().unwrap())
     }
 
-    pub fn offset(&self) -> u64 {
+    pub fn offset(&self) -> u32 {
         self.offset.unwrap_or(0)
+    }
+}
+
+pub struct ParsilSettingsBuilder<C: ContextProvider> {
+    context: Option<C>,
+    placeholders_settings: Option<PlaceholderSettings>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+impl<C: ContextProvider> std::default::Default for ParsilSettingsBuilder<C> {
+    fn default() -> Self {
+        ParsilSettingsBuilder {
+            context: None,
+            placeholders_settings: None,
+            limit: None,
+            offset: None,
+        }
+    }
+}
+impl<C: ContextProvider> ParsilSettingsBuilder<C> {
+    pub fn context(mut self, context: C) -> Self {
+        self.context = Some(context);
+        self
+    }
+
+    pub fn placeholders(mut self, placeholders_settings: PlaceholderSettings) -> Self {
+        self.placeholders_settings = Some(placeholders_settings);
+        self
+    }
+
+    pub fn maybe_limit(mut self, limit: Option<u32>) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    pub fn maybe_offset(mut self, offset: Option<u32>) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    pub fn limit(mut self, limit: u32) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    pub fn offset(mut self, offset: u32) -> Self {
+        self.offset = Some(offset);
+        self
+    }
+
+    pub fn build(mut self) -> anyhow::Result<ParsilSettings<C>> {
+        anyhow::ensure!(
+            self.limit
+                .map(|l| l <= C::MAX_NUM_OUTPUTS.try_into().unwrap())
+                .unwrap_or(true),
+            anyhow::anyhow!("limit can not be greater than `{}`", C::MAX_NUM_OUTPUTS)
+        );
+
+        Ok(ParsilSettings {
+            context: self
+                .context
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("context is not set"))?,
+            placeholders: self
+                .placeholders_settings
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("placehoder settings are not set"))?,
+            limit: self.limit,
+            offset: self.offset,
+        })
     }
 }
 
