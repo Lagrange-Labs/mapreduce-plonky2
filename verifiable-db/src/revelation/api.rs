@@ -278,8 +278,8 @@ where
     ///     IVC set of circuit
     /// - `query_bounds`: bounds on values of primary and secondary indexes specified in the query
     /// - `placeholders`: set of placeholders employed in the query. They must be less than `MAX_NUM_PLACEHOLDERS`
-    /// - `placeholder_hash_ids`: Identifiers of the placeholders employed to compute the placeholder hash; they can be
-    ///     obtained by the method `ids_for_placeholder_hash` of `query::api::Parameters`
+    /// - `predicate_operations`: Operations employed in the query to compute the filtering predicate in the `WHERE` clause
+    /// - `results_structure`: Data about the operations and items returned in the `SELECT` clause of the query
     pub fn new_revelation_aggregated(
         query_proof: Vec<u8>,
         preprocessing_proof: Vec<u8>,

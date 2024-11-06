@@ -138,13 +138,20 @@ async fn test_query_mapping(
     query_info: QueryCooking,
     table_hash: &MetadataHash,
 ) -> Result<()> {
-    let settings = ParsilSettingsBuilder::default()
-        .context(table)
-        .placeholders(PlaceholderSettings::with_freestanding(
-            MAX_NUM_PLACEHOLDERS - 2,
-        ))
-        .build()
-        .unwrap();
+    let settings = {
+        let mut builder = ParsilSettingsBuilder::default()
+            .context(table)
+            .placeholders(PlaceholderSettings::with_freestanding(
+                MAX_NUM_PLACEHOLDERS - 2,
+            ));
+        if let Some(limit) = query_info.limit {
+            builder = builder.limit(limit);
+        }
+        if let Some(offset) = query_info.offset {
+            builder = builder.offset(offset)
+        }
+        builder.build().unwrap()
+    };
 
     info!("QUERY on the testcase: {}", query_info.query);
     let mut parsed = parse_and_validate(&query_info.query, &settings)?;

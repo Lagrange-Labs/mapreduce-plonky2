@@ -287,8 +287,7 @@ pub(crate) async fn cook_query_with_max_num_matching_rows(
                 FROM {table_name}
                 WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                AND {key_column} = '0x{key_value}'
-                LIMIT {limit} OFFSET {offset};"
+                AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
@@ -331,8 +330,7 @@ pub(crate) async fn cook_query_with_matching_rows(
                 FROM {table_name}
                 WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                AND {key_column} = '0x{key_value}'
-                LIMIT {limit} OFFSET {offset};"
+                AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
@@ -376,8 +374,7 @@ pub(crate) async fn cook_query_too_big_offset(
                 FROM {table_name}
                 WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                AND {key_column} = '0x{key_value}'
-                LIMIT {limit} OFFSET {offset};"
+                AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
@@ -423,8 +420,7 @@ pub(crate) async fn cook_query_no_matching_rows(
                 FROM {table_name}
                 WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                AND {key_column} = $1
-                LIMIT {limit} OFFSET {offset};"
+                AND {key_column} = $1;"
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
@@ -467,8 +463,7 @@ pub(crate) async fn cook_query_with_distinct(
                 FROM {table_name}
                 WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                AND {key_column} = '0x{key_value}'
-                LIMIT {limit} OFFSET {offset};"
+                AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
@@ -513,8 +508,7 @@ pub(crate) async fn cook_query_with_wildcard(
                     FROM {table_name}
                     WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                     AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                    AND {key_column} = '0x{key_value}'
-                    LIMIT {limit} OFFSET {offset};"
+                    AND {key_column} = '0x{key_value}';"
         )
     } else {
         format!(
@@ -522,8 +516,7 @@ pub(crate) async fn cook_query_with_wildcard(
                     FROM {table_name}
                     WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                     AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                    AND {key_column} = '0x{key_value}'
-                    LIMIT {limit} OFFSET {offset};"
+                    AND {key_column} = '0x{key_value}';"
         )
     };
     Ok(QueryCooking {
