@@ -401,13 +401,18 @@ mod tests {
             tests::aggregate_output_values, ChildPosition, NodeInfo, QueryBoundSource, QueryBounds,
         },
         batching::{
-            circuits::row_chunk_processing::RowChunkProcessingCircuit, public_inputs::PublicInputs,
+            circuits::row_chunk_processing::RowChunkProcessingCircuit,
+            public_inputs::{tests::gen_values_in_range, PublicInputs},
+            row_chunk::tests::{BoundaryRowData, BoundaryRowNodeInfo},
             row_process_gadget::RowProcessingGadgetInputs,
         },
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
         },
-        merkle_path::{tests::build_node, MerklePathWithNeighborsGadget},
+        merkle_path::{
+            tests::{build_node, NeighborInfo},
+            MerklePathWithNeighborsGadget,
+        },
         universal_circuit::{
             output_no_aggregation::Circuit as NoAggOutputCircuit,
             output_with_aggregation::Circuit as AggOutputCircuit,
@@ -469,23 +474,6 @@ mod tests {
         }
     }
 
-    /// Generate a set of values in a given range ensuring that the i+1-th generated value is
-    /// bigger than the i-th generated value    
-    fn gen_values_in_range<const N: usize>(lower: U256, upper: U256) -> [U256; N] {
-        assert!(upper >= lower);
-        let mut prev_value = lower;
-        let rng = &mut thread_rng();
-        array::from_fn(|_| {
-            let range = (upper - lower).checked_add(U256::from(1));
-            let gen_value = match range {
-                Some(range) => lower + gen_random_u256(rng) % range,
-                None => gen_random_u256(rng),
-            };
-            prev_value = gen_value;
-            gen_value
-        })
-    }
-
     #[derive(Clone, Debug)]
     struct TestRowsTreeNode {
         node: NodeInfo,
@@ -519,26 +507,32 @@ mod tests {
     /// Where all nodes except for C are in secondary index query range
     async fn build_test_tree(bounds: &QueryBounds, column_ids: &[F]) -> [TestIndexTreeNode; 3] {
         // sample primary index values
-        let [value_0] = gen_values_in_range(U256::ZERO, bounds.min_query_primary()); // value of node 0 must be out of range
+        let rng = &mut thread_rng();
+        let [value_0] = gen_values_in_range(rng, U256::ZERO, bounds.min_query_primary()); // value of node 0 must be out of range
         let [value_1, value_2] =
-            gen_values_in_range(bounds.min_query_primary(), bounds.max_query_primary());
+            gen_values_in_range(rng, bounds.min_query_primary(), bounds.max_query_primary());
         // sample secondary index values for rows tree of node 0
         let [value_0C, value_0A] =
-            gen_values_in_range(*bounds.max_query_secondary().value(), U256::MAX);
+            gen_values_in_range(rng, *bounds.max_query_secondary().value(), U256::MAX);
         let [value_0B] = gen_values_in_range(
+            rng,
             *bounds.min_query_secondary().value(),
             *bounds.max_query_secondary().value(),
         );
         // sample secondary index values for rows tree of node 1
-        let [value_1B] = gen_values_in_range(U256::ZERO, *bounds.min_query_secondary().value());
-        let [value_1D] = gen_values_in_range(*bounds.max_query_secondary().value(), U256::MAX);
+        let [value_1B] =
+            gen_values_in_range(rng, U256::ZERO, *bounds.min_query_secondary().value());
+        let [value_1D] = gen_values_in_range(rng, *bounds.max_query_secondary().value(), U256::MAX);
         let [value_1A, value_1C] = gen_values_in_range(
+            rng,
             *bounds.min_query_secondary().value(),
             *bounds.max_query_secondary().value(),
         );
         // sample secondary index values for rows tree of node 2
-        let [value_2C] = gen_values_in_range(U256::ZERO, *bounds.min_query_secondary().value());
+        let [value_2C] =
+            gen_values_in_range(rng, U256::ZERO, *bounds.min_query_secondary().value());
         let [value_2B, value_2D, value_2A] = gen_values_in_range(
+            rng,
             *bounds.min_query_secondary().value(),
             *bounds.max_query_secondary().value(),
         );
@@ -1141,6 +1135,71 @@ mod tests {
                 .into(),
         );
 
+        // compute expected left boundary row of the proven chunk: should correspond to row_1C
+        let left_boundary_row = {
+            // predecessor is node_1A, and it's in the path
+            let predecessor_info_1C = NeighborInfo::new(
+                node_1A.value,
+                Some(node_1A.compute_node_hash(secondary_index)),
+            );
+            // successor is node_1D, and it's not in the path
+            let successor_info_1C = NeighborInfo::new(node_1D.value, None);
+            let row_1C_info = BoundaryRowNodeInfo {
+                end_node_hash: node_1C.compute_node_hash(secondary_index),
+                predecessor_info: predecessor_info_1C,
+                successor_info: successor_info_1C,
+            };
+            // predecessor is node_0, and it's not in the path
+            let predecessor_index_1 = NeighborInfo::new(node_0.node.value, None);
+            // successor is node_2, and it's not in the path
+            let successor_index_1 = NeighborInfo::new(node_2.node.value, None);
+            let index_1_info = BoundaryRowNodeInfo {
+                end_node_hash: node_1.node.compute_node_hash(primary_index),
+                predecessor_info: predecessor_index_1,
+                successor_info: successor_index_1,
+            };
+            BoundaryRowData {
+                row_node_info: row_1C_info,
+                index_node_info: index_1_info,
+            }
+        };
+        // compute expected right boundary row of the proven chunk: should correspond to row_2D
+        let right_boundary_row = {
+            // predecessor is node_2B, and it's in the path
+            let predecessor_2D = NeighborInfo::new(
+                node_2B.value,
+                Some(node_2B.compute_node_hash(secondary_index)),
+            );
+            // successor is node_2A, and it's in the path
+            let successor_2D = NeighborInfo::new(
+                node_2A.value,
+                Some(node_2A.compute_node_hash(secondary_index)),
+            );
+            let row_2D_info = BoundaryRowNodeInfo {
+                end_node_hash: node_2D.compute_node_hash(secondary_index),
+                predecessor_info: predecessor_2D,
+                successor_info: successor_2D,
+            };
+
+            // predecessor is node 1, and it's in the path
+            let predecessor_index_2 = NeighborInfo::new(
+                node_1.node.value,
+                Some(node_1.node.compute_node_hash(primary_index)),
+            );
+            // no successor
+            let successor_index_2 = NeighborInfo::new_dummy_successor();
+            let index_2_info = BoundaryRowNodeInfo {
+                end_node_hash: node_2.node.compute_node_hash(primary_index),
+                predecessor_info: predecessor_index_2,
+                successor_info: successor_index_2,
+            };
+
+            BoundaryRowData {
+                row_node_info: row_2D_info,
+                index_node_info: index_2_info,
+            }
+        };
+
         assert_eq!(pis.overflow_flag(), err_1C | err_2B | err_2D | expected_err);
         assert_eq!(
             pis.num_matching_rows(),
@@ -1153,6 +1212,10 @@ mod tests {
             expected_outputs[1..],
             pis.values()[..expected_outputs.len() - 1],
         );
+        // check boundary rows
+        assert_eq!(pis.to_left_row_raw(), &left_boundary_row.to_fields(),);
+        assert_eq!(pis.to_right_row_raw(), &right_boundary_row.to_fields(),);
+
         assert_eq!(pis.min_primary(), min_primary,);
         assert_eq!(pis.max_primary(), max_primary,);
         assert_eq!(pis.min_secondary(), min_secondary,);
@@ -1654,6 +1717,67 @@ mod tests {
             .unwrap())
                 .into(),
         );
+        // compute expected left boundary row of the proven chunk: should correspond to row_1A
+        let left_boundary_row = {
+            // predecessor is node_1B, and it's not in the path
+            let predecessor_info_1A = NeighborInfo::new(node_1B.value, None);
+            // successor is node_1C, and it's not in the path
+            let successor_info_1A = NeighborInfo::new(node_1C.value, None);
+            let row_1A_info = BoundaryRowNodeInfo {
+                end_node_hash: node_1A.compute_node_hash(secondary_index),
+                predecessor_info: predecessor_info_1A,
+                successor_info: successor_info_1A,
+            };
+            // predecessor is node_0, and it's not in the path
+            let predecessor_index_1 = NeighborInfo::new(node_0.node.value, None);
+            // successor is node_2, and it's not in the path
+            let successor_index_1 = NeighborInfo::new(node_2.node.value, None);
+            let index_1_info = BoundaryRowNodeInfo {
+                end_node_hash: node_1.node.compute_node_hash(primary_index),
+                predecessor_info: predecessor_index_1,
+                successor_info: successor_index_1,
+            };
+            BoundaryRowData {
+                row_node_info: row_1A_info,
+                index_node_info: index_1_info,
+            }
+        };
+        // compute expected right boundary row of the proven chunk: should correspond to row_2D
+        let right_boundary_row = {
+            // predecessor is node_2B, and it's in the path
+            let predecessor_2D = NeighborInfo::new(
+                node_2B.value,
+                Some(node_2B.compute_node_hash(secondary_index)),
+            );
+            // successor is node_2A, and it's in the path
+            let successor_2D = NeighborInfo::new(
+                node_2A.value,
+                Some(node_2A.compute_node_hash(secondary_index)),
+            );
+            let row_2D_info = BoundaryRowNodeInfo {
+                end_node_hash: node_2D.compute_node_hash(secondary_index),
+                predecessor_info: predecessor_2D,
+                successor_info: successor_2D,
+            };
+
+            // predecessor is node 1, and it's in the path
+            let predecessor_index_2 = NeighborInfo::new(
+                node_1.node.value,
+                Some(node_1.node.compute_node_hash(primary_index)),
+            );
+            // no successor
+            let successor_index_2 = NeighborInfo::new_dummy_successor();
+            let index_2_info = BoundaryRowNodeInfo {
+                end_node_hash: node_2.node.compute_node_hash(primary_index),
+                predecessor_info: predecessor_index_2,
+                successor_info: successor_index_2,
+            };
+
+            BoundaryRowData {
+                row_node_info: row_2D_info,
+                index_node_info: index_2_info,
+            }
+        };
 
         assert_eq!(pis.overflow_flag(), err_1A | err_1C | err_2B | err_2D,);
         assert_eq!(
@@ -1673,6 +1797,9 @@ mod tests {
         // without aggregation we accumulate all the results in the first output value,
         // and so we don't care about the other ones
         assert_eq!(array::from_fn(|_| U256::ZERO), pis.values());
+        // check boundary rows
+        assert_eq!(pis.to_left_row_raw(), &left_boundary_row.to_fields(),);
+        assert_eq!(pis.to_right_row_raw(), &right_boundary_row.to_fields(),);
 
         assert_eq!(pis.min_primary(), min_primary,);
         assert_eq!(pis.max_primary(), max_primary,);

@@ -32,7 +32,10 @@ use plonky2::{
         proof::ProofWithPublicInputsTarget,
     },
 };
-use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
+use plonky2_ecgfp5::{
+    curve::curve::{Point, WeierstrassPoint},
+    gadgets::curve::CurveTarget,
+};
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -1096,6 +1099,14 @@ where
         Self {
             first_output,
             other_outputs: other_outputs.try_into().unwrap(),
+        }
+    }
+
+    pub(crate) fn new_outputs_no_aggregation(point: &Point) -> Self {
+        let first_output = CurveOrU256::<F>::from_slice(&point.to_fields());
+        Self {
+            first_output,
+            other_outputs: [U256::ZERO; MAX_NUM_RESULTS - 1],
         }
     }
 

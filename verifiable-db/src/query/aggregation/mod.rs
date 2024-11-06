@@ -35,7 +35,7 @@ pub(crate) mod full_node_index_leaf;
 pub(crate) mod full_node_with_one_child;
 pub(crate) mod full_node_with_two_children;
 pub(crate) mod non_existence_inter;
-mod output_computation;
+pub(crate) mod output_computation;
 pub(crate) mod partial_node;
 mod utils;
 
