@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 bincode.workspace = true
-env_logger.workspace = true
 eth_trie.workspace = true
 hashbrown.workspace = true
 alloy.workspace = true
@@ -19,8 +18,6 @@ plonky2_ecgfp5.workspace = true
 rand.workspace = true
 rlp.workspace = true
 serde.workspace = true
-serde_arrays.workspace = true
-sha3.workspace = true
 
 mp2_common = { path = "../mp2-common" }
 recursion_framework = { path = "../recursion-framework" }
@@ -28,19 +25,19 @@ ryhope = { path = "../ryhope" }
 verifiable-db = { path = "../verifiable-db" }
 derive_more = "0.99.18"
 hex.workspace = true
-parsil = { path = "../parsil" }
 serde_json.workspace = true
 
 [dev-dependencies]
 alloy.workspace = true
 csv.workspace = true
 hex.workspace = true
-rmp-serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 serial_test.workspace = true
 
 mp2_test = { path = "../mp2-test" }
+parsil = { path = "../parsil" }
+env_logger.workspace = true
 envconfig = "0.10.0"
 test-log = "0.2.16"
 jammdb = "0.11.0"

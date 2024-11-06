@@ -138,8 +138,8 @@ mod scapegoat {
         bs.state_mut().commit_transaction().await.unwrap();
         ls.state_mut().commit_transaction().await.unwrap();
 
-        assert_eq!(bbst.depth(&mut bs).await, 7);
-        assert_eq!(list.depth(&mut ls).await, 127);
+        assert_eq!(bbst.depth(&bs).await, 7);
+        assert_eq!(list.depth(&ls).await, 127);
         Ok(())
     }
 

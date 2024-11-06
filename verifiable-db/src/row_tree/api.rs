@@ -180,10 +180,7 @@ pub enum CircuitInput {
 }
 
 impl CircuitInput {
-    pub fn leaf(identifier: u64, value: U256, cells_proof: Vec<u8>) -> Result<Self> {
-        Self::leaf_multiplier(identifier, value, false, cells_proof)
-    }
-    pub fn leaf_multiplier(
+    pub fn leaf(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
@@ -197,22 +194,6 @@ impl CircuitInput {
     }
 
     pub fn full(
-        identifier: u64,
-        value: U256,
-        left_proof: Vec<u8>,
-        right_proof: Vec<u8>,
-        cells_proof: Vec<u8>,
-    ) -> Result<Self> {
-        Self::full_multiplier(
-            identifier,
-            value,
-            false,
-            left_proof,
-            right_proof,
-            cells_proof,
-        )
-    }
-    pub fn full_multiplier(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
@@ -229,22 +210,6 @@ impl CircuitInput {
         })
     }
     pub fn partial(
-        identifier: u64,
-        value: U256,
-        is_child_left: bool,
-        child_proof: Vec<u8>,
-        cells_proof: Vec<u8>,
-    ) -> Result<Self> {
-        Self::partial_multiplier(
-            identifier,
-            value,
-            false,
-            is_child_left,
-            child_proof,
-            cells_proof,
-        )
-    }
-    pub fn partial_multiplier(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
@@ -393,6 +358,7 @@ mod test {
         let input = CircuitInput::partial(
             tuple.identifier.to_canonical_u64(),
             tuple.value,
+            false,
             is_left,
             child_proof_buff.clone(),
             p.cells_proof_vk().serialize()?,
@@ -442,6 +408,7 @@ mod test {
         let input = CircuitInput::full(
             tuple.identifier.to_canonical_u64(),
             tuple.value,
+            false,
             child_proof[0].to_vec(),
             child_proof[1].to_vec(),
             p.cells_proof_vk().serialize()?,
@@ -496,6 +463,7 @@ mod test {
         let input = CircuitInput::leaf(
             tuple.identifier.to_canonical_u64(),
             tuple.value,
+            false,
             p.cells_proof_vk().serialize()?,
         )?;
 

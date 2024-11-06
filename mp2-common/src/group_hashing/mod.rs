@@ -236,25 +236,23 @@ mod test {
 
     use plonky2::{
         field::types::Sample,
-        iop::{target::Target, witness::PartialWitness},
+        iop::witness::PartialWitness,
     };
-    use plonky2_ecdsa::curve::curve_types::base_to_scalar;
+    
     use plonky2_ecgfp5::{
         curve::curve::{Point, WeierstrassPoint},
         gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget, PartialWitnessCurve},
     };
 
     use crate::{
-        digest::DigestTarget,
         types::CBuilder,
-        utils::{FromFields, FromTargets, ToFields, ToTargets},
+        utils::{FromFields, ToFields},
         C, D, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
 
     use super::{
         circuit_hashed_scalar_mul, field_hashed_scalar_mul, weierstrass_to_point,
-        CircuitBuilderGroupHashing,
     };
 
     #[derive(Clone, Debug)]

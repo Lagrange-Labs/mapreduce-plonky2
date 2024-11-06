@@ -26,6 +26,7 @@ const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
 
+#[allow(dead_code)]
 trait ConnectSlice {
     fn connect_slice(&mut self, a: &[Target], b: &[Target]);
 }
@@ -138,6 +139,7 @@ pub fn less_than<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Returns true if a < b in the first n bits, False otherwise.
+///
 /// Will panic if `n >= F::BITS-1`.
 /// This variant is unsafe since it assumes that `a < 2^n` and `b < 2^n`;
 /// undefined behavior may occur if this assumption is not ensured by the
@@ -173,6 +175,7 @@ pub fn greater_than<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Returns true if a > b in the first n bits, False otherwise.
+///
 /// Will panic if `n >= F::BITS-1`.
 /// This variant is unsafe since it assumes that `a < 2^n` and `b < 2^n`;
 /// undefined behavior may occur if this assumption is not ensured by the
@@ -203,6 +206,7 @@ pub fn less_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Returns true if a <= b in the first n bits, False otherwise.
+///
 /// Will panic if `n >= F::BITS-1`.
 /// This variant is unsafe since it assumes that `a < 2^n` and `b < 2^n`;
 /// undefined behavior may occur if this assumption is not ensured by the
@@ -234,6 +238,7 @@ pub fn greater_than_or_equal_to<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Returns true if a >= b in the first n bits, False otherwise.
+///
 /// Will panic if `n >= F::BITS-1`.
 /// This variant is unsafe since it assumes that `a < 2^n` and `b < 2^n`;
 /// undefined behavior may occur if this assumption is not ensured by the
@@ -469,7 +474,7 @@ impl ToTargets for HashOutTarget {
     }
 }
 
-impl<'a> ToTargets for &'a HashOutTarget {
+impl ToTargets for &HashOutTarget {
     fn to_targets(&self) -> Vec<Target> {
         self.elements.to_vec()
     }
@@ -508,7 +513,8 @@ impl TryIntoBool for U256 {
     }
 }
 
-/// Trait alias defined to implement `Packer` and `ToBool` traits for `RichField`
+/// Implement `Packer` and `ToBool` for `RichField`.
+///
 /// Fields that want to be packed with `Packer` have to implement
 /// this trait (trivial implementation). Currently implemented only
 /// for Goldilocks

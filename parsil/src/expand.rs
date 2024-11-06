@@ -133,11 +133,12 @@ impl<'a, C: ContextProvider> AstMutator for Expander<'a, C> {
                     }))
                 }
             }
-            Expr::UnaryOp { op, expr } => {
+            Expr::UnaryOp {
+                op: UnaryOperator::Plus,
+                expr,
+            } => {
                 // +E := E
-                if let UnaryOperator::Plus = op {
-                    *e = *expr.clone();
-                }
+                *e = *expr.clone();
             }
             _ => {}
         }

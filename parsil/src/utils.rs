@@ -125,9 +125,9 @@ pub fn parse_and_validate<C: ContextProvider>(
     let mut query = parser::parse(&settings, query)?;
     expand::expand(&settings, &mut query)?;
 
-    placeholders::validate(&settings, &query)?;
-    validate::validate(&settings, &query)?;
-    assembler::validate(&query, &settings)?;
+    placeholders::validate(settings, &query)?;
+    validate::validate(settings, &query)?;
+    assembler::validate(&query, settings)?;
     Ok(query)
 }
 
@@ -254,7 +254,7 @@ pub(crate) fn const_reduce(expr: &mut Expr) {
             }
         }
         Expr::UnaryOp { op, expr } => {
-            if let Some(new_e) = const_eval(expr).ok() {
+            if let Result::Ok(new_e) = const_eval(expr) {
                 match op {
                     UnaryOperator::Plus => *expr = Box::new(u256_to_expr(new_e)),
                     UnaryOperator::Not => {

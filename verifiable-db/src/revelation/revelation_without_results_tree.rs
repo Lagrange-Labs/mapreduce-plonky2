@@ -322,7 +322,7 @@ mod tests {
         original_tree_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestRevelationWithoutResultsTreeCircuit<'a> {
+    impl UserCircuit<F, D> for TestRevelationWithoutResultsTreeCircuit<'_> {
         // Circuit wires + query proof + original tree proof (IVC proof)
         type Wires = (
             RevelationWithoutResultsTreeWires<L, S, PH, PP>,

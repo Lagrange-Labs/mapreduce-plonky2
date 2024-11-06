@@ -64,13 +64,12 @@ impl TestContext {
                     column.multiplier,
                     hex::encode(cell.hash.0)
                 );
-                let inputs = CircuitInput::CellsTree(
-                    verifiable_db::cells_tree::CircuitInput::leaf_multiplier(
+                let inputs =
+                    CircuitInput::CellsTree(verifiable_db::cells_tree::CircuitInput::leaf(
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
-                    ),
-                );
+                    ));
                 self.b.bench("indexing::cell_tree::leaf", || {
                     api::generate_proof(self.params(), inputs)
                 })
@@ -90,7 +89,7 @@ impl TestContext {
                     .get_proof_exact(&ProofKey::Cell(proof_key))
                     .expect("UT guarantees proving in order");
                 let inputs = CircuitInput::CellsTree(
-                    verifiable_db::cells_tree::CircuitInput::partial_multiplier(
+                    verifiable_db::cells_tree::CircuitInput::partial(
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
@@ -145,7 +144,7 @@ impl TestContext {
                 );
 
                 let inputs = CircuitInput::CellsTree(
-                    verifiable_db::cells_tree::CircuitInput::full_multiplier(
+                    verifiable_db::cells_tree::CircuitInput::full(
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,

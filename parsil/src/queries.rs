@@ -13,7 +13,7 @@ use verifiable_db::query::{
 ///
 ///  * execution_epoch: the epoch (block number) at which the query is executed;
 ///  * query_epoch_bounds: the min. and max. block numbers onto which the query
-///  is executed.
+///    is executed.
 pub fn core_keys_for_index_tree(
     execution_epoch: Epoch,
     query_epoch_bounds: (NodeIdx, NodeIdx),
@@ -48,7 +48,7 @@ pub fn core_keys_for_index_tree(
 ///  * query: the zkQuery, as registered by the end user;
 ///  * settings: the Parsil settings used to parse & execute the query;
 ///  * bounds: the bounds on the prim. and sec. index for this execution of
-///  the query;
+///    the query;
 ///  * placeholders: the placeholders value for this execution of the query.
 pub fn core_keys_for_row_tree<C: ContextProvider>(
     query: &str,

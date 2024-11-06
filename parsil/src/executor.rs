@@ -186,7 +186,7 @@ struct PlaceholderInterpolator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
     placeholders: &'a Placeholders,
 }
-impl<'a, C: ContextProvider> AstMutator for PlaceholderInterpolator<'a, C> {
+impl<C: ContextProvider> AstMutator for PlaceholderInterpolator<'_, C> {
     type Error = anyhow::Error;
 
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
@@ -388,7 +388,7 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
         Ok(())
     }
 }
-impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
+impl<C: ContextProvider> AstMutator for KeyFetcher<'_, C> {
     type Error = anyhow::Error;
 
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
@@ -414,7 +414,7 @@ impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
                 let user_facing_name = &name.0[0].value;
 
                 // Fetch all the column declared in this table
-                let table = self.settings.context.fetch_table(&user_facing_name)?;
+                let table = self.settings.context.fetch_table(user_facing_name)?;
                 let table_columns = &table.columns;
 
                 // Extract the apparent table name (either the concrete one
@@ -537,7 +537,7 @@ impl<'a, C: ContextProvider> Executor<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
+impl<C: ContextProvider> AstMutator for Executor<'_, C> {
     type Error = anyhow::Error;
 
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
@@ -564,7 +564,7 @@ impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
                     let concrete_table_name = &name.0[0].value;
 
                     // Fetch all the column declared in this table
-                    let table = self.settings.context.fetch_table(&concrete_table_name)?;
+                    let table = self.settings.context.fetch_table(concrete_table_name)?;
                     let table_columns = &table.columns;
 
                     // Extract the apparent table name (either the concrete one

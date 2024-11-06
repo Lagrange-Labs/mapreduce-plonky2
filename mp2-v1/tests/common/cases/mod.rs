@@ -1,30 +1,13 @@
 //! Define test cases
 
-use alloy::primitives::{Address, U256};
 use contract::Contract;
-use indexing::{TableRowUpdate, TableRowValues};
-use log::debug;
-use mp2_common::eth::StorageSlot;
-use mp2_v1::{
-    indexing::{
-        block::BlockPrimaryIndex,
-        cell::Cell,
-        row::{RowTreeKey, ToNonce},
-        ColumnID,
-    },
-    values_extraction::{
+use mp2_v1::values_extraction::{
         identifier_for_mapping_key_column, identifier_for_mapping_value_column,
         identifier_single_var_column,
-    },
-};
-use serde::{Deserialize, Serialize};
+    };
 use table_source::{ContractExtractionArgs, TableSource};
 
-use super::{
-    rowtree::SecondaryIndexCell,
-    table::{CellsUpdate, Table},
-    TableInfo,
-};
+use super::table::Table;
 
 pub mod contract;
 pub mod indexing;

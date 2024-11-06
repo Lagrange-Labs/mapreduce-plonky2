@@ -212,7 +212,7 @@ mod tests {
         child_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestChildProvenSinglePathNodeCircuit<'a> {
+    impl UserCircuit<F, D> for TestChildProvenSinglePathNodeCircuit<'_> {
         type Wires = (ChildProvenSinglePathNodeWires<MAX_NUM_RESULTS>, Vec<Target>);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
@@ -228,7 +228,7 @@ mod tests {
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
             self.c.assign(pw, &wires.0);
-            pw.set_target_arr(&wires.1, &self.child_proof);
+            pw.set_target_arr(&wires.1, self.child_proof);
         }
     }
 

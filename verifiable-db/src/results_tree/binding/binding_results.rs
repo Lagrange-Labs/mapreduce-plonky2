@@ -123,7 +123,7 @@ mod tests {
         results_construction_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestBindingResultsCircuit<'a> {
+    impl UserCircuit<F, D> for TestBindingResultsCircuit<'_> {
         // Query proof + results construction proof
         type Wires = (Vec<Target>, Vec<Target>);
 

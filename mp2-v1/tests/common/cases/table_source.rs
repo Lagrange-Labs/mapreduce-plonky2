@@ -10,7 +10,7 @@ use alloy::{
     providers::Provider,
 };
 use anyhow::{bail, Result};
-use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
+use futures::{future::BoxFuture, FutureExt, StreamExt};
 use log::{debug, info};
 use mp2_common::{
     digest::TableDimension,

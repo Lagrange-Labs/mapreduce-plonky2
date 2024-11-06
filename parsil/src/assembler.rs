@@ -178,7 +178,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 Symbol::Column { payload: id, .. }
                 | Symbol::NamedExpression { payload: id, .. }
                 | Symbol::Expression(id) => {
-                    let (aggregation, output_item) = self.to_output_expression(id, false)?;
+                    let (aggregation, output_item) = Self::to_output_expression(id, false)?;
                     output_items.push(output_item);
                     aggregations.push(aggregation);
                 }
@@ -237,7 +237,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         match s {
             Symbol::Column { .. } => false,
             Symbol::Alias { to, .. } => self.is_symbol_static(to),
-            Symbol::NamedExpression { payload, .. } => self.is_wire_static(&payload),
+            Symbol::NamedExpression { payload, .. } => self.is_wire_static(payload),
             Symbol::Expression(_) => todo!(),
             Symbol::Wildcard => false,
         }
@@ -261,22 +261,22 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     }
 
     /// Return the depth of the given expression, in terms of [`BasicOperation`] it will take to encode.
-    fn depth(&self, e: &Expr) -> usize {
+    fn depth(e: &Expr) -> usize {
         match e {
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => 0,
-            Expr::BinaryOp { left, right, .. } => 1 + self.depth(left).max(self.depth(right)),
-            Expr::UnaryOp { expr, .. } => 1 + self.depth(expr),
-            Expr::Nested(e) => self.depth(e),
+            Expr::BinaryOp { left, right, .. } => 1 + Self::depth(left).max(Self::depth(right)),
+            Expr::UnaryOp { expr, .. } => 1 + Self::depth(expr),
+            Expr::Nested(e) => Self::depth(e),
             Expr::Value(_) => 0,
             _ => unreachable!(),
         }
     }
 
     /// Return whether the given `Symbol` encodes the secondary index column.
-    fn is_symbol_secondary_idx(&self, s: &Symbol<Wire>) -> bool {
+    fn is_symbol_secondary_idx(s: &Symbol<Wire>) -> bool {
         match s {
             Symbol::Column { kind, .. } => *kind == ColumnKind::SecondaryIndex,
-            Symbol::Alias { to, .. } => self.is_symbol_secondary_idx(to),
+            Symbol::Alias { to, .. } => Self::is_symbol_secondary_idx(to),
             _ => false,
         }
     }
@@ -286,10 +286,10 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     fn is_secondary_index(&self, expr: &Expr) -> Result<bool> {
         Ok(match expr {
             Expr::Identifier(s) => {
-                self.is_symbol_secondary_idx(&self.scopes.resolve_freestanding(s)?)
+                Self::is_symbol_secondary_idx(&self.scopes.resolve_freestanding(s)?)
             }
             Expr::CompoundIdentifier(c) => {
-                self.is_symbol_secondary_idx(&self.scopes.resolve_compound(c)?)
+                Self::is_symbol_secondary_idx(&self.scopes.resolve_compound(c)?)
             }
 
             _ => false,
@@ -317,11 +317,9 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                     Wire::BasicOperation(id) => {
                         // Safety check
                         assert_eq!(id, 0);
-                        QueryBoundSource::Operation(ops[0].clone())
+                        QueryBoundSource::Operation(ops[0])
                     }
-                    Wire::Constant(id) => {
-                        QueryBoundSource::Constant(self.constants.ops[id].clone())
-                    }
+                    Wire::Constant(id) => QueryBoundSource::Constant(self.constants.ops[id]),
                     Wire::PlaceHolder(ph) => QueryBoundSource::Placeholder(ph),
                     _ => unreachable!(),
                 },
@@ -361,7 +359,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 // SID can only be computed from constants and placeholders
                 && self.is_expr_static(right)?
                 // SID can only be defined by up to one level of BasicOperation
-                && self.depth(right) <= 1
+                && Self::depth(right) <= 1
             {
                 match op {
                     // $sid > x
@@ -371,7 +369,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         } else {
                             right
                         };
-                        let bound = Some(self.expression_to_boundary(&right)?);
+                        let bound = Some(self.expression_to_boundary(right)?);
 
                         if self.secondary_index_bounds.low.is_some() {
                             // impossible to say which is higher between two
@@ -388,7 +386,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         } else {
                             right
                         };
-                        let bound = Some(self.expression_to_boundary(&right)?);
+                        let bound = Some(self.expression_to_boundary(right)?);
 
                         if self.secondary_index_bounds.high.is_some() {
                             // impossible to say which is lower between two
@@ -475,14 +473,15 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     fn find_secondary_index_boundaries(&mut self, expr: &Expr) -> Result<()> {
         self.maybe_set_secondary_index_boundary(expr)?;
         match expr {
-            Expr::BinaryOp { left, op, right } => match op {
-                BinaryOperator::And => {
-                    self.find_secondary_index_boundaries(left)?;
-                    self.find_secondary_index_boundaries(right)?;
-                    Ok(())
-                }
-                _ => Ok(()),
-            },
+            Expr::BinaryOp {
+                left,
+                op: BinaryOperator::And,
+                right,
+            } => {
+                self.find_secondary_index_boundaries(left)?;
+                self.find_secondary_index_boundaries(right)?;
+                Ok(())
+            }
             Expr::Nested(e) => self.find_secondary_index_boundaries(e),
             _ => Ok(()),
         }
@@ -612,7 +611,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
             Symbol::NamedExpression { payload: id, .. } | Symbol::Expression(id) => match id {
                 Wire::BasicOperation(idx) => InputOperand::PreviousValue(*idx),
                 Wire::ColumnId(idx) => InputOperand::Column(*idx),
-                Wire::Constant(idx) => InputOperand::Constant(self.constants.get(*idx).clone()),
+                Wire::Constant(idx) => InputOperand::Constant(*self.constants.get(*idx)),
                 Wire::PlaceHolder(ph) => InputOperand::Placeholder(*ph),
                 Wire::Aggregation(_, _) => unreachable!("an aggregation can not be an operand"),
             },
@@ -622,7 +621,6 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
 
     /// Create an output and its associated aggregation function from a wire.
     fn to_output_expression(
-        &self,
         wire_id: Wire,
         in_aggregation: bool,
     ) -> Result<(AggregationOperation, OutputItem)> {
@@ -633,7 +631,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
             Wire::ColumnId(i) => Ok((AggregationOperation::IdOp, OutputItem::Column(i))),
             Wire::Aggregation(agg, sub_wire_id) => {
                 ensure!(!in_aggregation, "recursive aggregation detected");
-                Ok((agg, self.to_output_expression(*sub_wire_id, true)?.1))
+                Ok((agg, Self::to_output_expression(*sub_wire_id, true)?.1))
             }
             Wire::Constant(_) => bail!(ValidationError::UnsupportedFeature(
                 "top-level immediate values".into(),
@@ -691,7 +689,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         let pis = CircuitPis {
             result,
             column_ids: self.columns.clone(),
-            query_aggregations: root_scope.metadata().aggregation.iter().cloned().collect(),
+            query_aggregations: root_scope.metadata().aggregation.to_vec(),
             predication_operations: root_scope.metadata().predicates.ops.clone(),
             bounds: StaticQueryBounds::without_values(
                 self.secondary_index_bounds.low.clone(),
@@ -711,7 +709,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         let pis = CircuitPis {
             result,
             column_ids: self.columns.clone(),
-            query_aggregations: root_scope.metadata().aggregation.iter().cloned().collect(),
+            query_aggregations: root_scope.metadata().aggregation.to_vec(),
             predication_operations: root_scope.metadata().predicates.ops.clone(),
             bounds: QueryBounds::new(
                 placeholders,
@@ -833,7 +831,7 @@ impl<T: BuildableBounds> CircuitPis<T> {
     }
 }
 
-impl<'a, C: ContextProvider> AstVisitor for Assembler<'a, C> {
+impl<C: ContextProvider> AstVisitor for Assembler<'_, C> {
     type Error = anyhow::Error;
 
     fn pre_table_factor(&mut self, table_factor: &TableFactor) -> Result<(), Self::Error> {
@@ -863,7 +861,7 @@ impl<'a, C: ContextProvider> AstVisitor for Assembler<'a, C> {
                     let table_columns = self
                         .settings
                         .context
-                        .fetch_table(&concrete_table_name)?
+                        .fetch_table(concrete_table_name)?
                         .columns;
 
                     // Extract the apparent table name (either the concrete one
@@ -1051,5 +1049,5 @@ pub fn assemble_dynamic<C: ContextProvider>(
     let mut resolver = Assembler::new(settings);
     query.visit(&mut resolver)?;
 
-    resolver.to_dynamic_inputs(&placeholders)
+    resolver.to_dynamic_inputs(placeholders)
 }

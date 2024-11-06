@@ -24,7 +24,7 @@ macro_rules! ensure {
 pub struct SqlValidator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
 }
-impl<'a, C: ContextProvider> AstVisitor for SqlValidator<'a, C> {
+impl<C: ContextProvider> AstVisitor for SqlValidator<'_, C> {
     type Error = ValidationError;
 
     fn pre_unary_operator(&mut self, unary_operator: &UnaryOperator) -> Result<(), Self::Error> {

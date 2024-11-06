@@ -615,7 +615,7 @@ mod test {
             rlp::encode(&rlp).to_vec()
         }
     }
-    impl<'a, X> rlp::Encodable for RLPBlock<'a, X> {
+    impl<X> rlp::Encodable for RLPBlock<'_, X> {
         fn rlp_append(&self, s: &mut rlp::RlpStream) {
             s.begin_unbounded_list();
             s.append(&self.0.parent_hash);
