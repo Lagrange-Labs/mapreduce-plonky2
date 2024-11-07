@@ -8,16 +8,11 @@ use alloy::primitives::{Address, U256};
 use anyhow::{bail, Context, Result};
 use envconfig::Envconfig;
 use mp2_test::cells_tree::CellTree;
-use mp2_v1::indexing::{
-    block::{BlockPrimaryIndex, BlockTree},
-    row::RowTreeKey,
-};
+use mp2_v1::indexing::{block::BlockPrimaryIndex, row::RowTreeKey};
 use ryhope::tree::TreeTopology;
 use serde::{Deserialize, Serialize};
 
 type CellTreeKey = <CellTree as TreeTopology>::Key;
-type IndexTreeKey = <BlockTree as TreeTopology>::Key;
-
 type ContractKey = (Address, BlockPrimaryIndex);
 
 /// This is the identifier we store cells tree proof under in storage. This identifier
