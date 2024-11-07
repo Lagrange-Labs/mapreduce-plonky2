@@ -36,7 +36,8 @@ use parsil::{
     assembler::DynamicCircuitPis,
     parse_and_validate,
     symbols::{ContextProvider, ZkTable},
-    ParsilSettings, PlaceholderSettings,
+    utils::ParsilSettingsBuilder,
+    PlaceholderSettings,
 };
 use test_log::test;
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
@@ -212,10 +213,13 @@ async fn test_andrus_query() -> Result<()> {
     let query = "select AVG(field1) from primitive1_rows WHERE block_number >= $MIN_BLOCK and block_number <= $MAX_BLOCK";
     let zktable_str = r#"{"user_name":"primitive1","name":"primitive1_rows","columns":[{"name":"block_number","kind":"PrimaryIndex","id":15542555334667826467},{"name":"field1","kind":"SecondaryIndex","id":10143644063834010325},{"name":"field2","kind":"Standard","id":14738928498191419754},{"name":"field3","kind":"Standard","id":2724380514203373020},{"name":"field4","kind":"Standard","id":1084192582840933701}]}"#;
     let table: ZkTable = serde_json::from_str(zktable_str)?;
-    let settings = ParsilSettings {
-        context: T(table),
-        placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
-    };
+    let settings = ParsilSettingsBuilder::default()
+        .context(T(table))
+        .placeholders(PlaceholderSettings::with_freestanding(
+            MAX_NUM_PLACEHOLDERS - 2,
+        ))
+        .build()
+        .unwrap();
 
     let parsed = parse_and_validate(query, &settings)?;
     let computed_pis = parsil::assembler::assemble_dynamic(&parsed, &settings, &ph)?;
@@ -229,7 +233,7 @@ async fn test_andrus_query() -> Result<()> {
     info!("Building querying params");
     ctx.build_params(ParamsType::Query).unwrap();
 
-    let input = RevelationCircuitInput::new_revelation_no_results_tree(
+    let input = RevelationCircuitInput::new_revelation_aggregated(
         root_query_proof,
         ivc_proof,
         &computed_pis.bounds,

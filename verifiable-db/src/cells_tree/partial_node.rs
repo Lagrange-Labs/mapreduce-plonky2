@@ -107,7 +107,7 @@ mod tests {
         child_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPartialNodeCircuit<'a> {
+    impl UserCircuit<F, D> for TestPartialNodeCircuit<'_> {
         // Partial node wires + child public inputs
         type Wires = (PartialNodeWires, Vec<Target>);
 

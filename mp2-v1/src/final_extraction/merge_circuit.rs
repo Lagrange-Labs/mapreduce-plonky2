@@ -9,7 +9,7 @@ use mp2_common::{
     digest::{SplitDigestTarget, TableDimension, TableDimensionWire},
     serialization::{deserialize, serialize},
     types::CBuilder,
-    utils::{SliceConnector, ToTargets},
+    utils::ToTargets,
     D, F,
 };
 use plonky2::{
@@ -19,7 +19,6 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use verifiable_db::extraction::ExtractionPI;

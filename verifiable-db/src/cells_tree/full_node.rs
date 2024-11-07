@@ -108,7 +108,7 @@ mod tests {
         child_pis: &'a [Vec<F>; 2],
     }
 
-    impl<'a> UserCircuit<F, D> for TestFullNodeCircuit<'a> {
+    impl UserCircuit<F, D> for TestFullNodeCircuit<'_> {
         // Full node wires + child public inputs
         type Wires = (FullNodeWires, [Vec<Target>; 2]);
 

@@ -29,7 +29,7 @@ use mp2_common::{
 };
 use plonky2::{
     field::types::PrimeField64,
-    hash::hash_types::{HashOut, HashOutTarget},
+    hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -52,8 +52,8 @@ use crate::{
     ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
         aggregation::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
-        api::{CircuitInput as QueryCircuitInput, Parameters},
-        computational_hash_ids::{AggregationOperation, ColumnIDs, Identifiers, ResultIdentifier},
+        api::CircuitInput as QueryCircuitInput,
+        computational_hash_ids::{AggregationOperation, ColumnIDs, ResultIdentifier},
         merkle_path::{MerklePathGadget, MerklePathTargetInputs},
         public_inputs::PublicInputs as QueryProofPublicInputs,
         universal_circuit::{
@@ -217,8 +217,8 @@ pub struct RevelationCircuit<
         deserialize_with = "deserialize_long_array"
     )]
     results: [U256; S * L],
-    limit: u64,
-    offset: u64,
+    limit: u32,
+    offset: u32,
     /// Boolean flag specifying whether DISTINCT keyword must be applied to results
     distinct: bool,
     /// Input values employed by the `CheckPlaceholderGadget`
@@ -292,8 +292,8 @@ where
         index_ids: [u64; 2],
         item_ids: &[F],
         results: [Vec<U256>; L],
-        limit: u64,
-        offset: u64,
+        limit: u32,
+        offset: u32,
         distinct: bool,
         placeholder_inputs: CheckPlaceholderGadget<PH, PP>,
     ) -> Result<Self> {
@@ -837,7 +837,7 @@ mod tests {
         group_hashing::map_to_curve_point,
         types::{HashOutput, CURVE_TARGET_LEN},
         u256::is_less_than_or_equal_to_u256_arr,
-        utils::{Fieldable, ToFields},
+        utils::ToFields,
         C, D, F,
     };
     use mp2_test::{
@@ -953,7 +953,7 @@ mod tests {
         const PP: usize = 30;
         let ops = random_aggregation_operations::<S>();
         let mut row_pis = random_aggregation_public_inputs(&ops);
-        let mut rng = &mut thread_rng();
+        let rng = &mut thread_rng();
         let mut original_tree_pis = (0..NUM_PREPROCESSING_IO)
             .map(|_| rng.gen())
             .collect::<Vec<u32>>()

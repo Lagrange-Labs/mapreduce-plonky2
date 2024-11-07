@@ -36,23 +36,10 @@ pub enum CircuitInput {
 }
 
 impl CircuitInput {
-    /// Create a circuit input for proving a leaf node.
-    /// It is not considered a multiplier column. Please use `leaf_multiplier` for registering a
-    /// multiplier column.
-    pub fn leaf(identifier: u64, value: U256) -> Self {
-        CircuitInput::Leaf(
-            Cell {
-                identifier: F::from_canonical_u64(identifier),
-                value,
-                is_multiplier: false,
-            }
-            .into(),
-        )
-    }
     /// Create a circuit input for proving a leaf node whose value is considered as a multiplier
     /// depending on the boolean value.
     /// i.e. it means it's one of the repeated value amongst all the rows
-    pub fn leaf_multiplier(identifier: u64, value: U256, is_multiplier: bool) -> Self {
+    pub fn leaf(identifier: u64, value: U256, is_multiplier: bool) -> Self {
         CircuitInput::Leaf(
             Cell {
                 identifier: F::from_canonical_u64(identifier),
@@ -64,19 +51,7 @@ impl CircuitInput {
     }
 
     /// Create a circuit input for proving a full node of 2 children.
-    /// It is not considered a multiplier column. Please use `full_multiplier` for registering a
-    /// multiplier column.
-    pub fn full(identifier: u64, value: U256, child_proofs: [Vec<u8>; 2]) -> Self {
-        CircuitInput::FullNode(new_child_input(
-            F::from_canonical_u64(identifier),
-            value,
-            false,
-            child_proofs.to_vec(),
-        ))
-    }
-
-    /// Create a circuit input for proving a full node of 2 children.
-    pub fn full_multiplier(
+    pub fn full(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
@@ -90,17 +65,7 @@ impl CircuitInput {
         ))
     }
     /// Create a circuit input for proving a partial node of 1 child.
-    /// It is not considered a multiplier column. Please use `partial_multiplier` for registering a
-    /// multiplier column.
-    pub fn partial(identifier: u64, value: U256, child_proof: Vec<u8>) -> Self {
-        CircuitInput::PartialNode(new_child_input(
-            F::from_canonical_u64(identifier),
-            value,
-            false,
-            vec![child_proof],
-        ))
-    }
-    pub fn partial_multiplier(
+    pub fn partial(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
@@ -288,7 +253,7 @@ mod tests {
         let id = cell.identifier;
         let value = cell.value;
         let values_digests = cell.split_values_digest();
-        let input = CircuitInput::leaf(id.to_canonical_u64(), value);
+        let input = CircuitInput::leaf(id.to_canonical_u64(), value, false);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -383,7 +348,7 @@ mod tests {
         let id = cell.identifier;
         let value = cell.value;
         let values_digests = cell.split_values_digest();
-        let input = CircuitInput::full(id.to_canonical_u64(), value, child_proofs);
+        let input = CircuitInput::full(id.to_canonical_u64(), value, false, child_proofs);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -456,7 +421,7 @@ mod tests {
         let id = cell.identifier;
         let value = cell.value;
         let values_digests = cell.split_values_digest();
-        let input = CircuitInput::partial(id.to_canonical_u64(), value, child_proof);
+        let input = CircuitInput::partial(id.to_canonical_u64(), value, false, child_proof);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
