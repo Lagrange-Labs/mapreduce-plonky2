@@ -12,6 +12,7 @@ use super::TestContext;
 
 impl TestContext {
     /// Generate the Values Extraction (C.2) proof for single variables.
+    #[allow(dead_code)]
     pub(crate) async fn prove_length_extraction(
         &self,
         contract_address: &Address,
