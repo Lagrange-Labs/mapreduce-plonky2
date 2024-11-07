@@ -1,4 +1,4 @@
-use super::row::{Row, RowWire};
+use super::secondary_index_cell::{SecondaryIndexCell, SecondaryIndexCellWire};
 use crate::cells_tree;
 use derive_more::{From, Into};
 use mp2_common::{
@@ -23,10 +23,10 @@ use super::public_inputs::PublicInputs;
 // easily down the line with less recursion. Best to provide code which is easily
 // amenable to a different arity rather than hardcoding binary tree only
 #[derive(Clone, Debug, From, Into)]
-pub struct FullNodeCircuit(Row);
+pub struct FullNodeCircuit(SecondaryIndexCell);
 
 #[derive(Clone, Serialize, Deserialize, From, Into)]
-pub(crate) struct FullNodeWires(RowWire);
+pub(crate) struct FullNodeWires(SecondaryIndexCellWire);
 
 impl FullNodeCircuit {
     pub(crate) fn build(
@@ -38,10 +38,10 @@ impl FullNodeCircuit {
         let min_child = PublicInputs::from_slice(left_pi);
         let max_child = PublicInputs::from_slice(right_pi);
         let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
-        let row = RowWire::new(b);
-        let id = row.identifier();
-        let value = row.value();
-        let digest = row.digest(b, &cells_pi);
+        let secondary_index_cell = SecondaryIndexCellWire::new(b);
+        let id = secondary_index_cell.identifier();
+        let value = secondary_index_cell.value();
+        let digest = secondary_index_cell.digest(b, &cells_pi);
 
         // Check multiplier_vd and multiplier_counter are the same as children proofs.
         // assert multiplier_vd == p1.multiplier_vd == p2.multiplier_vd
@@ -89,7 +89,7 @@ impl FullNodeCircuit {
             &digest.multiplier_cnt,
         )
         .register(b);
-        FullNodeWires(row)
+        FullNodeWires(secondary_index_cell)
     }
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &FullNodeWires) {
         self.0.assign(pw, &wires.0);
@@ -187,7 +187,7 @@ pub(crate) mod test {
     }
 
     fn test_row_tree_full_circuit(is_multiplier: bool, cells_multiplier: bool) {
-        let mut row = Row::sample(is_multiplier);
+        let mut row = SecondaryIndexCell::sample(is_multiplier);
         row.cell.value = U256::from(18);
         let id = row.cell.identifier;
         let value = row.cell.value;

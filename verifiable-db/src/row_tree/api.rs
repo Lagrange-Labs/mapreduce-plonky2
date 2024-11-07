@@ -14,7 +14,7 @@ use super::{
     full_node::{self, FullNodeCircuit},
     leaf::{self, LeafCircuit},
     partial_node::{self, PartialNodeCircuit},
-    row::Row,
+    secondary_index_cell::SecondaryIndexCell,
     PublicInputs,
 };
 
@@ -189,9 +189,9 @@ impl CircuitInput {
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
         let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
-        let row = Row::new(cell, row_unique_data.into());
+        let secondary_index_cell = SecondaryIndexCell::new(cell, row_unique_data.into());
         Ok(CircuitInput::Leaf {
-            witness: row.into(),
+            witness: secondary_index_cell.into(),
             cells_proof,
         })
     }
@@ -206,9 +206,9 @@ impl CircuitInput {
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
         let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
-        let row = Row::new(cell, row_unique_data.into());
+        let secondary_index_cell = SecondaryIndexCell::new(cell, row_unique_data.into());
         Ok(CircuitInput::Full {
-            witness: row.into(),
+            witness: secondary_index_cell.into(),
             left_proof,
             right_proof,
             cells_proof,
@@ -224,8 +224,8 @@ impl CircuitInput {
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
         let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
-        let row = Row::new(cell, row_unique_data.into());
-        let witness = PartialNodeCircuit::new(row, is_child_left);
+        let secondary_index_cell = SecondaryIndexCell::new(cell, row_unique_data.into());
+        let witness = PartialNodeCircuit::new(secondary_index_cell, is_child_left);
         Ok(CircuitInput::Partial {
             witness,
             child_proof,
@@ -271,10 +271,10 @@ mod test {
         // to save on test time
         cells_proof: ProofWithPublicInputs<F, C, D>,
         cells_vk: VerifierOnlyCircuitData<C, D>,
-        leaf1: Row,
-        leaf2: Row,
-        full: Row,
-        partial: Row,
+        leaf1: SecondaryIndexCell,
+        leaf2: SecondaryIndexCell,
+        full: SecondaryIndexCell,
+        partial: SecondaryIndexCell,
     }
 
     impl TestParams {
@@ -303,10 +303,16 @@ mod test {
                 params,
                 cells_proof: cells_proof[0].clone(),
                 cells_vk,
-                leaf1: Row::new(Cell::new(identifier, v1, false), HashOut::rand()),
-                leaf2: Row::new(Cell::new(identifier, v2, false), HashOut::rand()),
-                full: Row::new(Cell::new(identifier, v_full, false), HashOut::rand()),
-                partial: Row::new(Cell::new(identifier, v_partial, false), HashOut::rand()),
+                leaf1: SecondaryIndexCell::new(Cell::new(identifier, v1, false), HashOut::rand()),
+                leaf2: SecondaryIndexCell::new(Cell::new(identifier, v2, false), HashOut::rand()),
+                full: SecondaryIndexCell::new(
+                    Cell::new(identifier, v_full, false),
+                    HashOut::rand(),
+                ),
+                partial: SecondaryIndexCell::new(
+                    Cell::new(identifier, v_partial, false),
+                    HashOut::rand(),
+                ),
             })
         }
 
@@ -341,11 +347,11 @@ mod test {
         is_left: bool,
         child_proof_buff: Vec<u8>,
     ) -> Result<Vec<u8>> {
-        let row = &p.partial;
-        let id = row.cell.identifier;
-        let value = row.cell.value;
-        let row_unique_data = row.row_unique_data.into();
-        let row_digest = row.digest(&p.cells_pi());
+        let secondary_index_cell = &p.partial;
+        let id = secondary_index_cell.cell.identifier;
+        let value = secondary_index_cell.cell.value;
+        let row_unique_data = secondary_index_cell.row_unique_data.into();
+        let row_digest = secondary_index_cell.digest(&p.cells_pi());
 
         let child_proof = ProofWithVK::deserialize(&child_proof_buff)?;
         let child_pi = PublicInputs::from_slice(&child_proof.proof.public_inputs);
@@ -417,11 +423,11 @@ mod test {
     }
 
     fn generate_full_proof(p: &TestParams, child_proof: [Vec<u8>; 2]) -> Result<Vec<u8>> {
-        let row = &p.full;
-        let id = row.cell.identifier;
-        let value = row.cell.value;
-        let row_unique_data = row.row_unique_data.into();
-        let row_digest = row.digest(&p.cells_pi());
+        let secondary_index_cell = &p.full;
+        let id = secondary_index_cell.cell.identifier;
+        let value = secondary_index_cell.cell.value;
+        let row_unique_data = secondary_index_cell.row_unique_data.into();
+        let row_digest = secondary_index_cell.digest(&p.cells_pi());
 
         let input = CircuitInput::full(
             id.to_canonical_u64(),
@@ -480,7 +486,7 @@ mod test {
         Ok(proof)
     }
 
-    fn generate_leaf_proof(p: &TestParams, row: &Row) -> Result<Vec<u8>> {
+    fn generate_leaf_proof(p: &TestParams, row: &SecondaryIndexCell) -> Result<Vec<u8>> {
         let id = row.cell.identifier;
         let value = row.cell.value;
         let row_unique_data = row.row_unique_data.into();
