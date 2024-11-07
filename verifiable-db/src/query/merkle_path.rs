@@ -130,6 +130,26 @@ pub struct NeighborInfoTarget {
     pub(crate) hash: HashOutTarget,
 }
 
+impl NeighborInfoTarget {
+    pub(crate) fn new_dummy_predecessor(b: &mut CircuitBuilder<F, D>) -> Self {
+        Self {
+            is_found: b._false(),
+            is_in_path: b._true(), // the circuit still looks at the predecessor in the path
+            value: b.zero_u256(),
+            hash: b.constant_hash(*empty_poseidon_hash()),
+        }
+    }
+
+    pub(crate) fn new_dummy_successor(b: &mut CircuitBuilder<F, D>) -> Self {
+        Self {
+            is_found: b._false(),
+            is_in_path: b._true(), // the circuit still looks at the predecessor in the path
+            value: b.constant_u256(U256::MAX),
+            hash: b.constant_hash(*empty_poseidon_hash()),
+        }
+    }
+}
+
 impl ToTargets for NeighborInfoTarget {
     fn to_targets(&self) -> Vec<Target> {
         once(self.is_found.target)
@@ -811,7 +831,7 @@ pub(crate) mod tests {
         pub(crate) fn new_dummy_successor() -> Self {
             Self {
                 is_found: false,
-                is_in_path: true, // the circuit still looks at the predecessor in the path
+                is_in_path: true, // the circuit still looks at the successor in the path
                 value: U256::MAX,
                 hash: *empty_poseidon_hash(),
             }
@@ -919,12 +939,12 @@ pub(crate) mod tests {
         )
     }
 
-    // Build the following Merkle-tree to be employed in tests, using
-    // the `index_id` provided as input to compute the hash of the nodes
-    //              A
-    //          B       C
-    //      D               G
-    //   E      F
+    /// Build the following Merkle-tree to be employed in tests, using
+    /// the `index_id` provided as input to compute the hash of the nodes
+    ///              A
+    ///          B       C
+    ///      D               G
+    ///   E      F
     pub(crate) fn generate_test_tree(
         index_id: F,
         value_range: Option<(U256, U256)>,
