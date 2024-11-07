@@ -58,11 +58,16 @@ impl<const N: usize> RlpList<N> {
         }
     }
 }
-pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, const N: usize>(
+pub fn decode_compact_encoding<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    const N: usize,
+    const KEY_LEN: usize,
+>(
     b: &mut CircuitBuilder<F, D>,
     input: &Array<Target, N>,
     key_header: &RlpHeader,
-) -> (VectorWire<Target, MAX_KEY_NIBBLE_LEN>, BoolTarget) {
+) -> (VectorWire<Target, KEY_LEN>, BoolTarget) {
     let zero = b.zero();
     let two = b.two();
     let first_byte = input.value_at(b, key_header.offset);
@@ -71,7 +76,7 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     let mut prev_nibbles = (least_bits, most_bits);
 
     let mut cur_nibbles: (Target, Target);
-    let mut nibbles: [Target; MAX_KEY_NIBBLE_LEN] = [b.zero(); MAX_KEY_NIBBLE_LEN];
+    let mut nibbles: [Target; KEY_LEN] = [b.zero(); KEY_LEN];
 
     let first_nibble = prev_nibbles.0;
     let first_nibble_as_bits = num_to_bits(b, 4, first_nibble);
@@ -92,7 +97,10 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     // during the first iteration of this loop.
     let one = b.one();
     let mut i_offset = key_header.offset;
-    for i in 0..MAX_ENC_KEY_LEN - 1 {
+
+    // We calculate how many times to run the foor loop, this is only depends on
+    // KEY_LEN, since we skip one byte it is just KEY_LEN / 2.
+    for i in 0..KEY_LEN / 2 {
         i_offset = b.add(i_offset, one);
         // look now at the encoded path
         let x = input.value_at(b, i_offset);
@@ -355,7 +363,7 @@ mod tests {
     use crate::array::Array;
     use crate::rlp::{
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, MAX_ENC_KEY_LEN,
-        MAX_LEN_BYTES,
+        MAX_KEY_NIBBLE_LEN, MAX_LEN_BYTES,
     };
     use crate::utils::{keccak256, less_than_or_equal_to, IntTargetWriter};
     use crate::{C, D, F};
@@ -792,7 +800,11 @@ mod tests {
                 len: builder.constant(F::from_canonical_usize(tc.key_len)),
                 data_type: builder.constant(F::from_canonical_usize(0)),
             };
-            let (nibbles, cond) = decode_compact_encoding(&mut builder, &wire1, &key_header);
+            let (nibbles, cond) = decode_compact_encoding::<_, _, _, MAX_KEY_NIBBLE_LEN>(
+                &mut builder,
+                &wire1,
+                &key_header,
+            );
             builder.assert_bool(cond);
             let exp_nib_len = builder.constant(F::from_canonical_usize(tc.expected.len()));
             builder.connect(nibbles.real_len, exp_nib_len);

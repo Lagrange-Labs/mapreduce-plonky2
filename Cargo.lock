@@ -3991,6 +3991,7 @@ dependencies = [
  "recursion_framework",
  "ryhope",
  "serde",
+ "tokio",
 ]
 
 [[package]]
