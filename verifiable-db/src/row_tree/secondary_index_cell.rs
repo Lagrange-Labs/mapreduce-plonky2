@@ -63,13 +63,13 @@ pub(crate) struct RowDigestTarget {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Constructor)]
-pub(crate) struct Row {
+pub(crate) struct SecondaryIndexCell {
     pub(crate) cell: Cell,
     pub(crate) row_unique_data: HashOut<F>,
 }
 
-impl Row {
-    pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &RowWire) {
+impl SecondaryIndexCell {
+    pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &SecondaryIndexCellWire) {
         self.cell.assign(pw, &wires.cell);
         pw.set_hash_target(wires.row_unique_data, self.row_unique_data);
     }
@@ -122,13 +122,13 @@ impl Row {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct RowWire {
+pub(crate) struct SecondaryIndexCellWire {
     pub(crate) cell: CellWire,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) row_unique_data: HashOutTarget,
 }
 
-impl RowWire {
+impl SecondaryIndexCellWire {
     pub(crate) fn new(b: &mut CBuilder) -> Self {
         Self {
             cell: CellWire::new(b),
@@ -195,37 +195,37 @@ pub(crate) mod tests {
     use plonky2::field::types::Sample;
     use rand::{thread_rng, Rng};
 
-    impl Row {
+    impl SecondaryIndexCell {
         pub(crate) fn sample(is_multiplier: bool) -> Self {
             let cell = Cell::sample(is_multiplier);
             let row_unique_data = HashOut::rand();
 
-            Row::new(cell, row_unique_data)
+            SecondaryIndexCell::new(cell, row_unique_data)
         }
     }
 
     #[derive(Clone, Debug)]
     struct TestRowCircuit<'a> {
-        row: &'a Row,
+        row: &'a SecondaryIndexCell,
         cells_pi: &'a [F],
     }
 
     impl<'a> UserCircuit<F, D> for TestRowCircuit<'a> {
         // Row wire + cells PI
-        type Wires = (RowWire, Vec<Target>);
+        type Wires = (SecondaryIndexCellWire, Vec<Target>);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let row = RowWire::new(b);
+            let secondary_index_cell = SecondaryIndexCellWire::new(b);
             let cells_proof = b.add_virtual_targets(CellsPublicInputs::<Target>::total_len());
             let cells_pi = CellsPublicInputs::from_slice(&cells_proof);
 
-            let digest = row.digest(b, &cells_pi);
+            let digest = secondary_index_cell.digest(b, &cells_pi);
 
             b.register_public_inputs(&digest.multiplier_cnt.to_targets());
             b.register_public_inputs(&digest.individual_vd.to_targets());
             b.register_public_inputs(&digest.multiplier_vd.to_targets());
 
-            (row, cells_proof)
+            (secondary_index_cell, cells_proof)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -239,10 +239,13 @@ pub(crate) mod tests {
         let rng = &mut thread_rng();
 
         let cells_pi = &CellsPublicInputs::sample(rng.gen());
-        let row = &Row::sample(rng.gen());
-        let exp_row_digest = row.digest(&CellsPublicInputs::from_slice(cells_pi));
+        let secondary_index_cell = &SecondaryIndexCell::sample(rng.gen());
+        let exp_row_digest = secondary_index_cell.digest(&CellsPublicInputs::from_slice(cells_pi));
 
-        let test_circuit = TestRowCircuit { row, cells_pi };
+        let test_circuit = TestRowCircuit {
+            row: secondary_index_cell,
+            cells_pi,
+        };
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let row_digest = RowDigest::from_fields(&proof.public_inputs);

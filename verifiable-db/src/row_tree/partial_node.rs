@@ -1,4 +1,4 @@
-use super::row::{Row, RowWire};
+use super::secondary_index_cell::{SecondaryIndexCell, SecondaryIndexCellWire};
 use crate::cells_tree;
 use mp2_common::{
     default_config,
@@ -33,19 +33,19 @@ use super::public_inputs::PublicInputs;
 
 #[derive(Clone, Debug)]
 pub struct PartialNodeCircuit {
-    pub(crate) row: Row,
+    pub(crate) row: SecondaryIndexCell,
     pub(crate) is_child_at_left: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PartialNodeWires {
-    row: RowWire,
+    row: SecondaryIndexCellWire,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     is_child_at_left: BoolTarget,
 }
 
 impl PartialNodeCircuit {
-    pub(crate) fn new(row: Row, is_child_at_left: bool) -> Self {
+    pub(crate) fn new(row: SecondaryIndexCell, is_child_at_left: bool) -> Self {
         Self {
             row,
             is_child_at_left,
@@ -58,10 +58,10 @@ impl PartialNodeCircuit {
     ) -> PartialNodeWires {
         let child_pi = PublicInputs::from_slice(child_pi);
         let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
-        let row = RowWire::new(b);
-        let id = row.identifier();
-        let value = row.value();
-        let digest = row.digest(b, &cells_pi);
+        let secondary_index_cell = SecondaryIndexCellWire::new(b);
+        let id = secondary_index_cell.identifier();
+        let value = secondary_index_cell.value();
+        let digest = secondary_index_cell.digest(b, &cells_pi);
 
         // Check multiplier_vd and multiplier_counter are the same as children proof.
         // assert multiplier_vd == p.multiplier_vd
@@ -118,7 +118,7 @@ impl PartialNodeCircuit {
         )
         .register(b);
         PartialNodeWires {
-            row,
+            row: secondary_index_cell,
             is_child_at_left,
         }
     }
@@ -273,7 +273,7 @@ pub mod test {
     }
 
     fn partial_node_circuit(child_at_left: bool, is_multiplier: bool, is_cell_multiplier: bool) {
-        let mut row = Row::sample(is_multiplier);
+        let mut row = SecondaryIndexCell::sample(is_multiplier);
         row.cell.value = U256::from(18);
         let id = row.cell.identifier;
         let value = row.cell.value;
