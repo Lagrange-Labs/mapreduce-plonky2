@@ -30,11 +30,12 @@ pub enum TableDimension {
     /// uint256 or a bytes32 will only generate a single row per block.
     Single,
     /// Set to Compound for types that
-    /// * have multiple entries (like an mapping, unlike a single uin256 for example)
-    /// * don't need or have an associated length slot to combine with
-    /// It happens contracts don't have a length slot associated with the mapping
-    /// like ERC20 and thus there is no proof circuits have looked at _all_ the entries
-    /// due to limitations on EVM (there is no mapping.len()).
+    /// 1. have multiple entries (like an mapping, unlike a single uin256 for example)
+    /// 2. don't need or have an associated length slot to combine with
+    ///
+    /// It happens contracts don't have a length slot associated with the mapping like ERC20 and
+    /// thus there is no proof circuits have looked at _all_ the entries due to limitations on EVM
+    /// (there is no mapping.len()).
     Compound,
 }
 
@@ -183,18 +184,12 @@ mod test {
     use crate::{types::CBuilder, utils::FromFields, C, D, F};
 
     use super::{
-        Digest, DigestTarget, SplitDigest, SplitDigestPoint, SplitDigestTarget, TableDimension,
+        Digest, DigestTarget, SplitDigestPoint, SplitDigestTarget, TableDimension,
         TableDimensionWire,
     };
     use crate::utils::TryIntoBool;
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{
-        field::types::Sample,
-        iop::{
-            target::BoolTarget,
-            witness::{PartialWitness, WitnessWrite},
-        },
-    };
+    use plonky2::{field::types::Sample, iop::witness::PartialWitness};
     use plonky2_ecgfp5::{
         curve::curve::Point,
         gadgets::curve::{CircuitBuilderEcGFp5, PartialWitnessCurve},

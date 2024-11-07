@@ -87,7 +87,7 @@ impl TestContext {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(wk)) = workplan.next() {
             let k = wk.k();
-            let (context, row) = t.fetch_with_context(&k).await;
+            let (context, row) = t.fetch_with_context(k).await;
             let id = row.secondary_index_column;
             // Sec. index value
             let value = row.secondary_index_value();
@@ -147,7 +147,7 @@ impl TestContext {
                     hex::encode(row.cell_root_hash.unwrap().0)
                 );
                 let inputs = CircuitInput::RowsTree(
-                    verifiable_db::row_tree::CircuitInput::leaf_multiplier(
+                    verifiable_db::row_tree::CircuitInput::leaf(
                         id,
                         value,
                         multiplier,
@@ -186,7 +186,7 @@ impl TestContext {
                     .expect("UT guarantees proving in order");
 
                 let inputs = CircuitInput::RowsTree(
-                    verifiable_db::row_tree::CircuitInput::partial_multiplier(
+                    verifiable_db::row_tree::CircuitInput::partial(
                         id,
                         value,
                         multiplier,
@@ -233,7 +233,7 @@ impl TestContext {
                     .get_proof_exact(&ProofKey::Row(right_proof_key.clone()))
                     .expect("UT guarantees proving in order");
                 let inputs = CircuitInput::RowsTree(
-                    verifiable_db::row_tree::CircuitInput::full_multiplier(
+                    verifiable_db::row_tree::CircuitInput::full(
                         id,
                         value,
                         multiplier,

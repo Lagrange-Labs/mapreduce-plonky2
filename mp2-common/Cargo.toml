@@ -26,12 +26,8 @@ sha3.workspace = true
 ethereum-types = "0.14.1"
 
 [dev-dependencies]
-csv.workspace = true
 hex.workspace = true
 rand.workspace = true
-rmp-serde.workspace = true
-serde_json.workspace = true
-serial_test.workspace = true
 tokio.workspace = true
 ethers.workspace = true
 

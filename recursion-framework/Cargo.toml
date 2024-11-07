@@ -7,8 +7,6 @@ edition = "2021"
 anyhow.workspace = true
 log.workspace = true
 plonky2.workspace = true
-plonky2_crypto.workspace = true
-plonky2_ecgfp5.workspace = true
 serde.workspace = true
 
 mp2_common = { path = "../mp2-common" }

@@ -11,7 +11,7 @@ use alloy::{
     providers::Provider,
 };
 use anyhow::{bail, Result};
-use futures::{future::BoxFuture, FutureExt};
+use futures::{future::BoxFuture, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{

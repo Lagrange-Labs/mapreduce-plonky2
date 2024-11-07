@@ -184,22 +184,6 @@ impl CircuitInput {
     pub fn leaf(
         identifier: u64,
         value: U256,
-        mpt_metadata: HashOut<F>,
-        row_unique_data: HashOut<F>,
-        cells_proof: Vec<u8>,
-    ) -> Result<Self> {
-        Self::leaf_multiplier(
-            identifier,
-            value,
-            false,
-            mpt_metadata,
-            row_unique_data,
-            cells_proof,
-        )
-    }
-    pub fn leaf_multiplier(
-        identifier: u64,
-        value: U256,
         is_multiplier: bool,
         mpt_metadata: HashOut<F>,
         row_unique_data: HashOut<F>,
@@ -219,26 +203,6 @@ impl CircuitInput {
     }
 
     pub fn full(
-        identifier: u64,
-        value: U256,
-        mpt_metadata: HashOut<F>,
-        row_unique_data: HashOut<F>,
-        left_proof: Vec<u8>,
-        right_proof: Vec<u8>,
-        cells_proof: Vec<u8>,
-    ) -> Result<Self> {
-        Self::full_multiplier(
-            identifier,
-            value,
-            false,
-            mpt_metadata,
-            row_unique_data,
-            left_proof,
-            right_proof,
-            cells_proof,
-        )
-    }
-    pub fn full_multiplier(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
@@ -263,26 +227,6 @@ impl CircuitInput {
         })
     }
     pub fn partial(
-        identifier: u64,
-        value: U256,
-        is_child_left: bool,
-        mpt_metadata: HashOut<F>,
-        row_unique_data: HashOut<F>,
-        child_proof: Vec<u8>,
-        cells_proof: Vec<u8>,
-    ) -> Result<Self> {
-        Self::partial_multiplier(
-            identifier,
-            value,
-            false,
-            is_child_left,
-            mpt_metadata,
-            row_unique_data,
-            child_proof,
-            cells_proof,
-        )
-    }
-    pub fn partial_multiplier(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
@@ -443,6 +387,7 @@ mod test {
         let input = CircuitInput::partial(
             id.to_canonical_u64(),
             value,
+            false,
             is_left,
             mpt_metadata,
             row_unique_data,
@@ -512,6 +457,7 @@ mod test {
         let input = CircuitInput::full(
             id.to_canonical_u64(),
             value,
+            false,
             mpt_metadata,
             row_unique_data,
             child_proof[0].to_vec(),
@@ -574,6 +520,7 @@ mod test {
         let input = CircuitInput::leaf(
             id.to_canonical_u64(),
             value,
+            false,
             mpt_metadata,
             row_unique_data,
             p.cells_proof_vk().serialize()?,

@@ -55,7 +55,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) new_node_digest: &'a [T],
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] = &[
         H_NEW_RANGE,
         H_OLD_RANGE,
@@ -81,7 +81,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     }
 }
 
-impl<'a> PublicInputs<'a, F> {
+impl PublicInputs<'_, F> {
     /// Get the new Merkle tree root hash value.
     pub fn new_merkle_hash_field(&self) -> HashOut<F> {
         self.h_new.try_into().unwrap()
@@ -109,7 +109,7 @@ impl<'a> PublicInputs<'a, F> {
     }
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl PublicInputs<'_, Target> {
     /// Get the new Merkle root hash target.
     pub fn new_merkle_hash_target(&self) -> HashOutTarget {
         self.h_new.try_into().unwrap()
@@ -234,7 +234,7 @@ mod tests {
         exp_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPICircuit<'a> {
+    impl UserCircuit<F, D> for TestPICircuit<'_> {
         type Wires = Vec<Target>;
 
         fn build(b: &mut CBuilder) -> Self::Wires {

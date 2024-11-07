@@ -289,7 +289,7 @@ mod tests {
         }
 
         fn get_circuit_data(&self) -> &CircuitData<F, C, D> {
-            &self.wrap_circuit.final_proof_circuit_data()
+            self.wrap_circuit.final_proof_circuit_data()
         }
     }
 
@@ -388,7 +388,7 @@ mod tests {
         }
 
         fn get_circuit_data(&self) -> &CircuitData<F, C, D> {
-            &self.wrap_circuit.final_proof_circuit_data()
+            self.wrap_circuit.final_proof_circuit_data()
         }
     }
 

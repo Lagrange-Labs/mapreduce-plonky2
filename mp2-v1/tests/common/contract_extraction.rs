@@ -98,11 +98,8 @@ fn prove_leaf(
 ) -> Vec<u8> {
     let params = ctx.params();
     // Generate the proof.
-    let input = contract_extraction::CircuitInput::new_leaf(
-        node.clone(),
-        &storage_root,
-        contract_address.clone(),
-    );
+    let input =
+        contract_extraction::CircuitInput::new_leaf(node.clone(), storage_root, *contract_address);
     let input = CircuitInput::ContractExtraction(input);
     let proof = ctx
         .b
