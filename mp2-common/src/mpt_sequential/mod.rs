@@ -1,3 +1,4 @@
+use crate::rlp::MAX_KEY_NIBBLE_LEN;
 use crate::serialization::{
     deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
 };
@@ -8,14 +9,12 @@ use crate::{
         compute_size_with_padding, InputData, KeccakCircuit, KeccakWires, OutputHash, HASH_LEN,
         PACKED_HASH_LEN,
     },
-    rlp::{
-        decode_compact_encoding, decode_fixed_list, RlpHeader, RlpList, MAX_ITEMS_IN_LIST,
-        MAX_KEY_NIBBLE_LEN,
-    },
+    rlp::{decode_compact_encoding, decode_fixed_list, RlpHeader, RlpList, MAX_ITEMS_IN_LIST},
     utils::{find_index_subvector, keccak256},
 };
 use anyhow::{anyhow, Result};
 use core::array::from_fn as create_array;
+
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
@@ -33,8 +32,14 @@ mod key;
 mod leaf_or_extension;
 pub mod utils;
 
-pub use key::{mpt_key_ptr, MPTKeyWire};
-pub use leaf_or_extension::{MPTLeafOrExtensionNode, MPTLeafOrExtensionWires};
+pub use key::{
+    mpt_key_ptr, receipt_key_ptr, MPTKeyWire, MPTKeyWireGeneric, ReceiptKeyWire,
+    MAX_TX_KEY_NIBBLE_LEN,
+};
+pub use leaf_or_extension::{
+    MPTLeafOrExtensionNode, MPTLeafOrExtensionNodeGeneric, MPTLeafOrExtensionWires,
+    MPTLeafOrExtensionWiresGeneric,
+};
 
 /// Number of items in the RLP encoded list in a leaf node.
 const NB_ITEMS_LEAF: usize = 2;
@@ -43,6 +48,11 @@ const NB_ITEMS_LEAF: usize = 2;
 /// This can later be also be done in a generic way to allow different sizes.
 /// Given we target MPT storage proof, the value is 32 bytes + 1 byte for RLP encoding.
 pub const MAX_LEAF_VALUE_LEN: usize = 33;
+
+/// This is the maximum size we allow for the value of Receipt Trie leaf
+/// currently set to be the same as we allow for a branch node in the Storage Trie
+/// minus the length of the key header and key
+pub const MAX_RECEIPT_LEAF_VALUE_LEN: usize = 526;
 
 /// RLP item size for the extension node
 pub const MPT_EXTENSION_RLP_SIZE: usize = 2;
@@ -56,6 +66,17 @@ pub const MPT_BRANCH_RLP_SIZE: usize = 17;
 pub const fn PAD_LEN(d: usize) -> usize {
     compute_size_with_padding(d)
 }
+
+/// const function to allow arrays of half a generics size without additional generics
+#[allow(non_snake_case)]
+pub const fn NIBBLES_TO_BYTES(d: usize) -> usize {
+    d >> 1
+}
+
+/// We export a type here to keep it consistent with the already established codebase.
+pub type MPTCircuit<const DEPTH: usize, const NODE_LEN: usize> =
+    Circuit<DEPTH, NODE_LEN, MAX_KEY_NIBBLE_LEN>;
+
 /// Circuit that simoply proves the inclusion of a value inside a MPT tree.
 ///
 /// . DEPTH is the maximal depth of the tree. If the tree is smaller, the circuit
@@ -65,23 +86,29 @@ pub const fn PAD_LEN(d: usize) -> usize {
 /// branch node can be up to 32 * 17 = 544 bytes.
 ///     - Note since it uses keccak, the array being hashed is larger because
 /// keccak requires padding.
+/// KEY_LEN is the maximum length of the MPT key (differs between storage tries and transaction/receipt tries)
 #[derive(Clone, Debug)]
-pub struct Circuit<const DEPTH: usize, const NODE_LEN: usize> {
+pub struct Circuit<
+    const DEPTH: usize,
+    const NODE_LEN: usize,
+    const KEY_LEN: usize,
+    const KEY_LEN_BYTES: usize = { NIBBLES_TO_BYTES(KEY_LEN) },
+> {
     /// for ease of usage, we take vector here and the circuit is doing the padding
     nodes: Vec<Vec<u8>>,
     /// the full key that we are trying to prove in this trie
     /// NOTE: the key is in bytes. This code will transform it into nibbles
     /// before passing it to circuit, i.e. the circuit takes the key in nibbles
     /// whose length == MAX_KEY_NIBBLE_LEN
-    key: [u8; MAX_KEY_NIBBLE_LEN / 2],
+    key: [u8; KEY_LEN_BYTES],
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct InputWires<const DEPTH: usize, const NODE_LEN: usize>
+pub struct InputWires<const DEPTH: usize, const NODE_LEN: usize, const KEY_LEN: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
-    pub(crate) key: MPTKeyWire,
+    pub(crate) key: MPTKeyWireGeneric<KEY_LEN>,
     /// a vector of buffers whose size is the padded size of the maximum node length
     /// the padding may occur anywhere in the array but it can fit the maximum node size
     /// NOTE: this makes the code a bit harder grasp at first, but it's a straight
@@ -122,27 +149,28 @@ where
     pub root: OutputHash,
 }
 
-impl<const DEPTH: usize, const NODE_LEN: usize> Circuit<DEPTH, NODE_LEN>
+impl<const DEPTH: usize, const NODE_LEN: usize, const KEY_LEN: usize>
+    Circuit<DEPTH, NODE_LEN, KEY_LEN, { NIBBLES_TO_BYTES(KEY_LEN) }>
 where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); DEPTH - 1]:,
 {
-    pub fn new(key: [u8; MAX_KEY_NIBBLE_LEN / 2], proof: Vec<Vec<u8>>) -> Self {
+    pub fn new(key: [u8; NIBBLES_TO_BYTES(KEY_LEN)], proof: Vec<Vec<u8>>) -> Self {
         Self { nodes: proof, key }
     }
 
     pub fn create_input_wires<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        key: Option<MPTKeyWire>, // Could set the full key from outside
-    ) -> InputWires<DEPTH, NODE_LEN>
+        key: Option<MPTKeyWireGeneric<KEY_LEN>>, // Could set the full key from outside
+    ) -> InputWires<DEPTH, NODE_LEN, KEY_LEN>
     where
         F: RichField + Extendable<D>,
     {
         // full key is expected to be given by verifier (done in UserCircuit impl)
         // initial key has the pointer that is set at the maximum length - 1 (it's an index, so 0-based)
-        let key = key.unwrap_or_else(|| MPTKeyWire {
-            key: Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b),
-            pointer: b.constant(F::from_canonical_usize(MAX_KEY_NIBBLE_LEN) - F::ONE),
+        let key = key.unwrap_or_else(|| MPTKeyWireGeneric::<KEY_LEN> {
+            key: Array::<Target, KEY_LEN>::new(b),
+            pointer: b.constant(F::from_canonical_usize(KEY_LEN) - F::ONE),
         });
         let should_process: [BoolTarget; DEPTH - 1] =
             create_array(|_| b.add_virtual_bool_target_safe());
@@ -162,7 +190,7 @@ where
     /// to be done by the caller.
     pub fn verify_mpt_proof<F, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
-        inputs: &InputWires<DEPTH, NODE_LEN>,
+        inputs: &InputWires<DEPTH, NODE_LEN, KEY_LEN>,
     ) -> OutputWires<DEPTH, NODE_LEN>
     where
         F: RichField + Extendable<D>,
@@ -177,12 +205,8 @@ where
         // small optimization here as we only need to decode two items for a leaf, since we know it's a leaf
         let leaf_headers =
             decode_fixed_list::<_, _, NB_ITEMS_LEAF>(b, &inputs.nodes[0].arr.arr, zero);
-        let (mut iterative_key, leaf_value, is_leaf) = Self::advance_key_leaf_or_extension(
-            b,
-            &inputs.nodes[0].arr,
-            &inputs.key,
-            &leaf_headers,
-        );
+        let (mut iterative_key, leaf_value, is_leaf) =
+            advance_key_leaf_or_extension(b, &inputs.nodes[0].arr, &inputs.key, &leaf_headers);
         b.connect(t.target, is_leaf.target);
         let mut last_hash_output = leaf_hash.output_array.clone();
         let mut keccak_wires = vec![leaf_hash];
@@ -239,7 +263,7 @@ where
     pub fn assign_wires<F: RichField + Extendable<D>, const D: usize>(
         &self,
         p: &mut PartialWitness<F>,
-        inputs: &InputWires<DEPTH, NODE_LEN>,
+        inputs: &InputWires<DEPTH, NODE_LEN, KEY_LEN>,
         outputs: &OutputWires<DEPTH, NODE_LEN>,
     ) -> Result<()> {
         let pad_len = DEPTH.checked_sub(self.nodes.len()).ok_or(anyhow!(
@@ -302,8 +326,12 @@ where
     pub fn advance_key<F: RichField + Extendable<D>, const D: usize>(
         b: &mut CircuitBuilder<F, D>,
         node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
-        key: &MPTKeyWire,
-    ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget) {
+        key: &MPTKeyWireGeneric<KEY_LEN>,
+    ) -> (
+        MPTKeyWireGeneric<KEY_LEN>,
+        Array<Target, HASH_LEN>,
+        BoolTarget,
+    ) {
         let zero = b.zero();
         // It will try to decode a RLP list of the maximum number of items there can be
         // in a list, which is 16 for a branch node (Excluding value).
@@ -313,9 +341,9 @@ where
         // if it's more ==> node's a branch node
         //              RLP ( RLP(hash1), RLP(hash2), ... RLP(hash16), RLP(value))
         let rlp_headers = decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(b, &node.arr, zero);
-        let leaf_info = Self::advance_key_leaf_or_extension(b, node, key, &rlp_headers);
+        let leaf_info = advance_key_leaf_or_extension(b, node, key, &rlp_headers);
         let tuple_condition = leaf_info.2;
-        let branch_info = Self::advance_key_branch(b, node, key, &rlp_headers);
+        let branch_info = advance_key_branch(b, node, key, &rlp_headers);
         // ensures it's either a branch or leaf/extension
         let tuple_or_branch = b.or(leaf_info.2, branch_info.2);
 
@@ -327,78 +355,94 @@ where
 
         (new_key, child_hash, tuple_or_branch)
     }
-
-    /// This function advances the pointer of the MPT key. The parameters are:
-    /// * The key where to lookup the next nibble and thus the hash stored at
-    ///   nibble position in the branch node.
-    /// * RLP headers of the current node.
-    ///   And it returns:
-    /// * New key with the pointer moved.
-    /// * The child hash / value of the node.
-    /// * A boolean that must be true if the given node is a leaf or an extension.
-    /// * The nibble position before this advance.
-    pub fn advance_key_branch<F: RichField + Extendable<D>, const D: usize>(
-        b: &mut CircuitBuilder<F, D>,
-        node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
-        key: &MPTKeyWire,
-        rlp_headers: &RlpList<MAX_ITEMS_IN_LIST>,
-    ) -> (MPTKeyWire, Array<Target, HASH_LEN>, BoolTarget, Target) {
-        let one = b.one();
-        // assume it's a node and return the boolean condition that must be true if
-        // it is a node - decided in advance_key function
-        let seventeen = b.constant(F::from_canonical_usize(MAX_ITEMS_IN_LIST));
-        let branch_condition = b.is_equal(seventeen, rlp_headers.num_fields);
-
-        // Given we are reading the nibble from the key itself, we don't need to do
-        // any more checks on it. The key and pointer will be given by the verifier so
-        // attacker can't indicate a different nibble
-        let nibble = key.current_nibble(b);
-
-        // we advance the pointer for the next iteration
-        let new_key = key.advance_by(b, one);
-        let nibble_header = rlp_headers.select(b, nibble);
-        let branch_child_hash = node.extract_array::<F, D, HASH_LEN>(b, nibble_header.offset);
-        (new_key, branch_child_hash, branch_condition, nibble)
-    }
-
-    /// Returns the key with the pointer moved, returns the child hash / value of the node,
-    /// and returns booleans that must be true IF the given node is a leaf or an extension.
-    pub fn advance_key_leaf_or_extension<
-        F: RichField + Extendable<D>,
-        const D: usize,
-        const LIST_LEN: usize,
-        // in case of a leaf, the value can be up to 33 bytes because of additional RLP encoding
-        // in case of extension, the value is 32 bytes
-        const VALUE_LEN: usize,
-    >(
-        b: &mut CircuitBuilder<F, D>,
-        node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
-        key: &MPTKeyWire,
-        rlp_headers: &RlpList<LIST_LEN>,
-    ) -> (MPTKeyWire, Array<Target, VALUE_LEN>, BoolTarget) {
-        let two = b.two();
-        let condition = b.is_equal(rlp_headers.num_fields, two);
-        let key_header = RlpHeader {
-            data_type: rlp_headers.data_type[0],
-            offset: rlp_headers.offset[0],
-            len: rlp_headers.len[0],
-        };
-        let (extracted_key, should_true) = decode_compact_encoding(b, node, &key_header);
-        // it's either the _value_ of the leaf, OR the _hash_ of the child node if node = ext.
-        let leaf_child_hash = node.extract_array::<F, D, VALUE_LEN>(b, rlp_headers.offset[1]);
-        // note we are going _backwards_ on the key, so we need to substract the expected key length
-        // we want to check against
-        let new_key = key.advance_by(b, extracted_key.real_len);
-        // NOTE: there is no need to check if the extracted_key is indeed a subvector of the full key
-        // in this case. Indeed, in leaf/ext. there is only one key possible. Since we decoded it
-        // from the beginning of the node, and that the hash of the node also starts at the beginning,
-        // either the attacker give the right node or it gives an invalid node and hashes will not
-        // match.
-        let condition = b.and(condition, should_true);
-        (new_key, leaf_child_hash, condition)
-    }
 }
 
+/// This function advances the pointer of the MPT key. The parameters are:
+/// * The key where to lookup the next nibble and thus the hash stored at
+///   nibble position in the branch node.
+/// * RLP headers of the current node.
+/// And it returns:
+/// * New key with the pointer moved.
+/// * The child hash / value of the node.
+/// * A boolean that must be true if the given node is a leaf or an extension.
+/// * The nibble position before this advance.
+pub fn advance_key_branch<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    const NODE_LEN: usize,
+    const KEY_LEN: usize,
+>(
+    b: &mut CircuitBuilder<F, D>,
+    node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
+    key: &MPTKeyWireGeneric<KEY_LEN>,
+    rlp_headers: &RlpList<MAX_ITEMS_IN_LIST>,
+) -> (
+    MPTKeyWireGeneric<KEY_LEN>,
+    Array<Target, HASH_LEN>,
+    BoolTarget,
+    Target,
+) {
+    let one = b.one();
+    // assume it's a node and return the boolean condition that must be true if
+    // it is a node - decided in advance_key function
+    let seventeen = b.constant(F::from_canonical_usize(MAX_ITEMS_IN_LIST));
+    let branch_condition = b.is_equal(seventeen, rlp_headers.num_fields);
+
+    // Given we are reading the nibble from the key itself, we don't need to do
+    // any more checks on it. The key and pointer will be given by the verifier so
+    // attacker can't indicate a different nibble
+    let nibble = key.current_nibble(b);
+
+    // we advance the pointer for the next iteration
+    let new_key = key.advance_by(b, one);
+    let nibble_header = rlp_headers.select(b, nibble);
+    let branch_child_hash = node.extract_array::<F, D, HASH_LEN>(b, nibble_header.offset);
+    (new_key, branch_child_hash, branch_condition, nibble)
+}
+
+/// Returns the key with the pointer moved, returns the child hash / value of the node,
+/// and returns booleans that must be true IF the given node is a leaf or an extension.
+pub fn advance_key_leaf_or_extension<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    const LIST_LEN: usize,
+    // in case of a leaf, the value can be up to 33 bytes because of additional RLP encoding
+    // in case of extension, the value is 32 bytes
+    const VALUE_LEN: usize,
+    const NODE_LEN: usize,
+    const KEY_LEN: usize,
+>(
+    b: &mut CircuitBuilder<F, D>,
+    node: &Array<Target, { PAD_LEN(NODE_LEN) }>,
+    key: &MPTKeyWireGeneric<KEY_LEN>,
+    rlp_headers: &RlpList<LIST_LEN>,
+) -> (
+    MPTKeyWireGeneric<KEY_LEN>,
+    Array<Target, VALUE_LEN>,
+    BoolTarget,
+) {
+    let two = b.two();
+    let condition = b.is_equal(rlp_headers.num_fields, two);
+    let key_header = RlpHeader {
+        data_type: rlp_headers.data_type[0],
+        offset: rlp_headers.offset[0],
+        len: rlp_headers.len[0],
+    };
+    let (extracted_key, should_true) =
+        decode_compact_encoding::<_, _, _, KEY_LEN>(b, node, &key_header);
+    // it's either the _value_ of the leaf, OR the _hash_ of the child node if node = ext.
+    let leaf_child_hash = node.extract_array::<F, D, VALUE_LEN>(b, rlp_headers.offset[1]);
+    // note we are going _backwards_ on the key, so we need to substract the expected key length
+    // we want to check against
+    let new_key = key.advance_by(b, extracted_key.real_len);
+    // NOTE: there is no need to check if the extracted_key is indeed a subvector of the full key
+    // in this case. Indeed, in leaf/ext. there is only one key possible. Since we decoded it
+    // from the beginning of the node, and that the hash of the node also starts at the beginning,
+    // either the attacker give the right node or it gives an invalid node and hashes will not
+    // match.
+    let condition = b.and(condition, should_true);
+    (new_key, leaf_child_hash, condition)
+}
 #[cfg(test)]
 mod test {
     use std::array::from_fn as create_array;
@@ -428,31 +472,43 @@ mod test {
     use plonky2_crypto::u32::arithmetic_u32::U32Target;
     use rand::{thread_rng, RngCore};
 
-    use crate::keccak::{HASH_LEN, PACKED_HASH_LEN};
-    use crate::rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN};
     use crate::utils::{Endianness, PackerTarget};
     use crate::{
         array::Array,
         utils::{find_index_subvector, keccak256},
     };
     use crate::{eth::ProofQuery, C, D, F};
+    use crate::{
+        keccak::{HASH_LEN, PACKED_HASH_LEN},
+        mpt_sequential::advance_key_leaf_or_extension,
+    };
+    use crate::{
+        mpt_sequential::advance_key_branch,
+        rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
+    };
 
     use super::{
         utils::{bytes_to_nibbles, nibbles_to_bytes, visit_node, visit_proof},
-        Circuit, InputWires, MPTKeyWire, OutputWires, MAX_LEAF_VALUE_LEN, NB_ITEMS_LEAF, PAD_LEN,
+        Circuit, InputWires, MPTKeyWire, OutputWires, MAX_LEAF_VALUE_LEN, NB_ITEMS_LEAF,
+        NIBBLES_TO_BYTES, PAD_LEN,
     };
 
     #[derive(Clone, Debug)]
-    struct TestCircuit<const DEPTH: usize, const NODE_LEN: usize> {
-        c: Circuit<DEPTH, NODE_LEN>,
+    struct TestCircuit<
+        const DEPTH: usize,
+        const NODE_LEN: usize,
+        const KEY_LEN: usize,
+        const KEY_LEN_BYTES: usize = { NIBBLES_TO_BYTES(KEY_LEN) },
+    > {
+        c: Circuit<DEPTH, NODE_LEN, KEY_LEN, KEY_LEN_BYTES>,
         exp_root: [u8; 32],
         exp_value: [u8; MAX_LEAF_VALUE_LEN],
         // The flag identifies if need to check the expected leaf value, it's
         // set to true for storage proof, and false for state proof (unconcern).
         checking_value: bool,
     }
-    impl<F, const D: usize, const DEPTH: usize, const NODE_LEN: usize> UserCircuit<F, D>
-        for TestCircuit<DEPTH, NODE_LEN>
+    impl<F, const D: usize, const DEPTH: usize, const NODE_LEN: usize, const KEY_LEN: usize>
+        UserCircuit<F, D> for TestCircuit<DEPTH, NODE_LEN, KEY_LEN, { NIBBLES_TO_BYTES(KEY_LEN) }>
     where
         F: RichField + Extendable<D>,
         [(); PAD_LEN(NODE_LEN)]:,
@@ -461,7 +517,7 @@ mod test {
         [(); HASH_LEN / 4]:,
     {
         type Wires = (
-            InputWires<DEPTH, NODE_LEN>,
+            InputWires<DEPTH, NODE_LEN, KEY_LEN>,
             OutputWires<DEPTH, NODE_LEN>,
             Array<Target, HASH_LEN>,           // root
             Array<Target, MAX_LEAF_VALUE_LEN>, // value
@@ -531,12 +587,16 @@ mod test {
         // Written as constant from ^
         const DEPTH: usize = 2;
         const NODE_LEN: usize = 150;
-        verify_storage_proof_from_query::<DEPTH, NODE_LEN>(&query, &res)?;
+        verify_storage_proof_from_query::<DEPTH, NODE_LEN, MAX_KEY_NIBBLE_LEN>(&query, &res)?;
         verify_state_proof_from_query(&query, &res)
     }
 
     /// Verify the storage proof from query result.
-    pub(crate) fn verify_storage_proof_from_query<const DEPTH: usize, const NODE_LEN: usize>(
+    pub(crate) fn verify_storage_proof_from_query<
+        const DEPTH: usize,
+        const NODE_LEN: usize,
+        const KEY_LEN: usize,
+    >(
         query: &ProofQuery,
         res: &EIP1186AccountProofResponse,
     ) -> Result<()>
@@ -544,6 +604,7 @@ mod test {
         [(); PAD_LEN(NODE_LEN)]:,
         [(); DEPTH - 1]:,
         [(); PAD_LEN(NODE_LEN) / 4]:,
+        [(); NIBBLES_TO_BYTES(KEY_LEN)]:,
     {
         ProofQuery::verify_storage_proof(res)?;
 
@@ -568,8 +629,8 @@ mod test {
             let u8idx = find_index_subvector(&mpt_proof[i], &child_hash);
             assert!(u8idx.is_some());
         }
-        let circuit = TestCircuit::<DEPTH, NODE_LEN> {
-            c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
+        let circuit = TestCircuit::<DEPTH, NODE_LEN, KEY_LEN> {
+            c: Circuit::<DEPTH, NODE_LEN, KEY_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
             exp_root: root.try_into().unwrap(),
             exp_value: encoded_value.try_into().unwrap(),
             checking_value: false,
@@ -608,8 +669,11 @@ mod test {
             let u8idx = find_index_subvector(&mpt_proof[i], &child_hash);
             assert!(u8idx.is_some());
         }
-        let circuit = TestCircuit::<DEPTH, NODE_LEN> {
-            c: Circuit::<DEPTH, NODE_LEN>::new(mpt_key.try_into().unwrap(), mpt_proof),
+        let circuit = TestCircuit::<DEPTH, NODE_LEN, MAX_KEY_NIBBLE_LEN> {
+            c: Circuit::<DEPTH, NODE_LEN, MAX_KEY_NIBBLE_LEN>::new(
+                mpt_key.try_into().unwrap(),
+                mpt_proof,
+            ),
             exp_root: root.try_into().unwrap(),
             exp_value: [0; MAX_LEAF_VALUE_LEN],
             // the reason we don't check the value is the circuit is made for storage proof and it extracts a 32bytes
@@ -665,8 +729,8 @@ mod test {
             let u8idx = find_index_subvector(&proof[i], &child_hash);
             assert!(u8idx.is_some());
         }
-        let circuit = TestCircuit::<DEPTH, NODE_LEN> {
-            c: Circuit::<DEPTH, NODE_LEN>::new(key.try_into().unwrap(), proof),
+        let circuit = TestCircuit::<DEPTH, NODE_LEN, MAX_KEY_NIBBLE_LEN> {
+            c: Circuit::<DEPTH, NODE_LEN, MAX_KEY_NIBBLE_LEN>::new(key.try_into().unwrap(), proof),
             exp_root: root,
             // simply pad it to max size
             exp_value: create_array(|i| if i < VALUE_LEN { value[i] } else { 0 }),
@@ -753,7 +817,9 @@ mod test {
                 let node = Array::<Target, { PAD_LEN(NODE_LEN) }>::new(&mut b);
                 let key_wire = MPTKeyWire::new(&mut b);
                 let (advanced_key, value, valid_node) =
-                    Circuit::<DEPTH, NODE_LEN>::advance_key(&mut b, &node, &key_wire);
+                    Circuit::<DEPTH, NODE_LEN, MAX_KEY_NIBBLE_LEN>::advance_key(
+                        &mut b, &node, &key_wire,
+                    );
                 b.connect(tr.target, valid_node.target);
                 let exp_key_ptr = b.add_virtual_target();
                 b.connect(advanced_key.pointer, exp_key_ptr);
@@ -864,12 +930,13 @@ mod test {
         let key_wire = MPTKeyWire::new(&mut builder);
         let rlp_headers =
             decode_fixed_list::<F, D, MAX_ITEMS_IN_LIST>(&mut builder, &node.arr, zero);
-        let (advanced_key, value, should_true, _) = Circuit::<DEPTH, NODE_LEN>::advance_key_branch(
-            &mut builder,
-            &node,
-            &key_wire,
-            &rlp_headers,
-        );
+        let (advanced_key, value, should_true, _) =
+            advance_key_branch::<_, _, NODE_LEN, MAX_KEY_NIBBLE_LEN>(
+                &mut builder,
+                &node,
+                &key_wire,
+                &rlp_headers,
+            );
         builder.connect(tt.target, should_true.target);
         let exp_key_ptr = builder.add_virtual_target();
         builder.connect(advanced_key.pointer, exp_key_ptr);
@@ -935,7 +1002,7 @@ mod test {
         let key_wire = MPTKeyWire::new(&mut builder);
         let rlp_headers = decode_fixed_list::<F, D, NB_ITEMS_LEAF>(&mut builder, &node.arr, zero);
         let (advanced_key, value, should_true) =
-            Circuit::<DEPTH, NODE_LEN>::advance_key_leaf_or_extension(
+            advance_key_leaf_or_extension::<_, _, _, _, NODE_LEN, MAX_KEY_NIBBLE_LEN>(
                 &mut builder,
                 &node,
                 &key_wire,

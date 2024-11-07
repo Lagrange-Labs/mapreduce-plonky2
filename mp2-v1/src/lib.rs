@@ -25,4 +25,5 @@ pub mod final_extraction;
 pub mod indexing;
 pub mod length_extraction;
 pub mod query;
+pub mod receipt_extraction;
 pub mod values_extraction;

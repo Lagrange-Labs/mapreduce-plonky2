@@ -1,6 +1,9 @@
 use crate::{
     serialization::{deserialize_long_array, serialize_long_array},
-    utils::{less_than_or_equal_to_unsafe, range_check_optimized, Endianness, PackerTarget},
+    utils::{
+        less_than_or_equal_to_unsafe, less_than_unsafe, range_check_optimized, Endianness,
+        PackerTarget,
+    },
 };
 use anyhow::{anyhow, Result};
 use plonky2::{
@@ -600,6 +603,91 @@ where
     pub fn last(&self) -> T {
         self.arr[SIZE - 1]
     }
+
+    /// This function allows you to search a larger [`Array`] by representing it as a number of
+    /// smaller [`Array`]s with size [`RANDOM_ACCESS_SIZE`], padding the final smaller array where required.
+    pub fn random_access_large_array<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        at: Target,
+    ) -> T {
+        // We will split the array into smaller arrays of size 64, padding the last array with zeroes if required
+        let padded_size = (SIZE - 1) / RANDOM_ACCESS_SIZE + 1;
+
+        // Create an array of `Array`s
+        let arrays: Vec<Array<T, RANDOM_ACCESS_SIZE>> = (0..padded_size)
+            .map(|i| Array {
+                arr: create_array(|j| {
+                    let index = 64 * i + j;
+                    if index < self.arr.len() {
+                        self.arr[index]
+                    } else {
+                        T::from_target(b.zero())
+                    }
+                }),
+            })
+            .collect();
+
+        // We need to express `at` in base 64, we are also assuming that the initial array was smaller than 64^2 = 4096 which we enforce with a range check.
+        // We also check that `at` is smaller that the size of the array.
+        let array_size = b.constant(F::from_noncanonical_u64(SIZE as u64));
+        let less_than_check = less_than_unsafe(b, at, array_size, 12);
+        let true_target = b._true();
+        b.connect(less_than_check.target, true_target.target);
+        b.range_check(at, 12);
+        let (low_bits, high_bits) = b.split_low_high(at, 6, 12);
+
+        // Search each of the smaller arrays for the target at `low_bits`
+        let first_search = arrays
+            .into_iter()
+            .map(|array| {
+                b.random_access(
+                    low_bits,
+                    array
+                        .arr
+                        .iter()
+                        .map(Targetable::to_target)
+                        .collect::<Vec<Target>>(),
+                )
+            })
+            .collect::<Vec<Target>>();
+
+        // Serach the result for the Target at `high_bits`
+        T::from_target(b.random_access(high_bits, first_search))
+    }
+
+    /// Returns [`self[at..at+SUB_SIZE]`].
+    /// This is more expensive than [`Self::extract_array`] due to using [`Self::random_access_large_array`]
+    /// instead of [`Self::value_at`]. This function enforces that the values extracted are within the array.
+    pub fn extract_array_large<
+        F: RichField + Extendable<D>,
+        const D: usize,
+        const SUB_SIZE: usize,
+    >(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        at: Target,
+    ) -> Array<T, SUB_SIZE> {
+        let m = b.constant(F::from_canonical_usize(SUB_SIZE));
+        let array_len = b.constant(F::from_canonical_usize(SIZE));
+        let upper_bound = b.add(at, m);
+        let num_bits_size = SIZE.ilog2() + 1;
+
+        let lt = less_than_or_equal_to_unsafe(b, upper_bound, array_len, num_bits_size as usize);
+
+        let t = b._true();
+        b.connect(t.target, lt.target);
+
+        Array::<T, SUB_SIZE> {
+            arr: core::array::from_fn(|i| {
+                let i_target = b.constant(F::from_canonical_usize(i));
+                let i_plus_n_target = b.add(at, i_target);
+
+                // out_val = arr[((i+n)<=n+M) * (i+n)]
+                self.random_access_large_array(b, i_plus_n_target)
+            }),
+        }
+    }
 }
 /// Returns the size of the array in 32-bit units, rounded up.
 #[allow(non_snake_case)]
@@ -816,6 +904,51 @@ mod test {
     }
 
     #[test]
+    fn test_random_access_large_array() {
+        const SIZE: usize = 512;
+        #[derive(Clone, Debug)]
+        struct ValueAtCircuit {
+            arr: [u8; SIZE],
+            idx: usize,
+            exp: u8,
+        }
+        impl<F, const D: usize> UserCircuit<F, D> for ValueAtCircuit
+        where
+            F: RichField + Extendable<D>,
+        {
+            type Wires = (Array<Target, SIZE>, Target, Target);
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let array = Array::<Target, SIZE>::new(c);
+                let exp_value = c.add_virtual_target();
+                let index = c.add_virtual_target();
+                let extracted = array.random_access_large_array(c, index);
+                c.connect(exp_value, extracted);
+                (array, index, exp_value)
+            }
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .0
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
+                pw.set_target(wires.1, F::from_canonical_usize(self.idx));
+                pw.set_target(wires.2, F::from_canonical_u8(self.exp));
+            }
+        }
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..]);
+        let idx: usize = rng.gen_range(0..SIZE);
+        let exp = arr[idx];
+        run_circuit::<F, D, C, _>(ValueAtCircuit { arr, idx, exp });
+
+        // Now we check that it fails when the index is too large
+        let idx = SIZE;
+        let result = std::panic::catch_unwind(|| {
+            run_circuit::<F, D, C, _>(ValueAtCircuit { arr, idx, exp })
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_extract_array() {
         const SIZE: usize = 80;
         const SUBSIZE: usize = 40;
@@ -856,6 +989,56 @@ mod test {
         let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
         let exp = create_array(|i| arr[idx + i]);
         run_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp });
+    }
+
+    #[test]
+    fn test_extract_array_large() {
+        const SIZE: usize = 512;
+        const SUBSIZE: usize = 40;
+        #[derive(Clone, Debug)]
+        struct ExtractArrayCircuit {
+            arr: [u8; SIZE],
+            idx: usize,
+            exp: [u8; SUBSIZE],
+        }
+        impl<F, const D: usize> UserCircuit<F, D> for ExtractArrayCircuit
+        where
+            F: RichField + Extendable<D>,
+        {
+            type Wires = (Array<Target, SIZE>, Target, Array<Target, SUBSIZE>);
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let array = Array::<Target, SIZE>::new(c);
+                let index = c.add_virtual_target();
+                let expected = Array::<Target, SUBSIZE>::new(c);
+                let extracted = array.extract_array_large::<_, _, SUBSIZE>(c, index);
+                let are_equal = expected.equals(c, &extracted);
+                let tru = c._true();
+                c.connect(are_equal.target, tru.target);
+                (array, index, expected)
+            }
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .0
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
+                pw.set_target(wires.1, F::from_canonical_usize(self.idx));
+                wires
+                    .2
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.exp[i])));
+            }
+        }
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..]);
+        let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
+        let exp = create_array(|i| arr[idx + i]);
+        run_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp });
+
+        // It should panic if we try to extract an array where some of the indices fall outside of (0..SIZE)
+        let idx = SIZE;
+        let result = std::panic::catch_unwind(|| {
+            run_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp })
+        });
+        assert!(result.is_err());
     }
 
     #[test]

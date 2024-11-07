@@ -15,25 +15,37 @@ use plonky2::{
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};
 
+pub type MPTKeyWire = MPTKeyWireGeneric<MAX_KEY_NIBBLE_LEN>;
+
+pub type ReceiptKeyWire = MPTKeyWireGeneric<MAX_TX_KEY_NIBBLE_LEN>;
+
+pub const MAX_TX_KEY_NIBBLE_LEN: usize = 6;
+
 /// Calculate the pointer from the MPT key.
 pub fn mpt_key_ptr(mpt_key: &[u8]) -> usize {
     let nibbles = Nibbles::from_compact(mpt_key);
     MAX_KEY_NIBBLE_LEN - 1 - nibbles.nibbles().len()
 }
 
+/// Calculate the pointer from the MPT key.
+pub fn receipt_key_ptr(mpt_key: &[u8]) -> usize {
+    let nibbles = Nibbles::from_compact(mpt_key);
+    MAX_TX_KEY_NIBBLE_LEN - 1 - nibbles.nibbles().len()
+}
+
 /// A structure that keeps a running pointer to the portion of the key the circuit
 /// already has proven.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub struct MPTKeyWire {
+pub struct MPTKeyWireGeneric<const KEY_LENGTH: usize> {
     /// Represents the full key of the value(s) we're looking at in the MPT trie.
-    pub key: Array<Target, MAX_KEY_NIBBLE_LEN>,
+    pub key: Array<Target, KEY_LENGTH>,
     /// Represents which portion of the key we already processed. The pointer
     /// goes _backwards_ since circuit starts proving from the leaf up to the root.
     /// i.e. pointer must be equal to F::NEG_ONE when we reach the root.
     pub pointer: Target,
 }
 
-impl MPTKeyWire {
+impl<const KEY_LENGTH: usize> MPTKeyWireGeneric<KEY_LENGTH> {
     pub fn current_nibble<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
@@ -72,7 +84,7 @@ impl MPTKeyWire {
     /// Create a new fresh key wire
     pub fn new<F: RichField + Extendable<D>, const D: usize>(b: &mut CircuitBuilder<F, D>) -> Self {
         Self {
-            key: Array::<Target, MAX_KEY_NIBBLE_LEN>::new(b),
+            key: Array::<Target, KEY_LENGTH>::new(b),
             pointer: b.add_virtual_target(),
         }
     }
@@ -80,7 +92,7 @@ impl MPTKeyWire {
     pub fn assign<F: RichField>(
         &self,
         p: &mut PartialWitness<F>,
-        key_nibbles: &[u8; MAX_KEY_NIBBLE_LEN],
+        key_nibbles: &[u8; KEY_LENGTH],
         ptr: usize,
     ) {
         let f_nibbles = create_array(|i| F::from_canonical_u8(key_nibbles[i]));
@@ -141,7 +153,7 @@ impl MPTKeyWire {
                         // now we need to pack each pair of 2 bit limbs into a nibble, but for each byte we want nibbles to
                         // be ordered in big-endian
                         limbs
-                            .chunks(4)
+                            .chunks_exact(4)
                             .flat_map(|chunk| {
                                 vec![
                                     b.mul_const_add(F::from_canonical_u8(4), chunk[3], chunk[2]),
@@ -154,7 +166,7 @@ impl MPTKeyWire {
                     .try_into()
                     .unwrap(),
             },
-            pointer: b.constant(F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1)),
+            pointer: b.constant(F::from_canonical_usize(KEY_LENGTH - 1)),
         }
     }
 }
