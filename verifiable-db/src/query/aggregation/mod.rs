@@ -366,14 +366,14 @@ impl QueryHashNonExistenceCircuits {
     {
         let computational_hash = if is_rows_tree_node {
             Identifiers::computational_hash_without_query_bounds(
-                &column_ids,
+                column_ids,
                 predicate_operations,
                 results,
             )?
         } else {
             ComputationalHash::from_bytes(
                 (&Identifiers::computational_hash_universal_circuit(
-                    &column_ids,
+                    column_ids,
                     predicate_operations,
                     results,
                     Some((&query_bounds.min_query_secondary).into()),
@@ -391,9 +391,9 @@ impl QueryHashNonExistenceCircuits {
             predicate_operations, results, placeholders, query_bounds
         )?;
         let placeholder_hash = if is_rows_tree_node {
-            placeholder_hash_without_query_bounds(&placeholder_hash_ids, &placeholders)
+            placeholder_hash_without_query_bounds(&placeholder_hash_ids, placeholders)
         } else {
-            placeholder_hash(&placeholder_hash_ids, &placeholders, query_bounds)
+            placeholder_hash(&placeholder_hash_ids, placeholders, query_bounds)
         }?;
         Ok(Self {
             computational_hash,

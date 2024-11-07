@@ -123,7 +123,7 @@ impl<
         }
 
         self.current_epoch = epoch;
-        return Ok(());
+        Ok(())
     }
 
     async fn select_key(&self) -> Option<T::Key> {

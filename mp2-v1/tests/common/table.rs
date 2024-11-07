@@ -515,7 +515,7 @@ impl Table {
         // introduce this closure to coerce each param to have type `dyn ToSql + Sync` (required by pgSQL APIs)
         let prepare_param = |param: U256| -> Box<dyn ToSql + Sync> { Box::new(param) };
         let query_params = params
-            .into_iter()
+            .iter()
             .map(|param| prepare_param(*param))
             .collect_vec();
         let connection = self.db_pool.get().await.unwrap();

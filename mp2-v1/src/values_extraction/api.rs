@@ -9,8 +9,8 @@ use super::{
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
 };
-use crate::{api::InputNode, MAX_BRANCH_NODE_LEN};
-use anyhow::{bail, Result};
+use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
+use anyhow::{bail, ensure, Result};
 use log::debug;
 use mp2_common::{
     default_config,
@@ -260,30 +260,25 @@ macro_rules! impl_branch_circuits {
                 // from the public inputs of the children proofs.
                 // Note this is done outside circuits, more as a sanity check. The circuits is enforcing
                 // this condition.
-                let valid_inputs = child_proofs
-                    .windows(2)
-                    .all(|arr| {
-                        if arr.len() == 1 {
-                            true
-                        } else {
-                            let pi1 = PublicInputs::<F>::new(&arr[0].proof().public_inputs);
-                            let (k1, p1) = pi1.mpt_key_info();
-                            let pi2 = PublicInputs::<F>::new(&arr[1].proof().public_inputs);
-                            let (k2, p2) = pi2.mpt_key_info();
-                            let up1 = p1.to_canonical_u64() as usize;
-                            let up2 = p2.to_canonical_u64() as usize;
-                            up1 < k1.len() && up2 < k2.len() && p1 == p2 && k1[..up1] == k2[..up2]
-                        }
-                    });
-                if !valid_inputs {
-                    bail!("proofs don't match on the key and/or pointers");
+                for arr in child_proofs.windows(2) {
+                    if arr.len() > 1 {
+                        let pi1 = PublicInputs::<F>::new(&arr[0].proof().public_inputs);
+                        let (k1, p1) = pi1.mpt_key_info();
+                        let pi2 = PublicInputs::<F>::new(&arr[1].proof().public_inputs);
+                        let (k2, p2) = pi2.mpt_key_info();
+                        let up1 = p1.to_canonical_u64() as usize;
+                        let up2 = p2.to_canonical_u64() as usize;
+
+                        ensure!(up1 < k1.len(), "up1 ({}) >= |k1| ({})", up1, k1.len());
+                        ensure!(up2 < k2.len(), "up2 ({}) >= |k2| ({})", up2, k2.len());
+                        ensure!(p1 == p2, "p1 ({p1}) != p2 ({p2})");
+                        ensure!(k1[..up1] == k2[..up1], "k1[..up1] ({:?}) != k[2..up2] ({:?})", &k1[..up1], &k2[..up2]);
+                    }
+
                 }
-                if child_proofs.is_empty() || child_proofs.len() > 16 {
-                    bail!("No child proofs or too many child proofs");
-                }
-                if branch_node.node.len() > MAX_BRANCH_NODE_LEN {
-                    bail!("Branch node too long");
-                }
+                ensure!(!child_proofs.is_empty(), "empty child_proofs");
+                ensure!(child_proofs.len() <= 16, "too many child proofs found: {}", child_proofs.len());
+                ensure!(branch_node.node.len() <= MAX_BRANCH_NODE_LEN, "branch_node too long: {}", branch_node.node.len());
 
                 // We just take the first one, it doesn't matter which one we
                 // take as long as all prefixes and pointers are equal.
@@ -340,7 +335,7 @@ macro_rules! impl_branch_circuits {
                          ).map(|p| (p, self.[< b $i>].get_verifier_data().clone()).into())
                      }
                  )+
-                     _ => bail!("invalid child proof len"),
+                         _ => bail!("invalid child proof len: {}", child_proofs.len()),
                  }
             }
         }}

@@ -48,7 +48,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) merge: &'a [T],
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, PH_RANGE, DV_RANGE, DM_RANGE, BN_RANGE, MERGE_RANGE];
 
@@ -93,11 +93,11 @@ impl<'a> ExtractionPI<'a> for PublicInputs<'a, Target> {
     }
 }
 
-impl<'a> ExtractionPIWrap for PublicInputs<'a, Target> {
+impl ExtractionPIWrap for PublicInputs<'_, Target> {
     type PI<'b> = PublicInputs<'b, Target>;
 }
 
-impl<'a> PublicInputs<'a, F> {
+impl PublicInputs<'_, F> {
     /// Get the metadata point.
     pub fn metadata_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.dm)
@@ -137,7 +137,7 @@ impl<'a, T> PublicInputs<'a, T> {
     }
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl PublicInputs<'_, Target> {
     pub fn generic_register_args(&self, cb: &mut CBuilder) {
         cb.register_public_inputs(self.h);
         cb.register_public_inputs(self.ph);
@@ -224,7 +224,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
     }
 
     pub fn is_merge_raw(&self) -> &[T] {
-        &self.merge
+        self.merge
     }
 }
 
@@ -251,7 +251,7 @@ mod tests {
         exp_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPICircuit<'a> {
+    impl UserCircuit<F, D> for TestPICircuit<'_> {
         type Wires = Vec<Target>;
 
         fn build(b: &mut CBuilder) -> Self::Wires {

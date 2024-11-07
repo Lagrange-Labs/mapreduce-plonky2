@@ -50,7 +50,7 @@ type ColumnGadgetData =
 type PublicParameters = mp2_v1::api::PublicParameters<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
-    let root_pi = ProofWithVK::deserialize(&proof)
+    let root_pi = ProofWithVK::deserialize(proof)
         .expect("while deserializing proof")
         .proof
         .public_inputs;
@@ -62,7 +62,7 @@ fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
 }
 
 fn row_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
-    let root_pi = ProofWithVK::deserialize(&proof)
+    let root_pi = ProofWithVK::deserialize(proof)
         .expect("while deserializing proof")
         .proof
         .public_inputs;

@@ -202,7 +202,7 @@ impl TestContext {
                     hex::encode(row.cell_root_hash.unwrap().0)
                 );
                 let inputs = CircuitInput::RowsTree(
-                    verifiable_db::row_tree::CircuitInput::leaf_multiplier(
+                    verifiable_db::row_tree::CircuitInput::leaf(
                         id,
                         value,
                         multiplier,
@@ -260,7 +260,7 @@ impl TestContext {
                 }
 
                 let inputs = CircuitInput::RowsTree(
-                    verifiable_db::row_tree::CircuitInput::partial_multiplier(
+                    verifiable_db::row_tree::CircuitInput::partial(
                         id,
                         value,
                         multiplier,
@@ -304,7 +304,7 @@ impl TestContext {
                     .get_proof_exact(&ProofKey::Row(right_proof_key.clone()))
                     .expect("UT guarantees proving in order");
                 let inputs = CircuitInput::RowsTree(
-                    verifiable_db::row_tree::CircuitInput::full_multiplier(
+                    verifiable_db::row_tree::CircuitInput::full(
                         id,
                         value,
                         multiplier,

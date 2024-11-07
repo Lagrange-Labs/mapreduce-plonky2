@@ -1131,7 +1131,7 @@ impl UpdateSimpleStorage {
             .map(|tuple| {
                 let op: MappingOperation = tuple.into();
                 let (k, v) = match tuple {
-                    MappingValuesUpdate::Deletion(k, _) => (*k, DEFAULT_ADDRESS.clone()),
+                    MappingValuesUpdate::Deletion(k, _) => (*k, *DEFAULT_ADDRESS),
                     MappingValuesUpdate::Update(k, _, v) | MappingValuesUpdate::Insertion(k, v) => {
                         (*k, Address::from_slice(&v.to_be_bytes_trimmed_vec()))
                     }
