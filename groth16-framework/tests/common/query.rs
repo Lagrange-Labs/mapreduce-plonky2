@@ -11,7 +11,6 @@ use mp2_common::{
     F,
 };
 use plonky2::field::types::PrimeField64;
-use rand::thread_rng;
 use verifiable_db::{
     query::api::CircuitInput as QueryInput,
     revelation::{api::CircuitInput, PublicInputs as RevelationPI},
@@ -48,7 +47,7 @@ impl TestContext {
         let preprocessing_proof = serialize_proof(&preprocessing_proof).unwrap();
 
         // Generate the revelation proof.
-        let input = CircuitInput::new_revelation_no_results_tree(
+        let input = CircuitInput::new_revelation_aggregated(
             query_proof,
             preprocessing_proof,
             test_data.query_bounds(),

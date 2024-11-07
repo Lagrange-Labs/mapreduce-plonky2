@@ -229,7 +229,7 @@ impl<K: Debug + Clone + Hash + Eq> UpdateTree<K> {
             std::iter::once(k).chain(
                 n.children
                     .iter()
-                    .flat_map(|child_i| self.descendants(*child_i).into_iter()),
+                    .flat_map(|child_i| self.descendants(*child_i)),
             ),
         )
     }
@@ -423,7 +423,7 @@ impl<T: Debug + Clone + Hash + Eq> UpdatePlan<T> {
         let i = *self
             .t
             .idx
-            .get(&item.k())
+            .get(item.k())
             .ok_or_else(|| anyhow!("unknwown key"))?;
 
         // May happen when restarting a plan

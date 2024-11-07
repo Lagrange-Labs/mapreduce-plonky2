@@ -144,7 +144,7 @@ impl TrieNode {
     /// Prove a branch node.
     fn prove_value_branch(&self, ctx: ProvingContext) -> SerializedProof {
         // Has one child at least and 16 at maximum.
-        assert!(self.children.len() > 0);
+        assert!(!self.children.is_empty());
         assert!(self.children.len() <= MAX_BRANCH_CHILDREN);
 
         let node = self.raw.clone();
@@ -332,7 +332,7 @@ impl TrieNode {
     /// Prove a branch node.
     fn prove_length_branch(&self, ctx: ProvingContext) -> SerializedProof {
         // Has one child at least and 16 at maximum.
-        assert!(self.children.len() > 0);
+        assert!(!self.children.is_empty());
         assert!(self.children.len() <= MAX_BRANCH_CHILDREN);
 
         let node = self.raw.clone();
@@ -355,7 +355,7 @@ impl TrieNode {
     /// Prove an extension node.
     fn prove_length_extension(&self, ctx: ProvingContext) -> SerializedProof {
         // Has one child at least and 16 at maximum.
-        assert!(self.children.len() > 0);
+        assert!(!self.children.is_empty());
         assert!(self.children.len() <= MAX_BRANCH_CHILDREN);
 
         let node = self.raw.clone();

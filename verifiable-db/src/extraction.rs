@@ -42,7 +42,7 @@ pub mod test {
     use u256::UInt256Target;
 
     use super::*;
-    impl<'a> ExtractionPIWrap for PublicInputs<'a, Target> {
+    impl ExtractionPIWrap for PublicInputs<'_, Target> {
         type PI<'b> = PublicInputs<'b, Target>;
     }
 
@@ -112,7 +112,7 @@ pub mod test {
         pub(crate) merge: &'a [T],
     }
 
-    impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+    impl PublicInputCommon for PublicInputs<'_, Target> {
         const RANGES: &'static [PublicInputRange] =
             &[H_RANGE, PH_RANGE, DV_RANGE, DM_RANGE, BN_RANGE, MERGE_RANGE];
 
@@ -121,7 +121,7 @@ pub mod test {
         }
     }
 
-    impl<'a> PublicInputs<'a, GFp> {
+    impl PublicInputs<'_, GFp> {
         /// Get the metadata point.
         pub fn metadata_point(&self) -> WeierstrassPoint {
             WeierstrassPoint::from_fields(self.dm)
@@ -157,7 +157,7 @@ pub mod test {
         }
     }
 
-    impl<'a> PublicInputs<'a, Target> {
+    impl PublicInputs<'_, Target> {
         pub fn generic_register_args(&self, cb: &mut CBuilder) {
             cb.register_public_inputs(self.h);
             cb.register_public_inputs(self.ph);

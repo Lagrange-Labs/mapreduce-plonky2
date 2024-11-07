@@ -269,7 +269,7 @@ mod tests {
         right_child_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestNodeWithTwoChildrenCircuit<'a> {
+    impl UserCircuit<F, D> for TestNodeWithTwoChildrenCircuit<'_> {
         // Circuit wires + subtree proof + left child proof + right child proof
         type Wires = (
             NodeWithTwoChildrenWires<S>,

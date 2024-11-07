@@ -1,4 +1,6 @@
-//! Module handling the recursive proving of the correct derivation of the MPT path
+//! Module handling the recursive proving of the correct derivation
+//! of the MPT path
+//!
 //! depending on the type of variables the slot is holding (simple unit variable like uint256
 //! variable length & composite type like a mapping).
 
@@ -201,8 +203,8 @@ impl KeccakStructMPT {
 /// Deriving a MPT key from simple slot is done like:
 /// 1. location = left_pad32(slot)
 /// 2. mpt_key = keccak(location)
-/// WARNING: Currently takes the assumption that the storage slot number fits
-/// inside a single byte.
+///    WARNING: Currently takes the assumption that the storage slot number fits
+///    inside a single byte.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SimpleSlot(pub StorageSlot);
 
@@ -256,6 +258,7 @@ impl SimpleSlot {
     /// mpt_key = keccak256(location)
     /// Note the simple slot wire and the contract address wires are NOT range
     /// checked, because they are expected to be given by the verifier.
+    ///
     /// If that assumption is not true, then the caller should call
     /// `b.range_check(slot, 8)` to ensure its byteness.
     pub fn build_single<F: RichField + Extendable<D>, const D: usize>(
@@ -401,7 +404,7 @@ impl SimpleSlot {
 /// Deriving a MPT key from mapping slot is done like:
 /// 1. location = keccak(left_pad32(key), left_pad32(slot))
 /// 2. mpt_key = keccak(location)
-/// WARNING: Currently takes the assumption that the storage slot number fits inside a single byte.
+///    WARNING: Currently takes the assumption that the storage slot number fits inside a single byte.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MappingSlot {
     mapping_slot: u8,
