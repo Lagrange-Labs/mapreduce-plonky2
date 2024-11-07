@@ -14,7 +14,7 @@ use super::{
     full_node::{self, FullNodeCircuit},
     leaf::{self, LeafCircuit},
     partial_node::{self, PartialNodeCircuit},
-    row::Row,
+    secondary_index_cell::SecondaryIndexCell,
     PublicInputs,
 };
 
@@ -195,7 +195,7 @@ impl CircuitInput {
             is_multiplier,
             mpt_metadata,
         );
-        let row = Row::new(cell, row_unique_data);
+        let row = SecondaryIndexCell::new(cell, row_unique_data);
         Ok(CircuitInput::Leaf {
             witness: row.into(),
             cells_proof,
@@ -218,7 +218,7 @@ impl CircuitInput {
             is_multiplier,
             mpt_metadata,
         );
-        let row = Row::new(cell, row_unique_data);
+        let row = SecondaryIndexCell::new(cell, row_unique_data);
         Ok(CircuitInput::Full {
             witness: row.into(),
             left_proof,
@@ -242,7 +242,7 @@ impl CircuitInput {
             is_multiplier,
             mpt_metadata,
         );
-        let row = Row::new(cell, row_unique_data);
+        let row = SecondaryIndexCell::new(cell, row_unique_data);
         let witness = PartialNodeCircuit::new(row, is_child_left);
         Ok(CircuitInput::Partial {
             witness,
@@ -288,10 +288,10 @@ mod test {
         // to save on test time
         cells_proof: ProofWithPublicInputs<F, C, D>,
         cells_vk: VerifierOnlyCircuitData<C, D>,
-        leaf1: Row,
-        leaf2: Row,
-        full: Row,
-        partial: Row,
+        leaf1: SecondaryIndexCell,
+        leaf2: SecondaryIndexCell,
+        full: SecondaryIndexCell,
+        partial: SecondaryIndexCell,
     }
 
     impl TestParams {
@@ -320,19 +320,19 @@ mod test {
                 params,
                 cells_proof: cells_proof[0].clone(),
                 cells_vk,
-                leaf1: Row::new(
+                leaf1: SecondaryIndexCell::new(
                     Cell::new(identifier, v1, false, HashOut::rand()),
                     HashOut::rand(),
                 ),
-                leaf2: Row::new(
+                leaf2: SecondaryIndexCell::new(
                     Cell::new(identifier, v2, false, HashOut::rand()),
                     HashOut::rand(),
                 ),
-                full: Row::new(
+                full: SecondaryIndexCell::new(
                     Cell::new(identifier, v_full, false, HashOut::rand()),
                     HashOut::rand(),
                 ),
-                partial: Row::new(
+                partial: SecondaryIndexCell::new(
                     Cell::new(identifier, v_partial, false, HashOut::rand()),
                     HashOut::rand(),
                 ),
@@ -509,7 +509,7 @@ mod test {
         Ok(proof)
     }
 
-    fn generate_leaf_proof(p: &TestParams, row: &Row) -> Result<Vec<u8>> {
+    fn generate_leaf_proof(p: &TestParams, row: &SecondaryIndexCell) -> Result<Vec<u8>> {
         let id = row.cell.identifier;
         let value = row.cell.value;
         let mpt_metadata = row.cell.mpt_metadata;
