@@ -416,13 +416,13 @@ impl SingleValuesExtractionArgs {
     pub fn slot_inputs() -> Vec<SlotInput> {
         vec![
             // bool
-            SlotInput::new(SINGLE_SLOTS[0], 0, 0, 256, 0),
+            SlotInput::new(SINGLE_SLOTS[0], 0, 256, 0),
             // uint256
-            SlotInput::new(SINGLE_SLOTS[1], 0, 0, 256, 0),
+            SlotInput::new(SINGLE_SLOTS[1], 0, 256, 0),
             // string
-            SlotInput::new(SINGLE_SLOTS[2], 0, 0, 256, 0),
+            SlotInput::new(SINGLE_SLOTS[2], 0, 256, 0),
             // address
-            SlotInput::new(SINGLE_SLOTS[3], 0, 0, 256, 0),
+            SlotInput::new(SINGLE_SLOTS[3], 0, 256, 0),
         ]
     }
     pub fn table_info(contract: &Contract) -> Vec<ColumnInfo> {
@@ -656,7 +656,7 @@ impl MappingValuesExtractionArgs {
         }
     }
     pub fn slot_input() -> SlotInput {
-        SlotInput::new(MAPPING_SLOT, 0, 0, 256, 0)
+        SlotInput::new(MAPPING_SLOT, 0, 256, 0)
     }
     pub async fn init_contract_data(
         &mut self,

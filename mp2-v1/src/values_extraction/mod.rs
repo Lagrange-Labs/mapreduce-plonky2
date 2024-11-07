@@ -102,7 +102,7 @@ pub fn identifier_block_column() -> u64 {
 /// Compute identifier for value column.
 ///
 /// The value column could be either simple or mapping slot.
-/// `id = H(slot || byte_offset || bit_offset || length || evm_word || contract_address || chain_id)[0]`
+/// `id = H(slot || byte_offset || length || evm_word || contract_address || chain_id)[0]`
 pub fn identifier_for_value_column(
     input: &SlotInput,
     contract_address: &Address,
@@ -111,7 +111,6 @@ pub fn identifier_for_value_column(
 ) -> u64 {
     let inputs = once(input.slot)
         .chain(input.byte_offset.to_be_bytes())
-        .chain(input.bit_offset.to_be_bytes())
         .chain(input.length.to_be_bytes())
         .chain(input.evm_word.to_be_bytes())
         .chain(contract_address.0.to_vec())

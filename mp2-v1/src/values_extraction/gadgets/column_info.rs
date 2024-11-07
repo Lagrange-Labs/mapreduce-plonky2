@@ -69,7 +69,7 @@ impl ColumnInfo {
             slot_input.slot,
             identifier,
             slot_input.byte_offset,
-            slot_input.bit_offset,
+            0, // bit_offset
             slot_input.length,
             slot_input.evm_word,
         )

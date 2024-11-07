@@ -216,9 +216,6 @@ pub struct SlotInput {
     pub(crate) slot: u8,
     /// The offset in bytes where to extract this column in a given EVM word
     pub(crate) byte_offset: usize,
-    /// The starting offset in `byte_offset` of the bits to be extracted for this column.
-    /// The column bits will start at `byte_offset * 8 + bit_offset`.
-    pub(crate) bit_offset: usize,
     /// The length (in bits) of the field to extract in the EVM word
     pub(crate) length: usize,
     /// At which EVM word is this column extracted from. For simple variables,
@@ -230,30 +227,19 @@ pub struct SlotInput {
 impl From<&ColumnInfo> for SlotInput {
     fn from(column_info: &ColumnInfo) -> Self {
         let slot = u8::try_from(column_info.slot.to_canonical_u64()).unwrap();
-        let [byte_offset, bit_offset, length] = [
-            column_info.byte_offset,
-            column_info.bit_offset,
-            column_info.length,
-        ]
-        .map(|f| usize::try_from(f.to_canonical_u64()).unwrap());
+        let [byte_offset, length] = [column_info.byte_offset, column_info.length]
+            .map(|f| usize::try_from(f.to_canonical_u64()).unwrap());
         let evm_word = u32::try_from(column_info.evm_word.to_canonical_u64()).unwrap();
 
-        SlotInput::new(slot, byte_offset, bit_offset, length, evm_word)
+        SlotInput::new(slot, byte_offset, length, evm_word)
     }
 }
 
 impl SlotInput {
-    pub fn new(
-        slot: u8,
-        byte_offset: usize,
-        bit_offset: usize,
-        length: usize,
-        evm_word: u32,
-    ) -> Self {
+    pub fn new(slot: u8, byte_offset: usize, length: usize, evm_word: u32) -> Self {
         Self {
             slot,
             byte_offset,
-            bit_offset,
             length,
             evm_word,
         }
@@ -265,10 +251,6 @@ impl SlotInput {
 
     pub fn byte_offset(&self) -> usize {
         self.byte_offset
-    }
-
-    pub fn bit_offset(&self) -> usize {
-        self.bit_offset
     }
 
     pub fn length(&self) -> usize {
@@ -354,7 +336,7 @@ pub fn compute_table_info(
                 input.slot,
                 id,
                 input.byte_offset,
-                input.bit_offset,
+                0, // bit_offset
                 input.length,
                 input.evm_word,
             )
