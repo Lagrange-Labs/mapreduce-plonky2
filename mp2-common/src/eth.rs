@@ -751,7 +751,7 @@ impl BlockUtil {
     // recompute the receipts trie by first converting all receipts form RPC type to consensus type
     // since in Alloy these are two different types and RLP functions are only implemented for
     // consensus ones.
-    fn check(&mut self) -> Result<()> {
+    pub fn check(&mut self) -> Result<()> {
         let computed = self.receipts_trie.root_hash()?;
         let tx_computed = self.transactions_trie.root_hash()?;
         let expected = self.block.header.receipts_root;
@@ -944,8 +944,8 @@ mod test {
 
     use alloy::{
         node_bindings::Anvil,
-        primitives::{Bytes, Log, U256},
-        providers::{ext::AnvilApi, Provider, ProviderBuilder, WalletProvider},
+        primitives::{Bytes, Log},
+        providers::{Provider, ProviderBuilder, WalletProvider},
         rlp::Decodable,
         sol,
     };
@@ -1131,17 +1131,18 @@ mod test {
         // Fire off a few transactions to emit some events
 
         let address = rpc.default_signer_address();
-        rpc.anvil_set_nonce(address, U256::from(0)).await.unwrap();
+        let current_nonce = rpc.get_transaction_count(address).await?;
+
         let tx_reqs = (0..10)
             .map(|i| match i % 2 {
                 0 => contract
                     .testEmit()
                     .into_transaction_request()
-                    .nonce(i as u64),
+                    .nonce(current_nonce + i as u64),
                 1 => contract
                     .twoEmits()
                     .into_transaction_request()
-                    .nonce(i as u64),
+                    .nonce(current_nonce + i as u64),
                 _ => unreachable!(),
             })
             .collect::<Vec<_>>();
