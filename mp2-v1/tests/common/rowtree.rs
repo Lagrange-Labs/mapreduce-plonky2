@@ -1,14 +1,7 @@
 use alloy::primitives::U256;
 use anyhow::*;
-use itertools::Itertools;
 use log::debug;
-use mp2_common::{
-    poseidon::H,
-    proof::ProofWithVK,
-    types::MAPPING_KEY_LEN,
-    utils::{Endianness, Packer},
-    F,
-};
+use mp2_common::{proof::ProofWithVK, types::MAPPING_KEY_LEN};
 use mp2_v1::{
     api::{self, CircuitInput},
     indexing::{
@@ -16,17 +9,13 @@ use mp2_v1::{
         cell::Cell,
         index::IndexNode,
         row::{RowPayload, RowTree, RowTreeKey, ToNonce},
-        LagrangeNode,
     },
     values_extraction::{
         row_unique_data_for_mapping_leaf, row_unique_data_for_mapping_of_mappings_leaf,
         row_unique_data_for_single_leaf,
     },
 };
-use plonky2::{
-    field::types::Field,
-    plonk::config::{GenericHashOut, Hasher},
-};
+use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
         pgsql::PgsqlStorage,
@@ -35,7 +24,6 @@ use ryhope::{
     },
     MerkleTreeKvDb,
 };
-use serde::Deserialize;
 use verifiable_db::{
     cells_tree,
     row_tree::{self, extract_hash_from_proof},

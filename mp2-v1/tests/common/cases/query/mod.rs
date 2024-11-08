@@ -78,7 +78,7 @@ pub struct QueryCooking {
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
     match &t.source {
-        TableSource::MappingValues(_) | TableSource::Merge(_) => {
+        TableSource::MappingValues(_, _) | TableSource::Merge(_) => {
             query_mapping(ctx, &table, &t).await?
         }
         _ => unimplemented!("yet"),

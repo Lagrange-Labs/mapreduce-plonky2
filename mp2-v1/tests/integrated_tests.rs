@@ -19,9 +19,9 @@ use common::{
     cases::{
         indexing::{ChangeType, UpdateType},
         query::{
-            test_query, GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput,
-            MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
-            MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
+            test_query, GlobalCircuitInput, RevelationCircuitInput, MAX_NUM_COLUMNS,
+            MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
         },
         TableIndexing,
     },
@@ -94,40 +94,29 @@ async fn integrated_indexing() -> Result<()> {
     ];
     single.run(&mut ctx, genesis, changes.clone()).await?;
 
-    let (mut single_struct, genesis) = TableIndexing::single_struct_test_case(&mut ctx).await?;
-    let changes = vec![
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Silent,
-        ChangeType::Update(UpdateType::SecondaryIndex),
-    ];
-    single_struct
-        .run(&mut ctx, genesis, changes.clone())
-        .await?;
-
-    let (mut mapping, genesis) = TableIndexing::mapping_test_case(&mut ctx).await?;
+    let (mut mapping, genesis) = TableIndexing::mapping_value_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
-        ChangeType::Silent,
         ChangeType::Update(UpdateType::SecondaryIndex),
         ChangeType::Deletion,
+        ChangeType::Silent,
     ];
     mapping.run(&mut ctx, genesis, changes).await?;
 
-    let (mut mapping_struct, genesis) = TableIndexing::mapping_struct_test_case(&mut ctx).await?;
+    let (mut mapping, genesis) = TableIndexing::mapping_struct_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
-        ChangeType::Silent,
         ChangeType::Update(UpdateType::SecondaryIndex),
         ChangeType::Deletion,
+        ChangeType::Silent,
     ];
-    mapping_struct.run(&mut ctx, genesis, changes).await?;
+    mapping.run(&mut ctx, genesis, changes).await?;
 
     let (mut merged, genesis) = TableIndexing::merge_table_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Insertion,
-        ChangeType::Update(UpdateType::Rest),
         ChangeType::Update(UpdateType::Rest),
         ChangeType::Silent,
         ChangeType::Deletion,

@@ -505,6 +505,18 @@ impl TestStorageTrie {
             // The new slot must be the same type.
             match (slot.slot(), new_slot) {
                 (&StorageSlot::Simple(_), &StorageSlot::Simple(_)) => (),
+                (
+                    &StorageSlot::Simple(_),
+                    &StorageSlot::Node(StorageSlotNode::Struct(ref parent_slot, _)),
+                ) => {
+                    assert!(parent_slot.is_simple_slot());
+                }
+                (
+                    &StorageSlot::Node(StorageSlotNode::Struct(ref parent_slot, _)),
+                    &StorageSlot::Simple(_),
+                ) => {
+                    assert!(parent_slot.is_simple_slot());
+                }
                 (&StorageSlot::Mapping(_, slot), &StorageSlot::Mapping(_, new_slot)) => {
                     // Must have the same slot number for the mapping type.
                     assert_eq!(slot, new_slot);
