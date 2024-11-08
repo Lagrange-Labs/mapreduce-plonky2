@@ -105,6 +105,7 @@ pub fn prove_circuit<
     let now = std::time::Instant::now();
     u.prove(&mut pw, &setup.0);
     let proof = setup.1.prove(pw).expect("invalid proof");
+
     println!("[+] Proof generated in {:?}ms", now.elapsed().as_millis());
     setup
         .2
@@ -124,10 +125,108 @@ pub fn run_circuit<
     u: U,
 ) -> ProofWithPublicInputs<F, C, D> {
     let setup = setup_circuit::<F, D, C, U>();
+
     println!(
         "setup.verifierdata hash {:?}",
         setup.2.verifier_only.circuit_digest
     );
 
     prove_circuit(&setup, &u)
+}
+
+/// Given a `PartitionWitness` that has only inputs set, populates the rest of the witness using the
+/// given set of generators.
+pub fn debug_generate_partial_witness<
+    'a,
+    F: RichField + Extendable<D>,
+    C: GenericConfig<D, F = F>,
+    const D: usize,
+>(
+    inputs: PartialWitness<F>,
+    prover_data: &'a plonky2::plonk::circuit_data::ProverOnlyCircuitData<F, C, D>,
+    common_data: &'a plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+) -> plonky2::iop::witness::PartitionWitness<'a, F> {
+    use plonky2::iop::witness::WitnessWrite;
+
+    let config = &common_data.config;
+    let generators = &prover_data.generators;
+    let generator_indices_by_watches = &prover_data.generator_indices_by_watches;
+
+    let mut witness = plonky2::iop::witness::PartitionWitness::new(
+        config.num_wires,
+        common_data.degree(),
+        &prover_data.representative_map,
+    );
+
+    for (t, v) in inputs.target_values.into_iter() {
+        witness.set_target(t, v);
+    }
+
+    // Build a list of "pending" generators which are queued to be run. Initially, all generators
+    // are queued.
+    let mut pending_generator_indices: Vec<_> = (0..generators.len()).collect();
+
+    // We also track a list of "expired" generators which have already returned false.
+    let mut generator_is_expired = vec![false; generators.len()];
+    let mut remaining_generators = generators.len();
+
+    let mut buffer = plonky2::iop::generator::GeneratedValues::empty();
+
+    // Keep running generators until we fail to make progress.
+    while !pending_generator_indices.is_empty() {
+        let mut next_pending_generator_indices = Vec::new();
+
+        for &generator_idx in &pending_generator_indices {
+            if generator_is_expired[generator_idx] {
+                continue;
+            }
+
+            let finished = generators[generator_idx].0.run(&witness, &mut buffer);
+            if finished {
+                generator_is_expired[generator_idx] = true;
+                remaining_generators -= 1;
+            }
+
+            // Merge any generated values into our witness, and get a list of newly-populated
+            // targets' representatives.
+            let new_target_reps = buffer
+                .target_values
+                .drain(..)
+                .flat_map(|(t, v)| witness.set_target_returning_rep(t, v));
+
+            // Enqueue unfinished generators that were watching one of the newly populated targets.
+            for watch in new_target_reps {
+                let opt_watchers = generator_indices_by_watches.get(&watch);
+                if let Some(watchers) = opt_watchers {
+                    for &watching_generator_idx in watchers {
+                        if !generator_is_expired[watching_generator_idx] {
+                            next_pending_generator_indices.push(watching_generator_idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        pending_generator_indices = next_pending_generator_indices;
+    }
+    if remaining_generators != 0 {
+        println!("{} generators weren't run", remaining_generators);
+
+        let filtered = generator_is_expired
+            .iter()
+            .enumerate()
+            .filter_map(|(index, flag)| if !flag { Some(index) } else { None })
+            .min();
+
+        if let Some(min_val) = filtered {
+            println!("generator at index: {} is the first to not run", min_val);
+            println!("This has ID: {}", generators[min_val].0.id());
+
+            for watch in generators[min_val].0.watch_list().iter() {
+                println!("watching: {:?}", watch);
+            }
+        }
+    }
+
+    witness
 }

@@ -21,8 +21,6 @@ use plonky2_ecgfp5::{
     },
 };
 
-use std::array::from_fn as create_array;
-
 mod curve_add;
 pub mod field_to_curve;
 mod sswu_gadget;
