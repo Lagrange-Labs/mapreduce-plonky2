@@ -17,7 +17,9 @@ use mp2_v1::{
         gadgets::column_info::ColumnInfo, identifier_block_column, identifier_for_value_column,
     },
 };
+use rand::{thread_rng, Rng};
 use ryhope::storage::RoEpochKvStorage;
+use std::array;
 
 use crate::common::{
     bindings::simple::Simple::{
@@ -39,13 +41,13 @@ use crate::common::{
         CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TableRowUniqueID,
         TreeRowUpdate, TreeUpdateType,
     },
-    MetadataGadget, TableInfo, TestContext,
+    MetadataGadget, StorageSlotValue, TableInfo, TestContext,
 };
 
 use super::{ContractExtractionArgs, TableIndexing, TableSource};
 use alloy::{
     contract::private::{Network, Provider, Transport},
-    primitives::{Address, U256},
+    primitives::{ruint::aliases::U256, Address, U256},
     providers::ProviderBuilder,
 };
 use mp2_common::{
@@ -973,11 +975,57 @@ pub struct SimpleSingleValue {
     pub(crate) s4: Address,
 }
 
+impl StorageSlotValue for U256 {
+    fn sample() -> Self {
+        let rng = &mut thread_rng();
+        U256::from_limbs(rng.gen())
+    }
+    fn from_u256_slice(u: &[U256]) -> Self {
+        assert_eq!(u.len(), 1, "Must convert from one U256");
+
+        u[0]
+    }
+    fn to_u256_vec(&self) -> Vec<U256> {
+        vec![*self]
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct LargeStruct {
     pub(crate) field1: U256,
     pub(crate) field2: u128,
     pub(crate) field3: u128,
+}
+
+impl StorageSlotValue for LargeStruct {
+    fn sample() -> Self {
+        let rng = &mut thread_rng();
+        let field1 = U256::from_limbs(rng.gen());
+        let [field2, field3] = array::from_fn(|_| rng.gen());
+
+        Self {
+            field1,
+            field2,
+            field3,
+        }
+    }
+    fn from_u256_slice(u: &[U256]) -> Self {
+        assert_eq!(u.len(), 3, "Must convert from three U256 for LargeStruct");
+
+        let field1 = u[0];
+        let field2 = u[1].to();
+        let field3 = u[2].to();
+
+        Self {
+            field1,
+            field2,
+            field3,
+        }
+    }
+    fn to_u256_vec(&self) -> Vec<U256> {
+        let [field2, field3] = [self.field2, self.field3].map(U256::from);
+        vec![self.field1, field2, field3]
+    }
 }
 
 impl LargeStruct {
@@ -1069,6 +1117,7 @@ impl From<&[[u8; MAPPING_LEAF_VALUE_LEN]]> for LargeStruct {
         }
     }
 }
+
 #[derive(Clone, Debug)]
 pub enum MappingStructUpdate {
     // key, struct value

@@ -1,8 +1,7 @@
 use alloy::{primitives::Address, providers::ProviderBuilder};
 use anyhow::Result;
-use log::info;
 
-use crate::common::{bindings::simple::Simple, TestContext};
+use crate::common::{bindings::simple::Simple, StorageSlotValue, TestContext};
 
 use super::indexing::{LargeStruct, SimpleSingleValue, UpdateSimpleStorage};
 
@@ -39,10 +38,10 @@ impl Contract {
         Ok(res.into())
     }
     // Returns the table updated
-    pub async fn apply_update(
+    pub async fn apply_update<V: StorageSlotValue>(
         &self,
         ctx: &TestContext,
-        update: &UpdateSimpleStorage,
+        update: &UpdateSimpleStorage<V>,
     ) -> Result<()> {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -51,7 +50,6 @@ impl Contract {
 
         let contract = Simple::new(self.address, &provider);
         update.apply_to(&contract).await;
-        info!("Updated contract with new values {:?}", update);
         Ok(())
     }
 }

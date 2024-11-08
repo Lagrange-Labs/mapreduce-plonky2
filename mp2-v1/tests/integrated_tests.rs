@@ -19,9 +19,9 @@ use common::{
     cases::{
         indexing::{ChangeType, UpdateType},
         query::{
-            test_query, GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput,
-            MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
-            MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
+            test_query, GlobalCircuitInput, RevelationCircuitInput, MAX_NUM_COLUMNS,
+            MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
         },
         TableIndexing,
     },

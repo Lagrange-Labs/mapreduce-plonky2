@@ -1,4 +1,5 @@
 use std::{
+    array,
     assert_matches::assert_matches,
     collections::BTreeSet,
     marker::PhantomData,
@@ -11,7 +12,7 @@ use alloy::{
     primitives::{Address, U256},
 };
 use anyhow::{bail, Result};
-use futures::{future::BoxFuture, FutureExt, StreamExt};
+use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
@@ -38,28 +39,22 @@ use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    cases::indexing::{
-        LargeStruct, MappingStructUpdate, MappingUpdate, MappingValuesUpdate, SimpleSingleValue,
-        TableRowValues,
-    },
+    cases::indexing::{LargeStruct, MappingUpdate, SimpleSingleValue, TableRowValues},
     final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
-    MetadataGadget, StorageSlotInfo, TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
+    MetadataGadget, StorageSlotInfo, StorageSlotValue, TestContext, TEST_MAX_COLUMNS,
+    TEST_MAX_FIELD_PER_EVM,
 };
 
 use super::{
     contract::Contract,
     indexing::{
-        ChangeType, TableRowUpdate, UpdateSimpleStorage, UpdateType, MAPPING_SLOT,
-        MAPPING_STRUCT_SLOT, SINGLE_SLOTS, SINGLE_STRUCT_SLOT,
+        ChangeType, TableRowUpdate, UpdateSimpleStorage, UpdateType, MAPPING_SLOT, SINGLE_SLOTS,
+        SINGLE_STRUCT_SLOT,
     },
 };
-
-trait ToU256Vec {
-    fn to_u256_vec(&self) -> Vec<U256>;
-}
 
 /// What is the secondary index chosen for the table in the mapping.
 /// Each entry contains the identifier of the column expected to store in our tree
@@ -76,12 +71,12 @@ pub enum MappingIndex {
 /// The key,value such that the combination is unique. This can be turned into a RowTreeKey.
 /// to store in the row tree.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UniqueMappingEntry<V: ToU256Vec> {
+pub struct UniqueMappingEntry<V: StorageSlotValue> {
     key: U256,
     value: V,
 }
 
-impl<V: ToU256Vec> From<(U256, V)> for UniqueMappingEntry<V> {
+impl<V: StorageSlotValue> From<(U256, V)> for UniqueMappingEntry<V> {
     fn from(pair: (U256, V)) -> Self {
         Self {
             key: pair.0,
@@ -90,7 +85,7 @@ impl<V: ToU256Vec> From<(U256, V)> for UniqueMappingEntry<V> {
     }
 }
 
-impl<V: ToU256Vec> UniqueMappingEntry<V> {
+impl<V: StorageSlotValue> UniqueMappingEntry<V> {
     pub fn new(key: U256, value: V) -> Self {
         Self { key, value }
     }
@@ -225,11 +220,14 @@ pub(crate) enum TableSource {
     SingleValues(SingleValuesExtractionArgs),
     /// Test arguments for mapping values extraction (C.1)
     /// We can test with and without the length
-    MappingValues((MappingValuesExtractionArgs, Option<LengthExtractionArgs>)),
+    MappingValues(MappingExtractionArgs<U256>, Option<LengthExtractionArgs>),
     /// Test arguments for single struct extraction
     SingleStruct(SingleStructExtractionArgs),
     /// Test arguments for mapping struct extraction
-    MappingStruct((MappingStructExtractionArgs, Option<LengthExtractionArgs>)),
+    MappingStruct(
+        MappingExtractionArgs<LargeStruct>,
+        Option<LengthExtractionArgs>,
+    ),
     Merge(MergeSource),
 }
 
@@ -239,15 +237,11 @@ impl TableSource {
             TableSource::SingleValues(_) => {
                 SlotInputs::Simple(SingleValuesExtractionArgs::slot_inputs())
             }
-            TableSource::MappingValues(_) => {
-                SlotInputs::Mapping(vec![MappingValuesExtractionArgs::slot_input()])
-            }
+            TableSource::MappingValues(args, _) => SlotInputs::Mapping(args.slot_inputs.clone()),
             TableSource::SingleStruct(_) => {
                 SlotInputs::Simple(SingleStructExtractionArgs::slot_inputs())
             }
-            TableSource::MappingStruct(_) => {
-                SlotInputs::Mapping(MappingStructExtractionArgs::slot_inputs())
-            }
+            TableSource::MappingStruct(args, _) => SlotInputs::Mapping(args.slot_inputs.clone()),
             // TODO: Support for mapping of mappings.
             TableSource::Merge(_) => panic!("can't call slot inputs on merge table"),
         }
@@ -261,12 +255,12 @@ impl TableSource {
         async move {
             match self {
                 TableSource::SingleValues(ref mut s) => s.init_contract_data(ctx, contract).await,
-                TableSource::MappingValues((ref mut m, _)) => {
-                    m.init_contract_data(ctx, contract).await
+                TableSource::MappingValues(ref mut args, _) => {
+                    args.init_contract_data(ctx, contract).await
                 }
                 TableSource::SingleStruct(ref mut s) => s.init_contract_data(ctx, contract).await,
-                TableSource::MappingStruct((ref mut m, _)) => {
-                    m.init_contract_data(ctx, contract).await
+                TableSource::MappingStruct(ref mut args, _) => {
+                    args.init_contract_data(ctx, contract).await
                 }
                 TableSource::Merge(ref mut merge) => merge.init_contract_data(ctx, contract).await,
             }
@@ -286,16 +280,16 @@ impl TableSource {
                     .await
             }
             // first lets do without length
-            TableSource::MappingValues((ref m, _)) => {
-                m.generate_extraction_proof_inputs(ctx, contract, value_key)
+            TableSource::MappingValues(ref args, _) => {
+                args.generate_extraction_proof_inputs(ctx, contract, value_key)
                     .await
             }
             TableSource::SingleStruct(ref s) => {
                 s.generate_extraction_proof_inputs(ctx, contract, value_key)
                     .await
             }
-            TableSource::MappingStruct((ref m, _)) => {
-                m.generate_extraction_proof_inputs(ctx, contract, value_key)
+            TableSource::MappingStruct(ref args, _) => {
+                args.generate_extraction_proof_inputs(ctx, contract, value_key)
                     .await
             }
             TableSource::Merge(ref merge) => {
@@ -317,14 +311,14 @@ impl TableSource {
                 TableSource::SingleValues(ref s) => {
                     s.random_contract_update(ctx, contract, c).await
                 }
-                TableSource::MappingValues((ref mut m, _)) => {
-                    m.random_contract_update(ctx, contract, c).await
+                TableSource::MappingValues(ref mut args, _) => {
+                    args.random_contract_update(ctx, contract, c).await
                 }
                 TableSource::SingleStruct(ref s) => {
                     s.random_contract_update(ctx, contract, c).await
                 }
-                TableSource::MappingStruct((ref mut m, _)) => {
-                    m.random_contract_update(ctx, contract, c).await
+                TableSource::MappingStruct(ref mut args, _) => {
+                    args.random_contract_update(ctx, contract, c).await
                 }
                 TableSource::Merge(ref mut merge) => {
                     merge.random_contract_update(ctx, contract, c).await
@@ -388,7 +382,7 @@ impl SingleValuesExtractionArgs {
         // phase
         let old_table_values = TableRowValues::default();
         contract
-            .apply_update(ctx, &UpdateSimpleStorage::SingleValues(contract_update))
+            .apply_update::<U256>(ctx, &UpdateSimpleStorage::SingleValues(contract_update))
             .await
             .unwrap();
         let new_table_values = self.current_table_row_values(ctx, contract).await;
@@ -437,7 +431,10 @@ impl SingleValuesExtractionArgs {
         };
 
         let contract_update = UpdateSimpleStorage::SingleValues(current_values);
-        contract.apply_update(ctx, &contract_update).await.unwrap();
+        contract
+            .apply_update::<U256>(ctx, &contract_update)
+            .await
+            .unwrap();
         let new_table_values = self.current_table_row_values(ctx, contract).await;
         assert!(
             new_table_values.len() == 1,
@@ -568,398 +565,17 @@ impl SingleValuesExtractionArgs {
     }
 }
 
-/// Mapping values extraction arguments (C.1)
-#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
-pub(crate) struct MappingValuesExtractionArgs {
-    /// Mapping index
-    pub(crate) index: MappingIndex,
-    /// Mapping keys: they are useful for two things:
-    ///     * doing some controlled changes on the smart contract, since if we want to do an update we
-    /// need to know an existing key
-    ///     * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
-    /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
-    pub(crate) mapping_keys: Vec<Vec<u8>>,
-}
-
-impl MappingValuesExtractionArgs {
-    pub fn new(index: MappingIndex) -> Self {
-        Self {
-            index,
-            mapping_keys: vec![],
-        }
-    }
-    pub fn slot_input() -> SlotInput {
-        SlotInput::new(MAPPING_SLOT, 0, 256, 0)
-    }
-    pub async fn init_contract_data(
-        &mut self,
-        ctx: &mut TestContext,
-        contract: &Contract,
-    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        let index = self.index.clone();
-        let init_pair = (next_value(), next_address());
-        // NOTE: here is the same address but for different mapping key (10,11)
-        let pair2 = (next_value(), init_pair.1);
-        let init_state = [init_pair, pair2, (next_value(), next_address())];
-        // NOTE: uncomment this for simpler testing
-        //let init_state = [init_pair];
-        // saving the keys we are tracking in the mapping
-        self.mapping_keys.extend(
-            init_state
-                .iter()
-                .map(|u| u.0.to_be_bytes_trimmed_vec())
-                .collect::<Vec<_>>(),
-        );
-        let mapping_updates = init_state
-            .iter()
-            .map(|u| MappingValuesUpdate::Insertion(u.0, u.1.into_word().into()))
-            .collect::<Vec<_>>();
-
-        contract
-            .apply_update(
-                ctx,
-                &UpdateSimpleStorage::MappingValues(mapping_updates.clone()),
-            )
-            .await
-            .unwrap();
-        let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-        self.mapping_to_table_update(new_block_number, mapping_updates, index, contract)
-    }
-
-    async fn random_contract_update(
-        &mut self,
-        ctx: &mut TestContext,
-        contract: &Contract,
-        c: ChangeType,
-    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        // NOTE 1: The first part is just trying to construct the right input to simulate any
-        // changes on a mapping. This is mostly irrelevant for dist system but needs to
-        // manually construct our test cases here. The second part is more interesting as it looks at "what to do
-        // when receiving an update from scrapper". The core of the function is in
-        // `from_mapping_to_table_update`
-        //
-        // NOTE 2: Thhis implementation tries to emulate as much as possible what happens in dist
-        // system. TO compute the set of updates, it first simulate an update on the contract
-        // and creates the signal "MappingUpdate" corresponding to the update. From that point
-        // onwards, the table row updates are manually created.
-        // Note this can actually lead to more work than necessary in some cases.
-        // Take an example where the mapping is storing (10->A), (11->A), and where the
-        // secondary index value is the value, i.e. A.
-        // Our table initially looks like `A | 10`, `A | 11`.
-        // Imagine an update where we want to change the first row to `A | 12`. In the "table"
-        // world, this is only a simple update of a simple cell, no index even involved. But
-        // from the perspective of mapping, the "scrapper" can only tells us :
-        // * Key 10 has been deleted
-        // * Key 12 has been added with value A
-        // In the backend, we translate that in the "table world" to a deletion and an insertion.
-        // Having such optimization could be done later on, need to properly evaluate the cost
-        // of it.
-        let idx = 0;
-        let mkey = &self.mapping_keys[idx].clone();
-        let index_type = self.index.clone();
-        let address = &contract.address.clone();
-        let query = ProofQuery::new_mapping_slot(*address, MAPPING_SLOT as usize, mkey.to_owned());
-        let response = ctx
-            .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
-            .await;
-        let current_value = response.storage_proof[0].value;
-        let current_key = U256::from_be_slice(mkey);
-        let new_key = next_mapping_key();
-        let new_value: U256 = next_address().into_word().into();
-        let mapping_updates = match c {
-            ChangeType::Silent => vec![],
-            ChangeType::Insertion => {
-                vec![MappingValuesUpdate::Insertion(new_key, new_value)]
-            }
-            ChangeType::Deletion => {
-                // NOTE: We care about the value here since that allows _us_ to pinpoint the
-                // correct row in the table and delete it since for a mpping, we uniquely
-                // identify row per (mapping_key,mapping_value) (in the order dictated by
-                // the secondary index)
-                vec![MappingValuesUpdate::Deletion(current_key, current_value)]
-            }
-            ChangeType::Update(u) => {
-                match u {
-                    // update the non-indexed column
-                    UpdateType::Rest => {
-                        // check which one it is and change accordingly
-                        match index_type {
-                            MappingIndex::Key(_) => {
-                                // we simply change the mapping value since the key is the secondary index
-                                vec![MappingValuesUpdate::Update(
-                                    current_key,
-                                    current_value,
-                                    new_value,
-                                )]
-                            }
-                            MappingIndex::Value(_) => {
-                                // TRICKY: in this case, the mapping key must change. But from the
-                                // onchain perspective, it means a transfer
-                                // mapping(old_key -> new_key,value)
-                                vec![
-                                    MappingValuesUpdate::Deletion(current_key, current_value),
-                                    MappingValuesUpdate::Insertion(new_key, current_value),
-                                ]
-                            }
-                            MappingIndex::None => {
-                                // a random update of the mapping, we don't care which since it is
-                                // not impacting the secondary index of the table since the mapping
-                                // doesn't contain the column which is the secondary index, in case
-                                // of the merge table case.
-                                vec![MappingValuesUpdate::Update(
-                                    current_key,
-                                    current_value,
-                                    new_value,
-                                )]
-                            }
-                        }
-                    }
-                    UpdateType::SecondaryIndex => {
-                        match index_type {
-                            MappingIndex::Key(_) => {
-                                // TRICKY: if the mapping key changes, it's a deletion then
-                                // insertion from onchain perspective
-                                vec![
-                                    MappingValuesUpdate::Deletion(current_key, current_value),
-                                    // we insert the same value but with a new mapping key
-                                    MappingValuesUpdate::Insertion(new_key, current_value),
-                                ]
-                            }
-                            MappingIndex::Value(_) => {
-                                // if the value changes, it's a simple update in mapping
-                                vec![MappingValuesUpdate::Update(
-                                    current_key,
-                                    current_value,
-                                    new_value,
-                                )]
-                            }
-                            MappingIndex::None => {
-                                // empty vec since this table has no secondary index so it should
-                                // give no updates
-                                vec![]
-                            }
-                        }
-                    }
-                }
-            }
-        };
-        // small iteration to always have a good updated list of mapping keys
-        for update in mapping_updates.iter() {
-            match update {
-                MappingValuesUpdate::Deletion(mkey, _) => {
-                    info!("Removing key {} from mappping keys tracking", mkey);
-                    let key_stored = mkey.to_be_bytes_trimmed_vec();
-                    self.mapping_keys.retain(|u| u != &key_stored);
-                }
-                MappingValuesUpdate::Insertion(mkey, _) => {
-                    info!("Inserting key {} to mappping keys tracking", mkey);
-                    self.mapping_keys.push(mkey.to_be_bytes_trimmed_vec());
-                }
-                // the mapping key doesn't change here so no need to update the list
-                MappingValuesUpdate::Update(_, _, _) => {}
-            }
-        }
-
-        contract
-            .apply_update(
-                ctx,
-                &UpdateSimpleStorage::MappingValues(mapping_updates.clone()),
-            )
-            .await
-            .unwrap();
-        let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-        // NOTE HERE is the interesting bit for dist system as this is the logic to execute
-        // on receiving updates from scapper. This only needs to have the relevant
-        // information from update and it will translate that to changes in the tree.
-        self.mapping_to_table_update(new_block_number, mapping_updates, index_type, contract)
-    }
-
-    pub async fn generate_extraction_proof_inputs(
-        &self,
-        ctx: &mut TestContext,
-        contract: &Contract,
-        proof_key: ProofKey,
-    ) -> Result<(ExtractionProofInput, HashOutput)> {
-        let ProofKey::ValueExtraction((_, bn)) = proof_key.clone() else {
-            bail!("invalid proof key");
-        };
-        let slot_input = Self::slot_input();
-        let key_id = identifier_for_mapping_key_column(
-            MAPPING_SLOT,
-            &contract.address,
-            contract.chain_id,
-            vec![],
-        );
-        let value_id =
-            identifier_for_value_column(&slot_input, &contract.address, contract.chain_id, vec![]);
-        let column_info = ColumnInfo::new_from_slot_input(value_id, &slot_input);
-        let mapping_root_proof = match ctx.storage.get_proof_exact(&proof_key) {
-            Ok(p) => p,
-            Err(_) => {
-                let storage_slot_info = self
-                    .mapping_keys
-                    .iter()
-                    .map(|mapping_key| {
-                        let slot = StorageSlot::Mapping(mapping_key.clone(), MAPPING_SLOT as usize);
-                        let metadata =
-                            MetadataGadget::new(vec![column_info.clone()], &[value_id], 0);
-                        StorageSlotInfo::new(slot, metadata, Some(key_id), None)
-                    })
-                    .collect_vec();
-                let mapping_values_proof = ctx
-                    .prove_values_extraction(
-                        &contract.address,
-                        BlockNumberOrTag::Number(bn as u64),
-                        &storage_slot_info,
-                    )
-                    .await;
-
-                ctx.storage
-                    .store_proof(proof_key, mapping_values_proof.clone())?;
-                info!("Generated Values Extraction (C.1) proof for mapping slots");
-                {
-                    let pproof = ProofWithVK::deserialize(&mapping_values_proof).unwrap();
-                    let pi =
-                        mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
-                    debug!(
-                        "[--] MAPPING FINAL MPT DIGEST VALUE --> {:?} ",
-                        pi.values_digest()
-                    );
-                    debug!(
-                        "[--] MAPPING FINAL ROOT HASH --> {:?} ",
-                        hex::encode(
-                            pi.root_hash()
-                                .into_iter()
-                                .flat_map(|u| u.to_be_bytes())
-                                .collect_vec(),
-                        )
-                    );
-                }
-                mapping_values_proof
-            }
-        };
-        let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-            SlotInputs::Mapping(vec![Self::slot_input()]),
-            &contract.address,
-            contract.chain_id,
-            vec![],
-        );
-        // it's a compoound value type of proof since we're not using the length
-        let input = ExtractionProofInput::Single(ExtractionTableProof {
-            dimension: TableDimension::Compound,
-            value_proof: mapping_root_proof,
-            length_proof: None,
-        });
-        Ok((input, metadata_hash))
-    }
-
-    pub fn mapping_to_table_update(
-        &self,
-        block_number: BlockPrimaryIndex,
-        updates: Vec<MappingValuesUpdate>,
-        index: MappingIndex,
-        contract: &Contract,
-    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        let slot_input = Self::slot_input();
-        updates
-            .iter()
-            .flat_map(|mapping_change| {
-                match mapping_change {
-                    MappingValuesUpdate::Deletion(mkey, mvalue) => {
-                        // find the associated row key tree to that value
-                        // HERE: there are multiple possibilities:
-                        // * search for the entry at the previous block instead
-                        // * passing inside the deletion the value deleted as well, so we can
-                        // reconstruct the row key
-                        // * or have this extra list of mapping keys
-                        let entry = UniqueMappingEntry::new(mkey, mvalue);
-                        vec![TableRowUpdate::Deletion(entry.to_row_key(&index))]
-                    }
-                    MappingValuesUpdate::Insertion(mkey, mvalue) => {
-                        // we transform the mapping entry into the "table notion" of row
-                        let entry = UniqueMappingEntry::new(mkey, mvalue);
-                        let (cells, index) = entry.to_update(
-                            block_number,
-                            &index,
-                            &slot_input,
-                            &contract.address,
-                            contract.chain_id,
-                            None,
-                        );
-                        vec![TableRowUpdate::Insertion(cells, index)]
-                    }
-                    MappingValuesUpdate::Update(mkey, old_value, mvalue) => {
-                        // NOTE: we need here to (a) delete current row and (b) insert new row
-                        // Regardless of the change if it's on the mapping key or value, since a
-                        // row is uniquely identified by its pair (key,value) then if one of those
-                        // change, that means the row tree key needs to change as well, i.e. it's a
-                        // deletion and addition.
-                        let previous_entry = UniqueMappingEntry::new(mkey, old_value);
-                        let previous_row_key = previous_entry.to_row_key(&index);
-                        let new_entry = UniqueMappingEntry::new(mkey, mvalue);
-
-                        let (mut cells, mut secondary_index) = new_entry.to_update(
-                            block_number,
-                            &index,
-                            &slot_input,
-                            &contract.address,
-                            contract.chain_id,
-                            // NOTE: here we provide the previous key such that we can
-                            // reconstruct the cells tree as it was before and then apply
-                            // the update and put it in a new row. Otherwise we don't know
-                            // the update plan since we don't have a base tree to deal
-                            // with.
-                            // In the case the key is the cell, that's good, we don't need to do
-                            // anything to the tree then since the doesn't change.
-                            // In the case it's the value, then we'll have to reprove the cell.
-                            Some(previous_row_key.clone()),
-                        );
-                        match index {
-                            MappingIndex::Key(_) => {
-                                // in this case, the mapping value changed, so the cells changed so
-                                // we need to start from scratch. Telling there was no previous row
-                                // key means it's treated as a full new cells tree.
-                                cells.previous_row_key = Default::default();
-                            }
-                            MappingIndex::Value(_) => {
-                                // This is a bit hacky way but essentially it means that there is
-                                // no update in the cells tree to apply, even tho it's still a new
-                                // insertion of a new row, since we pick up the cells tree form the
-                                // previous location, and that cells tree didn't change (since it's
-                                // based on the mapping key), then no need to update anything.
-                                // TODO: maybe make a better API to express the different
-                                // possibilities:
-                                // * insertion with new cells tree
-                                // * insertion without modification to cells tree
-                                // * update with modification to cells tree (default)
-                                cells.updated_cells = vec![];
-                            }
-                            MappingIndex::None => {
-                                secondary_index = Default::default();
-                            }
-                        };
-                        vec![
-                            TableRowUpdate::Deletion(previous_row_key),
-                            TableRowUpdate::Insertion(cells, secondary_index),
-                        ]
-                    }
-                }
-            })
-            .collect::<Vec<_>>()
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Hash, Clone, PartialEq, Eq)]
 pub struct MergeSource {
     // NOTE: this is a hardcore assumption currently that  table_a is single and table_b is mapping for now
     // Extending to full merge between any table is not far - it requires some quick changes in
     // circuit but quite a lot of changes in integrated test.
     pub(crate) single: SingleValuesExtractionArgs,
-    pub(crate) mapping: MappingValuesExtractionArgs,
+    pub(crate) mapping: MappingExtractionArgs<U256>,
 }
 
 impl MergeSource {
-    pub fn new(single: SingleValuesExtractionArgs, mapping: MappingValuesExtractionArgs) -> Self {
+    pub fn new(single: SingleValuesExtractionArgs, mapping: MappingExtractionArgs<U256>) -> Self {
         Self { single, mapping }
     }
 
@@ -1052,7 +668,7 @@ impl MergeSource {
                         .await;
                     let current_value = response.storage_proof[0].value;
                     let current_key = U256::from_be_slice(&mk);
-                    let entry = UniqueMappingEntry::new(&current_key, &current_value);
+                    let entry = UniqueMappingEntry::new(current_key, current_value);
                     // create one update for each update of the first table (note again there
                     // should be only one update since it's single var)
                     all_updates.extend(rsu.iter().map(|s| {
@@ -1061,8 +677,16 @@ impl MergeSource {
                         };
                         TableRowUpdate::Update(CellsUpdate {
                             // the row key doesn't change since the mapping value doesn't change
-                            previous_row_key: entry.to_row_key(&self.mapping.index),
-                            new_row_key: entry.to_row_key(&self.mapping.index),
+                            previous_row_key: entry.to_row_key(
+                                contract,
+                                &self.mapping.index,
+                                &self.mapping.slot_inputs,
+                            ),
+                            new_row_key: entry.to_row_key(
+                                contract,
+                                &self.mapping.index,
+                                &self.mapping.slot_inputs,
+                            ),
                             // only insert the new cells from the single update
                             updated_cells: su.updated_cells.clone(),
                             primary: bn as BlockPrimaryIndex,
@@ -1148,7 +772,7 @@ impl MergeSource {
                 contract.chain_id,
                 vec![],
                 TableSource::SingleValues(self.single.clone()).slot_input(),
-                TableSource::MappingValues((self.mapping.clone(), None)).slot_input(),
+                TableSource::MappingValues(self.mapping.clone(), None).slot_input(),
             );
             assert!(extract_a != extract_b);
             Ok((
@@ -1263,7 +887,7 @@ impl SingleStructExtractionArgs {
         };
         let old_table_values = TableRowValues::default();
         contract
-            .apply_update(ctx, &UpdateSimpleStorage::SingleStruct(contract_update))
+            .apply_update::<LargeStruct>(ctx, &UpdateSimpleStorage::SingleStruct(contract_update))
             .await
             .unwrap();
         let new_table_values = self.current_table_row_values(ctx, contract).await;
@@ -1305,7 +929,10 @@ impl SingleStructExtractionArgs {
         };
 
         let contract_update = UpdateSimpleStorage::SingleStruct(current_struct);
-        contract.apply_update(ctx, &contract_update).await.unwrap();
+        contract
+            .apply_update::<LargeStruct>(ctx, &contract_update)
+            .await
+            .unwrap();
         let new_table_values = self.current_table_row_values(ctx, contract).await;
         assert!(
             new_table_values.len() == 1,
@@ -1430,422 +1057,9 @@ impl SingleStructExtractionArgs {
     }
 }
 
-/// Mapping struct extraction arguments
-#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
-pub(crate) struct MappingStructExtractionArgs {
-    /// Mapping index type
-    index: MappingIndex,
-    /// Metadata information
-    metadata: Vec<MetadataGadget>,
-    /// Mapping keys: they are useful for two things:
-    ///     * doing some controlled changes on the smart contract, since if we want to do an update we
-    /// need to know an existing key
-    ///     * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
-    /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
-    mapping_keys: Vec<Vec<u8>>,
-}
-
-impl MappingStructExtractionArgs {
-    pub fn new(index: MappingIndex, contract: &Contract) -> Self {
-        let metadata = LargeStruct::metadata(
-            MAPPING_STRUCT_SLOT as u8,
-            contract.chain_id,
-            &contract.address,
-        );
-
-        Self {
-            index,
-            metadata,
-            mapping_keys: vec![],
-        }
-    }
-
-    pub fn slot_inputs() -> Vec<SlotInput> {
-        LargeStruct::slot_inputs(MAPPING_STRUCT_SLOT as u8)
-    }
-
-    pub async fn init_contract_data(
-        &mut self,
-        ctx: &mut TestContext,
-        contract: &Contract,
-    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        let struct_value1 = LargeStruct {
-            field1: U256::from(1234),
-            field2: 1,
-            field3: 2,
-        };
-        let mut struct_value2 = struct_value1.clone();
-        struct_value2.field2 += 1;
-        let mut struct_value3 = struct_value2.clone();
-        struct_value3.field3 += 1;
-        let mapping_pairs = [
-            (next_value(), struct_value1),
-            (next_value(), struct_value2),
-            (next_value(), struct_value3),
-        ];
-        // Save the update mapping keys.
-        self.mapping_keys.extend(
-            mapping_pairs
-                .iter()
-                .map(|u| u.0.to_be_bytes_trimmed_vec())
-                .collect_vec(),
-        );
-        let mapping_updates = mapping_pairs
-            .into_iter()
-            .map(|u| MappingStructUpdate::Insertion(u.0, u.1))
-            .collect_vec();
-
-        contract
-            .apply_update(
-                ctx,
-                &UpdateSimpleStorage::MappingStruct(mapping_updates.clone()),
-            )
-            .await
-            .unwrap();
-        let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-        self.mapping_to_table_update(new_block_number, mapping_updates, contract)
-    }
-
-    async fn random_contract_update(
-        &mut self,
-        ctx: &mut TestContext,
-        contract: &Contract,
-        c: ChangeType,
-    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        // NOTE 1: The first part is just trying to construct the right input to simulate any
-        // changes on a mapping. This is mostly irrelevant for dist system but needs to manually
-        // construct our test cases here. The second part is more interesting as it looks at
-        // "what to do when receiving an update from scrapper". The core of the function is in
-        // `from_mapping_to_table_update`
-        //
-        // NOTE 2: This implementation tries to emulate as much as possible what happens in dist
-        // system. To compute the set of updates, it first simulate an update on the contract
-        // and creates the signal "MappingUpdate" corresponding to the update. From that point
-        // onwards, the table row updates are manually created.
-        // Note this can actually lead to more work than necessary in some cases.
-        // Take an example where the mapping is storing (10->A), (11->A), and where the
-        // secondary index value is the value, i.e. A.
-        // Our table initially looks like `A | 10`, `A | 11`.
-        // Imagine an update where we want to change the first row to `A | 12`. In the "table"
-        // world, this is only a simple update of a simple cell, no index even involved. But
-        // from the perspective of mapping, the "scrapper" can only tells us :
-        // * Key 10 has been deleted
-        // * Key 12 has been added with value A
-        // In the backend, we translate that in the "table world" to a deletion and an insertion.
-        // Having such optimization could be done later on, need to properly evaluate the cost
-        // of it.
-        let mkey = &self.mapping_keys[0];
-        let parent_slot = StorageSlot::Mapping(mkey.clone(), MAPPING_STRUCT_SLOT);
-        let mut fields = vec![];
-        for metadata in &self.metadata {
-            let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(
-                parent_slot.clone(),
-                metadata.evm_word(),
-            ));
-            let query = ProofQuery::new(contract.address, storage_slot);
-            let value = ctx
-                .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
-                .await
-                .storage_proof[0]
-                .value;
-
-            let table_info = metadata.extracted_table_info();
-            let value_bytes = value.to_be_bytes();
-            table_info.iter().for_each(|column_info| {
-                let bytes = extract_value(&value_bytes, column_info);
-                debug!(
-                    "Mapping struct extract value: column: {:?}, field = {}",
-                    column_info,
-                    U256::from_be_slice(&bytes),
-                );
-
-                fields.push(bytes);
-            });
-        }
-        assert_eq!(fields.len(), LargeStruct::FIELD_NUM);
-        let current_struct = LargeStruct::from(fields.as_slice());
-        let current_key = U256::from_be_slice(mkey);
-        let new_key = next_mapping_key();
-        let new_struct = LargeStruct::new(
-            current_struct.field1 + U256::from(1),
-            current_struct.field2 + 1,
-            current_struct.field3 + 1,
-        );
-        debug!("To update mapping struct: current = {current_struct:?}, new = {new_struct:?}");
-        let mapping_updates = match c {
-            ChangeType::Silent => vec![],
-            ChangeType::Insertion => {
-                vec![MappingStructUpdate::Insertion(new_key, new_struct)]
-            }
-            ChangeType::Deletion => {
-                vec![MappingStructUpdate::Deletion(current_key, current_struct)]
-            }
-            ChangeType::Update(u) => {
-                match u {
-                    UpdateType::Rest => {
-                        match self.index {
-                            MappingIndex::Key(_) => {
-                                // we simply change the mapping value since the key is the secondary index
-                                vec![MappingStructUpdate::Update(
-                                    current_key,
-                                    current_struct,
-                                    new_struct,
-                                )]
-                            }
-                            MappingIndex::Value(_) => {
-                                // TRICKY: in this case, the mapping key must change. But from the
-                                // onchain perspective, it means a transfer mapping(old_key -> new_key,value)
-                                vec![
-                                    MappingStructUpdate::Deletion(
-                                        current_key,
-                                        current_struct.clone(),
-                                    ),
-                                    MappingStructUpdate::Insertion(new_key, current_struct),
-                                ]
-                            }
-                            MappingIndex::None => {
-                                // a random update of the mapping, we don't care which since it is
-                                // not impacting the secondary index of the table since the mapping
-                                // doesn't contain the column which is the secondary index, in case
-                                // of the merge table case.
-                                vec![MappingStructUpdate::Update(
-                                    current_key,
-                                    current_struct,
-                                    new_struct,
-                                )]
-                            }
-                        }
-                    }
-                    UpdateType::SecondaryIndex => {
-                        match self.index {
-                            MappingIndex::Key(_) => {
-                                // TRICKY: if the mapping key changes, it's a deletion then
-                                // insertion from onchain perspective
-                                vec![
-                                    MappingStructUpdate::Deletion(
-                                        current_key,
-                                        current_struct.clone(),
-                                    ),
-                                    // we insert the same value but with a new mapping key
-                                    MappingStructUpdate::Insertion(new_key, current_struct),
-                                ]
-                            }
-                            MappingIndex::Value(_) => {
-                                // if the value changes, it's a simple update in mapping
-                                vec![MappingStructUpdate::Update(
-                                    current_key,
-                                    current_struct,
-                                    new_struct,
-                                )]
-                            }
-                            MappingIndex::None => {
-                                // empty vec since this table has no secondary index so it should
-                                // give no updates
-                                vec![]
-                            }
-                        }
-                    }
-                }
-            }
-        };
-        // small iteration to always have a good updated list of mapping keys
-        for update in mapping_updates.iter() {
-            match update {
-                MappingStructUpdate::Deletion(mkey, _) => {
-                    info!("Removing key {} from mappping keys tracking", mkey);
-                    let key_stored = mkey.to_be_bytes_trimmed_vec();
-                    self.mapping_keys.retain(|u| u != &key_stored);
-                }
-                MappingStructUpdate::Insertion(mkey, _) => {
-                    info!("Inserting key {} to mappping keys tracking", mkey);
-                    self.mapping_keys.push(mkey.to_be_bytes_trimmed_vec());
-                }
-                // the mapping key doesn't change here so no need to update the list
-                MappingStructUpdate::Update(_, _, _) => {}
-            }
-        }
-
-        contract
-            .apply_update(
-                ctx,
-                &UpdateSimpleStorage::MappingStruct(mapping_updates.clone()),
-            )
-            .await
-            .unwrap();
-        let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-        // NOTE HERE is the interesting bit for dist system as this is the logic to execute
-        // on receiving updates from scapper. This only needs to have the relevant
-        // information from update and it will translate that to changes in the tree.
-        self.mapping_to_table_update(new_block_number, mapping_updates, contract)
-    }
-
-    pub async fn generate_extraction_proof_inputs(
-        &self,
-        ctx: &mut TestContext,
-        contract: &Contract,
-        proof_key: ProofKey,
-    ) -> Result<(ExtractionProofInput, HashOutput)> {
-        let ProofKey::ValueExtraction((_, bn)) = proof_key.clone() else {
-            bail!("invalid proof key");
-        };
-        let key_id = identifier_for_mapping_key_column(
-            MAPPING_STRUCT_SLOT as u8,
-            &contract.address,
-            contract.chain_id,
-            vec![],
-        );
-        let mapping_root_proof = match ctx.storage.get_proof_exact(&proof_key) {
-            Ok(p) => p,
-            Err(_) => {
-                let storage_slot_info = self
-                    .metadata
-                    .iter()
-                    .cartesian_product(self.mapping_keys.iter())
-                    .map(|(metadata, mapping_key)| {
-                        let parent_slot =
-                            StorageSlot::Mapping(mapping_key.clone(), MAPPING_STRUCT_SLOT);
-                        let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(
-                            parent_slot.clone(),
-                            metadata.evm_word(),
-                        ));
-                        StorageSlotInfo::new(storage_slot, metadata.clone(), Some(key_id), None)
-                    })
-                    .collect_vec();
-                let mapping_values_proof = ctx
-                    .prove_values_extraction(
-                        &contract.address,
-                        BlockNumberOrTag::Number(bn as u64),
-                        &storage_slot_info,
-                    )
-                    .await;
-                ctx.storage
-                    .store_proof(proof_key, mapping_values_proof.clone())?;
-                info!("Generated Values Extraction proof for mapping struct slots");
-                {
-                    let pproof = ProofWithVK::deserialize(&mapping_values_proof).unwrap();
-                    let pi =
-                        mp2_v1::values_extraction::PublicInputs::new(&pproof.proof().public_inputs);
-                    debug!(
-                        "[--] MAPPING FINAL MPT DIGEST VALUE --> {:?} ",
-                        pi.values_digest()
-                    );
-                    debug!(
-                        "[--] MAPPING FINAL ROOT HASH --> {:?} ",
-                        hex::encode(
-                            pi.root_hash()
-                                .into_iter()
-                                .flat_map(|u| u.to_be_bytes())
-                                .collect_vec()
-                        )
-                    );
-                }
-                mapping_values_proof
-            }
-        };
-        let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-            SlotInputs::Mapping(Self::slot_inputs()),
-            &contract.address,
-            contract.chain_id,
-            vec![],
-        );
-        // it's a compoound value type of proof since we're not using the length
-        let input = ExtractionProofInput::Single(ExtractionTableProof {
-            dimension: TableDimension::Compound,
-            value_proof: mapping_root_proof,
-            length_proof: None,
-        });
-        Ok((input, metadata_hash))
-    }
-
-    pub fn mapping_to_table_update(
-        &self,
-        block_number: BlockPrimaryIndex,
-        updates: Vec<MappingStructUpdate>,
-        contract: &Contract,
-    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        updates
-            .iter()
-            .flat_map(|mapping_change| {
-                match mapping_change {
-                    MappingStructUpdate::Deletion(mkey, mvalue) => {
-                        // find the associated row key tree to that value
-                        // HERE: there are multiple possibilities:
-                        // * search for the entry at the previous block instead
-                        // * passing inside the deletion the value deleted as well, so we can
-                        // reconstruct the row key
-                        // * or have this extra list of mapping keys
-                        let entry = UniqueMappingStructEntry::new(mkey, mvalue);
-                        vec![TableRowUpdate::Deletion(entry.to_row_key())]
-                    }
-                    MappingStructUpdate::Insertion(mkey, mvalue) => {
-                        // we transform the mapping entry into the "table notion" of row
-                        let entry = UniqueMappingStructEntry::new(mkey, mvalue);
-                        let (cells, index) = entry.to_update(block_number, contract, None);
-                        debug!("Update mapping struct cells: secondary_index = {:?}, update_cell_len = {}", index, cells.updated_cells.len());
-                        vec![TableRowUpdate::Insertion(cells, index)]
-                    }
-                    MappingStructUpdate::Update(mkey, old_value, mvalue) => {
-                        // NOTE: we need here to (a) delete current row and (b) insert new row
-                        // Regardless of the change if it's on the mapping key or value, since a
-                        // row is uniquely identified by its pair (key,value) then if one of those
-                        // change, that means the row tree key needs to change as well, i.e. it's a
-                        // deletion and addition.
-                        let previous_entry = UniqueMappingStructEntry::new(mkey, old_value);
-                        let previous_row_key = previous_entry.to_row_key();
-                        let new_entry = UniqueMappingStructEntry::new(mkey, mvalue);
-
-                        let (mut cells, mut secondary_index) = new_entry.to_update(
-                            block_number,
-                            contract,
-                            // NOTE: here we provide the previous key such that we can
-                            // reconstruct the cells tree as it was before and then apply
-                            // the update and put it in a new row. Otherwise we don't know
-                            // the update plan since we don't have a base tree to deal
-                            // with.
-                            // In the case the key is the cell, that's good, we don't need to do
-                            // anything to the tree then since the doesn't change.
-                            // In the case it's the value, then we'll have to reprove the cell.
-                            Some(previous_row_key.clone()),
-                        );
-                        match self.index {
-                            MappingIndex::Key(_) => {
-                                // in this case, the mapping value changed, so the cells changed so
-                                // we need to start from scratch. Telling there was no previous row
-                                // key means it's treated as a full new cells tree.
-                                cells.previous_row_key = Default::default();
-                            }
-                            MappingIndex::Value(_) => {
-                                // This is a bit hacky way but essentially it means that there is
-                                // no update in the cells tree to apply, even tho it's still a new
-                                // insertion of a new row, since we pick up the cells tree form the
-                                // previous location, and that cells tree didn't change (since it's
-                                // based on the mapping key), then no need to update anything.
-                                // TODO: maybe make a better API to express the different
-                                // possibilities:
-                                // * insertion with new cells tree
-                                // * insertion without modification to cells tree
-                                // * update with modification to cells tree (default)
-                                cells.updated_cells = vec![];
-                            }
-                            MappingIndex::None => {
-                                secondary_index = Default::default();
-                            }
-                        };
-                        vec![
-                            TableRowUpdate::Deletion(previous_row_key),
-                            TableRowUpdate::Insertion(cells, secondary_index),
-                        ]
-                    }
-                }
-            })
-            .collect_vec()
-    }
-}
-
-// gupeng
 /// Mapping extraction arguments
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
-pub(crate) struct MappingExtractionArgs<V: Clone + ToU256Vec> {
+pub(crate) struct MappingExtractionArgs<V: StorageSlotValue> {
     /// Flag to identify if it's a single value or struct
     is_single: bool,
     /// Mapping slot number
@@ -1866,7 +1080,7 @@ pub(crate) struct MappingExtractionArgs<V: Clone + ToU256Vec> {
     _phantom: PhantomData<V>,
 }
 
-impl<V: Clone + ToU256Vec> MappingExtractionArgs<V> {
+impl<V: StorageSlotValue> MappingExtractionArgs<V> {
     pub fn new(
         is_single: bool,
         slot: u8,
@@ -1885,216 +1099,154 @@ impl<V: Clone + ToU256Vec> MappingExtractionArgs<V> {
         }
     }
 
-    pub async fn update_contract_data(
+    pub fn slot_inputs(&self) -> &[SlotInput] {
+        &self.slot_inputs
+    }
+
+    pub async fn init_contract_data(
         &mut self,
         ctx: &mut TestContext,
         contract: &Contract,
-        update_storage: &UpdateSimpleStorage<V>,
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        //Update the saved mapping keys.
-        let updates = match update_storage {
-            UpdateSimpleStorage::Mapping(updates) => {
-                updates.iter().for_each(|u| match u {
-                    MappingUpdate::Insertion(key, _) => {
-                        self.mapping_keys.insert(key.to_be_bytes_vec());
-                    }
-                    MappingUpdate::Deletion(key, _) => {
-                        self.mapping_keys.remove(&key.to_be_bytes_vec());
-                    }
-                    // No mapping key change for update
-                    MappingUpdate::Update(_, _, _) => (),
-                });
+        let init_key_and_value: [_; 3] = array::from_fn(|_| (next_mapping_key(), V::sample()));
+        // Save the mapping keys.
+        self.mapping_keys.extend(
+            init_key_and_value
+                .iter()
+                .map(|u| u.0.to_be_bytes_trimmed_vec())
+                .collect_vec(),
+        );
+        let updates = init_key_and_value
+            .into_iter()
+            .map(|(key, value)| MappingUpdate::Insertion(key, value))
+            .collect_vec();
 
-                updates
-            }
-            _ => panic!("Unsupported update in MAPPING"),
-        };
-
-        contract.apply_update(ctx, update_storage).await.unwrap();
+        contract
+            .apply_update(ctx, &UpdateSimpleStorage::Mapping(updates.clone()))
+            .await
+            .unwrap();
         let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-        self.mapping_to_table_update(new_block_number, contract, updates)
+        self.mapping_to_table_update(new_block_number, contract, &updates)
     }
-    /*
-        async fn random_contract_update(
-            &mut self,
-            ctx: &mut TestContext,
-            contract: &Contract,
-            c: ChangeType,
-        ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-            // NOTE 1: The first part is just trying to construct the right input to simulate any
-            // changes on a mapping. This is mostly irrelevant for dist system but needs to manually
-            // construct our test cases here. The second part is more interesting as it looks at
-            // "what to do when receiving an update from scrapper". The core of the function is in
-            // `mapping_to_table_update`
-            //
-            // NOTE 2: This implementation tries to emulate as much as possible what happens in dist
-            // system. To compute the set of updates, it first simulate an update on the contract
-            // and creates the signal "MappingUpdate" corresponding to the update. From that point
-            // onwards, the table row updates are manually created.
-            // Note this can actually lead to more work than necessary in some cases.
-            // Take an example where the mapping is storing (10->A), (11->A), and where the
-            // secondary index value is the value, i.e. A.
-            // Our table initially looks like `A | 10`, `A | 11`.
-            // Imagine an update where we want to change the first row to `A | 12`. In the "table"
-            // world, this is only a simple update of a simple cell, no index even involved. But
-            // from the perspective of mapping, the "scrapper" can only tells us :
-            // * Key 10 has been deleted
-            // * Key 12 has been added with value A
-            // In the backend, we translate that in the "table world" to a deletion and an insertion.
-            // Having such optimization could be done later on, need to properly evaluate the cost
-            // of it.
-            let mapping_key_to_update = self.mapping_keys.first().unwrap().clone();
-            let storage_slot = StorageSlot::Mapping(mapping_key_to_update, self.slot as usize);
-            let mut fields = vec![];
-            // gupeng
-            for metadata in &self.metadata {
-                let storage_slot = if self.is_single {
-                    storage_slot
-                } else {
-                    StorageSlot::Node(StorageSlotNode::new_struct(
-                        storage_slot.clone(),
-                        metadata.evm_word(),
-                    ))
-                };
-                let query = ProofQuery::new(contract.address, storage_slot);
-                let value = ctx
-                    .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
-                    .await
-                    .storage_proof[0]
-                    .value;
 
-                let table_info = metadata.extracted_table_info();
-                let value_bytes = value.to_be_bytes();
-                table_info.iter().for_each(|column_info| {
-                    let bytes = extract_value(&value_bytes, column_info);
-                    debug!(
-                        "Mapping struct extract value: column: {:?}, field = {}",
-                        column_info,
-                        U256::from_be_slice(&bytes),
-                    );
-
-                    // gupeng
-                    fields.push(bytes);
-                });
+    async fn random_contract_update(
+        &mut self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        c: ChangeType,
+    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
+        // NOTE 1: The first part is just trying to construct the right input to simulate any
+        // changes on a mapping. This is mostly irrelevant for dist system but needs to manually
+        // construct our test cases here. The second part is more interesting as it looks at
+        // "what to do when receiving an update from scrapper". The core of the function is in
+        // `mapping_to_table_update`
+        //
+        // NOTE 2: This implementation tries to emulate as much as possible what happens in dist
+        // system. To compute the set of updates, it first simulate an update on the contract
+        // and creates the signal "MappingUpdate" corresponding to the update. From that point
+        // onwards, the table row updates are manually created.
+        // Note this can actually lead to more work than necessary in some cases.
+        // Take an example where the mapping is storing (10->A), (11->A), and where the
+        // secondary index value is the value, i.e. A.
+        // Our table initially looks like `A | 10`, `A | 11`.
+        // Imagine an update where we want to change the first row to `A | 12`. In the "table"
+        // world, this is only a simple update of a simple cell, no index even involved. But
+        // from the perspective of mapping, the "scrapper" can only tells us :
+        // * Key 10 has been deleted
+        // * Key 12 has been added with value A
+        // In the backend, we translate that in the "table world" to a deletion and an insertion.
+        // Having such optimization could be done later on, need to properly evaluate the cost
+        // of it.
+        let current_key = self.mapping_keys.first().unwrap().clone();
+        let current_value = self.query_value(ctx, contract, current_key.clone()).await;
+        let current_key = U256::from_be_slice(&current_key);
+        let new_key = next_mapping_key();
+        let new_value = V::sample();
+        let updates = match c {
+            ChangeType::Silent => vec![],
+            ChangeType::Insertion => {
+                vec![MappingUpdate::Insertion(new_key, new_value)]
             }
-            // gupeng
-            assert_eq!(fields.len(), LargeStruct::FIELD_NUM);
-            let current_struct = LargeStruct::from(fields.as_slice());
-            let current_key = U256::from_be_slice(mkey);
-            let new_key = next_mapping_key();
-            let new_struct = LargeStruct::new(
-                current_struct.field1 + U256::from(1),
-                current_struct.field2 + 1,
-                current_struct.field3 + 1,
-            );
-            debug!("To update mapping struct: current = {current_struct:?}, new = {new_struct:?}");
-            let mapping_updates = match c {
-                ChangeType::Silent => vec![],
-                ChangeType::Insertion => {
-                    vec![MappingStructUpdate::Insertion(new_key, new_struct)]
-                }
-                ChangeType::Deletion => {
-                    vec![MappingStructUpdate::Deletion(current_key, current_struct)]
-                }
-                ChangeType::Update(u) => {
-                    match u {
-                        UpdateType::Rest => {
-                            match self.index {
-                                MappingIndex::Key(_) => {
-                                    // we simply change the mapping value since the key is the secondary index
-                                    vec![MappingStructUpdate::Update(
-                                        current_key,
-                                        current_struct,
-                                        new_struct,
-                                    )]
-                                }
-                                MappingIndex::Value(_) => {
-                                    // TRICKY: in this case, the mapping key must change. But from the
-                                    // onchain perspective, it means a transfer mapping(old_key -> new_key,value)
-                                    vec![
-                                        MappingStructUpdate::Deletion(
-                                            current_key,
-                                            current_struct.clone(),
-                                        ),
-                                        MappingStructUpdate::Insertion(new_key, current_struct),
-                                    ]
-                                }
-                                MappingIndex::None => {
-                                    // a random update of the mapping, we don't care which since it is
-                                    // not impacting the secondary index of the table since the mapping
-                                    // doesn't contain the column which is the secondary index, in case
-                                    // of the merge table case.
-                                    vec![MappingStructUpdate::Update(
-                                        current_key,
-                                        current_struct,
-                                        new_struct,
-                                    )]
-                                }
+            ChangeType::Deletion => {
+                vec![MappingUpdate::Deletion(current_key, current_value)]
+            }
+            ChangeType::Update(u) => {
+                match u {
+                    UpdateType::Rest => {
+                        match self.index {
+                            MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => {
+                                // we simply change the mapping value since the key is the secondary index
+                                vec![MappingUpdate::Update(current_key, current_value, new_value)]
+                            }
+                            MappingIndex::Value(_) => {
+                                // TRICKY: in this case, the mapping key must change. But from the
+                                // onchain perspective, it means a transfer mapping(old_key -> new_key,value)
+                                vec![
+                                    MappingUpdate::Deletion(current_key, current_value.clone()),
+                                    MappingUpdate::Insertion(new_key, current_value),
+                                ]
+                            }
+                            MappingIndex::None => {
+                                // a random update of the mapping, we don't care which since it is
+                                // not impacting the secondary index of the table since the mapping
+                                // doesn't contain the column which is the secondary index, in case
+                                // of the merge table case.
+                                vec![MappingUpdate::Update(current_key, current_value, new_value)]
                             }
                         }
-                        UpdateType::SecondaryIndex => {
-                            match self.index {
-                                MappingIndex::Key(_) => {
-                                    // TRICKY: if the mapping key changes, it's a deletion then
-                                    // insertion from onchain perspective
-                                    vec![
-                                        MappingStructUpdate::Deletion(
-                                            current_key,
-                                            current_struct.clone(),
-                                        ),
-                                        // we insert the same value but with a new mapping key
-                                        MappingStructUpdate::Insertion(new_key, current_struct),
-                                    ]
-                                }
-                                MappingIndex::Value(_) => {
-                                    // if the value changes, it's a simple update in mapping
-                                    vec![MappingStructUpdate::Update(
-                                        current_key,
-                                        current_struct,
-                                        new_struct,
-                                    )]
-                                }
-                                MappingIndex::None => {
-                                    // empty vec since this table has no secondary index so it should
-                                    // give no updates
-                                    vec![]
-                                }
+                    }
+                    UpdateType::SecondaryIndex => {
+                        match self.index {
+                            MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => {
+                                // TRICKY: if the mapping key changes, it's a deletion then
+                                // insertion from onchain perspective
+                                vec![
+                                    MappingUpdate::Deletion(current_key, current_value.clone()),
+                                    // we insert the same value but with a new mapping key
+                                    MappingUpdate::Insertion(new_key, current_value),
+                                ]
+                            }
+                            MappingIndex::Value(_) => {
+                                // if the value changes, it's a simple update in mapping
+                                vec![MappingUpdate::Update(current_key, current_value, new_value)]
+                            }
+                            MappingIndex::None => {
+                                // empty vec since this table has no secondary index so it should
+                                // give no updates
+                                vec![]
                             }
                         }
                     }
                 }
-            };
-            // small iteration to always have a good updated list of mapping keys
-            for update in mapping_updates.iter() {
-                match update {
-                    MappingStructUpdate::Deletion(mkey, _) => {
-                        info!("Removing key {} from mappping keys tracking", mkey);
-                        let key_stored = mkey.to_be_bytes_trimmed_vec();
-                        self.mapping_keys.retain(|u| u != &key_stored);
-                    }
-                    MappingStructUpdate::Insertion(mkey, _) => {
-                        info!("Inserting key {} to mappping keys tracking", mkey);
-                        self.mapping_keys.push(mkey.to_be_bytes_trimmed_vec());
-                    }
-                    // the mapping key doesn't change here so no need to update the list
-                    MappingStructUpdate::Update(_, _, _) => {}
-                }
             }
-
-            contract
-                .apply_update(
-                    ctx,
-                    &UpdateSimpleStorage::MappingStruct(mapping_updates.clone()),
-                )
-                .await
-                .unwrap();
-            let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-            // NOTE HERE is the interesting bit for dist system as this is the logic to execute
-            // on receiving updates from scapper. This only needs to have the relevant
-            // information from update and it will translate that to changes in the tree.
-            self.mapping_to_table_update(new_block_number, mapping_updates, contract)
+        };
+        // small iteration to always have a good updated list of mapping keys
+        for update in &updates {
+            match update {
+                MappingUpdate::Deletion(key, _) => {
+                    info!("Removing key {} from mappping keys tracking", key);
+                    let key_stored = key.to_be_bytes_trimmed_vec();
+                    self.mapping_keys.retain(|u| u != &key_stored);
+                }
+                MappingUpdate::Insertion(key, _) => {
+                    info!("Inserting key {} to mappping keys tracking", key);
+                    self.mapping_keys.insert(key.to_be_bytes_trimmed_vec());
+                }
+                // the mapping key doesn't change here so no need to update the list
+                MappingUpdate::Update(_, _, _) => {}
+            }
         }
-    */
+
+        contract
+            .apply_update(ctx, &UpdateSimpleStorage::Mapping(updates.clone()))
+            .await
+            .unwrap();
+        let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
+        // NOTE HERE is the interesting bit for dist system as this is the logic to execute
+        // on receiving updates from scapper. This only needs to have the relevant
+        // information from update and it will translate that to changes in the tree.
+        self.mapping_to_table_update(new_block_number, contract, &updates)
+    }
 
     pub async fn generate_extraction_proof_inputs(
         &self,
@@ -2300,5 +1452,39 @@ impl<V: Clone + ToU256Vec> MappingExtractionArgs<V> {
                 self.storage_slot_info(key_id, metadata, mapping_key.clone())
             })
             .collect()
+    }
+
+    /// Query a storage slot value by a mapping key.
+    async fn query_value(
+        &self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        mapping_key: Vec<u8>,
+    ) -> V {
+        let mut extracted_values = vec![];
+        for metadata in &self.metadata {
+            let storage_slot = self.storage_slot(metadata, mapping_key.clone());
+            let query = ProofQuery::new(contract.address, storage_slot);
+            let value = ctx
+                .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
+                .await
+                .storage_proof[0]
+                .value;
+
+            let table_info = metadata.extracted_table_info();
+            let value_bytes = value.to_be_bytes();
+            table_info.iter().for_each(|column_info| {
+                let bytes = extract_value(&value_bytes, column_info);
+                let value = U256::from_be_bytes(bytes);
+                debug!(
+                    "Mapping extract value: column: {:?}, value = {}",
+                    column_info, value,
+                );
+
+                extracted_values.push(value);
+            });
+        }
+
+        V::from_u256_slice(&extracted_values)
     }
 }
