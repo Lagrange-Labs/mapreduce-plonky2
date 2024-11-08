@@ -30,8 +30,7 @@ use crate::common::{
         contract::Contract,
         identifier_for_mapping_key_column,
         table_source::{
-            LengthExtractionArgs, MappingIndex, MappingStructExtractionArgs,
-            MappingValuesExtractionArgs, MergeSource, SingleStructExtractionArgs,
+            LengthExtractionArgs, MappingIndex, MergeSource, SingleStructExtractionArgs,
             SingleValuesExtractionArgs, DEFAULT_ADDRESS,
         },
     },
@@ -47,14 +46,13 @@ use crate::common::{
 use super::{ContractExtractionArgs, TableIndexing, TableSource};
 use alloy::{
     contract::private::{Network, Provider, Transport},
-    primitives::{ruint::aliases::U256, Address, U256},
+    primitives::{Address, U256},
     providers::ProviderBuilder,
 };
 use mp2_common::{
     eth::StorageSlot,
     proof::ProofWithVK,
     types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
-    F,
 };
 use plonky2::field::types::PrimeField64;
 
@@ -120,7 +118,7 @@ impl TableIndexing {
         let mapping_key_id =
             identifier_for_mapping_key_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
         let mapping_value_id = identifier_for_value_column(
-            &MappingValuesExtractionArgs::slot_input(),
+            &MappingExtractionArgs::slot_input(),
             contract_address,
             chain_id,
             vec![],
@@ -135,11 +133,11 @@ impl TableIndexing {
             ),
             false => (
                 mapping_key_id,
-                MappingIndex::Key(mapping_key_id),
+                MappingIndex::OuterKey(mapping_key_id),
                 mapping_value_id,
             ),
         };
-        let mapping_source = MappingValuesExtractionArgs::new(mapping_index);
+        let mapping_source = MappingExtractionArgs::new(mapping_index);
         let mut source = TableSource::Merge(MergeSource::new(single_source, mapping_source));
         let genesis_change = source.init_contract_data(ctx, &contract).await;
         let single_columns = SingleValuesExtractionArgs::slot_inputs()
@@ -159,7 +157,7 @@ impl TableIndexing {
                 }
             })
             .collect_vec();
-        let mapping_slot_input = MappingValuesExtractionArgs::slot_input();
+        let mapping_slot_input = MappingExtractionArgs::slot_input();
         let mapping_column = {
             let info = ColumnInfo::new_from_slot_input(mapping_cell_id, &mapping_slot_input);
             vec![TableColumn {
@@ -420,7 +418,7 @@ impl TableIndexing {
         ))
     }
 
-    pub(crate) async fn mapping_test_case(
+    pub(crate) async fn mapping_value_test_case(
         ctx: &mut TestContext,
     ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // Create a provider with the wallet for contract deployment and interaction.
@@ -436,7 +434,7 @@ impl TableIndexing {
         );
         let contract_address = contract.address();
         let chain_id = ctx.rpc.get_chain_id().await.unwrap();
-        let slot_input = MappingValuesExtractionArgs::slot_input();
+        let slot_input = MappingExtractionArgs::slot_input();
         let key_id =
             identifier_for_mapping_key_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
         let value_id = identifier_for_value_column(&slot_input, contract_address, chain_id, vec![]);
@@ -447,14 +445,14 @@ impl TableIndexing {
             false => (key_id, MappingIndex::Key(key_id), value_id),
         };
         // mapping(uint256 => address) public m1
-        let mapping_args = MappingValuesExtractionArgs::new(mapping_index);
-        let mut source = TableSource::MappingValues((
+        let mapping_args = MappingExtractionArgs::new(mapping_index);
+        let mut source = TableSource::MappingValues(
             mapping_args,
             Some(LengthExtractionArgs {
                 slot: LENGTH_SLOT,
                 value: LENGTH_VALUE,
             }),
-        ));
+        );
         let contract = Contract {
             address: *contract_address,
             chain_id,
@@ -620,8 +618,8 @@ impl TableIndexing {
                 (MappingIndex::Key(key_id), secondary_column, rest_columns)
             }
         };
-        let mapping_args = MappingStructExtractionArgs::new(mapping_index, &contract);
-        let mut source = TableSource::MappingStruct((mapping_args, None));
+        let mapping_args = MappingExtractionArgs::new(mapping_index, &contract);
+        let mut source = TableSource::MappingStruct(mapping_args, None);
         let table_row_updates = source.init_contract_data(ctx, &contract).await;
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their o
@@ -1157,7 +1155,8 @@ impl<V: Clone> From<&MappingUpdate<V>> for MappingOperation {
         })
     }
 }
-impl UpdateSimpleStorage {
+
+impl UpdateSimpleStorage<U256> {
     // This function applies the update in _one_ transaction so that Anvil only moves by one block
     // so we can test the "subsequent block"
     pub async fn apply_to<T: Transport + Clone, P: Provider<T, N>, N: Network>(
@@ -1168,14 +1167,11 @@ impl UpdateSimpleStorage {
             UpdateSimpleStorage::SingleValues(ref single) => {
                 Self::update_single_values(contract, single).await
             }
-            UpdateSimpleStorage::MappingValues(ref updates) => {
-                Self::update_mapping_values(contract, updates).await
-            }
             UpdateSimpleStorage::SingleStruct(ref single) => {
                 Self::update_single_struct(contract, single).await
             }
-            UpdateSimpleStorage::MappingStruct(ref updates) => {
-                Self::update_mapping_struct(contract, updates).await
+            UpdateSimpleStorage::Mapping(ref updates) => {
+                update_mapping_values(contract, updates).await
             }
         }
     }
@@ -1189,55 +1185,42 @@ impl UpdateSimpleStorage {
         log::info!("Updated simple contract single values");
     }
 
-    async fn update_mapping_values<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+    async fn update_single_struct<T: Transport + Clone, P: Provider<T, N>, N: Network>(
         contract: &SimpleInstance<T, P, N>,
-        values: &[MappingValuesUpdate],
+        single: &LargeStruct,
     ) {
-        let contract_changes = values
-            .iter()
-            .map(|tuple| {
-                let op: MappingOperation = tuple.into();
-                let (k, v) = match tuple {
-                    MappingValuesUpdate::Deletion(k, _) => (*k, *DEFAULT_ADDRESS),
-                    MappingValuesUpdate::Update(k, _, v) | MappingValuesUpdate::Insertion(k, v) => {
-                        (*k, Address::from_slice(&v.to_be_bytes_trimmed_vec()))
-                    }
-                };
-                MappingChange {
-                    key: k,
-                    value: v,
-                    operation: op.into(),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let b = contract.changeMapping(contract_changes);
+        let b = contract.setSimpleStruct(single.field1, single.field2, single.field3);
         b.send().await.unwrap().watch().await.unwrap();
-        {
-            // sanity check
-            for op in values {
-                match op {
-                    MappingValuesUpdate::Deletion(k, _) => {
-                        let res = contract.m1(*k).call().await.unwrap();
-                        let vu: U256 = res._0.into_word().into();
-                        let is_correct = vu == U256::from(0);
-                        assert!(is_correct, "key deletion not correct on contract");
-                    }
-                    MappingValuesUpdate::Insertion(k, v) => {
-                        let res = contract.m1(*k).call().await.unwrap();
-                        let newv: U256 = res._0.into_word().into();
-                        let is_correct = newv == *v;
-                        assert!(is_correct, "key insertion not correct on contract");
-                    }
-                    MappingValuesUpdate::Update(k, _, v) => {
-                        let res = contract.m1(*k).call().await.unwrap();
-                        let newv: U256 = res._0.into_word().into();
-                        let is_correct = newv == *v;
-                        assert!(is_correct, "KEY Updated, new value valid ? {is_correct}");
-                    }
-                }
+        log::info!("Updated simple contract for single struct");
+    }
+}
+
+impl UpdateSimpleStorage<LargeStruct> {
+    // This function applies the update in _one_ transaction so that Anvil only moves by one block
+    // so we can test the "subsequent block"
+    pub async fn apply_to<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+        &self,
+        contract: &SimpleInstance<T, P, N>,
+    ) {
+        match self {
+            UpdateSimpleStorage::SingleValues(ref single) => {
+                Self::update_single_values(contract, single).await
+            }
+            UpdateSimpleStorage::SingleStruct(ref single) => {
+                Self::update_single_struct(contract, single).await
+            }
+            UpdateSimpleStorage::Mapping(ref updates) => {
+                update_mapping_struct(contract, updates).await
             }
         }
+    }
+
+    async fn update_single_values<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+        contract: &SimpleInstance<T, P, N>,
+        values: &SimpleSingleValue,
+    ) {
+        let b = contract.setSimples(values.s1, values.s2, values.s3.clone(), values.s4);
+        b.send().await.unwrap().watch().await.unwrap();
         log::info!("Updated simple contract single values");
     }
 
@@ -1249,54 +1232,106 @@ impl UpdateSimpleStorage {
         b.send().await.unwrap().watch().await.unwrap();
         log::info!("Updated simple contract for single struct");
     }
+}
 
-    async fn update_mapping_struct<T: Transport + Clone, P: Provider<T, N>, N: Network>(
-        contract: &SimpleInstance<T, P, N>,
-        values: &[MappingStructUpdate],
-    ) {
-        let contract_changes = values
-            .iter()
-            .map(|tuple| {
-                let op: MappingOperation = tuple.into();
-                let (key, field1, field2, field3) = match tuple {
-                    MappingStructUpdate::Deletion(k, v) => (*k, v.field1, v.field2, v.field3),
-                    MappingStructUpdate::Update(k, _, v) | MappingStructUpdate::Insertion(k, v) => {
-                        (*k, v.field1, v.field2, v.field3)
-                    }
-                };
-                MappingStructChange {
-                    key,
-                    field1,
-                    field2,
-                    field3,
-                    operation: op.into(),
+async fn update_mapping_values<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+    contract: &SimpleInstance<T, P, N>,
+    values: &[MappingUpdate<U256>],
+) {
+    let contract_changes = values
+        .iter()
+        .map(|tuple| {
+            let op: MappingOperation = tuple.into();
+            let (k, v) = match tuple {
+                MappingUpdate::Deletion(k, _) => (*k, *DEFAULT_ADDRESS),
+                MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => {
+                    (*k, Address::from_slice(&v.to_be_bytes_trimmed_vec()))
                 }
-            })
-            .collect_vec();
+            };
+            MappingChange {
+                key: k,
+                value: v,
+                operation: op.into(),
+            }
+        })
+        .collect::<Vec<_>>();
 
-        let b = contract.changeMappingStruct(contract_changes);
-        b.send().await.unwrap().watch().await.unwrap();
-        {
-            // sanity check
-            for op in values {
-                match op {
-                    MappingStructUpdate::Deletion(k, _) => {
-                        let res = contract.structMapping(*k).call().await.unwrap();
-                        assert_eq!(
-                            LargeStruct::from(res),
-                            LargeStruct::new(U256::from(0), 0, 0)
-                        );
-                    }
-                    MappingStructUpdate::Insertion(k, v) | MappingStructUpdate::Update(k, _, v) => {
-                        let res = contract.structMapping(*k).call().await.unwrap();
-                        debug!("Set mapping struct: key = {k}, value = {v:?}");
-                        assert_eq!(&LargeStruct::from(res), v);
-                    }
+    let b = contract.changeMapping(contract_changes);
+    b.send().await.unwrap().watch().await.unwrap();
+    {
+        // sanity check
+        for op in values {
+            match op {
+                MappingUpdate::Deletion(k, _) => {
+                    let res = contract.m1(*k).call().await.unwrap();
+                    let vu: U256 = res._0.into_word().into();
+                    let is_correct = vu == U256::from(0);
+                    assert!(is_correct, "key deletion not correct on contract");
+                }
+                MappingUpdate::Insertion(k, v) => {
+                    let res = contract.m1(*k).call().await.unwrap();
+                    let newv: U256 = res._0.into_word().into();
+                    let is_correct = newv == *v;
+                    assert!(is_correct, "key insertion not correct on contract");
+                }
+                MappingUpdate::Update(k, _, v) => {
+                    let res = contract.m1(*k).call().await.unwrap();
+                    let newv: U256 = res._0.into_word().into();
+                    let is_correct = newv == *v;
+                    assert!(is_correct, "KEY Updated, new value valid ? {is_correct}");
                 }
             }
         }
-        log::info!("Updated simple contract for single struct");
     }
+    log::info!("Updated simple contract single values");
+}
+
+async fn update_mapping_struct<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+    contract: &SimpleInstance<T, P, N>,
+    values: &[MappingUpdate<LargeStruct>],
+) {
+    let contract_changes = values
+        .iter()
+        .map(|tuple| {
+            let op: MappingOperation = tuple.into();
+            let (key, field1, field2, field3) = match tuple {
+                MappingUpdate::Deletion(k, v) => (*k, v.field1, v.field2, v.field3),
+                MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => {
+                    (*k, v.field1, v.field2, v.field3)
+                }
+            };
+            MappingStructChange {
+                key,
+                field1,
+                field2,
+                field3,
+                operation: op.into(),
+            }
+        })
+        .collect_vec();
+
+    let b = contract.changeMappingStruct(contract_changes);
+    b.send().await.unwrap().watch().await.unwrap();
+    {
+        // sanity check
+        for op in values {
+            match op {
+                MappingUpdate::Deletion(k, _) => {
+                    let res = contract.structMapping(*k).call().await.unwrap();
+                    assert_eq!(
+                        LargeStruct::from(res),
+                        LargeStruct::new(U256::from(0), 0, 0)
+                    );
+                }
+                MappingUpdate::Insertion(k, v) | MappingUpdate::Update(k, _, v) => {
+                    let res = contract.structMapping(*k).call().await.unwrap();
+                    debug!("Set mapping struct: key = {k}, value = {v:?}");
+                    assert_eq!(&LargeStruct::from(res), v);
+                }
+            }
+        }
+    }
+    log::info!("Updated simple contract for single struct");
 }
 
 #[derive(Clone, Debug)]
