@@ -1,8 +1,8 @@
 use aggregated_queries::{
     cook_query_between_blocks, cook_query_no_matching_entries,
     cook_query_non_matching_entries_some_blocks, cook_query_partial_block_range,
-    cook_query_secondary_index_placeholder, cook_query_unique_secondary_index,
-    prove_query as prove_aggregation_query,
+    cook_query_secondary_index_nonexisting_placeholder, cook_query_secondary_index_placeholder,
+    cook_query_unique_secondary_index, prove_query as prove_aggregation_query,
 };
 use alloy::primitives::U256;
 use anyhow::{Context, Result};
@@ -94,6 +94,9 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table, info: &TableInfo) -
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     //// cook query with custom placeholders
     let query_info = cook_query_secondary_index_placeholder(table, info).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // cook query with a non-existing value for secondary index
+    let query_info = cook_query_secondary_index_nonexisting_placeholder(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query filtering over a secondary index value not valid in all the blocks
     let query_info = cook_query_non_matching_entries_some_blocks(table, info).await?;

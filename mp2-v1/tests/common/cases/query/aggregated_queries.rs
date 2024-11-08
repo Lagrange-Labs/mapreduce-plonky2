@@ -360,19 +360,27 @@ pub(crate) fn check_final_outputs(
         res.len() as u64,
         revelation_pis.num_results().to_canonical_u64(),
     );
-    // check results
+    // check results: we check that each result in res appears in set
+    // of results exposed by the proof, and vice versa:
+    // - first, we accumulate each result in `res` to a `HashMap`,
+    //   and we do the same for the set of results exposed by the proof
+    // - then, we check that the 2 `HashMap`s are the same
+    let mut expected_res_accumulator: HashMap<Vec<U256>, usize> = HashMap::new();
+    let mut proof_res_accumulator: HashMap<Vec<U256>, usize> = HashMap::new();
     res.into_iter()
         .zip(revelation_pis.result_values())
-        .for_each(|(expected_res, res)| {
-            (0..expected_res.len()).for_each(|i| {
-                let SqlReturn::Numeric(expected_res) =
-                    SqlType::Numeric.extract(&expected_res, i).unwrap();
-                assert_eq!(
-                    U256::from_str_radix(&expected_res.to_string(), 10).unwrap(),
-                    res[i],
-                );
-            })
+        .for_each(|(row, res)| {
+            let (expected_res, proof_res): (Vec<_>, Vec<_>) = (0..row.len())
+                .map(|i| {
+                    let SqlReturn::Numeric(expected_res) =
+                        SqlType::Numeric.extract(&row, i).unwrap();
+                    (expected_res, res[i])
+                })
+                .unzip();
+            *expected_res_accumulator.entry(expected_res).or_default() += 1;
+            *proof_res_accumulator.entry(proof_res).or_default() += 1;
         });
+    assert_eq!(expected_res_accumulator, proof_res_accumulator,);
 
     Ok(())
 }
