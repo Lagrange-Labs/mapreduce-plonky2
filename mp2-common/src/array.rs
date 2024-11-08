@@ -638,7 +638,7 @@ where
         let (low_bits, high_bits) = b.split_low_high(at, 6, 12);
 
         // Search each of the smaller arrays for the target at `low_bits`
-        let first_search = arrays
+        let mut first_search = arrays
             .into_iter()
             .map(|array| {
                 b.random_access(
@@ -652,6 +652,10 @@ where
             })
             .collect::<Vec<Target>>();
 
+        // Now we push a number of zero targets into the array to make it a power of 2
+        let next_power_of_two = first_search.len().next_power_of_two();
+        let zero_target = b.zero();
+        first_search.resize(next_power_of_two, zero_target);
         // Serach the result for the Target at `high_bits`
         T::from_target(b.random_access(high_bits, first_search))
     }
@@ -683,7 +687,7 @@ where
                 let i_target = b.constant(F::from_canonical_usize(i));
                 let i_plus_n_target = b.add(at, i_target);
 
-                // out_val = arr[((i+n)<=n+M) * (i+n)]
+                
                 self.random_access_large_array(b, i_plus_n_target)
             }),
         }

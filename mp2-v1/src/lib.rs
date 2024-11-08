@@ -17,6 +17,7 @@ pub const MAX_BRANCH_NODE_LEN_PADDED: usize = PAD_LEN(532);
 pub const MAX_EXTENSION_NODE_LEN: usize = 69;
 pub const MAX_EXTENSION_NODE_LEN_PADDED: usize = PAD_LEN(69);
 pub const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
+pub const MAX_RECEIPT_LEAF_NODE_LEN: usize = 512;
 
 pub mod api;
 pub mod block_extraction;

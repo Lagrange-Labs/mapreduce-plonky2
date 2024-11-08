@@ -2,8 +2,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     node_bindings::Anvil,
     primitives::U256,
-    providers::{ext::AnvilApi, Provider, ProviderBuilder, RootProvider, WalletProvider},
-    rpc::types::Transaction,
+    providers::{ext::AnvilApi, Provider, ProviderBuilder, WalletProvider},
     sol,
 };
 use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -53,7 +52,7 @@ pub fn generate_random_storage_mpt<const DEPTH: usize, const VALUE_LEN: usize>(
 
 /// This function is used so that we can generate a Receipt Trie for a blog with varying transactions
 /// (i.e. some we are interested in and some we are not).
-fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
+pub fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
     // Make a contract that emits events so we can pick up on them
     sol! {
         #[allow(missing_docs)]
@@ -178,16 +177,4 @@ fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
             .await
             .unwrap()
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn tester() {
-        let receipt_proofs = generate_receipt_proofs();
-        for proof in receipt_proofs.iter() {
-            println!("proof: {}", proof.tx_index);
-        }
-    }
 }
