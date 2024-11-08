@@ -1,17 +1,15 @@
 //! Module handling the leaf node inside a Receipt Trie
 
-use super::public_inputs::PublicInputArgs;
+use crate::MAX_RECEIPT_LEAF_NODE_LEN;
+
+use super::public_inputs::{PublicInputArgs, PublicInputs};
 
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     eth::{EventLogInfo, LogDataInfo, ReceiptProofInfo},
     group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires},
-    mpt_sequential::{
-        MPTLeafOrExtensionNodeGeneric, ReceiptKeyWire, MAX_RECEIPT_LEAF_VALUE_LEN,
-        MAX_TX_KEY_NIBBLE_LEN, PAD_LEN,
-    },
-    poseidon::H,
+    mpt_sequential::{MPTReceiptLeafNode, ReceiptKeyWire, MAX_TX_KEY_NIBBLE_LEN, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::{CBuilder, GFp},
     utils::{Endianness, PackerTarget},
@@ -23,13 +21,15 @@ use plonky2::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
+    plonk::circuit_builder::CircuitBuilder,
 };
 
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 
+use recursion_framework::circuit_builder::CircuitLogicWires;
 use rlp::Encodable;
 use serde::{Deserialize, Serialize};
-
+use std::array::from_fn;
 /// Maximum number of logs per transaction we can process
 const MAX_LOGS_PER_TX: usize = 2;
 
@@ -42,10 +42,10 @@ where
     pub event: EventWires,
     /// The node bytes
     pub node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
-    /// The actual value stored in the node
-    pub value: Array<Target, MAX_RECEIPT_LEAF_VALUE_LEN>,
     /// the hash of the node bytes
     pub root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
+    /// The index of this receipt in the block
+    pub index: Target,
     /// The offset of the status of the transaction in the RLP encoded receipt node.
     pub status_offset: Target,
     /// The offsets of the relevant logs inside the node
@@ -102,7 +102,7 @@ impl LogColumn {
 
 impl EventWires {
     /// Convert to an array  for metadata digest
-    pub fn to_slice(&self) -> [Target; 70] {
+    pub fn to_vec(&self) -> Vec<Target> {
         let topics_flat = self
             .topics
             .iter()
@@ -113,60 +113,45 @@ impl EventWires {
             .iter()
             .flat_map(|t| t.to_array())
             .collect::<Vec<Target>>();
-        let mut out = [Target::default(); 70];
-        out[0] = self.size;
-        out.iter_mut()
-            .skip(1)
-            .take(20)
-            .enumerate()
-            .for_each(|(i, entry)| *entry = self.address.arr[i]);
-        out[21] = self.add_rel_offset;
-        out.iter_mut()
-            .skip(22)
-            .take(32)
-            .enumerate()
-            .for_each(|(i, entry)| *entry = self.event_signature.arr[i]);
-        out[54] = self.sig_rel_offset;
-        out.iter_mut()
-            .skip(55)
-            .take(9)
-            .enumerate()
-            .for_each(|(i, entry)| *entry = topics_flat[i]);
-        out.iter_mut()
-            .skip(64)
-            .take(6)
-            .enumerate()
-            .for_each(|(i, entry)| *entry = data_flat[i]);
+        let mut out = Vec::new();
+        out.push(self.size);
+        out.extend_from_slice(&self.address.arr);
+        out.push(self.add_rel_offset);
+        out.extend_from_slice(&self.event_signature.arr);
+        out.push(self.sig_rel_offset);
+        out.extend_from_slice(&topics_flat);
+        out.extend_from_slice(&data_flat);
+
         out
     }
 
-    pub fn verify_logs_and_extract_values(
+    pub fn verify_logs_and_extract_values<const NODE_LEN: usize>(
         &self,
         b: &mut CBuilder,
-        value: &Array<Target, MAX_RECEIPT_LEAF_VALUE_LEN>,
+        value: &VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
         status_offset: Target,
         relevant_logs_offsets: &VectorWire<Target, MAX_LOGS_PER_TX>,
     ) -> CurveTarget {
         let t = b._true();
         let zero = b.zero();
         let curve_zero = b.curve_zero();
-        let mut value_digest = b.curve_zero();
+        let mut points = Vec::new();
 
         // Enforce status is true.
-        let status = value.random_access_large_array(b, status_offset);
+        let status = value.arr.random_access_large_array(b, status_offset);
         b.connect(status, t.target);
 
         for log_offset in relevant_logs_offsets.arr.arr {
             // Extract the address bytes
             let address_start = b.add(log_offset, self.add_rel_offset);
 
-            let address_bytes = value.extract_array_large::<_, _, 20>(b, address_start);
+            let address_bytes = value.arr.extract_array_large::<_, _, 20>(b, address_start);
 
             let address_check = address_bytes.equals(b, &self.address);
             // Extract the signature bytes
             let sig_start = b.add(log_offset, self.sig_rel_offset);
 
-            let sig_bytes = value.extract_array_large::<_, _, 32>(b, sig_start);
+            let sig_bytes = value.arr.extract_array_large::<_, _, 32>(b, sig_start);
 
             let sig_check = sig_bytes.equals(b, &self.event_signature);
 
@@ -182,7 +167,7 @@ impl EventWires {
             for &log_column in self.topics.iter().chain(self.data.iter()) {
                 let data_start = b.add(log_offset, log_column.rel_byte_offset);
                 // The data is always 32 bytes long
-                let data_bytes = value.extract_array_large::<_, _, 32>(b, data_start);
+                let data_bytes = value.arr.extract_array_large::<_, _, 32>(b, data_start);
 
                 // Pack the data and get the digest
                 let packed_data = data_bytes.arr.pack(b, Endianness::Big);
@@ -197,11 +182,11 @@ impl EventWires {
                 let selector = b.and(dummy_column, dummy);
 
                 let selected_point = b.select_curve_point(selector, curve_zero, data_digest);
-                value_digest = b.add_curve_point(&[selected_point, value_digest]);
+                points.push(selected_point);
             }
         }
 
-        value_digest
+        b.add_curve_point(&points)
     }
 }
 
@@ -215,7 +200,7 @@ impl<const NODE_LEN: usize> ReceiptLeafCircuit<NODE_LEN>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    pub fn build_leaf_wires(b: &mut CBuilder) -> ReceiptLeafWires<NODE_LEN> {
+    pub fn build(b: &mut CBuilder) -> ReceiptLeafWires<NODE_LEN> {
         // Build the event wires
         let event_wires = Self::build_event_wires(b);
 
@@ -227,27 +212,24 @@ where
         let mpt_key = ReceiptKeyWire::new(b);
 
         // Build the node wires.
-        let wires = MPTLeafOrExtensionNodeGeneric::build_and_advance_key::<
-            _,
-            D,
-            NODE_LEN,
-            MAX_RECEIPT_LEAF_VALUE_LEN,
-        >(b, &mpt_key);
+        let wires = MPTReceiptLeafNode::build_and_advance_key::<_, D, NODE_LEN>(b, &mpt_key);
+
         let node = wires.node;
         let root = wires.root;
 
         // For each relevant log in the transaction we have to verify it lines up with the event we are monitoring for
-        let receipt_body = wires.value;
-        let mut dv = event_wires.verify_logs_and_extract_values(
+        let mut dv = event_wires.verify_logs_and_extract_values::<NODE_LEN>(
             b,
-            &receipt_body,
+            &node,
             status_offset,
             &relevant_logs_offset,
         );
+
         let value_id = b.map_to_curve_point(&[index]);
+
         dv = b.add_curve_point(&[value_id, dv]);
 
-        let dm = b.hash_n_to_hash_no_pad::<H>(event_wires.to_slice().to_vec());
+        let dm = b.map_to_curve_point(&event_wires.to_vec());
 
         // Register the public inputs
         PublicInputArgs {
@@ -261,8 +243,8 @@ where
         ReceiptLeafWires {
             event: event_wires,
             node,
-            value: receipt_body,
             root,
+            index,
             status_offset,
             relevant_logs_offset,
             mpt_key,
@@ -273,24 +255,22 @@ where
         let size = b.add_virtual_target();
 
         // Packed address
-        let arr = [b.add_virtual_target(); 20];
-        let address = Array::from_array(arr);
+        let address = Array::<Target, 20>::new(b);
 
         // relative offset of the address
         let add_rel_offset = b.add_virtual_target();
 
         // Event signature
-        let arr = [b.add_virtual_target(); 32];
-        let event_signature = Array::from_array(arr);
+        let event_signature = Array::<Target, 32>::new(b);
 
         // Signature relative offset
         let sig_rel_offset = b.add_virtual_target();
 
         // topics
-        let topics = [Self::build_log_column(b); 3];
+        let topics: [LogColumn; 3] = from_fn(|_| Self::build_log_column(b));
 
         // data
-        let data = [Self::build_log_column(b); 2];
+        let data: [LogColumn; 2] = from_fn(|_| Self::build_log_column(b));
 
         EventWires {
             size,
@@ -331,7 +311,7 @@ where
             &wires.root,
             &InputData::Assigned(&pad_node),
         );
-
+        pw.set_target(wires.index, GFp::from_canonical_u64(self.info.tx_index));
         pw.set_target(
             wires.status_offset,
             GFp::from_canonical_usize(self.info.status_offset),
@@ -406,13 +386,47 @@ where
     }
 }
 
+/// Num of children = 0
+impl CircuitLogicWires<GFp, D, 0> for ReceiptLeafWires<MAX_RECEIPT_LEAF_NODE_LEN> {
+    type CircuitBuilderParams = ();
+
+    type Inputs = ReceiptLeafCircuit<MAX_RECEIPT_LEAF_NODE_LEN>;
+
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
+
+    fn circuit_logic(
+        builder: &mut CircuitBuilder<GFp, D>,
+        _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
+        _builder_parameters: Self::CircuitBuilderParams,
+    ) -> Self {
+        ReceiptLeafCircuit::build(builder)
+    }
+
+    fn assign_input(
+        &self,
+        inputs: Self::Inputs,
+        pw: &mut PartialWitness<GFp>,
+    ) -> anyhow::Result<()> {
+        inputs.assign(pw, self);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::receipt_extraction::compute_receipt_leaf_metadata_digest;
+    use mp2_common::{
+        utils::{keccak256, Packer},
+        C,
+    };
+    use mp2_test::{
+        circuit::{run_circuit, UserCircuit},
+        mpt_sequential::generate_receipt_proofs,
+    };
     #[derive(Clone, Debug)]
     struct TestReceiptLeafCircuit<const NODE_LEN: usize> {
         c: ReceiptLeafCircuit<NODE_LEN>,
-        exp_value: Vec<u8>,
     }
 
     impl<const NODE_LEN: usize> UserCircuit<F, D> for TestReceiptLeafCircuit<NODE_LEN>
@@ -420,91 +434,38 @@ mod tests {
         [(); PAD_LEN(NODE_LEN)]:,
     {
         // Leaf wires + expected extracted value
-        type Wires = (
-            ReceiptLeafWires<NODE_LEN>,
-            Array<Target, MAPPING_LEAF_VALUE_LEN>,
-        );
+        type Wires = ReceiptLeafWires<NODE_LEN>;
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let exp_value = Array::<Target, MAPPING_LEAF_VALUE_LEN>::new(b);
-
-            let leaf_wires = ReceiptLeafCircuit::<NODE_LEN>::build(b);
-            leaf_wires.value.enforce_equal(b, &exp_value);
-
-            (leaf_wires, exp_value)
+            ReceiptLeafCircuit::<NODE_LEN>::build(b)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.c.assign(pw, &wires.0);
-            wires
-                .1
-                .assign_bytes(pw, &self.exp_value.clone().try_into().unwrap());
+            self.c.assign(pw, &wires);
         }
     }
     #[test]
     fn test_leaf_circuit() {
-        const NODE_LEN: usize = 80;
+        const NODE_LEN: usize = 512;
 
-        let simple_slot = 2_u8;
-        let slot = StorageSlot::Simple(simple_slot as usize);
-        let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let chain_id = 10;
-        let id = identifier_single_var_column(simple_slot, &contract_address, chain_id, vec![]);
-
-        let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
-        let value = random_vector(MAPPING_LEAF_VALUE_LEN);
-        let encoded_value: Vec<u8> = rlp::encode(&value).to_vec();
-        // assert we added one byte of RLP header
-        assert_eq!(encoded_value.len(), MAPPING_LEAF_VALUE_LEN + 1);
-        println!("encoded value {:?}", encoded_value);
-        trie.insert(&slot.mpt_key(), &encoded_value).unwrap();
-        trie.root_hash().unwrap();
-
-        let proof = trie.get_proof(&slot.mpt_key_vec()).unwrap();
-        let node = proof.last().unwrap().clone();
-
-        let c = LeafSingleCircuit::<NODE_LEN> {
-            node: node.clone(),
-            slot: SimpleSlot::new(simple_slot),
-            id,
-        };
-        let test_circuit = TestLeafSingleCircuit {
-            c,
-            exp_value: value.clone(),
-        };
+        let receipt_proof_infos = generate_receipt_proofs();
+        let info = receipt_proof_infos.first().unwrap().clone();
+        let c = ReceiptLeafCircuit::<NODE_LEN> { info: info.clone() };
+        let test_circuit = TestReceiptLeafCircuit { c };
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::new(&proof.public_inputs);
-
+        let node = info.mpt_proof.last().unwrap().clone();
+        // Check the output hash
         {
             let exp_hash = keccak256(&node).pack(Endianness::Little);
             assert_eq!(pi.root_hash(), exp_hash);
         }
-        {
-            let (key, ptr) = pi.mpt_key_info();
 
-            let exp_key = slot.mpt_key_vec();
-            let exp_key: Vec<_> = bytes_to_nibbles(&exp_key)
-                .into_iter()
-                .map(F::from_canonical_u8)
-                .collect();
-            assert_eq!(key, exp_key);
-
-            let leaf_key: Vec<Vec<u8>> = rlp::decode_list(&node);
-            let nib = Nibbles::from_compact(&leaf_key[0]);
-            let exp_ptr = F::from_canonical_usize(MAX_KEY_NIBBLE_LEN - 1 - nib.nibbles().len());
-            assert_eq!(exp_ptr, ptr);
-        }
-        // Check values digest
-        {
-            let exp_digest = compute_leaf_single_values_digest(id, &value);
-            assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
-        }
         // Check metadata digest
         {
-            let exp_digest = compute_leaf_single_metadata_digest(id, simple_slot);
+            let exp_digest = compute_receipt_leaf_metadata_digest(&info.event_log_info);
             assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
         }
-        assert_eq!(pi.n(), F::ONE);
     }
 }

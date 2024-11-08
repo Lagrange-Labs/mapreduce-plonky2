@@ -1,6 +1,8 @@
 //! MPT leaf or extension node gadget
 
-use super::{advance_key_leaf_or_extension, key::MPTKeyWireGeneric, PAD_LEN};
+use super::{
+    advance_key_leaf_or_extension, advance_key_receipt_leaf, key::MPTKeyWireGeneric, PAD_LEN,
+};
 use crate::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires},
@@ -94,5 +96,63 @@ impl<const KEY_LEN: usize> MPTLeafOrExtensionNodeGeneric<KEY_LEN> {
             key,
             value,
         }
+    }
+}
+
+/// Wrapped wires for a MPT receipt leaf
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MPTReceiptLeafWiresGeneric<const NODE_LEN: usize, const KEY_LEN: usize>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+{
+    /// MPT node
+    pub node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
+    /// MPT root
+    pub root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
+    /// New MPT key after advancing the current key
+    pub key: MPTKeyWireGeneric<KEY_LEN>,
+}
+
+/// Receipt leaf node as we have to do things differently for efficiency reasons.
+pub struct MPTReceiptLeafNode<const KEY_LEN: usize>;
+
+impl<const KEY_LEN: usize> MPTReceiptLeafNode<KEY_LEN> {
+    /// Build the MPT node and advance the current key.
+    pub fn build_and_advance_key<
+        F: RichField + Extendable<D>,
+        const D: usize,
+        const NODE_LEN: usize,
+    >(
+        b: &mut CircuitBuilder<F, D>,
+        current_key: &MPTKeyWireGeneric<KEY_LEN>,
+    ) -> MPTReceiptLeafWiresGeneric<NODE_LEN, KEY_LEN>
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+    {
+        let zero = b.zero();
+        let tru = b._true();
+
+        // Build the node and ensure it only includes bytes.
+        let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b);
+
+        node.assert_bytes(b);
+
+        // Expose the keccak root of this subtree starting at this node.
+        let root = KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::hash_vector(b, &node);
+
+        // We know that the rlp encoding of the compact encoding of the key is going to be in roughly the first 10 bytes of
+        // the node since the node is list byte, 2 bytes for list length (maybe 3), key length byte (1), key compact encoding (4 max)
+        // so we take 10 bytes to be safe since this won't effect the number of random access gates we use.
+        let rlp_headers = decode_fixed_list::<_, D, 1>(b, &node.arr.arr[..10], zero);
+
+        let (key, valid) = advance_key_receipt_leaf::<F, D, NODE_LEN, KEY_LEN>(
+            b,
+            &node,
+            current_key,
+            &rlp_headers,
+        );
+        b.connect(tru.target, valid.target);
+
+        MPTReceiptLeafWiresGeneric { node, root, key }
     }
 }
