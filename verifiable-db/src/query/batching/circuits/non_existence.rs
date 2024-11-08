@@ -1,3 +1,4 @@
+use anyhow::Result;
 use std::array;
 
 use alloy::primitives::U256;
@@ -33,6 +34,8 @@ use crate::query::{
         ComputationalHash, ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
     },
 };
+
+use super::api::{TreePathInputs, NUM_IO};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct NonExistenceWires<const INDEX_TREE_MAX_DEPTH: usize, const MAX_NUM_RESULTS: usize>
@@ -101,25 +104,29 @@ where
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
 {
     pub(crate) fn new(
-        path: MerklePathWithNeighborsGadget<INDEX_TREE_MAX_DEPTH>,
-        index_node: &NodeInfo,
+        path: &TreePathInputs,
         primary_index: F,
         aggregation_ops: [F; MAX_NUM_RESULTS],
         computational_hash: ComputationalHash,
         placeholder_hash: PlaceholderHash,
         query_bounds: &QueryBounds,
-    ) -> Self {
-        Self {
-            index_path: path,
-            index_node_value: index_node.value,
-            index_node_subtree_hash: index_node.embedded_tree_hash,
+    ) -> Result<Self> {
+        Ok(Self {
+            index_path: MerklePathWithNeighborsGadget::new(
+                &path.path,
+                &path.siblings,
+                &path.node_info,
+                path.children,
+            )?,
+            index_node_value: path.node_info.value,
+            index_node_subtree_hash: path.node_info.embedded_tree_hash,
             primary_index_id: primary_index,
             ops: aggregation_ops,
             computational_hash,
             placeholder_hash,
             min_primary: query_bounds.min_query_primary(),
             max_primary: query_bounds.max_query_primary(),
-        }
+        })
     }
 
     pub(crate) fn build(
@@ -249,7 +256,7 @@ where
 
     type Inputs = NonExistenceCircuit<INDEX_TREE_MAX_DEPTH, MAX_NUM_RESULTS>;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target, MAX_NUM_RESULTS>::total_len();
+    const NUM_PUBLIC_INPUTS: usize = NUM_IO::<MAX_NUM_RESULTS>;
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -290,6 +297,7 @@ mod tests {
                 output_computation::tests::compute_dummy_output_values, ChildPosition, QueryBounds,
             },
             batching::{
+                circuits::api::TreePathInputs,
                 public_inputs::{tests::gen_values_in_range, PublicInputs},
                 row_chunk::tests::{BoundaryRowData, BoundaryRowNodeInfo},
             },
@@ -348,19 +356,16 @@ mod tests {
         let node_f_hash = HashOutput::try_from(node_f.compute_node_hash(primary_index)).unwrap();
         let node_c_hash = HashOutput::try_from(node_c.compute_node_hash(primary_index)).unwrap();
         let siblings_e = vec![Some(node_f_hash.clone()), None, Some(node_c_hash)];
-        let merkle_path_e =
-            MerklePathWithNeighborsGadget::new(&path_e, &siblings_e, &node_e, [None, None])
-                .unwrap();
-
+        let merkle_path_e = TreePathInputs::new(node_e, path_e, siblings_e, [None, None]);
         let circuit = NonExistenceCircuit::new(
-            merkle_path_e,
-            &node_e,
+            &merkle_path_e,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         let proof = run_circuit::<F, D, C, _>(circuit);
 
@@ -465,19 +470,17 @@ mod tests {
         ];
         let node_b_hash = HashOutput::try_from(node_b.compute_node_hash(primary_index)).unwrap();
         let siblings_g = vec![None, Some(node_b_hash)];
-        let merkle_path_g =
-            MerklePathWithNeighborsGadget::new(&path_g, &siblings_g, &node_g, [None, None])
-                .unwrap();
+        let merkle_path_g = TreePathInputs::new(node_g, path_g, siblings_g, [None, None]);
 
         let circuit = NonExistenceCircuit::new(
-            merkle_path_g,
-            &node_g,
+            &merkle_path_g,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         let proof = run_circuit::<F, D, C, _>(circuit);
 
@@ -537,19 +540,17 @@ mod tests {
         let node_e_hash = HashOutput::try_from(node_e.compute_node_hash(primary_index)).unwrap();
         let node_c_hash = HashOutput::try_from(node_c.compute_node_hash(primary_index)).unwrap();
         let siblings_f = vec![Some(node_e_hash), None, Some(node_c_hash.clone())];
-        let merkle_path_f =
-            MerklePathWithNeighborsGadget::new(&path_f, &siblings_f, &node_f, [None, None])
-                .unwrap();
+        let merkle_path_f = TreePathInputs::new(node_f, path_f, siblings_f, [None, None]);
 
         let circuit = NonExistenceCircuit::new(
-            merkle_path_f,
-            &node_f,
+            &merkle_path_f,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         let proof = run_circuit::<F, D, C, _>(circuit);
         let expected_index_node_info = {
@@ -577,23 +578,18 @@ mod tests {
         // we try to prove also with node_b
         let path_b = vec![(node_a.clone(), ChildPosition::Left)];
         let siblings_b = vec![Some(node_c_hash.clone())];
-        let merkle_path_b = MerklePathWithNeighborsGadget::new(
-            &path_b,
-            &siblings_b,
-            &node_b,
-            [Some(node_d.clone()), None],
-        )
-        .unwrap();
+        let merkle_path_b =
+            TreePathInputs::new(node_b, path_b, siblings_b, [Some(node_d.clone()), None]);
 
         let circuit = NonExistenceCircuit::new(
-            merkle_path_b,
-            &node_b,
+            &merkle_path_b,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         let proof = run_circuit::<F, D, C, _>(circuit);
         let expected_index_node_info = {
@@ -627,23 +623,22 @@ mod tests {
         // try generate prove with node_a
         let path_a = vec![];
         let siblings_a = vec![];
-        let merkle_path_a = MerklePathWithNeighborsGadget::new(
-            &path_a,
-            &siblings_a,
-            &node_a,
+        let merkle_path_a = TreePathInputs::new(
+            node_a,
+            path_a,
+            siblings_a,
             [Some(node_b.clone()), Some(node_c.clone())],
-        )
-        .unwrap();
+        );
 
         let circuit = NonExistenceCircuit::new(
-            merkle_path_a,
-            &node_a,
+            &merkle_path_a,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         check_panic!(
             || run_circuit::<F, D, C, _>(circuit),
@@ -652,14 +647,14 @@ mod tests {
 
         // try to generate proof with node_b
         let circuit = NonExistenceCircuit::new(
-            merkle_path_b,
-            &node_b,
+            &merkle_path_b,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         check_panic!(
             || run_circuit::<F, D, C, _>(circuit),
@@ -670,23 +665,18 @@ mod tests {
         let path_c = vec![(node_a.clone(), ChildPosition::Right)];
         let node_b_hash = HashOutput::try_from(node_b.compute_node_hash(primary_index)).unwrap();
         let siblings_c = vec![Some(node_b_hash.clone())];
-        let merkle_path_c = MerklePathWithNeighborsGadget::new(
-            &path_c,
-            &siblings_c,
-            &node_c,
-            [None, Some(node_g.clone())],
-        )
-        .unwrap();
+        let merkle_path_c =
+            TreePathInputs::new(node_c, path_c, siblings_c, [None, Some(node_g.clone())]);
 
         let circuit = NonExistenceCircuit::new(
-            merkle_path_c,
-            &node_c,
+            &merkle_path_c,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         check_panic!(
             || run_circuit::<F, D, C, _>(circuit),
@@ -699,23 +689,22 @@ mod tests {
             (node_a.clone(), ChildPosition::Left),
         ];
         let siblings_d = vec![None, Some(node_c_hash.clone())];
-        let merkle_path_d = MerklePathWithNeighborsGadget::new(
-            &path_d,
-            &siblings_d,
-            &node_d,
+        let merkle_path_d = TreePathInputs::new(
+            node_d,
+            path_d,
+            siblings_d,
             [Some(node_e.clone()), Some(node_f.clone())],
-        )
-        .unwrap();
+        );
 
         let circuit = NonExistenceCircuit::new(
-            merkle_path_d,
-            &node_d,
+            &merkle_path_d,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         check_panic!(
             || run_circuit::<F, D, C, _>(circuit),
@@ -730,19 +719,17 @@ mod tests {
         ];
         let node_f_hash = HashOutput::try_from(node_f.compute_node_hash(primary_index)).unwrap();
         let siblings_e = vec![Some(node_f_hash), None, Some(node_c_hash.clone())];
-        let merkle_path_e =
-            MerklePathWithNeighborsGadget::new(&path_e, &siblings_e, &node_e, [None, None])
-                .unwrap();
+        let merkle_path_e = TreePathInputs::new(node_e, path_e, siblings_e, [None, None]);
 
         let circuit = NonExistenceCircuit::new(
-            merkle_path_e,
-            &node_e,
+            &merkle_path_e,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         check_panic!(
             || run_circuit::<F, D, C, _>(circuit),
@@ -751,14 +738,14 @@ mod tests {
 
         // try to generate proof with node_f
         let circuit = NonExistenceCircuit::new(
-            merkle_path_f,
-            &node_f,
+            &merkle_path_f,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         check_panic!(
             || run_circuit::<F, D, C, _>(circuit),
@@ -772,19 +759,17 @@ mod tests {
             (node_a.clone(), ChildPosition::Right),
         ];
         let siblings_g = vec![None, Some(node_b_hash.clone())];
-        let merkle_path_g =
-            MerklePathWithNeighborsGadget::new(&path_g, &siblings_g, &node_g, [None, None])
-                .unwrap();
+        let merkle_path_g = TreePathInputs::new(node_g, path_g, siblings_g, [None, None]);
 
         let circuit = NonExistenceCircuit::new(
-            merkle_path_g,
-            &node_g,
+            &merkle_path_g,
             primary_index,
             ops.clone(),
             computational_hash,
             placeholder_hash,
             &query_bounds,
-        );
+        )
+        .unwrap();
 
         check_panic!(
             || run_circuit::<F, D, C, _>(circuit),

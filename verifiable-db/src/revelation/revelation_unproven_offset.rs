@@ -70,6 +70,55 @@ use super::{
     PublicInputs, NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
 };
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+/// Data structure containing all the information needed to verify the membership of
+/// a row in a tree representing a table
+pub struct RowPath {
+    /// Info about the node of the row tree storing the row
+    pub(crate) row_node_info: NodeInfo,
+    /// Info about the nodes in the path of the rows tree for the node storing the row; The `ChildPosition` refers to
+    /// the position of the previous node in the path as a child of the current node
+    pub(crate) row_tree_path: Vec<(NodeInfo, ChildPosition)>,
+    /// Hash of the siblings of the node in the rows tree path (except for the root)
+    pub(crate) row_path_siblings: Vec<Option<HashOutput>>,
+    /// Info about the node of the index tree storing the rows tree containing the row
+    pub(crate) index_node_info: NodeInfo,
+    /// Info about the nodes in the path of the index tree for the index_node; The `ChildPosition` refers to
+    /// the position of the previous node in the path as a child of the current node
+    pub(crate) index_tree_path: Vec<(NodeInfo, ChildPosition)>,
+    /// Hash of the siblings of the nodes in the index tree path (except for the root)
+    pub(crate) index_path_siblings: Vec<Option<HashOutput>>,
+}
+
+impl RowPath {
+    /// Instantiate a new instance of `RowPath` for a given proven row from the following input data:
+    /// - `row_node_info`: data about the node of the row tree storing the row
+    /// - `row_tree_path`: data about the nodes in the path of the rows tree for the node storing the row;
+    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
+    /// - `row_path_siblings`: hash of the siblings of the node in the rows tree path (except for the root)
+    /// - `index_node_info`: data about the node of the index tree storing the rows tree containing the row
+    /// - `index_tree_path`: data about the nodes in the path of the index tree for the index_node;
+    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
+    /// - `index_path_siblings`: hash of the siblings of the nodes in the index tree path (except for the root)
+    pub fn new(
+        row_node_info: NodeInfo,
+        row_tree_path: Vec<(NodeInfo, ChildPosition)>,
+        row_path_siblings: Vec<Option<HashOutput>>,
+        index_node_info: NodeInfo,
+        index_tree_path: Vec<(NodeInfo, ChildPosition)>,
+        index_path_siblings: Vec<Option<HashOutput>>,
+    ) -> Self {
+        Self {
+            row_node_info,
+            row_tree_path,
+            row_path_siblings,
+            index_node_info,
+            index_tree_path,
+            index_path_siblings,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Target for all the information about nodes in the path needed by this revelation circuit
 struct NodeInfoTarget {
@@ -223,55 +272,6 @@ pub struct RevelationCircuit<
     distinct: bool,
     /// Input values employed by the `CheckPlaceholderGadget`
     check_placeholder_inputs: CheckPlaceholderGadget<PH, PP>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
-/// Data structure containing all the information needed to verify the membership of
-/// a row in a tree representing a table
-pub struct RowPath {
-    /// Info about the node of the row tree storing the row
-    row_node_info: NodeInfo,
-    /// Info about the nodes in the path of the rows tree for the node storing the row; The `ChildPosition` refers to
-    /// the position of the previous node in the path as a child of the current node
-    row_tree_path: Vec<(NodeInfo, ChildPosition)>,
-    /// Hash of the siblings of the node in the rows tree path (except for the root)
-    row_path_siblings: Vec<Option<HashOutput>>,
-    /// Info about the node of the index tree storing the rows tree containing the row
-    index_node_info: NodeInfo,
-    /// Info about the nodes in the path of the index tree for the index_node; The `ChildPosition` refers to
-    /// the position of the previous node in the path as a child of the current node
-    index_tree_path: Vec<(NodeInfo, ChildPosition)>,
-    /// Hash of the siblings of the nodes in the index tree path (except for the root)
-    index_path_siblings: Vec<Option<HashOutput>>,
-}
-
-impl RowPath {
-    /// Instantiate a new instance of `RowPath` for a given proven row from the following input data:
-    /// - `row_node_info`: data about the node of the row tree storing the row
-    /// - `row_tree_path`: data about the nodes in the path of the rows tree for the node storing the row;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
-    /// - `row_path_siblings`: hash of the siblings of the node in the rows tree path (except for the root)
-    /// - `index_node_info`: data about the node of the index tree storing the rows tree containing the row
-    /// - `index_tree_path`: data about the nodes in the path of the index tree for the index_node;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
-    /// - `index_path_siblings`: hash of the siblings of the nodes in the index tree path (except for the root)
-    pub fn new(
-        row_node_info: NodeInfo,
-        row_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        row_path_siblings: Vec<Option<HashOutput>>,
-        index_node_info: NodeInfo,
-        index_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        index_path_siblings: Vec<Option<HashOutput>>,
-    ) -> Self {
-        Self {
-            row_node_info,
-            row_tree_path,
-            row_path_siblings,
-            index_node_info,
-            index_tree_path,
-            index_path_siblings,
-        }
-    }
 }
 
 impl<

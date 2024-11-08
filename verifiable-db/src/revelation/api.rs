@@ -48,13 +48,13 @@ use crate::{
 use super::{
     revelation_unproven_offset::{
         self, RecursiveCircuitInputs as RecursiveCircuitInputsUnporvenOffset,
-        RevelationCircuit as RevelationCircuitUnprovenOffset, RowPath,
+        RevelationCircuit as RevelationCircuitUnprovenOffset,
     },
     revelation_without_results_tree::{
         CircuitBuilderParams, RecursiveCircuitInputs, RecursiveCircuitWires,
         RevelationWithoutResultsTreeCircuit,
     },
-    NUM_QUERY_IO, PI_LEN,
+    RowPath, NUM_QUERY_IO, PI_LEN,
 };
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 /// Data structure employed to provide input data related to a matching row

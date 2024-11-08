@@ -3,8 +3,11 @@ use std::array;
 
 use itertools::Itertools;
 use mp2_common::{
+    proof::ProofWithVK,
     public_inputs::PublicInputCommon,
-    serialization::{deserialize_array, serialize_array},
+    serialization::{
+        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+    },
     u256::CircuitBuilderU256,
     utils::{FromTargets, ToTargets},
     D, F,
@@ -27,6 +30,8 @@ use crate::query::{
     universal_circuit::universal_query_gadget::{OutputValuesTarget, UniversalQueryOutputWires},
 };
 
+use super::api::NUM_IO;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkAggregationWires<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize> {
     #[serde(
@@ -37,11 +42,11 @@ pub struct ChunkAggregationWires<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS:
     is_non_dummy_chunk: [BoolTarget; NUM_CHUNKS],
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkAggregationCircuit<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize> {
     /// Number of non-dummy chunks to be aggregated. Must be at
     /// most `NUM_CHUNKS`
-    num_non_dummy_chunks: usize,
+    pub(crate) num_non_dummy_chunks: usize,
 }
 
 impl<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize>
@@ -157,7 +162,7 @@ where
 
     type Inputs = ChunkAggregationCircuit<NUM_CHUNKS, MAX_NUM_RESULTS>;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target, MAX_NUM_RESULTS>::total_len();
+    const NUM_PUBLIC_INPUTS: usize = NUM_IO::<MAX_NUM_RESULTS>;
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -172,6 +177,15 @@ where
         inputs.assign(pw, self);
         Ok(())
     }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ChunkAggregationInputs<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize> {
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    pub(crate) chunk_proofs: [ProofWithVK; NUM_CHUNKS],
+    pub(crate) circuit: ChunkAggregationCircuit<NUM_CHUNKS, MAX_NUM_RESULTS>,
 }
 
 #[cfg(test)]

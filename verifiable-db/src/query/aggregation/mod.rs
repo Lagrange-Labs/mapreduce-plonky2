@@ -433,8 +433,8 @@ pub struct SinglePathInput {
 /// non-existence circuits. These hashes are computed from the query specific data provided as input
 /// to the initialization method of this data structure
 pub struct QueryHashNonExistenceCircuits {
-    computational_hash: ComputationalHash,
-    placeholder_hash: PlaceholderHash,
+    pub(crate) computational_hash: ComputationalHash,
+    pub(crate) placeholder_hash: PlaceholderHash,
 }
 
 impl QueryHashNonExistenceCircuits {

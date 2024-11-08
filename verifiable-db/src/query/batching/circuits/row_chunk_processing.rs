@@ -40,6 +40,8 @@ use self::row_chunk::{
 
 use anyhow::{ensure, Result};
 
+use super::api::NUM_IO;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct RowChunkProcessingWires<
     const NUM_ROWS: usize,
@@ -351,7 +353,7 @@ where
         T,
     >;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target, MAX_NUM_RESULTS>::total_len();
+    const NUM_PUBLIC_INPUTS: usize = NUM_IO::<MAX_NUM_RESULTS>;
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,

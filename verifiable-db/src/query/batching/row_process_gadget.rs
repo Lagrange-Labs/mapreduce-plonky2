@@ -16,7 +16,10 @@ use crate::query::{
     },
 };
 
-use super::row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget};
+use super::{
+    circuits::api::{RowPath, RowWithPath},
+    row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget},
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct RowProcessingGadgetInputWires<
@@ -271,4 +274,47 @@ where
         self.index_path.assign(pw, &wires.index_path);
         self.input_values.assign(pw, &wires.input_values);
     }
+}
+
+impl<
+        'a,
+        const ROW_TREE_MAX_DEPTH: usize,
+        const INDEX_TREE_MAX_DEPTH: usize,
+        const MAX_NUM_COLUMNS: usize,
+        const MAX_NUM_PREDICATE_OPS: usize,
+        const MAX_NUM_RESULT_OPS: usize,
+        const MAX_NUM_RESULTS: usize,
+    > TryFrom<&'a RowWithPath>
+    for RowProcessingGadgetInputs<
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+    >
+where
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
+    [(); MAX_NUM_RESULTS - 1]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+{
+    fn try_from(value: &RowWithPath) -> Result<Self> {
+        let index_path = MerklePathWithNeighborsGadget::new(
+            &value.path.index_tree_path.path,
+            &value.path.index_tree_path.siblings,
+            &value.path.index_tree_path.node_info,
+            value.path.index_tree_path.children,
+        )?;
+        let row_path = MerklePathWithNeighborsGadget::new(
+            &value.path.row_tree_path.path,
+            &value.path.row_tree_path.siblings,
+            &value.path.row_tree_path.node_info,
+            value.path.row_tree_path.children,
+        )?;
+
+        Self::new(row_path, index_path, &value.cells)
+    }
+
+    type Error = anyhow::Error;
 }
