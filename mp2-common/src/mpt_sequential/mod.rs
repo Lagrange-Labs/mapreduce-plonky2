@@ -38,7 +38,7 @@ pub use key::{
 };
 pub use leaf_or_extension::{
     MPTLeafOrExtensionNode, MPTLeafOrExtensionNodeGeneric, MPTLeafOrExtensionWires,
-    MPTLeafOrExtensionWiresGeneric,
+    MPTLeafOrExtensionWiresGeneric, MPTReceiptLeafNode, MPTReceiptLeafWiresGeneric,
 };
 
 /// Number of items in the RLP encoded list in a leaf node.
@@ -52,7 +52,7 @@ pub const MAX_LEAF_VALUE_LEN: usize = 33;
 /// This is the maximum size we allow for the value of Receipt Trie leaf
 /// currently set to be the same as we allow for a branch node in the Storage Trie
 /// minus the length of the key header and key
-pub const MAX_RECEIPT_LEAF_VALUE_LEN: usize = 526;
+pub const MAX_RECEIPT_LEAF_VALUE_LEN: usize = 503;
 
 /// RLP item size for the extension node
 pub const MPT_EXTENSION_RLP_SIZE: usize = 2;
@@ -442,6 +442,44 @@ pub fn advance_key_leaf_or_extension<
     // match.
     let condition = b.and(condition, should_true);
     (new_key, leaf_child_hash, condition)
+}
+
+/// Returns the key with the pointer moved in the case of a Receipt Trie leaf.
+pub fn advance_key_receipt_leaf<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    const NODE_LEN: usize,
+    const KEY_LEN: usize,
+>(
+    b: &mut CircuitBuilder<F, D>,
+    node: &VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
+    key: &MPTKeyWireGeneric<KEY_LEN>,
+    rlp_headers: &RlpList<1>,
+) -> (MPTKeyWireGeneric<KEY_LEN>, BoolTarget) {
+    let key_header = RlpHeader {
+        data_type: rlp_headers.data_type[0],
+        offset: rlp_headers.offset[0],
+        len: rlp_headers.len[0],
+    };
+
+    // To save on operations we know the key is goin to be in the first 10 items so we
+    // only feed these into `decode_compact_encoding`
+    let sub_array: Array<Target, 10> = Array {
+        arr: create_array(|i| node.arr.arr[i]),
+    };
+    let (extracted_key, should_true) =
+        decode_compact_encoding::<_, _, _, KEY_LEN>(b, &sub_array, &key_header);
+
+    // note we are going _backwards_ on the key, so we need to substract the expected key length
+    // we want to check against
+    let new_key = key.advance_by(b, extracted_key.real_len);
+    // NOTE: there is no need to check if the extracted_key is indeed a subvector of the full key
+    // in this case. Indeed, in leaf/ext. there is only one key possible. Since we decoded it
+    // from the beginning of the node, and that the hash of the node also starts at the beginning,
+    // either the attacker give the right node or it gives an invalid node and hashes will not
+    // match.
+
+    (new_key, should_true)
 }
 #[cfg(test)]
 mod test {
