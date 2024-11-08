@@ -937,11 +937,10 @@ impl TableIndexing {
 }
 
 #[derive(Clone, Debug)]
-pub enum UpdateSimpleStorage {
+pub enum UpdateSimpleStorage<V> {
     SingleValues(SimpleSingleValue),
-    MappingValues(Vec<MappingValuesUpdate>),
+    Mapping(Vec<MappingUpdate<V>>),
     SingleStruct(LargeStruct),
-    MappingStruct(Vec<MappingStructUpdate>),
 }
 
 /// Represents the update that can come from the chain
@@ -1090,6 +1089,25 @@ impl From<&MappingStructUpdate> for MappingOperation {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum MappingUpdate<V> {
+    // key and value
+    Insertion(U256, V),
+    // key and value
+    Deletion(U256, V),
+    // key, previous value and new value
+    Update(U256, V, V),
+}
+
+impl<V: Clone> From<&MappingUpdate<V>> for MappingOperation {
+    fn from(update: &MappingUpdate<V>) -> Self {
+        Self::from(match update {
+            MappingUpdate::Deletion(_, _) => 0,
+            MappingUpdate::Update(_, _, _) => 1,
+            MappingUpdate::Insertion(_, _) => 2,
+        })
+    }
+}
 impl UpdateSimpleStorage {
     // This function applies the update in _one_ transaction so that Anvil only moves by one block
     // so we can test the "subsequent block"
