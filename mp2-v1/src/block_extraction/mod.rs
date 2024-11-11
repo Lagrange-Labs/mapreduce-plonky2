@@ -121,7 +121,7 @@ mod test {
         );
         assert_eq!(
             U256::from_fields(pi.block_number_raw()),
-            U256::from(block.header.number),
+            U256::from(block.header.number)
         );
         assert_eq!(
             pi.state_root_raw(),
