@@ -85,7 +85,7 @@ pub fn setup_circuit<
     };
 
     println!("[+] Circuit data built in {:?}s", now.elapsed().as_secs());
-
+    println!("FRI config: {:?}", circuit_data.common.fri_params);
     (wires, circuit_data, vcd)
 }
 

@@ -19,7 +19,7 @@ pub type MPTKeyWire = MPTKeyWireGeneric<MAX_KEY_NIBBLE_LEN>;
 
 pub type ReceiptKeyWire = MPTKeyWireGeneric<MAX_TX_KEY_NIBBLE_LEN>;
 
-pub const MAX_TX_KEY_NIBBLE_LEN: usize = 6;
+pub const MAX_TX_KEY_NIBBLE_LEN: usize = 4;
 
 /// Calculate the pointer from the MPT key.
 pub fn mpt_key_ptr(mpt_key: &[u8]) -> usize {

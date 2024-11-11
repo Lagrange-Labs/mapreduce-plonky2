@@ -31,6 +31,7 @@ alloy = { version = "0.6", default-features = false, features = [
   "transports",
   "postgres",
 ] }
+
 anyhow = "1.0"
 base64 = "0.22"
 bb8 = "0.8.5"
