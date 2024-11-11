@@ -1,8 +1,9 @@
 use alloy::{
     eips::BlockNumberOrTag,
+    network::TransactionBuilder,
     node_bindings::Anvil,
-    primitives::U256,
-    providers::{ext::AnvilApi, Provider, ProviderBuilder, WalletProvider},
+    primitives::{Address, U256},
+    providers::{ext::AnvilApi, Provider, ProviderBuilder},
     sol,
 };
 use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -111,9 +112,7 @@ pub fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
     rt.block_on(async {
         // Spin up a local node.
 
-        let rpc = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .on_anvil_with_wallet_and_config(|a| Anvil::block_time(a, 1));
+        let rpc = ProviderBuilder::new().on_anvil_with_config(|anvil| Anvil::block_time(anvil, 1));
 
         // Deploy the contract using anvil
         let event_contract = EventEmitter::deploy(rpc.clone()).await.unwrap();
@@ -121,26 +120,12 @@ pub fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
         // Deploy the contract using anvil
         let other_contract = OtherEmitter::deploy(rpc.clone()).await.unwrap();
 
-        let address = rpc.default_signer_address();
-        rpc.anvil_set_nonce(address, U256::from(0)).await.unwrap();
         let tx_reqs = (0..25)
             .map(|i| match i % 4 {
-                0 => event_contract
-                    .testEmit()
-                    .into_transaction_request()
-                    .nonce(i as u64),
-                1 => event_contract
-                    .twoEmits()
-                    .into_transaction_request()
-                    .nonce(i as u64),
-                2 => other_contract
-                    .otherEmit()
-                    .into_transaction_request()
-                    .nonce(i as u64),
-                3 => other_contract
-                    .twoEmits()
-                    .into_transaction_request()
-                    .nonce(i as u64),
+                0 => event_contract.testEmit().into_transaction_request(),
+                1 => event_contract.twoEmits().into_transaction_request(),
+                2 => other_contract.otherEmit().into_transaction_request(),
+                3 => other_contract.twoEmits().into_transaction_request(),
                 _ => unreachable!(),
             })
             .collect::<Vec<_>>();
@@ -148,8 +133,18 @@ pub fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
         tx_reqs.into_iter().for_each(|tx_req| {
             let rpc_clone = rpc.clone();
             join_set.spawn(async move {
+                let sender_address = Address::random();
+                let funding = U256::from(1e18 as u64);
                 rpc_clone
-                    .send_transaction(tx_req)
+                    .anvil_set_balance(sender_address, funding)
+                    .await
+                    .unwrap();
+                rpc_clone
+                    .anvil_auto_impersonate_account(true)
+                    .await
+                    .unwrap();
+                rpc_clone
+                    .send_transaction(tx_req.with_from(sender_address))
                     .await
                     .unwrap()
                     .watch()

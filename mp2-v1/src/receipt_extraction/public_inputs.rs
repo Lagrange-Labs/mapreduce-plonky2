@@ -19,14 +19,14 @@ use plonky2_ecgfp5::{
 };
 
 /// The maximum length of a transaction index in a block in nibbles.
-/// Theoretically a block can have up to 1428 transactions in Ethereum, which takes 3 bytes to represent.
-const MAX_INDEX_NIBBLES: usize = 6;
+/// Theoretically a block can have up to 1428 transactions in Ethereum, which takes 2 bytes to represent.
+const MAX_INDEX_NIBBLES: usize = 4;
 // Contract extraction public Inputs:
 /// - `H : [8]F` : packed node hash
 const H_RANGE: PublicInputRange = 0..PACKED_HASH_LEN;
-/// - `K : [6]F` : Length of the transaction index in nibbles
+/// - `K : [4]F` : Length of the transaction index in nibbles
 const K_RANGE: PublicInputRange = H_RANGE.end..H_RANGE.end + MAX_INDEX_NIBBLES;
-/// `T : F` pointer in the MPT indicating portion of the key already traversed (from 6 → 0)
+/// `T : F` pointer in the MPT indicating portion of the key already traversed (from 4 → 0)
 const T_RANGE: PublicInputRange = K_RANGE.end..K_RANGE.end + 1;
 /// - `DV : Digest[F]` : value digest of all rows to extract
 const DV_RANGE: PublicInputRange = T_RANGE.end..T_RANGE.end + CURVE_TARGET_LEN;

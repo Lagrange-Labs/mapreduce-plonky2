@@ -611,6 +611,19 @@ where
 
     /// This function allows you to search a larger [`Array`] by representing it as a number of
     /// smaller [`Array`]s with size [`RANDOM_ACCESS_SIZE`], padding the final smaller array where required.
+    /// For example if we have an array of length `512` and we wish to find the value at index `324` the following
+    /// occurs:
+    ///     1) Split the original [`Array`] into `512 / 64 = 8` chunks `[A_0, ... , A_7]`
+    ///     2) Express `324` in base 64 (Little Endian)  `[4, 5]`
+    ///     3) For each `i \in [0, 7]` use a [`RandomAccesGate`] to lookup the `4`th element, `v_i,3` of `A_i`
+    ///        and create a new list of length `8` that consists of `[v_0,3, v_1,3, ... v_7,3]`
+    ///     4) Now use another [`RandomAccessGate`] to select the `5`th elemnt of this new list (`v_4,3` as we have zero-indexed both times)
+    ///
+    /// For comparison using [`Self::value_at`] on an [`Array`] with length `512` results in 129 rows, using this method
+    /// on the same [`Array`] results in 15 rows.
+    ///
+    /// As an aside, if the [`Array`] length is not divisible by `64` then we pad with zero values, since the size of the
+    /// [`Array`] is a compile time constant this will not affect circuit preprocessing.
     pub fn random_access_large_array<F: RichField + Extendable<D>, const D: usize>(
         &self,
         b: &mut CircuitBuilder<F, D>,
@@ -665,9 +678,12 @@ where
         T::from_target(b.random_access(high_bits, first_search))
     }
 
-    /// Returns [`self[at..at+SUB_SIZE]`].
-    /// This is more expensive than [`Self::extract_array`] due to using [`Self::random_access_large_array`]
+    /// Returns [`Self[at..at+SUB_SIZE]`].
+    /// This is more expensive than [`Self::extract_array`] for [`Array`]s that are shorter than 64 elements long due to using [`Self::random_access_large_array`]
     /// instead of [`Self::value_at`]. This function enforces that the values extracted are within the array.
+    ///
+    /// For comparison usin [`Self::extract_array`] on an [`Array`] of size `512` results in 5179 rows, using this method instead
+    /// results in 508 rows.
     pub fn extract_array_large<
         F: RichField + Extendable<D>,
         const D: usize,
@@ -692,7 +708,6 @@ where
                 let i_target = b.constant(F::from_canonical_usize(i));
                 let i_plus_n_target = b.add(at, i_target);
 
-                
                 self.random_access_large_array(b, i_plus_n_target)
             }),
         }
@@ -932,6 +947,7 @@ mod test {
                 let index = c.add_virtual_target();
                 let extracted = array.random_access_large_array(c, index);
                 c.connect(exp_value, extracted);
+
                 (array, index, exp_value)
             }
             fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -942,6 +958,7 @@ mod test {
                 pw.set_target(wires.2, F::from_canonical_u8(self.exp));
             }
         }
+
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
         rng.fill(&mut arr[..]);
@@ -1035,6 +1052,7 @@ mod test {
                     .assign(pw, &create_array(|i| F::from_canonical_u8(self.exp[i])));
             }
         }
+
         let mut rng = thread_rng();
         let mut arr = [0u8; SIZE];
         rng.fill(&mut arr[..]);

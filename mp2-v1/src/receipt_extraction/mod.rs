@@ -6,7 +6,9 @@ use mp2_common::{
 };
 use plonky2::field::types::Field;
 
-/// Calculate `metadata_digest = D(key_id || value_id || slot)` for receipt leaf.
+/// Calculate `metadata_digest = D(address || signature || topics)` for receipt leaf.
+/// Topics is an array of 5 values (some are dummies), each being `column_id`, `rel_byte_offset` (from the start of the log)
+/// and `len`.
 pub fn compute_receipt_leaf_metadata_digest(event: &EventLogInfo) -> Digest {
     let topics_flat = event
         .topics
