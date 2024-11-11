@@ -209,18 +209,23 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use alloy::primitives::U256;
-    use mp2_common::{utils::ToFields, F};
+    use mp2_common::{
+        utils::{FromFields, FromTargets, ToFields},
+        F,
+    };
     use mp2_test::utils::{gen_random_field_hash, gen_random_u256};
     use plonky2::{
         field::types::Field,
-        hash::hash_types::{HashOut, RichField},
+        hash::hash_types::{HashOut, RichField, NUM_HASH_OUT_ELTS},
         iop::witness::{PartialWitness, WitnessWrite},
     };
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-        aggregation::QueryBounds, batching::public_inputs::tests::gen_values_in_range,
-        merkle_path::tests::NeighborInfo, universal_circuit::universal_query_gadget::OutputValues,
+        aggregation::QueryBounds,
+        batching::public_inputs::tests::gen_values_in_range,
+        merkle_path::{tests::NeighborInfo, NeighborInfoTarget},
+        universal_circuit::universal_query_gadget::OutputValues,
     };
 
     use super::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget};
@@ -379,6 +384,23 @@ pub(crate) mod tests {
                 .collect()
         }
     }
+
+    impl FromFields<F> for BoundaryRowNodeInfo {
+        fn from_fields(t: &[F]) -> Self {
+            assert!(t.len() >= BoundaryRowNodeInfoTarget::NUM_TARGETS);
+            let end_node_hash = HashOut::from_partial(&t[..NUM_HASH_OUT_ELTS]);
+            let predecessor_info = NeighborInfo::from_fields(&t[NUM_HASH_OUT_ELTS..]);
+            let successor_info = NeighborInfo::from_fields(
+                &t[NUM_HASH_OUT_ELTS + NeighborInfoTarget::NUM_TARGETS..],
+            );
+
+            Self {
+                end_node_hash,
+                predecessor_info,
+                successor_info,
+            }
+        }
+    }
     #[derive(Clone, Debug)]
     pub(crate) struct BoundaryRowData {
         pub(crate) row_node_info: BoundaryRowNodeInfo,
@@ -392,6 +414,20 @@ pub(crate) mod tests {
                 .into_iter()
                 .chain(self.index_node_info.to_fields())
                 .collect()
+        }
+    }
+
+    impl FromFields<F> for BoundaryRowData {
+        fn from_fields(t: &[F]) -> Self {
+            assert!(t.len() >= BoundaryRowDataTarget::NUM_TARGETS);
+            let row_node_info = BoundaryRowNodeInfo::from_fields(t);
+            let index_node_info =
+                BoundaryRowNodeInfo::from_fields(&t[BoundaryRowNodeInfoTarget::NUM_TARGETS..]);
+
+            Self {
+                row_node_info,
+                index_node_info,
+            }
         }
     }
 
