@@ -688,9 +688,7 @@ mod tryethers {
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use ethers::{
         providers::{Http, Middleware, Provider},
-        types::{
-            Block, BlockId, Bytes, EIP1186ProofResponse, Transaction, TransactionReceipt, H256, U64,
-        },
+        types::{BlockId, Bytes, Transaction, TransactionReceipt, U64},
     };
     use rlp::{Encodable, RlpStream};
 
@@ -838,12 +836,15 @@ mod test {
     use std::str::FromStr;
 
     use alloy::{
+        network::TransactionBuilder,
         node_bindings::Anvil,
-        primitives::{Bytes, Log},
-        providers::{Provider, ProviderBuilder, WalletProvider},
+        primitives::{Bytes, Log, U256},
+        providers::{ext::AnvilApi, Provider, ProviderBuilder},
         rlp::Decodable,
         sol,
     };
+    use alloy_multicall::Multicall;
+
     use eth_trie::Nibbles;
     use ethereum_types::U64;
     use ethers::{
@@ -991,8 +992,7 @@ mod test {
     #[tokio::test]
     async fn test_receipt_query() -> Result<()> {
         let rpc = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .on_anvil_with_wallet_and_config(|anvil| Anvil::block_time(anvil, 1));
+            .on_anvil_with_config(|anvil| Anvil::fork(anvil, get_sepolia_url()));
 
         // Make a contract that emits events so we can pick up on them
         sol! {
@@ -1023,30 +1023,37 @@ mod test {
         // Deploy the contract using anvil
         let contract = EventEmitter::deploy(rpc.clone()).await?;
 
-        // Fire off a few transactions to emit some events
-
-        let address = rpc.default_signer_address();
-        let current_nonce = rpc.get_transaction_count(address).await?;
-
+        // (0..10).for_each(|j| {
+        //     match i % 2 {
+        //         0 => multicall.add_call(),
+        //         1 => contract.twoEmits().into_transaction_request(),
+        //         _ => unreachable!(),
+        //     }
+        // });
         let tx_reqs = (0..10)
             .map(|i| match i % 2 {
-                0 => contract
-                    .testEmit()
-                    .into_transaction_request()
-                    .nonce(current_nonce + i as u64),
-                1 => contract
-                    .twoEmits()
-                    .into_transaction_request()
-                    .nonce(current_nonce + i as u64),
+                0 => contract.testEmit().into_transaction_request(),
+                1 => contract.twoEmits().into_transaction_request(),
                 _ => unreachable!(),
             })
             .collect::<Vec<_>>();
         let mut join_set = JoinSet::new();
+
         tx_reqs.into_iter().for_each(|tx_req| {
             let rpc_clone = rpc.clone();
             join_set.spawn(async move {
                 rpc_clone
-                    .send_transaction(tx_req)
+                    .anvil_auto_impersonate_account(true)
+                    .await
+                    .unwrap();
+                let sender_address = Address::random();
+                let balance = U256::from(1e18 as u64);
+                rpc_clone
+                    .anvil_set_balance(sender_address, balance)
+                    .await
+                    .unwrap();
+                rpc_clone
+                    .send_transaction(tx_req.with_from(sender_address))
                     .await
                     .unwrap()
                     .watch()
@@ -1062,7 +1069,7 @@ mod test {
         }
 
         let block_number = transactions.first().unwrap().block_number.unwrap();
-
+        println!("block number: {block_number}");
         // We want to get the event signature so we can make a ReceiptQuery
         let all_events = EventEmitter::abi::events();
 

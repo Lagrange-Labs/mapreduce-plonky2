@@ -185,7 +185,7 @@ macro_rules! impl_branch_circuits {
             }
             /// generates a proof from the inputs stored in `branch`. Depending on the size of the node,
             /// and the number of children proofs, it selects the right specialized circuit to generate the proof.
-            pub fn generate_proof(
+            fn generate_proof(
                 &self,
                 set: &RecursiveCircuits<F, C, D>,
                 branch_node: InputNode,
