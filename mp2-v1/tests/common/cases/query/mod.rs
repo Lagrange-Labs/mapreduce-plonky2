@@ -28,6 +28,8 @@ use super::TableSourceSlot;
 pub mod aggregated_queries;
 pub mod simple_select_queries;
 
+pub const NUM_CHUNKS: usize = 5;
+pub const NUM_ROWS: usize = 5;
 pub const MAX_NUM_RESULT_OPS: usize = 20;
 pub const MAX_NUM_OUTPUTS: usize = 3;
 pub const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
@@ -38,6 +40,8 @@ pub const ROW_TREE_MAX_DEPTH: usize = 10;
 pub const INDEX_TREE_MAX_DEPTH: usize = 15;
 
 pub type GlobalCircuitInput = verifiable_db::api::QueryCircuitInput<
+    NUM_CHUNKS,
+    NUM_ROWS,
     ROW_TREE_MAX_DEPTH,
     INDEX_TREE_MAX_DEPTH,
     MAX_NUM_COLUMNS,

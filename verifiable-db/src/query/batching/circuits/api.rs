@@ -131,7 +131,7 @@ impl RowWithPath {
         }
     }
 }
-
+#[derive(Serialize, Deserialize)]
 pub(crate) enum CircuitInput<
     const NUM_CHUNKS: usize,
     const NUM_ROWS: usize,

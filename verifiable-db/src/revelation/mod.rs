@@ -2,9 +2,7 @@
 
 use crate::{
     ivc::NUM_IO,
-    query::{
-        batching::public_inputs::PublicInputs as BatchingPublicInputs, PI_LEN as QUERY_PI_LEN,
-    },
+    query::{batching::circuits::api::NUM_IO as NUM_BATCHING_IO, PI_LEN as QUERY_PI_LEN},
 };
 use mp2_common::F;
 
@@ -30,7 +28,7 @@ pub const NUM_PREPROCESSING_IO: usize = NUM_IO;
 
 #[cfg(feature = "batching_circuits")]
 #[rustfmt::skip]
-pub const NUM_QUERY_IO_NO_RESULTS_TREE<const S: usize>: usize = BatchingPublicInputs::<F, S>::total_len();
+pub const NUM_QUERY_IO_NO_RESULTS_TREE<const S: usize>: usize = NUM_BATCHING_IO::<S>;
 
 #[cfg(not(feature = "batching_circuits"))]
 #[rustfmt::skip]
