@@ -125,14 +125,6 @@ pub(crate) struct MergeCircuitInput {
     pub(crate) merge: MergeTable,
 }
 
-impl MergeCircuitInput {
-    // CHORE: Remove this when relevant PR is merged
-    #[allow(dead_code)]
-    pub(crate) fn new(base: BaseCircuitProofInputs, merge: MergeTable) -> Self {
-        Self { base, merge }
-    }
-}
-
 impl CircuitLogicWires<F, D, 0> for MergeTableRecursiveWires {
     type CircuitBuilderParams = FinalExtractionBuilderParams;
 
