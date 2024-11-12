@@ -46,7 +46,7 @@ use crate::common::{
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
-    MetadataGadget, StorageSlotInfo, TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
+    ColumnsMetadata, StorageSlotInfo, TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
 };
 
 use super::{
@@ -706,12 +706,12 @@ impl SingleExtractionArgs {
         })
     }
 
-    fn metadata(&self, contract: &Contract) -> Vec<MetadataGadget> {
+    fn metadata(&self, contract: &Contract) -> Vec<ColumnsMetadata> {
         let table_info = table_info(contract, self.slot_inputs.clone());
         metadata(&table_info)
     }
 
-    fn storage_slots(&self, metadata: &[MetadataGadget]) -> Vec<StorageSlot> {
+    fn storage_slots(&self, metadata: &[ColumnsMetadata]) -> Vec<StorageSlot> {
         metadata
             .iter()
             .map(|metadata| {
@@ -733,7 +733,7 @@ impl SingleExtractionArgs {
             .collect()
     }
 
-    fn storage_slot_info(&self, metadata: &[MetadataGadget]) -> Vec<StorageSlotInfo> {
+    fn storage_slot_info(&self, metadata: &[ColumnsMetadata]) -> Vec<StorageSlotInfo> {
         let storage_slots = self.storage_slots(metadata);
 
         metadata
@@ -1225,7 +1225,7 @@ where
     fn storage_slot_info(
         &self,
         key_id: u64,
-        metadata: &MetadataGadget,
+        metadata: &ColumnsMetadata,
         mapping_key: Vec<u8>,
     ) -> StorageSlotInfo {
         let storage_slot = V::mapping_storage_slot(self.slot, metadata.evm_word(), mapping_key);
@@ -1287,7 +1287,7 @@ where
         V::from_u256_slice(&extracted_values)
     }
 
-    fn metadata(&self, contract: &Contract) -> Vec<MetadataGadget> {
+    fn metadata(&self, contract: &Contract) -> Vec<ColumnsMetadata> {
         let table_info = table_info(contract, self.slot_inputs.clone());
         metadata(&table_info)
     }
@@ -1299,7 +1299,7 @@ fn table_info(contract: &Contract, slot_inputs: Vec<SlotInput>) -> Vec<ColumnInf
 }
 
 /// Construct the metadata for each slot and EVM word.
-fn metadata(table_info: &[ColumnInfo]) -> Vec<MetadataGadget> {
+fn metadata(table_info: &[ColumnInfo]) -> Vec<ColumnsMetadata> {
     // Initialize a mapping of `(slot, evm_word) -> column_Identifier`.
     let mut slots_ids = HashMap::new();
     table_info.iter().for_each(|col| {
@@ -1314,7 +1314,7 @@ fn metadata(table_info: &[ColumnInfo]) -> Vec<MetadataGadget> {
     slots_ids
         .into_iter()
         .map(|((_, evm_word), ids)| {
-            MetadataGadget::new(
+            ColumnsMetadata::new(
                 table_info.to_vec(),
                 &ids,
                 u32::try_from(evm_word.to_canonical_u64()).unwrap(),

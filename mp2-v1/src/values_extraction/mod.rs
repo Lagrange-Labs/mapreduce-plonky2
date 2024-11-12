@@ -102,19 +102,34 @@ pub fn identifier_block_column() -> u64 {
 /// Compute identifier for value column.
 ///
 /// The value column could be either simple or mapping slot.
-/// `id = H(slot || byte_offset || length || evm_word || contract_address || chain_id)[0]`
+/// `id = H(slot || byte_offset || length || evm_word || contract_address || chain_id || extra)[0]`
 pub fn identifier_for_value_column(
     input: &SlotInput,
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
+    let extra = contract_address
+        .0
+        .into_iter()
+        .chain(chain_id.to_be_bytes())
+        .chain(extra)
+        .collect_vec();
+
+    identifier_for_value_column_raw(input, extra)
+}
+
+/// Compute identifier for value column in raw mode.
+/// The value column could be either simple or mapping slot.
+/// `id = H(slot || byte_offset || length || evm_word || extra)[0]`
+///
+/// We could custom the `extra` argument, if it's set to `(contract_address || chain_id || extra)`,
+/// It's same with `identifier_for_mapping_key_column`.
+pub fn identifier_for_value_column_raw(input: &SlotInput, extra: Vec<u8>) -> u64 {
     let inputs = once(input.slot)
         .chain(input.byte_offset.to_be_bytes())
         .chain(input.length.to_be_bytes())
         .chain(input.evm_word.to_be_bytes())
-        .chain(contract_address.0.to_vec())
-        .chain(chain_id.to_be_bytes())
         .chain(extra)
         .map(F::from_canonical_u8)
         .collect_vec();
@@ -133,6 +148,15 @@ pub fn identifier_for_mapping_key_column(
     compute_id_with_prefix(KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
+/// Compute key indetifier for mapping variable in raw mode.
+/// `key_id = H(KEY || slot || contract_address || chain_id)[0]`
+///
+/// We could custom the `extra` argument, if it's set to `(contract_address || chain_id || extra)`,
+/// It's same with `identifier_for_mapping_key_column`.
+pub fn identifier_for_mapping_key_column_raw(slot: u8, extra: Vec<u8>) -> u64 {
+    compute_id_with_prefix_raw(KEY_ID_PREFIX, slot, extra)
+}
+
 /// Compute outer key indetifier for mapping of mappings variable.
 /// `outer_key_id = H(OUT_KEY || slot || contract_address || chain_id)[0]`
 pub fn identifier_for_outer_mapping_key_column(
@@ -144,6 +168,14 @@ pub fn identifier_for_outer_mapping_key_column(
     compute_id_with_prefix(OUTER_KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
+/// Compute outer key indetifier for mapping of mappings variable in raw mode.
+/// `outer_key_id = H(OUT_KEY || slot || contract_address || chain_id)[0]`
+///
+/// We could custom the `extra` argument, if it's set to `(contract_address || chain_id || extra)`,
+/// It's same with `identifier_for_outer_mapping_key_column`.
+pub fn identifier_for_outer_mapping_key_column_raw(slot: u8, extra: Vec<u8>) -> u64 {
+    compute_id_with_prefix_raw(OUTER_KEY_ID_PREFIX, slot, extra)
+}
 /// Compute inner key indetifier for mapping of mappings variable.
 /// `inner_key_id = H(IN_KEY || slot || contract_address || chain_id)[0]`
 pub fn identifier_for_inner_mapping_key_column(
@@ -155,6 +187,15 @@ pub fn identifier_for_inner_mapping_key_column(
     compute_id_with_prefix(INNER_KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
+/// Compute inner key indetifier for mapping of mappings variable in raw mode.
+/// `inner_key_id = H(IN_KEY || slot || extra)[0]`
+///
+/// We could custom the `extra` argument, if it's set to `(contract_address || chain_id || extra)`,
+/// It's same with `identifier_for_inner_mapping_key_column`.
+pub fn identifier_for_inner_mapping_key_column_raw(slot: u8, extra: Vec<u8>) -> u64 {
+    compute_id_with_prefix_raw(INNER_KEY_ID_PREFIX, slot, extra)
+}
+
 /// Calculate ID with prefix.
 fn compute_id_with_prefix(
     prefix: &[u8],
@@ -163,14 +204,27 @@ fn compute_id_with_prefix(
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
+    let extra = contract_address
+        .0
+        .into_iter()
+        .chain(chain_id.to_be_bytes())
+        .chain(extra)
+        .collect_vec();
+
+    compute_id_with_prefix_raw(prefix, slot, extra)
+}
+
+/// Calculate ID with prefix in raw mode.
+///
+/// We could custom the `extra` argument, if it's set to `(contract_address || chain_id || extra)`,
+/// It's same with `compute_id_with_prefix`.
+fn compute_id_with_prefix_raw(prefix: &[u8], slot: u8, extra: Vec<u8>) -> u64 {
     let inputs: Vec<F> = prefix
         .iter()
         .cloned()
         .chain(once(slot))
-        .chain(contract_address.0)
-        .chain(chain_id.to_be_bytes())
         .chain(extra)
-        .collect::<Vec<u8>>()
+        .collect_vec()
         .to_fields();
 
     H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
