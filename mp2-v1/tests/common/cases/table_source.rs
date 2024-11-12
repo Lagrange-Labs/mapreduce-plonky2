@@ -50,7 +50,7 @@ use crate::common::{
 };
 
 use super::{
-    contract::{Contract, SimpleContractValue, SimpleSingleValues},
+    contract::{Contract, ContractController, SimpleSingleValues},
     indexing::{
         ChangeType, MappingUpdate, TableRowUpdate, TableRowValues, UpdateType, SINGLE_SLOTS,
         SINGLE_STRUCT_SLOT,
@@ -763,17 +763,13 @@ impl SingleExtractionArgs {
             s3: Alphanumeric.sample_string(rng, 10),
             s4: next_address(),
         };
-        single_values
-            .update_contract_single_values(ctx, contract)
-            .await;
+        single_values.update_contract(ctx, contract).await;
         let single_struct = LargeStruct {
             field1: U256::from_limbs(rng.gen()),
             field2: rng.gen(),
             field3: rng.gen(),
         };
-        single_struct
-            .update_contract_single_values(ctx, contract)
-            .await;
+        single_struct.update_contract(ctx, contract).await;
 
         // Since the table is not created yet, we are giving an empty table row. When making the
         // diff with the new updated contract storage, the logic will detect it's an initialization
@@ -821,20 +817,15 @@ impl SingleExtractionArgs {
                         if index_slot == Some(SINGLE_STRUCT_SLOT as u8) {
                             // Update the single value slots as `Rest` if single Struct slot is the index.
                             let mut current_values =
-                                SimpleSingleValues::current_contract_single_values(ctx, contract)
-                                    .await;
+                                SimpleSingleValues::current_values(ctx, contract).await;
                             current_values.s4 = next_address();
-                            current_values
-                                .update_contract_single_values(ctx, contract)
-                                .await;
+                            current_values.update_contract(ctx, contract).await;
                         } else {
                             // Update the single Struct slot as `Rest` if one of single value slots is the index.
                             let mut current_struct =
-                                LargeStruct::current_contract_single_values(ctx, contract).await;
+                                LargeStruct::current_values(ctx, contract).await;
                             current_struct.field2 += 1;
-                            current_struct
-                                .update_contract_single_values(ctx, contract)
-                                .await;
+                            current_struct.update_contract(ctx, contract).await;
                         }
                     }
                     UpdateType::SecondaryIndex => {
@@ -843,8 +834,7 @@ impl SingleExtractionArgs {
                             let rng = &mut StdRng::from_entropy();
                             if slot == SINGLE_STRUCT_SLOT as u8 {
                                 let mut current_struct =
-                                    LargeStruct::current_contract_single_values(ctx, contract)
-                                        .await;
+                                    LargeStruct::current_values(ctx, contract).await;
                                 let field_index =
                                     LargeStruct::slot_inputs(SINGLE_STRUCT_SLOT as u8)
                                         .iter()
@@ -859,15 +849,10 @@ impl SingleExtractionArgs {
                                 } else {
                                     panic!("Wrong Struct field index");
                                 }
-                                current_struct
-                                    .update_contract_single_values(ctx, contract)
-                                    .await;
+                                current_struct.update_contract(ctx, contract).await;
                             } else {
                                 let mut current_values =
-                                    SimpleSingleValues::current_contract_single_values(
-                                        ctx, contract,
-                                    )
-                                    .await;
+                                    SimpleSingleValues::current_values(ctx, contract).await;
                                 if slot == SINGLE_SLOTS[0] {
                                     current_values.s1 = !current_values.s1;
                                 } else if slot == SINGLE_SLOTS[1] {
@@ -879,9 +864,7 @@ impl SingleExtractionArgs {
                                 } else {
                                     panic!("Wrong slot number");
                                 }
-                                current_values
-                                    .update_contract_single_values(ctx, contract)
-                                    .await;
+                                current_values.update_contract(ctx, contract).await;
                             }
                         }
                     }
@@ -921,7 +904,7 @@ pub(crate) struct MappingExtractionArgs<V: StorageSlotValue> {
 impl<V> MappingExtractionArgs<V>
 where
     V: StorageSlotValue,
-    Vec<MappingUpdate<V>>: SimpleContractValue,
+    Vec<MappingUpdate<V>>: ContractController,
 {
     pub fn new(slot: u8, index: MappingIndex, slot_inputs: Vec<SlotInput>) -> Self {
         Self {
@@ -955,7 +938,7 @@ where
             .map(|(key, value)| MappingUpdate::Insertion(key, value))
             .collect_vec();
 
-        updates.update_contract_mapping_values(ctx, contract).await;
+        updates.update_contract(ctx, contract).await;
 
         let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
         self.mapping_to_table_update(new_block_number, contract, &updates)
@@ -1068,7 +1051,7 @@ where
                 MappingUpdate::Update(_, _, _) => {}
             }
         }
-        updates.update_contract_mapping_values(ctx, contract).await;
+        updates.update_contract(ctx, contract).await;
 
         let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
         // NOTE HERE is the interesting bit for dist system as this is the logic to execute

@@ -41,15 +41,12 @@ impl Contract {
 }
 
 /// Common functions for a specific type to interact with the test contract
-pub trait SimpleContractValue {
-    /// Get the current single values from the test contract.
-    async fn current_contract_single_values(ctx: &TestContext, contract: &Contract) -> Self;
+pub trait ContractController {
+    /// Get the current values from the contract.
+    async fn current_values(ctx: &TestContext, contract: &Contract) -> Self;
 
-    /// Update the single values to the test contract.
-    async fn update_contract_single_values(&self, ctx: &TestContext, contract: &Contract);
-
-    /// Update the mapping values to the test contract.
-    async fn update_contract_mapping_values(&self, ctx: &TestContext, contract: &Contract);
+    /// Update the values to the contract.
+    async fn update_contract(&self, ctx: &TestContext, contract: &Contract);
 }
 
 /// Single values collection
@@ -61,8 +58,8 @@ pub struct SimpleSingleValues {
     pub(crate) s4: Address,
 }
 
-impl SimpleContractValue for SimpleSingleValues {
-    async fn current_contract_single_values(ctx: &TestContext, contract: &Contract) -> Self {
+impl ContractController for SimpleSingleValues {
+    async fn current_values(ctx: &TestContext, contract: &Contract) -> Self {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(ctx.wallet())
@@ -77,7 +74,7 @@ impl SimpleContractValue for SimpleSingleValues {
         }
     }
 
-    async fn update_contract_single_values(&self, ctx: &TestContext, contract: &Contract) {
+    async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(ctx.wallet())
@@ -89,18 +86,14 @@ impl SimpleContractValue for SimpleSingleValues {
         log::info!("Updated simple contract single values");
         // Sanity check
         {
-            let updated = Self::current_contract_single_values(ctx, contract).await;
+            let updated = Self::current_values(ctx, contract).await;
             assert_eq!(self, &updated);
         }
     }
-
-    async fn update_contract_mapping_values(&self, _ctx: &TestContext, _contract: &Contract) {
-        panic!("No specified slot for simple single values of mapping in simple contract")
-    }
 }
 
-impl SimpleContractValue for LargeStruct {
-    async fn current_contract_single_values(ctx: &TestContext, contract: &Contract) -> Self {
+impl ContractController for LargeStruct {
+    async fn current_values(ctx: &TestContext, contract: &Contract) -> Self {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(ctx.wallet())
@@ -110,7 +103,7 @@ impl SimpleContractValue for LargeStruct {
         contract.simpleStruct().call().await.unwrap().into()
     }
 
-    async fn update_contract_single_values(&self, ctx: &TestContext, contract: &Contract) {
+    async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(ctx.wallet())
@@ -121,27 +114,19 @@ impl SimpleContractValue for LargeStruct {
         call.send().await.unwrap().watch().await.unwrap();
         // Sanity check
         {
-            let updated = Self::current_contract_single_values(ctx, contract).await;
+            let updated = Self::current_values(ctx, contract).await;
             assert_eq!(self, &updated);
         }
         log::info!("Updated simple contract for LargeStruct");
     }
-
-    async fn update_contract_mapping_values(&self, _ctx: &TestContext, _contract: &Contract) {
-        panic!("No specified slot for one LargeStruct of mapping in simple contract")
-    }
 }
 
-impl SimpleContractValue for Vec<MappingUpdate<Address>> {
-    async fn current_contract_single_values(_ctx: &TestContext, _contract: &Contract) -> Self {
-        panic!("No specified slot for mapping addresses of single values in simple contract")
+impl ContractController for Vec<MappingUpdate<Address>> {
+    async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
+        unimplemented!("Unimplemented for fetching the all mapping values")
     }
 
-    async fn update_contract_single_values(&self, _ctx: &TestContext, _contract: &Contract) {
-        panic!("No specified slot for mapping addresses of single values in simple contract")
-    }
-
-    async fn update_contract_mapping_values(&self, ctx: &TestContext, contract: &Contract) {
+    async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(ctx.wallet())
@@ -193,16 +178,12 @@ impl SimpleContractValue for Vec<MappingUpdate<Address>> {
     }
 }
 
-impl SimpleContractValue for Vec<MappingUpdate<LargeStruct>> {
-    async fn current_contract_single_values(_ctx: &TestContext, _contract: &Contract) -> Self {
-        panic!("No specified slot for mapping struct of single values in simple contract")
+impl ContractController for Vec<MappingUpdate<LargeStruct>> {
+    async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
+        unimplemented!("Unimplemented for fetching the all mapping values")
     }
 
-    async fn update_contract_single_values(&self, _ctx: &TestContext, _contract: &Contract) {
-        panic!("No specified slot for mapping struct of single values in simple contract")
-    }
-
-    async fn update_contract_mapping_values(&self, ctx: &TestContext, contract: &Contract) {
+    async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(ctx.wallet())
