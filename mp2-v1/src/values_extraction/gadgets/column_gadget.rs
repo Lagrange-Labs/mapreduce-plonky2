@@ -349,7 +349,7 @@ pub fn extract_value(
         [info.byte_offset, info.length].map(|f| usize::try_from(f.to_canonical_u64()).unwrap());
 
     // last_byte_offset = info.byte_offset + ceil(info.length / 8) - 1
-    let last_byte_offset = (byte_offset + length.div_ceil(8) - 1).min(MAPPING_LEAF_VALUE_LEN - 1);
+    let last_byte_offset = byte_offset + length.div_ceil(8) - 1;
 
     // Extract all the bits of the field aligined with bytes.
     let mut result_bytes = Vec::with_capacity(last_byte_offset - byte_offset + 1);
