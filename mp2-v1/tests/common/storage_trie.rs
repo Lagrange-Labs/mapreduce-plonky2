@@ -280,16 +280,16 @@ impl TrieNode {
         let list: Vec<Vec<u8>> = rlp::decode_list(&node);
         let value: Vec<u8> = rlp::decode(&list[1]).unwrap();
         debug!(
-            "[+] [+] MPT SLOT {:?} -> identifiers {} value {:?} value.digest() = {:?}",
+            "[+] [+] MPT SLOT {} -> identifiers {:?} value {:?} value.digest() = {:?}",
+            slot_info.slot().slot(),
             slot_info
                 .metadata()
                 .extracted_table_info()
                 .iter()
                 .map(|info| info.identifier().to_canonical_u64())
                 .collect_vec(),
-            slot_info.slot().slot(),
             U256::from_be_slice(&value),
-            pi.values_digest()
+            pi.values_digest(),
         );
         proof
     }
