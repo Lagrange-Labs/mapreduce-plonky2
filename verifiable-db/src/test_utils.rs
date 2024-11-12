@@ -28,7 +28,7 @@ use mp2_common::{
 };
 use plonky2::{
     field::types::{Field, PrimeField64, Sample},
-    hash::hash_types::NUM_HASH_OUT_ELTS,
+    hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
     plonk::config::GenericHashOut,
 };
 use plonky2_ecgfp5::curve::curve::Point;
@@ -52,9 +52,7 @@ pub const INDEX_TREE_MAX_DEPTH: usize = 15;
 pub const NUM_COLUMNS: usize = 4;
 
 /// Generate a random original tree proof for testing.
-pub fn random_original_tree_proof<const S: usize>(
-    query_pi: &QueryProofPublicInputs<F, S>,
-) -> Vec<F> {
+pub fn random_original_tree_proof(tree_hash: HashOut<F>) -> Vec<F> {
     let mut rng = thread_rng();
     let mut proof = (0..NUM_PREPROCESSING_IO)
         .map(|_| rng.gen())
@@ -62,7 +60,7 @@ pub fn random_original_tree_proof<const S: usize>(
         .to_fields();
 
     // Set the tree hash.
-    proof[ORIGINAL_TREE_H_RANGE].copy_from_slice(query_pi.to_hash_raw());
+    proof[ORIGINAL_TREE_H_RANGE].copy_from_slice(&tree_hash.to_fields());
 
     proof
 }
@@ -278,7 +276,7 @@ impl TestRevelationData {
 
         let query_pi = QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::from_slice(&query_pi_raw);
         // generate preprocessing proof public inputs
-        let preprocessing_pi_raw = random_original_tree_proof(&query_pi);
+        let preprocessing_pi_raw = random_original_tree_proof(query_pi.tree_hash());
 
         Self {
             query_bounds,

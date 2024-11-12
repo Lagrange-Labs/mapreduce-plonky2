@@ -6,7 +6,8 @@ use crate::{
     ivc,
     query::{self, api::Parameters as QueryParams, PI_LEN as QUERY_PI_LEN},
     revelation::{
-        self, api::Parameters as RevelationParams, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
+        self, api::Parameters as RevelationParams, NUM_QUERY_IO_NO_RESULTS_TREE,
+        PI_LEN as REVELATION_PI_LEN,
     },
     row_tree,
 };
@@ -211,7 +212,8 @@ pub struct QueryParameters<
 > where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); NUM_QUERY_IO_NO_RESULTS_TREE::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
@@ -298,9 +300,9 @@ impl<
 where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
-    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); NUM_QUERY_IO_NO_RESULTS_TREE::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,

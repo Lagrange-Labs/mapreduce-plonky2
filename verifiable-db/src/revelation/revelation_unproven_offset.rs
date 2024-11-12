@@ -60,14 +60,14 @@ use crate::{
             build_cells_tree,
             universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure},
         },
-        PI_LEN,
+        PI_LEN as QUERY_PI_LEN,
     },
 };
 
 use super::{
     placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
     revelation_without_results_tree::CircuitBuilderParams,
-    PublicInputs, NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
+    PublicInputs, NUM_PREPROCESSING_IO, PI_LEN as REVELATION_PI_LEN,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -651,7 +651,7 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     // we generate a dummy proof for a dummy node of the index tree with an index value out of range
@@ -761,7 +761,7 @@ where
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); S * L]:,
-    [(); NUM_QUERY_IO::<S>]:,
+    [(); QUERY_PI_LEN::<S>]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     type CircuitBuilderParams = CircuitBuilderParams;
@@ -775,7 +775,7 @@ where
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let row_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, { NUM_QUERY_IO::<S> }>::new(
+        let row_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, { QUERY_PI_LEN::<S> }>::new(
             default_config(),
             &builder_parameters.query_circuit_set,
         );
@@ -793,7 +793,7 @@ where
             .iter()
             .map(|verifier| {
                 QueryProofPublicInputs::from_slice(
-                    verifier.get_public_input_targets::<F, { NUM_QUERY_IO::<S> }>(),
+                    verifier.get_public_input_targets::<F, { QUERY_PI_LEN::<S> }>(),
                 )
             })
             .collect_vec();
@@ -858,10 +858,10 @@ mod tests {
         query::{
             aggregation::{ChildPosition, NodeInfo},
             public_inputs::{PublicInputs as QueryProofPublicInputs, QueryPublicInputs},
+            PI_LEN as QUERY_PI_LEN,
         },
         revelation::{
             revelation_unproven_offset::RowPath, tests::TestPlaceholders, NUM_PREPROCESSING_IO,
-            NUM_QUERY_IO,
         },
         test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
@@ -911,7 +911,7 @@ mod tests {
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let row_pis_raw: [Vec<Target>; L] = (0..L)
-                .map(|_| c.add_virtual_targets(NUM_QUERY_IO::<S>))
+                .map(|_| c.add_virtual_targets(QUERY_PI_LEN::<S>))
                 .collect_vec()
                 .try_into()
                 .unwrap();

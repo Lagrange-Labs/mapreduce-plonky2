@@ -1,11 +1,17 @@
 //! Module including the revelation circuits for query
 
-use crate::{ivc::NUM_IO, query::PI_LEN as QUERY_PI_LEN};
+use crate::{
+    ivc::NUM_IO,
+    query::{
+        batching::public_inputs::PublicInputs as BatchingPublicInputs, PI_LEN as QUERY_PI_LEN,
+    },
+};
 use mp2_common::F;
 
 pub mod api;
 pub(crate) mod placeholders_check;
 mod public_inputs;
+mod revelation_batching;
 mod revelation_unproven_offset;
 mod revelation_without_results_tree;
 
@@ -21,8 +27,14 @@ pub(crate) const PI_LEN<const L: usize, const S: usize, const PH: usize>: usize 
     PublicInputs::<F, L, S, PH>::total_len();
 
 pub const NUM_PREPROCESSING_IO: usize = NUM_IO;
+
+#[cfg(feature = "batching_circuits")]
 #[rustfmt::skip]
-pub const NUM_QUERY_IO<const S: usize>: usize = QUERY_PI_LEN::<S>;
+pub const NUM_QUERY_IO_NO_RESULTS_TREE<const S: usize>: usize = BatchingPublicInputs::<F, S>::total_len();
+
+#[cfg(not(feature = "batching_circuits"))]
+#[rustfmt::skip]
+pub const NUM_QUERY_IO_NO_RESULTS_TREE<const S: usize>: usize = QUERY_PI_LEN::<S>;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -30,6 +42,7 @@ pub(crate) mod tests {
     use crate::query::{
         computational_hash_ids::{AggregationOperation, PlaceholderIdentifier},
         public_inputs::PublicInputs as QueryProofPublicInputs,
+        universal_circuit::universal_query_gadget::OutputValues,
     };
     use alloy::primitives::U256;
     use itertools::Itertools;
@@ -187,35 +200,28 @@ pub(crate) mod tests {
         }
     }
 
-    /// Compute the query results from the proof, and it returns the results and overflow flag.
-    pub(crate) fn compute_results_from_query_proof<const S: usize>(
-        query_pi: &QueryProofPublicInputs<F, S>,
-    ) -> ([U256; S], bool)
+    /// Compute the query results from the query proof outputs, and it returns the results.
+    pub(crate) fn compute_results_from_query_proof_outputs<const S: usize>(
+        entry_count: F,
+        output_values: OutputValues<S>,
+        ops: &[F; S],
+    ) -> [U256; S]
     where
         [(); S - 1]:,
     {
         // Convert the entry count to an Uint256.
-        let entry_count = U256::from(query_pi.num_matching_rows().to_canonical_u64());
-        let mut overflow = false;
+        let entry_count = U256::from(entry_count.to_canonical_u64());
 
         let [op_avg, op_count] =
             [AggregationOperation::AvgOp, AggregationOperation::CountOp].map(|op| op.to_field());
 
         // Compute the results array, and deal with AVG and COUNT operations if any.
-        let ops = query_pi.operation_ids();
         let result = array::from_fn(|i| {
-            let value = query_pi.value_at_index(i);
+            let value = output_values.value_at_index(i);
 
             let op = ops[i];
             if op == op_avg {
-                match value.checked_div(entry_count) {
-                    Some(dividend) => dividend,
-                    None => {
-                        // Set the overflow flag to true if the divisor is zero.
-                        overflow = true;
-                        U256::ZERO
-                    }
-                }
+                value.checked_div(entry_count).unwrap_or(U256::ZERO)
             } else if op == op_count {
                 entry_count
             } else {
@@ -223,6 +229,6 @@ pub(crate) mod tests {
             }
         });
 
-        (result, query_pi.overflow_flag() || overflow)
+        result
     }
 }
