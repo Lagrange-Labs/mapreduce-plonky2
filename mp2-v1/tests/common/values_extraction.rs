@@ -3,8 +3,9 @@
 use super::{storage_trie::TestStorageTrie, TestContext};
 use crate::common::StorageSlotInfo;
 use alloy::{eips::BlockNumberOrTag, primitives::Address, providers::Provider};
+use itertools::Itertools;
 use log::info;
-use mp2_common::F;
+use mp2_common::{mpt_sequential::utils::bytes_to_nibbles, F};
 use mp2_v1::values_extraction::public_inputs::PublicInputs;
 use plonky2::field::types::Field;
 
@@ -33,6 +34,17 @@ impl TestContext {
         let pi = PublicInputs::new(&proof_value.proof().public_inputs);
         assert_eq!(pi.root_hash(), trie.root_hash());
         assert_eq!(pi.n(), F::from_canonical_usize(slots.len()));
+        {
+            let exp_key = slots[0].slot().mpt_key_vec();
+            let exp_key = bytes_to_nibbles(&exp_key)
+                .into_iter()
+                .map(F::from_canonical_u8)
+                .collect_vec();
+
+            let (key, ptr) = pi.mpt_key_info();
+            assert_eq!(key, exp_key);
+            assert_eq!(ptr, F::NEG_ONE);
+        }
 
         proof_value.serialize().unwrap()
     }
