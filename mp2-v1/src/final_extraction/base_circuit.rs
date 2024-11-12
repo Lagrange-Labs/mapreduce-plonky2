@@ -431,7 +431,7 @@ pub(crate) mod test {
         pub(crate) fn random() -> Self {
             let value_h = HashOut::<F>::rand().to_bytes().pack(Endianness::Little);
             let key = random_vector(64);
-            let ptr = usize::max_value();
+            let ptr = usize::MAX;
             let value_dv = Point::rand();
             let value_dm = Point::rand();
             let n = 10;

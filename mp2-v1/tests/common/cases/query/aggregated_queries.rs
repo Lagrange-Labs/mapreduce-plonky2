@@ -84,8 +84,8 @@ pub type RevelationPublicInputs<'a> =
     PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
 
 /// Execute a query to know all the touched rows, and then call the universal circuit on all rows
-#[warn(clippy::too_many_arguments)]
-pub(crate) async fn prove_query(
+#[allow(clippy::too_many_arguments)]
+async fn prove_query(
     ctx: &mut TestContext,
     table: &Table,
     query: QueryCooking,
@@ -217,7 +217,7 @@ pub(crate) async fn prove_query(
     // to check the public inputs
     let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
     // get number of matching rows
-    let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
+    let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
     let query_params = exec_query.convert_placeholders(&query.placeholders);
     let num_touched_rows = execute_row_query(
         &table.db_pool,
@@ -281,8 +281,8 @@ async fn prove_revelation(
     Ok(proof)
 }
 
-#[warn(clippy::too_many_arguments)]
-pub(crate) fn check_final_outputs(
+#[allow(clippy::too_many_arguments)]
+fn check_final_outputs(
     revelation_proof: Vec<u8>,
     ctx: &TestContext,
     table: &Table,
@@ -759,8 +759,8 @@ pub fn generate_non_existence_proof(
 }
 
 /// Generate a proof for a node of the index tree which is outside of the query bounds
-async fn prove_non_existence_index<'a>(
-    planner: &mut QueryPlanner<'a>,
+async fn prove_non_existence_index(
+    planner: &mut QueryPlanner<'_>,
     primary: BlockPrimaryIndex,
 ) -> Result<()> {
     let tree = &planner.table.index;
@@ -794,8 +794,8 @@ async fn prove_non_existence_index<'a>(
     Ok(())
 }
 
-pub async fn prove_non_existence_row<'a>(
-    planner: &mut QueryPlanner<'a>,
+pub async fn prove_non_existence_row(
+    planner: &mut QueryPlanner<'_>,
     primary: BlockPrimaryIndex,
 ) -> Result<()> {
     let (chosen_node, plan) = find_row_node_for_non_existence(
@@ -803,7 +803,7 @@ pub async fn prove_non_existence_row<'a>(
         planner.table.public_name.clone(),
         &planner.table.db_pool,
         primary,
-        &planner.settings,
+        planner.settings,
         &planner.pis.bounds,
     )
     .await?;

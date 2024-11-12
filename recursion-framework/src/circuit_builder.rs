@@ -381,7 +381,6 @@ pub(crate) mod tests {
     }
 
     impl<
-            'a,
             F: SerializableRichField<D>,
             const D: usize,
             const NUM_VERIFIERS: usize,
@@ -452,7 +451,6 @@ pub(crate) mod tests {
     }
 
     impl<
-            'a,
             F: SerializableRichField<D>,
             const D: usize,
             const NUM_VERIFIERS: usize,

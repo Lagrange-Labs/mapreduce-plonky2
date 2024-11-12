@@ -376,6 +376,7 @@ mod tests {
             const ACTUAL_NUM_RESULTS: usize,
         > TestOutputComponentInputs<MAX_NUM_COLUMNS, MAX_NUM_RESULTS, ACTUAL_NUM_RESULTS>
     {
+        #[allow(clippy::too_many_arguments)]
         fn new(
             column_values: [U256; MAX_NUM_COLUMNS],
             column_hash: [ComputationalHash; MAX_NUM_COLUMNS],

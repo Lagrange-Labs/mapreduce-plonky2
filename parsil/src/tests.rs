@@ -1,3 +1,4 @@
+#![allow(clippy::single_element_loop)]
 use crate::assembler::{assemble_dynamic, DynamicCircuitPis};
 use crate::isolator;
 use crate::utils::ParsilSettingsBuilder;
@@ -166,8 +167,8 @@ fn isolation() {
             .build()
             .unwrap();
 
-        let mut query = parse_and_validate(q, &settings).unwrap();
-        isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)
+        let query = parse_and_validate(q, &settings).unwrap();
+        isolator::isolate_with(&query, &settings, lo_sec, hi_sec)
             .unwrap()
             .to_string()
     }

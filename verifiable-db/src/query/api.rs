@@ -1395,9 +1395,7 @@ mod tests {
             &[
                 column_ids.primary.to_canonical_u64(),
                 column_ids.secondary.to_canonical_u64(),
-            ]
-            .try_into()
-            .unwrap(),
+            ],
             &[AggregationOperation::SumOp],
             query_hashes,
             false,
@@ -1500,9 +1498,7 @@ mod tests {
             &[
                 column_ids.primary.to_canonical_u64(),
                 column_ids.secondary.to_canonical_u64(),
-            ]
-            .try_into()
-            .unwrap(),
+            ],
             &[AggregationOperation::SumOp],
             query_hashes,
             false,
@@ -1551,14 +1547,10 @@ mod tests {
             gen_row(max_query_primary, IndexValueBounds::InRange),
         ];
         // sort column values according to primary/secondary index values
-        column_values.sort_by(|a, b| {
-            if a[0] < b[0] {
-                Ordering::Less
-            } else if a[0] > b[0] {
-                Ordering::Greater
-            } else {
-                a[1].cmp(&b[1])
-            }
+        column_values.sort_by(|a, b| match a[0].cmp(&b[0]) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Equal => a[1].cmp(&b[1]),
         });
 
         // generate proof for node A rows tree
@@ -1599,9 +1591,7 @@ mod tests {
             &[
                 column_ids.primary.to_canonical_u64(),
                 column_ids.secondary.to_canonical_u64(),
-            ]
-            .try_into()
-            .unwrap(),
+            ],
             &[AggregationOperation::SumOp],
             query_hashes,
             true,

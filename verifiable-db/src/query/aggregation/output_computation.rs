@@ -179,8 +179,8 @@ pub(crate) mod tests {
 
         let mut outputs = vec![];
 
-        for i in 0..S {
-            let mut output = if ops[i] == op_min {
+        for (i, &item) in ops.iter().enumerate().take(S) {
+            let mut output = if item == op_min {
                 U256::MAX
             } else {
                 U256::ZERO
@@ -188,7 +188,7 @@ pub(crate) mod tests {
             .to_fields();
 
             if i == 0 {
-                output = if ops[i] == op_id {
+                output = if item == op_id {
                     Point::NEUTRAL.to_fields()
                 } else {
                     // Pad the current output to `CURVE_TARGET_LEN` for the first item.
