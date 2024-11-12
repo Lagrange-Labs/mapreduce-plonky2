@@ -38,7 +38,7 @@ const TEST_MAX_FIELD_PER_EVM: usize = 32;
 type ColumnIdentifier = u64;
 type StorageSlotInfo =
     mp2_v1::values_extraction::StorageSlotInfo<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
-type MetadataGadget = mp2_v1::values_extraction::gadgets::metadata_gadget::MetadataGadget<
+type MetadataGadget = mp2_v1::values_extraction::gadgets::metadata_gadget::ColumnsMetadata<
     TEST_MAX_COLUMNS,
     TEST_MAX_FIELD_PER_EVM,
 >;

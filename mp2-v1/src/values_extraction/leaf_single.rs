@@ -3,7 +3,7 @@
 use crate::values_extraction::{
     gadgets::{
         column_gadget::ColumnGadget,
-        metadata_gadget::{MetadataGadget, MetadataTarget},
+        metadata_gadget::{ColumnsMetadata, MetadataTarget},
     },
     public_inputs::{PublicInputs, PublicInputsArgs},
 };
@@ -30,6 +30,8 @@ use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter::once;
+
+use super::gadgets::metadata_gadget::MetadataGadget;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafSingleWires<
@@ -60,7 +62,7 @@ pub struct LeafSingleCircuit<
 > {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: SimpleSlot,
-    pub(crate) metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    pub(crate) metadata: ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
 }
 
 impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
@@ -146,7 +148,7 @@ where
         );
         self.slot
             .assign_struct(pw, &wires.slot, self.metadata.evm_word);
-        self.metadata.assign(pw, &wires.metadata);
+        MetadataGadget::assign(pw, &self.metadata, &wires.metadata);
     }
 }
 
@@ -247,7 +249,7 @@ mod tests {
         let slot = storage_slot.slot();
         let evm_word = storage_slot.evm_offset();
         let metadata =
-            MetadataGadget::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
+            ColumnsMetadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
         let metadata_digest = metadata.digest();
         // Compute the values digest.
