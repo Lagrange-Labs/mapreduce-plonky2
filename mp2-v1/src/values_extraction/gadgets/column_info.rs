@@ -69,7 +69,8 @@ impl ColumnInfo {
             slot_input.slot,
             identifier,
             slot_input.byte_offset,
-            0, // bit_offset
+            // TODO: Will remove this bit_offset from the internal data structures and the circuit.
+            0,
             slot_input.length,
             slot_input.evm_word,
         )
