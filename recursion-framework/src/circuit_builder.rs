@@ -4,7 +4,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, CircuitData, VerifierOnlyCircuitData},
-        config::{AlgebraicHasher, GenericConfig, Hasher},
+        config::{AlgebraicHasher, GenericConfig},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -55,7 +55,7 @@ pub trait CircuitLogicWires<F: SerializableRichField<D>, const D: usize, const N
     /// This method, given a `ProofWithPublicInputsTarget` that should represent a proof generated with
     /// a `CircuitWithUniversalVerifier` circuit implementing the additional circuit logid specified by `Self`,
     /// returns the set of `Self::NUM_PUBLIC_INPUTS` targets corresponding to all the public inputs of the
-    /// proof except for the ones representing the digest of the circuit set
+    /// proof except for the ones representing the digest of the circuit set    
     fn public_input_targets(proof: &ProofWithPublicInputsTarget<D>) -> &[Target]
     where
         [(); Self::NUM_PUBLIC_INPUTS]:,
@@ -90,7 +90,6 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
     ) -> Self
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         let verifier_builder = UniversalVerifierBuilder::new::<C>(config.clone(), circuit_set_size);
         Self {
@@ -114,7 +113,6 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
     ) -> CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         self.build_circuit_internal(&self.config, input_parameters)
     }
@@ -132,7 +130,6 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
     ) -> CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         self.build_circuit_internal(&custom_config, input_parameters)
     }
@@ -148,7 +145,6 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
     ) -> CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         let mut builder = CircuitBuilder::<F, D>::new(config.clone());
         let circuit_set_target = CircuitSetTarget::build_target(&mut builder);
@@ -156,7 +152,7 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
             ..NUM_VERIFIERS)
             .map(|_| {
                 self.verifier_builder
-                    .universal_verifier_circuit(&mut builder, &circuit_set_target)
+                    .universal_verifier_circuit::<C>(&mut builder, &circuit_set_target)
             })
             .collect::<Vec<_>>()
             .try_into()
@@ -274,7 +270,6 @@ impl<
     > CircuitWithUniversalVerifier<F, C, D, NUM_VERIFIERS, CLW>
 where
     C::Hasher: AlgebraicHasher<F>,
-    [(); C::Hasher::HASH_SIZE]:,
 {
     /// Generate a proof for this instance of a `CircuitWithUniversalVerifier, employing the provided inputs
     /// to compute the witness data necessary to generate the proof. More specifically:
@@ -505,7 +500,6 @@ pub(crate) mod tests {
         config: Option<CircuitConfig>,
     ) where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         const INPUT_SIZE: usize = 8;
         const NUM_PUBLIC_INPUTS: usize = NUM_PUBLIC_INPUTS_TEST_CIRCUITS;

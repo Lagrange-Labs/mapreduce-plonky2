@@ -159,7 +159,7 @@ where
 pub(crate) mod tests {
     use super::*;
     use crate::{
-        query::{aggregation::tests::compute_output_item_value, PI_LEN},
+        query::{aggregation::tests::compute_output_item_value, pi_len},
         test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
     use mp2_common::{types::CURVE_TARGET_LEN, u256::NUM_LIMBS, utils::ToFields, C, D, F};
@@ -223,14 +223,15 @@ pub(crate) mod tests {
         for TestOutputComputationCircuit<S, PROOF_NUM>
     where
         [(); S - 1]:,
-        [(); PI_LEN::<S>]:,
+        [(); pi_len::<S>()]:,
     {
         // Proof public inputs + expected outputs
         type Wires = ([Vec<Target>; PROOF_NUM], [TestOutputWires; S]);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             // Initialize the proofs and the expected outputs.
-            let proofs = array::from_fn(|_| b.add_virtual_target_arr::<{ PI_LEN::<S> }>().to_vec());
+            let proofs =
+                array::from_fn(|_| b.add_virtual_target_arr::<{ pi_len::<S>() }>().to_vec());
             let exp_outputs = array::from_fn(|i| {
                 let output = if i == 0 {
                     b.add_virtual_target_arr::<CURVE_TARGET_LEN>().to_vec()

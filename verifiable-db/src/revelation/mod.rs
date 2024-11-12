@@ -1,6 +1,6 @@
 //! Module including the revelation circuits for query
 
-use crate::{ivc::NUM_IO, query::PI_LEN as QUERY_PI_LEN};
+use crate::{ivc::NUM_IO, query::pi_len as query_pi_len};
 use mp2_common::F;
 
 pub mod api;
@@ -12,18 +12,17 @@ mod revelation_without_results_tree;
 pub use public_inputs::PublicInputs;
 pub use revelation_unproven_offset::RowPath;
 
-// L: maximum number of results
-// S: maximum number of items in each result
-// PH: maximum number of unique placeholder IDs and values bound for query
-// Without this skipping config, the generic parameter was deleted when `cargo fmt`.
-#[rustfmt::skip]
-pub(crate) const PI_LEN<const L: usize, const S: usize, const PH: usize>: usize =
-    PublicInputs::<F, L, S, PH>::total_len();
-
+/// L: maximum number of results
+/// S: maximum number of items in each result
+/// PH: maximum number of unique placeholder IDs and values bound for query
+pub const fn pi_len<const L: usize, const S: usize, const PH: usize>() -> usize {
+    PublicInputs::<F, L, S, PH>::total_len()
+}
 pub const NUM_PREPROCESSING_IO: usize = NUM_IO;
-#[rustfmt::skip]
-pub const NUM_QUERY_IO<const S: usize>: usize = QUERY_PI_LEN::<S>;
 
+pub const fn num_query_io<const S: usize>() -> usize {
+    query_pi_len::<S>()
+}
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

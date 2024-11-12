@@ -33,6 +33,7 @@ use super::{
         SubProof, TwoProvenChildNodeInput,
     },
     computational_hash_ids::{AggregationOperation, HashPermutation, Output},
+    pi_len,
     universal_circuit::{
         output_no_aggregation::Circuit as NoAggOutputCircuit,
         output_with_aggregation::Circuit as AggOutputCircuit,
@@ -44,7 +45,6 @@ use super::{
             UniversalQueryCircuitWires,
         },
     },
-    PI_LEN,
 };
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
@@ -114,13 +114,13 @@ where
     }
     /// Initialize input for universal circuit to prove the execution of a query over a
     /// single row, from the following inputs:
-    /// - `column_cells`: set of columns (including primary and secondary indexes) of the row being proven
-    /// - `predicate_operations`: Set of operations employed to compute the filtering predicate of the query for the
+    ///     - `column_cells`: set of columns (including primary and secondary indexes) of the row being proven
+    ///     - `predicate_operations`: Set of operations employed to compute the filtering predicate of the query for the
     ///     row being proven
-    /// - `results`: Data structure specifying how the results for each row are computed according to the query
-    /// - `placeholders`: Set of placeholders employed in the query
-    /// - `is_leaf`: Flag specifying whether the row being proven is stored in a leaf node of the rows tree or not
-    /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
+    ///     - `results`: Data structure specifying how the results for each row are computed according to the query
+    ///     - `placeholders`: Set of placeholders employed in the query
+    ///     - `is_leaf`: Flag specifying whether the row being proven is stored in a leaf node of the rows tree or not
+    ///     - `query_bounds`: bounds on primary and secondary indexes specified in the query
     /// Note that the following assumption is expected on the structure of the inputs:
     /// The output of the last operation in `predicate_operations` is taken as the filtering predicate evaluation;
     /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
@@ -465,13 +465,13 @@ impl<
 where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_RESULTS - 1]:,
-    [(); PI_LEN::<MAX_NUM_RESULTS>]:,
+    [(); pi_len::<MAX_NUM_RESULTS>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     /// Build `Parameters` for query circuits
     pub fn build() -> Self {
         let builder =
-            CircuitWithUniversalVerifierBuilder::<F, D, { PI_LEN::<MAX_NUM_RESULTS> }>::new::<C>(
+            CircuitWithUniversalVerifierBuilder::<F, D, { pi_len::<MAX_NUM_RESULTS>() }>::new::<C>(
                 default_config(),
                 QUERY_CIRCUIT_SET_SIZE,
             );
@@ -822,12 +822,7 @@ mod tests {
         const MAX_NUM_PREDICATE_OPS: usize = 20;
         const MAX_NUM_RESULT_OPS: usize = 20;
         const MAX_NUM_RESULTS: usize = 10;
-        let column_ids = (0..NUM_COLUMNS)
-            .map(|_| {
-                let id: u32 = rng.gen();
-                id as u64
-            })
-            .collect_vec();
+
         let column_ids = ColumnIDs::new(
             F::rand().to_canonical_u64(),
             F::rand().to_canonical_u64(),
@@ -1376,11 +1371,7 @@ mod tests {
             column_values[0][0],
         );
         let hash_0 = node_info_0.compute_node_hash(primary_index_id);
-        let column_cells = column_values[0]
-            .iter()
-            .zip(column_ids.to_vec().iter())
-            .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
-            .collect_vec();
+
         // compute hashes associated to query, which are needed as inputs
         let query_hashes = QueryHashNonExistenceCircuits::new::<
             MAX_NUM_COLUMNS,
@@ -1485,11 +1476,7 @@ mod tests {
 
         // generate non-existence proof starting from intermediate node (i.e., node 1) rather than a leaf node
         // generate proof with non-existence circuit for node 1
-        let column_cells = column_values[1]
-            .iter()
-            .zip(column_ids.to_vec().iter())
-            .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
-            .collect_vec();
+
         // compute hashes associated to query, which are needed as inputs
         let query_hashes = QueryHashNonExistenceCircuits::new::<
             MAX_NUM_COLUMNS,
@@ -1588,11 +1575,7 @@ mod tests {
             column_values[2][1],
         );
         let hash_2 = node_info_2.compute_node_hash(secondary_index_id);
-        let column_cells = column_values[2]
-            .iter()
-            .zip(column_ids.to_vec().iter())
-            .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
-            .collect_vec();
+
         // compute hashes associated to query, which are needed as inputs
         let query_hashes = QueryHashNonExistenceCircuits::new::<
             MAX_NUM_COLUMNS,
@@ -1663,7 +1646,7 @@ mod tests {
         assert_eq!(hash_1, get_tree_hash_from_proof(&proof_1),);
 
         // generate proof for node A (leaf of index tree)
-        let node_info_A = NodeInfo::new(
+        let node_info_a = NodeInfo::new(
             &HashOutput::try_from(hash_1.to_bytes()).unwrap(),
             None,
             None,
@@ -1671,20 +1654,20 @@ mod tests {
             column_values[0][0],
             column_values[0][0],
         );
-        let hash_A = node_info_A.compute_node_hash(primary_index_id);
+        let hash_a = node_info_a.compute_node_hash(primary_index_id);
         let subtree_proof = SubProof::new_embedded_tree_proof(proof_1).unwrap();
         let input = Input::new_single_path(
             subtree_proof,
             None,
             None,
-            node_info_A.clone(),
+            node_info_a.clone(),
             false,
             &query_bounds,
         )
         .unwrap();
-        let proof_A = params.generate_proof(input).unwrap();
+        let proof_a = params.generate_proof(input).unwrap();
         // check hash
-        assert_eq!(hash_A, get_tree_hash_from_proof(&proof_A),);
+        assert_eq!(hash_a, get_tree_hash_from_proof(&proof_a),);
 
         // generate proof for node B rows tree
         // all the nodes are in the range, so we generate proofs for each of the nodes
@@ -1714,14 +1697,14 @@ mod tests {
         // generate proof for node B of the index tree (root node)
         let node_info_root = NodeInfo::new(
             &HashOutput::try_from(hash_4.to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(hash_A.to_bytes()).unwrap()),
+            Some(&HashOutput::try_from(hash_a.to_bytes()).unwrap()),
             None,
             column_values[4][0],
             column_values[0][0],
             column_values[5][0],
         );
         let input = Input::new_partial_node(
-            proof_A,
+            proof_a,
             proof_4,
             None,
             ChildPosition::Left,

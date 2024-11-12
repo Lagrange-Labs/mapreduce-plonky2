@@ -397,10 +397,10 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
 
     // Check the placeholder hash of proof is computed only from expected placeholder values.
     let mut placeholder_hash_payload = vec![];
-    for i in 0..PP {
+    for item in to_be_checked_placeholder.iter().take(PP) {
         // Accumulate the placeholder identifiers and values for computing the
         // placeholder hash.
-        let CheckedPlaceholderTarget { id, value, pos } = &to_be_checked_placeholder[i];
+        let CheckedPlaceholderTarget { id, value, pos } = item;
         let payload = once(*id).chain(value.to_targets());
         placeholder_hash_payload.extend(payload);
 
@@ -408,8 +408,8 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
     }
 
     // check placeholders related to secondary index bounds
-    for i in 0..2 {
-        let CheckedPlaceholderTarget { id, value, pos } = &secondary_query_bound_placeholder[i];
+    for item in secondary_query_bound_placeholder.iter().take(2) {
+        let CheckedPlaceholderTarget { id, value, pos } = item;
         check_placeholder_pair(id, value, *pos);
     }
 

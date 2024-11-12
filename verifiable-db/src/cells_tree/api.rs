@@ -204,7 +204,7 @@ impl PublicParameters {
     }
 
     /// Get the proof of an empty node.
-    pub(crate) fn empty_node_proof(&self) -> &ProofWithVK {
+    pub fn empty_node_proof(&self) -> &ProofWithVK {
         &self.empty_node_proof
     }
 }

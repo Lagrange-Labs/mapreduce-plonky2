@@ -10,6 +10,8 @@ use anyhow::Result;
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
 /// NOTE: queries that may bother us in the future
+// CHORE: Remove this when relevant PR is merged
+#[allow(dead_code)]
 const CAREFUL: &[&str] = &[
     // What to do if b.t is longer than a.x?
     "SELECT x, (SELECT t AS tt FROM b) FROM a;",

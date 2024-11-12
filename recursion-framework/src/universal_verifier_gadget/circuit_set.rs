@@ -173,7 +173,7 @@ pub(crate) struct CircuitSet<
 impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> CircuitSet<F, C, D>
 where
     C::Hasher: AlgebraicHasher<F>,
-    [(); C::Hasher::HASH_SIZE]:,
+    // [(); C::Hasher::HASH_SIZE]:,
 {
     pub(crate) fn build_circuit_set(circuit_digests: Vec<<C::Hasher as Hasher<F>>::Hash>) -> Self {
         let (circuit_digests_to_leaf_indexes, mut leaves): (HashMap<Vec<F>, usize>, Vec<_>) =
@@ -263,14 +263,14 @@ where
 impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> Default
     for CircuitSetDigest<F, C, D>
 where
-    [(); C::Hasher::HASH_SIZE]:,
+// [(); C::Hasher::HASH_SIZE]:,
 {
     fn default() -> Self {
         Self(MerkleCap(
             (0..(1 << CIRCUIT_SET_CAP_HEIGHT))
                 .map(|_| {
                     <<C as GenericConfig<D>>::Hasher as Hasher<F>>::Hash::from_bytes(
-                        &[0u8; <<C as GenericConfig<D>>::Hasher as Hasher<F>>::HASH_SIZE],
+                        vec![0u8; <C::Hasher as Hasher<F>>::HASH_SIZE].as_slice(),
                     )
                 })
                 .collect::<Vec<_>>(),

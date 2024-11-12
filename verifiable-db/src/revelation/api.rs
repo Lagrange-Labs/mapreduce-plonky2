@@ -29,10 +29,10 @@ use crate::{
         aggregation::QueryBounds,
         api::{CircuitInput as QueryCircuitInput, Parameters as QueryParams},
         computational_hash_ids::ColumnIDs,
+        pi_len as query_pi_len,
         universal_circuit::universal_circuit_inputs::{
             BasicOperation, Placeholders, ResultStructure,
         },
-        PI_LEN as QUERY_PI_LEN,
     },
     revelation::{
         placeholders_check::CheckPlaceholderGadget,
@@ -44,6 +44,7 @@ use crate::{
 };
 
 use super::{
+    num_query_io, pi_len,
     revelation_unproven_offset::{
         RecursiveCircuitInputs as RecursiveCircuitInputsUnporvenOffset,
         RevelationCircuit as RevelationCircuitUnprovenOffset, RowPath,
@@ -52,7 +53,6 @@ use super::{
         CircuitBuilderParams, RecursiveCircuitInputs, RecursiveCircuitWires,
         RevelationWithoutResultsTreeCircuit,
     },
-    NUM_QUERY_IO, PI_LEN,
 };
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 /// Data structure employed to provide input data related to a matching row
@@ -147,11 +147,11 @@ pub struct Parameters<
     const MAX_NUM_PLACEHOLDERS: usize,
 > where
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
 {
     revelation_no_results_tree: CircuitWithUniversalVerifier<
         F,
@@ -267,7 +267,7 @@ where
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
@@ -438,15 +438,15 @@ impl<
     >
 where
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
-    [(); PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
-    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+    [(); pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()]:,
 {
     pub fn build(
         query_circuit_set: &RecursiveCircuits<F, C, D>,
@@ -456,7 +456,7 @@ where
         let builder = CircuitWithUniversalVerifierBuilder::<
             F,
             D,
-            { PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS> },
+            { pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>() },
         >::new::<C>(default_config(), REVELATION_CIRCUIT_SET_SIZE);
         let build_parameters = CircuitBuilderParams {
             query_circuit_set: query_circuit_set.clone(),
@@ -590,14 +590,14 @@ mod tests {
     use crate::{
         ivc::PublicInputs as PreprocessingPI,
         query::{
-            api::CircuitInput as QueryInput,
             computational_hash_ids::{ColumnIDs, Identifiers},
             public_inputs::PublicInputs as QueryPI,
         },
         revelation::{
             api::{CircuitInput, Parameters},
+            num_query_io,
             tests::compute_results_from_query_proof,
-            PublicInputs, NUM_PREPROCESSING_IO, NUM_QUERY_IO,
+            PublicInputs, NUM_PREPROCESSING_IO,
         },
     };
 
@@ -612,7 +612,7 @@ mod tests {
             F,
             C,
             D,
-            { NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT> },
+            { num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>() },
         >::default();
         let preprocessing_circuits =
             TestingRecursiveCircuits::<F, C, D, NUM_PREPROCESSING_IO>::default();

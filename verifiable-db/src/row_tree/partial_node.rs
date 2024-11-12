@@ -176,12 +176,7 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursivePartialWires {
 
 #[cfg(test)]
 pub mod test {
-    use mp2_common::{
-        group_hashing::{cond_field_hashed_scalar_mul, map_to_curve_point},
-        poseidon::empty_poseidon_hash,
-        utils::ToFields,
-        CHasher,
-    };
+    use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher};
     use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::curve::Point;
 
