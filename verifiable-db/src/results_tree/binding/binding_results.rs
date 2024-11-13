@@ -17,7 +17,7 @@ use mp2_common::{
 };
 use plonky2::iop::target::Target;
 use serde::{Deserialize, Serialize};
-use std::{iter::once, slice};
+use std::slice;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BindingResultsWires<const S: usize>;
@@ -123,7 +123,7 @@ mod tests {
         results_construction_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestBindingResultsCircuit<'a> {
+    impl UserCircuit<F, D> for TestBindingResultsCircuit<'_> {
         // Query proof + results construction proof
         type Wires = (Vec<Target>, Vec<Target>);
 
@@ -199,7 +199,7 @@ mod tests {
             };
 
             // H(res_id || pQ.C)
-            let inputs = once(&res_id.to_field())
+            let inputs = std::iter::once(&res_id.to_field())
                 .chain(query_pi.to_computational_hash_raw())
                 .cloned()
                 .collect_vec();

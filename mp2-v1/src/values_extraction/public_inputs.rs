@@ -44,7 +44,7 @@ pub struct PublicInputsArgs<'a> {
     pub(crate) n: Target,
 }
 
-impl<'a> PublicInputCommon for PublicInputsArgs<'a> {
+impl PublicInputCommon for PublicInputsArgs<'_> {
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE, N_RANGE];
 
@@ -63,7 +63,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) proof_inputs: &'a [T],
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl PublicInputs<'_, Target> {
     /// Get the merkle hash of the subtree this proof has processed.
     pub fn root_hash_target(&self) -> OutputHash {
         OutputHash::from_targets(self.root_hash_info())
@@ -91,7 +91,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 }
 
-impl<'a> PublicInputs<'a, GFp> {
+impl PublicInputs<'_, GFp> {
     /// Get the merkle hash of the subtree this proof has processed.
     pub fn root_hash(&self) -> Vec<u32> {
         let hash = self.root_hash_info();

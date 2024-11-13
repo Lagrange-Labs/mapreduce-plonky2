@@ -55,7 +55,13 @@ in
     }];
   };
 
-  scripts.db.exec = "psql storage -h localhost -p ${builtins.toString config.env.PGPORT}";
+  scripts = {
+    # Open a shell to the DB
+    db.exec = "psql storage -h localhost -p ${builtins.toString config.env.PGPORT}";
+
+    # Wipe out the database
+    reset-db.exec = "rm -rf ${config.env.DEVENV_STATE}/postgres";
+  };
 
   # https://devenv.sh/languages/
   languages.rust = {

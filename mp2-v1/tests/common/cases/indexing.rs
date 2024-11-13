@@ -23,7 +23,7 @@ use crate::common::{
         identifier_single_var_column,
         table_source::{
             LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs, MergeSource,
-            SingleValuesExtractionArgs, UniqueMappingEntry, DEFAULT_ADDRESS,
+            SingleValuesExtractionArgs, DEFAULT_ADDRESS,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
@@ -69,9 +69,6 @@ pub(crate) const MAPPING_VALUE_COLUMN: &str = "map_value";
 pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
 
 impl TableIndexing {
-    pub fn table(&self) -> &Table {
-        &self.table
-    }
     pub(crate) async fn merge_table_test_case(
         ctx: &mut TestContext,
     ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
@@ -429,7 +426,7 @@ impl TableIndexing {
         updates: Vec<TableRowUpdate<BlockPrimaryIndex>>,
         expected_metadata_hash: &HashOutput,
     ) -> Result<()> {
-        let current_block = ctx.block_number().await;
+        let current_block = ctx.block_number().await as BlockPrimaryIndex;
         // apply the new cells to the trees
         // NOTE ONLY the rest of the cells, not including the secondary one !
         let mut rows_update = Vec::new();
@@ -462,7 +459,7 @@ impl TableIndexing {
                     let row_payload = ctx
                         .prove_cells_tree(
                             &self.table,
-                            current_block as usize,
+                            current_block,
                             previous_row,
                             new_cell_collection,
                             tree_update,
@@ -495,7 +492,7 @@ impl TableIndexing {
                     let row_payload = ctx
                         .prove_cells_tree(
                             &self.table,
-                            current_block as usize,
+                            current_block,
                             Row {
                                 k: new_cells.previous_row_key.clone(),
                                 payload: old_row,
@@ -728,7 +725,7 @@ impl UpdateSimpleStorage {
             .map(|tuple| {
                 let op: MappingOperation = tuple.into();
                 let (k, v) = match tuple {
-                    MappingUpdate::Deletion(k, _) => (*k, DEFAULT_ADDRESS.clone()),
+                    MappingUpdate::Deletion(k, _) => (*k, *DEFAULT_ADDRESS),
                     MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => {
                         (*k, Address::from_slice(&v.to_be_bytes_trimmed_vec()))
                     }

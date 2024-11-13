@@ -50,8 +50,8 @@ async fn _storage_in_memory(initial_epoch: Epoch) -> Result<()> {
 
     for i in initial_epoch + 1..initial_epoch + 6 {
         println!("\nEpoch = {i}");
-        let mut ss = s.view_at(i);
-        s.tree().print(&mut ss).await;
+        let ss = s.view_at(i);
+        s.tree().print(&ss).await;
         s.diff_at(i).await.unwrap().print();
 
         match i - initial_epoch {
@@ -108,7 +108,7 @@ async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
     println!("Old one");
     s.print_tree().await;
 
-    let mut s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
+    let s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
         InitSettings::MustExist,
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
@@ -121,14 +121,14 @@ async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
 
     assert_eq!(s2.root_data().await, s.root_data().await);
     assert_eq!(
-        s.tree().size(&mut s2.storage).await,
+        s.tree().size(&s2.storage).await,
         s2.tree().size(&s2.storage).await
     );
 
     for i in initial_epoch + 1..=initial_epoch + 6 {
         println!("\nEpoch = {i}");
-        let mut ss = s.view_at(i);
-        s.tree().print(&mut ss).await;
+        let ss = s.view_at(i);
+        s.tree().print(&ss).await;
         s.diff_at(i).await.unwrap().print();
 
         match i {
@@ -295,8 +295,8 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
 
     for i in 1..=2 {
         println!("\nEpoch = {i}");
-        let mut ss = s2.view_at(i);
-        s2.tree().print(&mut ss).await;
+        let ss = s2.view_at(i);
+        s2.tree().print(&ss).await;
         s_psql.diff_at(i).await.unwrap().print();
     }
 
@@ -671,7 +671,7 @@ async fn test_rollback<
     // Rollback twice to reach epoch 1
     s.rollback_to(1 + initial_epoch)
         .await
-        .expect(&format!("failed to rollback to {}", 1 + initial_epoch));
+        .unwrap_or_else(|_| panic!("failed to rollback to {}", 1 + initial_epoch));
     assert_eq!(s.current_epoch(), 1 + initial_epoch);
     assert_eq!(s.size().await, 2);
     for i in 0..=5 {
@@ -1014,7 +1014,7 @@ async fn fetch_many() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT1.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
             Ok(())
         })
@@ -1025,7 +1025,7 @@ async fn fetch_many() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT2.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
             Ok(())
         })
@@ -1061,6 +1061,9 @@ async fn fetch_many() {
             (1i64, "restera".to_string(), 12),
             (2i64, "restera".to_string(), 12),
             (2i64, "car".to_string(), 0),
+            // This should not exist, but as we use infinity to mark alive
+            // nodes, it will still appear
+            (4i64, "restera".to_string(), 12),
         ]
         .into_iter()
         .collect::<HashSet<_>>()
@@ -1091,7 +1094,7 @@ async fn wide_update_trees() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT1.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
             Ok(())
         })
@@ -1105,7 +1108,7 @@ async fn wide_update_trees() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT2.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
             Ok(())
         })
@@ -1151,7 +1154,7 @@ async fn all_pgsql() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT1.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
             Ok(())
         })
@@ -1172,7 +1175,7 @@ async fn all_pgsql() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT2.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
             Ok(())
         })
@@ -1220,7 +1223,7 @@ async fn all_memory() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT1.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
             Ok(())
         })
@@ -1241,7 +1244,7 @@ async fn all_memory() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT2.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
             Ok(())
         })

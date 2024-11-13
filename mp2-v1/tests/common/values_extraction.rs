@@ -76,8 +76,7 @@ impl TestContext {
 
         // Query the slot and add the node path to the trie.
         for mapping_key in mapping_keys {
-            let query =
-                ProofQuery::new_mapping_slot(contract_address.clone(), slot, mapping_key.clone());
+            let query = ProofQuery::new_mapping_slot(*contract_address, slot, mapping_key.clone());
             let response = self
                 .query_mpt_proof(&query, BlockNumberOrTag::Number(self.block_number().await))
                 .await;
@@ -103,7 +102,7 @@ impl TestContext {
 
         let chain_id = self.rpc.get_chain_id().await.unwrap();
         info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
-        let proof = trie.prove_value(&contract_address, chain_id, &self.params(), &self.b);
+        let proof = trie.prove_value(contract_address, chain_id, self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof.proof().public_inputs);

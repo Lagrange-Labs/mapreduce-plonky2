@@ -45,10 +45,10 @@ pub fn identifier_single_var_column(
 ) -> u64 {
     let fields = contract_address
         .0
-        .to_vec()
-        .into_iter()
+        .iter()
+        .copied()
         .chain(chain_id.to_be_bytes())
-        .chain(extra.into_iter())
+        .chain(extra)
         .collect::<Vec<u8>>()
         .to_fields();
 

@@ -18,12 +18,12 @@ pub struct NodePath<K> {
 impl<K> NodePath<K> {
     /// Return an iterator over references to the keys forming the full path
     /// from the root to `target` (included).
-    pub fn full_path(&self) -> impl Iterator<Item = &K> + DoubleEndedIterator {
+    pub fn full_path(&self) -> impl DoubleEndedIterator<Item = &K> {
         self.ascendance.iter().chain(std::iter::once(&self.target))
     }
     /// Return an iterator over the keys forming the full path from the root to
     /// `target` (included).
-    pub fn into_full_path(self) -> impl Iterator<Item = K> + DoubleEndedIterator {
+    pub fn into_full_path(self) -> impl DoubleEndedIterator<Item = K> {
         self.ascendance
             .into_iter()
             .chain(std::iter::once(self.target))
@@ -58,6 +58,7 @@ pub trait TreeTopology: Default + Send + Sync {
     /// Return, if it has some, the children of `k`.
     ///
     /// Return nothing if `k` is not in the tree.
+    #[allow(clippy::type_complexity)]
     fn children<S: TreeStorage<Self>>(
         &self,
         k: &Self::Key,

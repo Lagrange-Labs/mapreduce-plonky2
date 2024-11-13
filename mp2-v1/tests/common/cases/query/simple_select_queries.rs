@@ -1,19 +1,16 @@
-use std::collections::HashMap;
-
 use alloy::primitives::U256;
 use anyhow::{Error, Result};
-use futures::{stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use log::info;
 use mp2_common::types::HashOutput;
 use mp2_v1::{
     api::MetadataHash,
     indexing::{block::BlockPrimaryIndex, row::RowTreeKey, LagrangeNode},
+    query::planner::execute_row_query,
 };
 use parsil::{
-    assembler::DynamicCircuitPis,
-    executor::{generate_query_execution_with_keys, generate_query_keys},
-    ParsilSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
+    executor::generate_query_execution_with_keys, DEFAULT_MAX_BLOCK_PLACEHOLDER,
+    DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{pgsql::ToFromBytea, RoEpochKvStorage},
@@ -40,12 +37,12 @@ use crate::common::{
             aggregated_queries::{
                 check_final_outputs, find_longest_lived_key, get_node_info, prove_single_row,
             },
-            GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, SqlReturn, SqlType,
+            GlobalCircuitInput, RevelationCircuitInput, SqlReturn, SqlType,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
     table::Table,
-    TableInfo, TestContext,
+    TableInfo,
 };
 
 use super::QueryCooking;
@@ -58,15 +55,14 @@ pub(crate) async fn prove_query<'a>(
 ) -> Result<()> {
     let mut exec_query = generate_query_execution_with_keys(&mut parsed, &planner.settings)?;
     let query_params = exec_query.convert_placeholders(&planner.query.placeholders);
-    let res = planner
-        .table
-        .execute_row_query(
-            &exec_query
-                .normalize_placeholder_names()
-                .to_pgsql_string_with_placeholder(),
-            &query_params,
-        )
-        .await?;
+    let res = execute_row_query(
+        &planner.table.db_pool,
+        &exec_query
+            .normalize_placeholder_names()
+            .to_pgsql_string_with_placeholder(),
+        &query_params,
+    )
+    .await?;
     let matching_rows = res
         .iter()
         .map(|row| {
@@ -133,7 +129,7 @@ pub(crate) async fn prove_query<'a>(
     };
     let column_ids = ColumnIDs::from(&planner.table.columns);
     let num_matching_rows = matching_rows_input.len();
-    let input = RevelationCircuitInput::new_revelation_unproven_offset(
+    let input = RevelationCircuitInput::new_revelation_tabular(
         indexing_proof,
         matching_rows_input,
         &planner.pis.bounds,
@@ -195,8 +191,8 @@ where
             )))?;
         let child_pos = node_ctx
             .iter_children()
-            .find_position(|child| child.is_some() && child.unwrap() == &previous_node_key);
-        let is_left_child = child_pos.unwrap().0 == 0; // unwrap is safe
+            .position(|child| child.map(|c| *c == previous_node_key).unwrap_or(false));
+        let is_left_child = child_pos.unwrap() == 0; // unwrap is safe
         let (left_child_hash, right_child_hash) = if is_left_child {
             (
                 Some(previous_node_hash),
@@ -279,7 +275,7 @@ pub(crate) async fn cook_query_with_max_num_matching_rows(
         U256::from(max_block),
     ));
 
-    let limit = MAX_NUM_OUTPUTS;
+    let limit = MAX_NUM_OUTPUTS as u32;
     let offset = 0;
 
     let query_str = format!(
@@ -287,15 +283,14 @@ pub(crate) async fn cook_query_with_max_num_matching_rows(
                 FROM {table_name}
                 WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                AND {key_column} = '0x{key_value}'
-                LIMIT {limit} OFFSET {offset};"
+                AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
+        limit: Some(limit),
         offset: Some(offset),
     })
 }
@@ -323,24 +318,25 @@ pub(crate) async fn cook_query_with_matching_rows(
         U256::from(max_block),
     ));
 
-    let limit = (MAX_NUM_OUTPUTS - 2).min(1);
-    let offset = max_block - min_block + 1 - limit; // get the matching rows in the last blocks
+    let limit: u32 = (MAX_NUM_OUTPUTS - 2).min(1).try_into().unwrap();
+    let offset: u32 = (max_block - min_block + 1 - limit as usize)
+        .try_into()
+        .unwrap(); // get the matching rows in the last blocks
 
     let query_str = format!(
         "SELECT {BLOCK_COLUMN_NAME}, {value_column} + $1
                 FROM {table_name}
                 WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                AND {key_column} = '0x{key_value}'
-                LIMIT {limit} OFFSET {offset};"
+                AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
-        offset: Some(offset as u64),
+        limit: Some(limit),
+        offset: Some(offset),
     })
 }
 
@@ -368,7 +364,7 @@ pub(crate) async fn cook_query_too_big_offset(
         U256::from(max_block),
     ));
 
-    let limit = MAX_NUM_OUTPUTS;
+    let limit: u32 = MAX_NUM_OUTPUTS.try_into().unwrap();
     let offset = 100;
 
     let query_str = format!(
@@ -376,15 +372,14 @@ pub(crate) async fn cook_query_too_big_offset(
                 FROM {table_name}
                 WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                AND {key_column} = '0x{key_value}'
-                LIMIT {limit} OFFSET {offset};"
+                AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
+        limit: Some(limit),
         offset: Some(offset),
     })
 }
@@ -415,7 +410,7 @@ pub(crate) async fn cook_query_no_matching_rows(
         U256::from(max_block),
     ));
 
-    let limit = MAX_NUM_OUTPUTS;
+    let limit: u32 = MAX_NUM_OUTPUTS.try_into().unwrap();
     let offset = 0;
 
     let query_str = format!(
@@ -423,15 +418,14 @@ pub(crate) async fn cook_query_no_matching_rows(
                 FROM {table_name}
                 WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                AND {key_column} = $1
-                LIMIT {limit} OFFSET {offset};"
+                AND {key_column} = $1;"
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
+        limit: Some(limit),
         offset: Some(offset),
     })
 }
@@ -459,7 +453,7 @@ pub(crate) async fn cook_query_with_distinct(
         U256::from(max_block),
     ));
 
-    let limit = MAX_NUM_OUTPUTS;
+    let limit: u32 = MAX_NUM_OUTPUTS.try_into().unwrap();
     let offset = 0;
 
     let query_str = format!(
@@ -467,15 +461,14 @@ pub(crate) async fn cook_query_with_distinct(
                 FROM {table_name}
                 WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                 AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                AND {key_column} = '0x{key_value}'
-                LIMIT {limit} OFFSET {offset};"
+                AND {key_column} = '0x{key_value}';"
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
+        limit: Some(limit),
         offset: Some(offset),
     })
 }
@@ -504,7 +497,7 @@ pub(crate) async fn cook_query_with_wildcard(
         U256::from(max_block),
     ));
 
-    let limit = MAX_NUM_OUTPUTS;
+    let limit: u32 = MAX_NUM_OUTPUTS.try_into().unwrap();
     let offset = 0;
 
     let query_str = if distinct {
@@ -513,8 +506,7 @@ pub(crate) async fn cook_query_with_wildcard(
                     FROM {table_name}
                     WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                     AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                    AND {key_column} = '0x{key_value}'
-                    LIMIT {limit} OFFSET {offset};"
+                    AND {key_column} = '0x{key_value}';"
         )
     } else {
         format!(
@@ -522,8 +514,7 @@ pub(crate) async fn cook_query_with_wildcard(
                     FROM {table_name}
                     WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
                     AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER}
-                    AND {key_column} = '0x{key_value}'
-                    LIMIT {limit} OFFSET {offset};"
+                    AND {key_column} = '0x{key_value}';"
         )
     };
     Ok(QueryCooking {
@@ -531,7 +522,7 @@ pub(crate) async fn cook_query_with_wildcard(
         max_block: max_block as BlockPrimaryIndex,
         query: query_str,
         placeholders,
-        limit: Some(limit as u64),
+        limit: Some(limit),
         offset: Some(offset),
     })
 }

@@ -2,7 +2,6 @@ use plonky2::plonk::proof::ProofWithPublicInputsTarget;
 
 use mp2_common::{
     default_config,
-    group_hashing::{cond_circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     hash::hash_maybe_first,
     poseidon::empty_poseidon_hash,
     proof::ProofWithVK,

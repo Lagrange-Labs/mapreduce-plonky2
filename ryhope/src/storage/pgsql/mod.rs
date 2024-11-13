@@ -24,6 +24,8 @@ use tracing::*;
 
 mod storages;
 
+const MAX_PGSQL_BIGINT: i64 = i64::MAX;
+
 /// A trait that must be implemented by a custom node key. This allows to
 /// (de)serialize any custom key to and fro a PgSQL BYTEA.
 pub trait ToFromBytea: Clone + Eq {
@@ -491,35 +493,21 @@ where
             .with_context(|| format!("unable to create table `{table}_meta`"))
     }
 
-    async fn update_all(&self, db_tx: &tokio_postgres::Transaction<'_>) -> Result<()> {
-        let update_all = format!(
-            "UPDATE {} SET {VALID_UNTIL}=$1 WHERE {VALID_UNTIL}=$2",
-            self.table
-        );
-
-        db_tx
-            .query(&update_all, &[&(&self.epoch + 1), &self.epoch])
-            .await
-            .context("while updating timestamps")
-            .map(|_| ())
-    }
-
-    /// Roll-back to `self.epoch` the lifetime of a row having already been extended to `self.epoch + 1`.
-    async fn rollback_one_row(
+    /// Close the lifetim of a row to `self.epoch`.
+    async fn mark_dead(
         &self,
         db_tx: &tokio_postgres::Transaction<'_>,
         key: &T::Key,
     ) -> Result<Option<(T::Node, V)>> {
-        trace!("[{self}] rolling back {key:?} one epoch");
+        trace!("[{self}] marking {key:?} as dead @{}", self.epoch);
         let rows = db_tx
             .query(
                 &format!(
-                    "UPDATE {} SET {VALID_UNTIL}={} WHERE {KEY}=$1 AND {VALID_UNTIL}={} RETURNING *",
+                    "UPDATE {} SET {VALID_UNTIL}={} WHERE {KEY}=$1 AND {VALID_UNTIL}=$2 RETURNING *",
                     self.table,
                     self.epoch,
-                    self.epoch + 1
                 ),
-                &[&key.to_bytea()],
+                &[&key.to_bytea(), &MAX_PGSQL_BIGINT],
             )
             .await?;
 
@@ -562,11 +550,6 @@ where
         // The putative new stamps if everything goes well
         let new_epoch = self.epoch + 1;
 
-        // Pre-emptively extend by 1 the lifetime of the currently alive rows;
-        // those that should not be alive in the next epoch will be rolled back
-        // later.
-        self.update_all(db_tx).await?;
-
         // Collect all the keys found in the caches
         let mut cached_keys = HashSet::new();
         {
@@ -604,7 +587,7 @@ where
                     // The node has been removed
                     (Some(None), _) => {
                         // k has been deleted; simply roll-back the lifetime of its row.
-                        self.rollback_one_row(db_tx, &k).await?;
+                        self.mark_dead(db_tx, &k).await?;
                     }
 
                     // The payload alone has been updated
@@ -614,7 +597,7 @@ where
                     )
                     | (None, Some(Some(CachedValue::Written(new_payload)))) => {
                         // rollback the old value if any
-                        let previous_node = self.rollback_one_row(db_tx, &k).await?.unwrap().0;
+                        let previous_node = self.mark_dead(db_tx, &k).await?.unwrap().0;
                         // write the new value
                         self.new_node(db_tx, &k, previous_node).await?;
                         T::set_at_in_tx(
@@ -631,7 +614,7 @@ where
                     (Some(Some(CachedValue::Written(new_node))), maybe_new_payload) => {
                         // insertion or displacement in the tree; the row has to be
                         // duplicated/updated and rolled-back
-                        let previous_state = self.rollback_one_row(db_tx, &k).await?;
+                        let previous_state = self.mark_dead(db_tx, &k).await?;
 
                         // insert the new row representing the new state of the key...
                         self.new_node(db_tx, &k, new_node.to_owned()).await?;

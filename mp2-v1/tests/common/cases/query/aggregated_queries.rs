@@ -22,8 +22,8 @@ use crate::common::{
 
 use crate::context::TestContext;
 use alloy::primitives::U256;
-use anyhow::{bail, Context, Result};
-use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
+use anyhow::{bail, Result};
+use futures::{stream, FutureExt, StreamExt};
 
 use itertools::Itertools;
 use log::*;
@@ -42,17 +42,17 @@ use mp2_v1::{
         row::{Row, RowPayload, RowTreeKey},
         LagrangeNode,
     },
+    query::planner::{execute_row_query, find_row_node_for_non_existence},
     values_extraction::identifier_block_column,
 };
 use parsil::{
     assembler::{DynamicCircuitPis, StaticCircuitPis},
-    bracketer::bracket_secondary_index,
+    parse_and_validate,
     queries::{core_keys_for_index_tree, core_keys_for_row_tree},
     ParsilSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{
-        pgsql::ToFromBytea,
         updatetree::{Next, UpdateTree, WorkplanItem},
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage, WideLineage,
     },
@@ -84,6 +84,7 @@ pub type RevelationPublicInputs<'a> =
     PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
 
 /// Execute a query to know all the touched rows, and then call the universal circuit on all rows
+#[warn(clippy::too_many_arguments)]
 pub(crate) async fn prove_query(
     ctx: &mut TestContext,
     table: &Table,
@@ -103,14 +104,14 @@ pub(crate) async fn prove_query(
         )
         .await?;
     // the query to use to fetch all the rows keys involved in the result tree.
-    let mut row_keys_per_epoch = row_cache.keys_by_epochs();
-    let all_epochs = query.min_block as Epoch..=query.max_block as Epoch;
+    let pis = parsil::assembler::assemble_dynamic(&parsed, settings, &query.placeholders)?;
+    let row_keys_per_epoch = row_cache.keys_by_epochs();
     let mut planner = QueryPlanner {
         ctx,
         query: query.clone(),
-        settings: &settings,
+        settings,
         pis: &pis,
-        table: &table,
+        table,
         columns: table.columns.clone(),
     };
 
@@ -211,22 +212,22 @@ pub(crate) async fn prove_query(
     info!("Query proofs done! Generating revelation proof...");
     let proof = prove_revelation(ctx, table, &query, &pis, table.index.current_epoch()).await?;
     info!("Revelation proof done! Checking public inputs...");
+
     // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
     // to check the public inputs
     let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
-
     // get number of matching rows
     let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
     let query_params = exec_query.convert_placeholders(&query.placeholders);
-    let num_touched_rows = table
-        .execute_row_query(
-            &exec_query
-                .normalize_placeholder_names()
-                .to_pgsql_string_with_placeholder(),
-            &query_params,
-        )
-        .await?
-        .len();
+    let num_touched_rows = execute_row_query(
+        &table.db_pool,
+        &exec_query
+            .normalize_placeholder_names()
+            .to_pgsql_string_with_placeholder(),
+        &query_params,
+    )
+    .await?
+    .len();
 
     check_final_outputs(
         proof,
@@ -265,7 +266,7 @@ async fn prove_revelation(
         let pk = ProofKey::IVC(tree_epoch as BlockPrimaryIndex);
         ctx.storage.get_proof_exact(&pk)?
     };
-    let input = RevelationCircuitInput::new_revelation_no_results_tree(
+    let input = RevelationCircuitInput::new_revelation_aggregated(
         query_proof,
         indexing_proof,
         &pis.bounds,
@@ -280,6 +281,7 @@ async fn prove_revelation(
     Ok(proof)
 }
 
+#[warn(clippy::too_many_arguments)]
 pub(crate) fn check_final_outputs(
     revelation_proof: Vec<u8>,
     ctx: &TestContext,
@@ -358,19 +360,27 @@ pub(crate) fn check_final_outputs(
         res.len() as u64,
         revelation_pis.num_results().to_canonical_u64(),
     );
-    // check results
+    // check results: we check that each result in res appears in set
+    // of results exposed by the proof, and vice versa:
+    // - first, we accumulate each result in `res` to a `HashMap`,
+    //   and we do the same for the set of results exposed by the proof
+    // - then, we check that the 2 `HashMap`s are the same
+    let mut expected_res_accumulator: HashMap<Vec<U256>, usize> = HashMap::new();
+    let mut proof_res_accumulator: HashMap<Vec<U256>, usize> = HashMap::new();
     res.into_iter()
         .zip(revelation_pis.result_values())
-        .for_each(|(expected_res, res)| {
-            (0..expected_res.len()).for_each(|i| {
-                let SqlReturn::Numeric(expected_res) =
-                    SqlType::Numeric.extract(&expected_res, i).unwrap();
-                assert_eq!(
-                    U256::from_str_radix(&expected_res.to_string(), 10).unwrap(),
-                    res[i],
-                );
-            })
+        .for_each(|(row, res)| {
+            let (expected_res, proof_res): (Vec<_>, Vec<_>) = (0..row.len())
+                .map(|i| {
+                    let SqlReturn::Numeric(expected_res) =
+                        SqlType::Numeric.extract(&row, i).unwrap();
+                    (expected_res, res[i])
+                })
+                .unzip();
+            *expected_res_accumulator.entry(expected_res).or_default() += 1;
+            *proof_res_accumulator.entry(proof_res).or_default() += 1;
         });
+    assert_eq!(expected_res_accumulator, proof_res_accumulator,);
 
     Ok(())
 }
@@ -382,7 +392,7 @@ pub(crate) fn check_final_outputs(
 /// clippy doesn't see that it can not be done
 #[allow(clippy::needless_lifetimes)]
 async fn prove_query_on_tree<'a, I, K, V>(
-    mut planner: &mut QueryPlanner<'a>,
+    planner: &mut QueryPlanner<'a>,
     info: I,
     update: UpdateTree<K>,
     primary: BlockPrimaryIndex,
@@ -443,7 +453,7 @@ where
             .expect("cache is not full");
         let is_satisfying_query = info.is_satisfying_query(k);
         let embedded_proof = info
-            .load_or_prove_embedded(&mut planner, primary, k, &node_payload)
+            .load_or_prove_embedded(planner, primary, k, &node_payload)
             .await;
         if node_ctx.is_leaf() && info.is_row_tree() {
             // NOTE: if it is a leaf of the row tree, then there is no need to prove anything,
@@ -456,10 +466,10 @@ where
             if is_satisfying_query {
                 // unwrap is safe since we are guaranteed the row is satisfying the query
                 info.save_proof(
-                    &mut planner.ctx,
+                    planner.ctx,
                     &query_id,
                     primary,
-                    &k,
+                    k,
                     placeholder_values.clone(),
                     embedded_proof?.unwrap(),
                 )?;
@@ -490,12 +500,12 @@ where
                 continue;
             }
             assert!(
-                info.is_satisfying_query(&k),
+                info.is_satisfying_query(k),
                 "first node in merkle path should always be a valid query one"
             );
             let (node_info, left_info, right_info) =
             // we can use primary as epoch now that tree stores epoch from genesis
-                get_node_info(&info, &k, primary as Epoch).await;
+                get_node_info(&info, k, primary as Epoch).await;
             (
                 "querying::aggregation::single",
                 QueryCircuitInput::new_single_path(
@@ -522,7 +532,7 @@ where
                     fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                 let (node_info, left_info, right_info) = get_node_info(
                     &info,
-                    &k,
+                    k,
                     // we can use primary as epoch since storage starts epoch at genesis
                     primary as Epoch,
                 )
@@ -579,7 +589,7 @@ where
                     let (child_pos, child_proof) =
                         fetch_only_proven_child(node_ctx, planner.ctx, &proven_nodes);
                     let (_, left_info, right_info) =
-                        get_node_info(&info, &k, primary as Epoch).await;
+                        get_node_info(&info, k, primary as Epoch).await;
                     let unproven = match child_pos {
                         ChildPosition::Left => right_info,
                         ChildPosition::Right => left_info,
@@ -607,7 +617,7 @@ where
             planner.ctx,
             &query_id,
             primary,
-            &k,
+            k,
             placeholder_values.clone(),
             proof,
         )?;
@@ -694,12 +704,12 @@ where
     )
 }
 
-pub fn generate_non_existence_proof<'a>(
+pub fn generate_non_existence_proof(
     node_info: NodeInfo,
     left_child_info: Option<NodeInfo>,
     right_child_info: Option<NodeInfo>,
     primary: BlockPrimaryIndex,
-    planner: &mut QueryPlanner<'a>,
+    planner: &mut QueryPlanner<'_>,
     is_rows_tree_node: bool,
 ) -> Result<Vec<u8>> {
     let index_ids = [
@@ -775,9 +785,9 @@ async fn prove_non_existence_index<'a>(
         planner,
         false,
     )
-    .expect(
-        format!("unable to generate non-existence proof for {current_epoch} -> {primary}").as_str(),
-    );
+    .unwrap_or_else(|_| {
+        panic!("unable to generate non-existence proof for {current_epoch} -> {primary}")
+    });
     info!("Non-existence circuit proof DONE for {current_epoch} -> {primary} ");
     planner.ctx.storage.store_proof(proof_key, proof.clone())?;
 
@@ -788,282 +798,29 @@ pub async fn prove_non_existence_row<'a>(
     planner: &mut QueryPlanner<'a>,
     primary: BlockPrimaryIndex,
 ) -> Result<()> {
-    let row_tree = &planner.table.row;
-    let (query_for_min, query_for_max) = bracket_secondary_index(
-        &planner.table.public_name,
+    let (chosen_node, plan) = find_row_node_for_non_existence(
+        &planner.table.row,
+        planner.table.public_name.clone(),
+        &planner.table.db_pool,
+        primary,
         &planner.settings,
-        primary as Epoch,
         &planner.pis.bounds,
-    );
-
-    // this method returns the `NodeContext` of the successor of the node provided as input,
-    // if the successor exists in the row tree and it stores the same value of the input node (i.e., `value`);
-    // returns `None` otherwise, as it means that the input node can be used to prove non-existence
-    async fn get_successor_node_with_same_value(
-        node_ctx: &NodeContext<RowTreeKey>,
-        value: U256,
-        table: &Table,
-        primary: BlockPrimaryIndex,
-    ) -> Option<NodeContext<RowTreeKey>> {
-        let row_tree = &table.row;
-        if node_ctx.right.is_some() {
-            let (right_child_ctx, payload) = row_tree
-                .fetch_with_context_at(node_ctx.right.as_ref().unwrap(), primary as Epoch)
-                .await;
-            // the value of the successor in this case is `payload.min`, since the successor is the
-            // minimum of the subtree rooted in the right child
-            if payload.min() != value {
-                // the value of successor is different from `value`, so we don't return the
-                // successor node
-                return None;
-            }
-            // find successor in the subtree rooted in the right child: it is
-            // the leftmost node in such a subtree
-            let mut successor_ctx = right_child_ctx;
-            while successor_ctx.left.is_some() {
-                successor_ctx = row_tree
-                    .node_context_at(successor_ctx.left.as_ref().unwrap(), primary as Epoch)
-                    .await
-                    .expect(
-                        format!(
-                            "Node context not found for left child of node {:?}",
-                            successor_ctx.node_id
-                        )
-                        .as_str(),
-                    );
-            }
-            Some(successor_ctx)
-        } else {
-            // find successor among the ancestors of current node: we go up in the path
-            // until we either found a node whose left child is the previous node in the
-            // path, or we get to the root of the tree
-            let (mut candidate_successor_ctx, mut candidate_successor_val) =
-                (node_ctx.clone(), value);
-            let mut successor_found = false;
-            while candidate_successor_ctx.parent.is_some() {
-                let (parent_ctx, parent_payload) = row_tree
-                    .fetch_with_context_at(
-                        candidate_successor_ctx.parent.as_ref().unwrap(),
-                        primary as Epoch,
-                    )
-                    .await;
-                candidate_successor_val = parent_payload.value();
-                if parent_ctx
-                    .iter_children()
-                    .find_position(|child| {
-                        child.is_some() && child.unwrap().clone() == candidate_successor_ctx.node_id
-                    })
-                    .unwrap()
-                    .0
-                    == 0
-                {
-                    // successor_ctx.node_id is left child of parent_ctx node, so parent_ctx is
-                    // the successor
-                    candidate_successor_ctx = parent_ctx;
-                    successor_found = true;
-                    break;
-                } else {
-                    candidate_successor_ctx = parent_ctx;
-                }
-            }
-            if successor_found {
-                if candidate_successor_val != value {
-                    // the value of successor is different from `value`, so we don't return the
-                    // successor node
-                    return None;
-                }
-                Some(candidate_successor_ctx)
-            } else {
-                // We got up to the root of the tree without finding the successor,
-                // which means that the input node has no successor;
-                // so we don't return any node
-                None
-            }
-        }
-    }
-
-    // this method returns the `NodeContext` of the predecessor of the node provided as input,
-    // if the predecessor exists in the row tree and it stores the same value of the input node (i.e., `value`);
-    // returns `None` otherwise, as it means that the input node can be used to prove non-existence
-    async fn get_predecessor_node_with_same_value(
-        node_ctx: &NodeContext<RowTreeKey>,
-        value: U256,
-        table: &Table,
-        primary: BlockPrimaryIndex,
-    ) -> Option<NodeContext<RowTreeKey>> {
-        let row_tree = &table.row;
-        if node_ctx.left.is_some() {
-            let (left_child_ctx, payload) = row_tree
-                .fetch_with_context_at(node_ctx.right.as_ref().unwrap(), primary as Epoch)
-                .await;
-            // the value of the predecessor in this case is `payload.max`, since the predecessor is the
-            // maximum of the subtree rooted in the left child
-            if payload.max() != value {
-                // the value of predecessor is different from `value`, so we don't return the
-                // predecessor node
-                return None;
-            }
-            // find predecessor in the subtree rooted in the left child: it is
-            // the rightmost node in such a subtree
-            let mut predecessor_ctx = left_child_ctx;
-            while predecessor_ctx.right.is_some() {
-                predecessor_ctx = row_tree
-                    .node_context_at(predecessor_ctx.right.as_ref().unwrap(), primary as Epoch)
-                    .await
-                    .expect(
-                        format!(
-                            "Node context not found for right child of node {:?}",
-                            predecessor_ctx.node_id
-                        )
-                        .as_str(),
-                    );
-            }
-            Some(predecessor_ctx)
-        } else {
-            // find successor among the ancestors of current node: we go up in the path
-            // until we either found a node whose right child is the previous node in the
-            // path, or we get to the root of the tree
-            let (mut candidate_predecessor_ctx, mut candidate_predecessor_val) =
-                (node_ctx.clone(), value);
-            let mut predecessor_found = false;
-            while candidate_predecessor_ctx.parent.is_some() {
-                let (parent_ctx, parent_payload) = row_tree
-                    .fetch_with_context_at(
-                        candidate_predecessor_ctx.parent.as_ref().unwrap(),
-                        primary as Epoch,
-                    )
-                    .await;
-                candidate_predecessor_val = parent_payload.value();
-                if parent_ctx
-                    .iter_children()
-                    .find_position(|child| {
-                        child.is_some()
-                            && child.unwrap().clone() == candidate_predecessor_ctx.node_id
-                    })
-                    .unwrap()
-                    .0
-                    == 1
-                {
-                    // predecessor_ctx.node_id is right child of parent_ctx node, so parent_ctx is
-                    // the predecessor
-                    candidate_predecessor_ctx = parent_ctx;
-                    predecessor_found = true;
-                    break;
-                } else {
-                    candidate_predecessor_ctx = parent_ctx;
-                }
-            }
-            if predecessor_found {
-                if candidate_predecessor_val != value {
-                    // the value of predecessor is different from `value`, so we don't return the
-                    // predecessor node
-                    return None;
-                }
-                Some(candidate_predecessor_ctx)
-            } else {
-                // We got up to the root of the tree without finding the predecessor,
-                // which means that the input node has no predecessor;
-                // so we don't return any node
-                None
-            }
-        }
-    }
-
-    let find_node_for_proof = async |query: Option<String>,
-                                     is_min_query: bool|
-           -> Result<Option<RowTreeKey>> {
-        if query.is_none() {
-            return Ok(None);
-        }
-        let rows = planner
-            .table
-            .execute_row_query(&query.unwrap(), &[])
-            .await?;
-        if rows.len() == 0 {
-            // no node found, return None
-            info!("Search node for non-existence circuit: no node found");
-            return Ok(None);
-        }
-        let row_key = rows[0]
-            .get::<_, Option<Vec<u8>>>(0)
-            .map(RowTreeKey::from_bytea)
-            .context("unable to parse row key tree")
-            .expect("");
-        // among the nodes with the same index value of the node with `row_key`, we need to find
-        // the one that satisfies the following property: all its successor nodes have values bigger
-        // than `max_query_secondary`, and all its predecessor nodes have values smaller than
-        // `min_query_secondary`. Such a node can be found differently, depending on the case:
-        // - if `is_min_query = true`, then we are looking among nodes with the highest value smaller
-        //   than `min_query_secondary` bound (call this value `min_value`);
-        //   therefore, we need to find the "last" node among the nodes with value `min_value`, that
-        //   is the node whose successor (if exists) has a value bigger than `min_value`. Since there
-        //   are no nodes in the tree in the range [`min_query_secondary, max_query_secondary`], then
-        //   the value of the successor of the "last" node is necessarily bigger than `max_query_secondary`,
-        //   and so it implies that we found the node satisfying the property mentioned above
-        // - if `is_min_query = false`, then we are looking among nodes with the smallest value higher
-        //   than `max_query_secondary` bound (call this value `max_value`);
-        //   therefore, we need to find the "first" node among the nodes with value `max_value`, that
-        //   is the node whose predecessor (if exists) has a value smaller than `max_value`. Since there
-        //   are no nodes in the tree in the range [`min_query_secondary, max_query_secondary`], then
-        //   the value of the predecessor of the "first" node is necessarily smaller than `min_query_secondary`,
-        //   and so it implies that we found the node satisfying the property mentioned above
-        let (mut node_ctx, node_value) = row_tree
-            .fetch_with_context_at(&row_key, primary as Epoch)
-            .await;
-        let value = node_value.value();
-
-        if is_min_query {
-            // starting from the node with key `row_key`, we iterate over its successor nodes in the tree,
-            // until we found a node that either has no successor or whose successor stores a value different
-            // from the value `value` stored in the node with key `row_key`; the node found is the one to be
-            // employed to generate the non-existence proof
-            let mut successor_ctx =
-                get_successor_node_with_same_value(&node_ctx, value, &planner.table, primary).await;
-            while successor_ctx.is_some() {
-                node_ctx = successor_ctx.unwrap();
-                successor_ctx =
-                    get_successor_node_with_same_value(&node_ctx, value, &planner.table, primary)
-                        .await;
-            }
-        } else {
-            // starting from the node with key `row_key`, we iterate over its predecessor nodes in the tree,
-            // until we found a node that either has no predecessor or whose predecessor stores a value different
-            // from the value `value` stored in the node with key `row_key`; the node found is the one to be
-            // employed to generate the non-existence proof
-            let mut predecessor_ctx =
-                get_predecessor_node_with_same_value(&node_ctx, value, &planner.table, primary)
-                    .await;
-            while predecessor_ctx.is_some() {
-                node_ctx = predecessor_ctx.unwrap();
-                predecessor_ctx =
-                    get_predecessor_node_with_same_value(&node_ctx, value, &planner.table, primary)
-                        .await;
-            }
-        }
-
-        Ok(Some(node_ctx.node_id))
-    };
-    // try first with lower node than secondary min query bound
-    let to_be_proven_node = match find_node_for_proof(query_for_min, true).await? {
-        Some(node) => node,
-        None => find_node_for_proof(query_for_max, false)
-            .await?
-            .expect("No valid node found to prove non-existence, something is wrong"),
-    };
-    let (node_info, left_child_info, right_child_info) = get_node_info(
-        &RowInfo::no_satisfying_rows(row_tree),
-        &to_be_proven_node,
-        primary as Epoch,
     )
-    .await;
+    .await?;
+    let (node_info, left_child_info, right_child_info) =
+        mp2_v1::query::planner::get_node_info(&planner.table.row, &chosen_node, primary as Epoch)
+            .await;
 
     let proof_key = ProofKey::QueryAggregateRow((
         planner.query.query.clone(),
         planner.query.placeholders.placeholder_values(),
         primary,
-        to_be_proven_node.clone(),
+        chosen_node.clone(),
     ));
-    info!("Non-existence circuit proof RUNNING for {primary} -> {to_be_proven_node:?} ");
+    info!(
+        "Non-existence circuit proof RUNNING for {primary} -> {:?} ",
+        proof_key
+    );
     let proof = generate_non_existence_proof(
         node_info,
         left_child_info,
@@ -1072,35 +829,28 @@ pub async fn prove_non_existence_row<'a>(
         planner,
         true,
     )
-    .expect(
-        format!("unable to generate non-existence proof for {primary} -> {to_be_proven_node:?}")
-            .as_str(),
+    .unwrap_or_else(|_| {
+        panic!(
+            "unable to generate non-existence proof for {primary} -> {:?}",
+            chosen_node
+        )
+    });
+    info!(
+        "Non-existence circuit proof DONE for {primary} -> {:?} ",
+        chosen_node
     );
-    info!("Non-existence circuit proof DONE for {primary} -> {to_be_proven_node:?} ");
     planner.ctx.storage.store_proof(proof_key, proof.clone())?;
 
-    // now generate the path up to the root of the row tree for the current epoch, as all nodes in such a path
-    // need to be proven
-    let path = planner
-        .table
-        .row
-        // since the epoch starts at genesis we can directly give the block number !
-        .lineage_at(&to_be_proven_node, primary as Epoch)
-        .await
-        .expect("node doesn't have a lineage?")
-        .into_full_path()
-        .collect_vec();
-    let proving_tree = UpdateTree::from_paths([path], primary as Epoch);
-    let info = RowInfo::no_satisfying_rows(&planner.table.row);
+    let tree_info = RowInfo::no_satisfying_rows(&planner.table.row);
     let mut planner = QueryPlanner {
         ctx: planner.ctx,
         table: planner.table,
         query: planner.query.clone(),
         pis: planner.pis,
         columns: planner.columns.clone(),
-        settings: &planner.settings,
+        settings: planner.settings,
     };
-    prove_query_on_tree(&mut planner, info, proving_tree, primary).await?;
+    prove_query_on_tree(&mut planner, tree_info, plan, primary).await?;
 
     Ok(())
 }
@@ -1528,7 +1278,7 @@ pub(crate) async fn find_longest_lived_key(
                 Some((k, l, start))
             }
         })
-        .max_by_key(|(k, l, start)| *l)
+        .max_by_key(|(_k, l, _start)| *l)
         .unwrap_or_else(|| {
             panic!(
                 "unable to find longest row? -> length all _table {}, max {}",
@@ -1591,20 +1341,20 @@ fn find_longest_consecutive_sequence(v: Vec<i64>) -> (usize, i64) {
     (longest, v[starting_idx])
 }
 
+#[allow(dead_code)]
 async fn check_correct_cells_tree(
     all_cells: &[ColumnCell],
     payload: &RowPayload<BlockPrimaryIndex>,
 ) -> Result<()> {
-    let local_cells = all_cells.iter().cloned().collect::<Vec<_>>();
+    let local_cells = all_cells.to_vec();
     let expected_cells_root = payload
         .cell_root_hash
         .clone()
-        .or(Some(HashOutput::from(*empty_poseidon_hash())))
-        .unwrap();
+        .unwrap_or(HashOutput::from(*empty_poseidon_hash()));
     let mut tree = indexing::cell::new_tree().await;
     tree.in_transaction(|t| {
         async move {
-            for (i, cell) in local_cells[2..].into_iter().enumerate() {
+            for (i, cell) in local_cells[2..].iter().enumerate() {
                 // putting 0 for primary index as it doesn't matter in the hash computation
                 t.store(
                     i + 1,

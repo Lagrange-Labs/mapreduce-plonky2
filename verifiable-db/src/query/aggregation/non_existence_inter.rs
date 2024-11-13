@@ -173,18 +173,18 @@ impl<const MAX_NUM_RESULTS: usize> NonExistenceInterNodeCircuit<MAX_NUM_RESULTS>
         // Enforce that the value associated to the current node is out of the range
         // specified by the query:
         // value < MIN_query OR value > MAX_query
-        let is_value_less_than_min = b.is_less_than_u256(&value, &min_query_value);
-        let is_value_greater_than_max = b.is_less_than_u256(&max_query_value, &value);
+        let is_value_less_than_min = b.is_less_than_u256(&value, min_query_value);
+        let is_value_greater_than_max = b.is_less_than_u256(max_query_value, &value);
         let is_out_of_range = b.or(is_value_less_than_min, is_value_greater_than_max);
         b.connect(is_out_of_range.target, ttrue.target);
 
         // Enforce that the records found in the subtree rooted in the child node
         // are all out of the range specified by the query. If left child exists,
         // ensure left_child_max < MIN_query; if right child exists, ensure right_child_min > MAX_query.
-        let is_child_less_than_min = b.is_less_than_u256(&left_child_max, &min_query_value);
+        let is_child_less_than_min = b.is_less_than_u256(&left_child_max, min_query_value);
         let is_left_child_out_of_range = b.and(left_child_exists, is_child_less_than_min);
         b.connect(is_left_child_out_of_range.target, left_child_exists.target);
-        let is_child_greater_than_max = b.is_less_than_u256(&max_query_value, &right_child_min);
+        let is_child_greater_than_max = b.is_less_than_u256(max_query_value, &right_child_min);
         let is_right_child_out_of_range = b.and(right_child_exists, is_child_greater_than_max);
         b.connect(
             is_right_child_out_of_range.target,
@@ -478,7 +478,7 @@ mod tests {
 
         let first_placeholder_id = PlaceholderId::Generic(0);
 
-        let (min_query, max_query, placeholders) = if is_rows_tree_node {
+        let (min_query, max_query, _placeholders) = if is_rows_tree_node {
             let dummy_min_query_primary = U256::ZERO; //dummy value, circuit will employ only bounds for secondary index
             let dummy_max_query_primary = U256::MAX; //dummy value, circuit will employ only bounds for secondary index
             let placeholders = Placeholders::from((
@@ -488,7 +488,7 @@ mod tests {
             ));
 
             let query_bounds = QueryBounds::new(
-                &&placeholders,
+                &placeholders,
                 Some(QueryBoundSource::Constant(min_query_value)),
                 Some(QueryBoundSource::Placeholder(first_placeholder_id)),
             )
@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn test_query_agg_non_existence_for_index_tree_leaf_node() {
         // Generate the random operations.
-        let mut ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+        let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
         test_non_existence_inter_circuit(false, false, false, ops);
     }
@@ -741,7 +741,7 @@ mod tests {
     #[test]
     fn test_query_agg_non_existence_for_row_tree_full_node() {
         // Generate the random operations.
-        let mut ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
+        let ops: [_; MAX_NUM_RESULTS] = random_aggregation_operations();
 
         test_non_existence_inter_circuit(true, true, true, ops);
     }
