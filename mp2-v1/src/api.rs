@@ -210,7 +210,7 @@ pub enum SlotInputs {
     MappingWithLength(Vec<SlotInput>, u8),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct SlotInput {
     /// Slot information of the variable
     pub(crate) slot: u8,

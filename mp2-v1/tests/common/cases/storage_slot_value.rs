@@ -3,19 +3,23 @@
 use crate::common::bindings::simple::Simple::{simpleStructReturn, structMappingReturn};
 use alloy::primitives::{Address, U256};
 use itertools::Itertools;
+use log::warn;
 use mp2_common::{
     eth::{StorageSlot, StorageSlotNode},
     types::MAPPING_LEAF_VALUE_LEN,
 };
 use mp2_v1::api::SlotInput;
 use rand::{thread_rng, Rng};
-use std::array;
+use std::{array, os::unix::thread};
 
 /// Abstract for the value saved in the storage slot.
 /// It could be a single value as Uint256 or a Struct.
 pub trait StorageSlotValue: Clone {
     /// Generate a random value for testing.
     fn sample() -> Self;
+
+    /// Update the slot input specified field to a random value.
+    fn random_update(&mut self, slot_input_to_update: &SlotInput);
 
     /// Convert from an Uint256 vector.
     fn from_u256_slice(u: &[U256]) -> Self;
@@ -30,6 +34,16 @@ pub trait StorageSlotValue: Clone {
 impl StorageSlotValue for Address {
     fn sample() -> Self {
         Address::random()
+    }
+    fn random_update(&mut self, _: &SlotInput) {
+        loop {
+            let new_addr = Self::sample();
+            if &new_addr != self {
+                *self = new_addr;
+                break;
+            }
+            warn!("Generated the same address");
+        }
     }
     fn from_u256_slice(u: &[U256]) -> Self {
         assert_eq!(u.len(), 1, "Must convert from one U256");
@@ -64,6 +78,23 @@ impl StorageSlotValue for LargeStruct {
             field1,
             field2,
             field3,
+        }
+    }
+    fn random_update(&mut self, slot_input_to_update: &SlotInput) {
+        let field_index = LargeStruct::slot_inputs(slot_input_to_update.slot())
+            .iter()
+            .position(|slot_input| slot_input == slot_input_to_update)
+            .unwrap();
+        let rng = &mut thread_rng();
+        let diff = rng.gen_range(1..100);
+        if field_index == 0 {
+            self.field1 += U256::from(diff);
+        } else if field_index == 1 {
+            self.field2 += diff;
+        } else if field_index == 2 {
+            self.field3 += diff;
+        } else {
+            panic!("Wrong Struct field index");
         }
     }
     fn from_u256_slice(u: &[U256]) -> Self {

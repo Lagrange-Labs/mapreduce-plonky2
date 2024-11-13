@@ -833,20 +833,8 @@ impl SingleExtractionArgs {
                             if slot == SINGLE_STRUCT_SLOT as u8 {
                                 let mut current_struct =
                                     LargeStruct::current_values(ctx, contract).await;
-                                let field_index =
-                                    LargeStruct::slot_inputs(SINGLE_STRUCT_SLOT as u8)
-                                        .iter()
-                                        .position(|slot_input| slot_input == &index_slot_input)
-                                        .unwrap();
-                                if field_index == 0 {
-                                    current_struct.field1 += U256::from(1);
-                                } else if field_index == 1 {
-                                    current_struct.field2 += 1;
-                                } else if field_index == 2 {
-                                    current_struct.field3 += 1;
-                                } else {
-                                    panic!("Wrong Struct field index");
-                                }
+                                // We only update the secondary index value here.
+                                current_struct.random_update(&index_slot_input);
                                 current_struct.update_contract(ctx, contract).await;
                             } else {
                                 let mut current_values =
@@ -974,11 +962,10 @@ where
         let current_value = self.query_value(ctx, contract, current_key.clone()).await;
         let current_key = U256::from_be_slice(&current_key);
         let new_key = next_mapping_key();
-        let new_value = V::sample();
         let updates = match c {
             ChangeType::Silent => vec![],
             ChangeType::Insertion => {
-                vec![MappingUpdate::Insertion(new_key, new_value)]
+                vec![MappingUpdate::Insertion(new_key, V::sample())]
             }
             ChangeType::Deletion => {
                 vec![MappingUpdate::Deletion(current_key, current_value)]
@@ -986,6 +973,7 @@ where
             ChangeType::Update(u) => {
                 match u {
                     UpdateType::Rest => {
+                        let new_value = V::sample();
                         match self.index {
                             MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => {
                                 // we simply change the mapping value since the key is the secondary index
@@ -1019,7 +1007,22 @@ where
                                     MappingUpdate::Insertion(new_key, current_value),
                                 ]
                             }
-                            MappingIndex::Value(_) => {
+                            MappingIndex::Value(secondary_value_id) => {
+                                // We only update the second index value here.
+                                let slot_input_to_update = self
+                                    .slot_inputs
+                                    .iter()
+                                    .find(|slot_input| {
+                                        identifier_for_value_column(
+                                            slot_input,
+                                            &contract.address,
+                                            contract.chain_id,
+                                            vec![],
+                                        ) == secondary_value_id
+                                    })
+                                    .unwrap();
+                                let mut new_value = current_value.clone();
+                                new_value.random_update(slot_input_to_update);
                                 // if the value changes, it's a simple update in mapping
                                 vec![MappingUpdate::Update(current_key, current_value, new_value)]
                             }

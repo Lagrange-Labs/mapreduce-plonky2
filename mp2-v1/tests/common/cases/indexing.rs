@@ -17,7 +17,6 @@ use mp2_v1::{
         gadgets::column_info::ColumnInfo, identifier_block_column, identifier_for_value_column,
     },
 };
-use plonky2::field::types::PrimeField64;
 use rand::{thread_rng, Rng};
 use ryhope::storage::RoEpochKvStorage;
 
@@ -422,8 +421,8 @@ impl TableIndexing {
             })
             .collect_vec();
         // Switch the test index.
-        // let mapping_index = MappingIndex::Value(value_ids(1));
-        let mapping_index = MappingIndex::OuterKey(key_id);
+        // let mapping_index = MappingIndex::OuterKey(key_id);
+        let mapping_index = MappingIndex::Value(value_ids[1]);
         let args = MappingExtractionArgs::new(
             MAPPING_STRUCT_SLOT as u8,
             mapping_index.clone(),
@@ -791,7 +790,7 @@ async fn build_mapping_table(
                 index: IndexType::None,
                 multiplier: false,
                 // The slot input is useless for the key column.
-                info: ColumnInfo::new_from_slot_input(key_id, &slot_inputs[0]),
+                info: ColumnInfo::new_from_slot_input(key_id, &Default::default()),
             });
 
             (secondary_column, rest_columns)
