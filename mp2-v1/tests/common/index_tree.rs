@@ -44,8 +44,8 @@ impl TestContext {
     ) -> IndexProofIdentifier<BlockPrimaryIndex> {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(wk)) = workplan.next() {
-            let k = &wk.k;
-            let (context, node) = t.fetch_with_context(&k).await;
+            let k = wk.k();
+            let (context, node) = t.fetch_with_context(k).await;
             let row_proof_key = RowProofIdentifier {
                 table: table_id.clone(),
                 tree_key: node.row_tree_root_key,
@@ -163,7 +163,7 @@ impl TestContext {
                 // here we are simply proving the new updated nodes from the new node to
                 // the root. We fetch the same node but at the previous version of the
                 // tree to prove the update.
-                let previous_node = t.fetch_at(&k, t.current_epoch() - 1).await;
+                let previous_node = t.fetch_at(k, t.current_epoch() - 1).await;
                 let left_key = context.left.expect("should always be a left child");
                 let left_node = t.fetch(&left_key).await;
                 // this should be one of the nodes we just proved in this loop before
@@ -194,7 +194,7 @@ impl TestContext {
             };
             let proof_key = IndexProofIdentifier {
                 table: table_id.clone(),
-                tree_key: k.clone(),
+                tree_key: *k,
             };
             self.storage
                 .store_proof(ProofKey::Index(proof_key), proof)

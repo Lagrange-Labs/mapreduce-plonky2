@@ -40,7 +40,9 @@ impl LengthedCircuit {
         value_pi: &[Target],
         length_pi: &[Target],
     ) -> LengthedWires {
-        let base_wires = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, value_pi);
+        // Right now for length circuit we don't support MERGE, we only give a single table. Need
+        // to create other circuit to handle different table with length.
+        let base_wires = base_circuit::BaseCircuit::build(b, block_pi, contract_pi, vec![value_pi]);
         let value_pi = values_extraction::PublicInputs::<Target>::new(value_pi);
         let dv = value_pi.values_digest_target().to_targets();
 
@@ -59,13 +61,17 @@ impl LengthedCircuit {
         len_pi
             .root_hash()
             .enforce_equal(b, &value_pi.root_hash_target());
+        // 0 because there is only one value proof to verify
         let final_dm = b.curve_add(base_wires.dm, len_pi.metadata_digest());
         PublicInputs::new(
             &base_wires.bh,
             &base_wires.prev_bh,
+            // here the value digest is the same since for length proof, it is assumed the table
+            // digest is in Compound format (i.e. multiple rows inside digest already).
             &dv,
             &final_dm.to_targets(),
             &base_wires.bn.to_targets(),
+            &[b._false().target],
         )
         .register_args(b);
         LengthedWires {}
@@ -116,7 +122,9 @@ impl CircuitLogicWires<F, D, 0> for LengthedRecursiveWires {
         _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let base = BaseCircuitProofInputs::build(builder, &builder_parameters);
+        // there is only one value proof to verify for length circuit, see "merge" circuit for more
+        // info if one wants to final extract on multiple tables.
+        let base = BaseCircuitProofInputs::build(builder, &builder_parameters, 1);
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<_, _, D, LENGTH_SET_NUM_IO>::new(
             default_config(),
             &builder_parameters.length_circuit_set,
@@ -152,6 +160,7 @@ mod test {
 
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
+    use mp2_common::digest::TableDimension;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::witness::WitnessWrite;
 
@@ -201,11 +210,11 @@ mod test {
         let test_circuit = TestLengthedCircuit {
             pis: pis.clone(),
             circuit: LengthedCircuit {},
-            len_pi: len_pi,
+            len_pi,
         };
         let len_pi = length_extraction::PublicInputs::<F>::from_slice(&test_circuit.len_pi);
         let len_dm = len_pi.metadata_point();
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        pis.check_proof_public_inputs(&proof, true, Some(len_dm));
+        pis.check_proof_public_inputs(&proof, TableDimension::Compound, Some(len_dm));
     }
 }

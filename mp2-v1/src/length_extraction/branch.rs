@@ -176,7 +176,6 @@ pub mod tests {
         }
         let length = GFp::from_canonical_u32(value);
         let dm = compute_metadata_digest(length_slot, variable_slot).to_weierstrass();
-        let is_inf = GFp::from_bool(dm.is_inf);
 
         // compute the public inputs for the first iteration
 
@@ -201,7 +200,7 @@ pub mod tests {
             let proof_pi = PublicInputs::<GFp>::from_slice(&branch_proof.public_inputs);
 
             branch_pi = proof_pi.to_vec();
-            let root: Vec<_> = keccak256(&node).pack(Endianness::Little).to_fields();
+            let root: Vec<_> = keccak256(node).pack(Endianness::Little).to_fields();
 
             assert_eq!(proof_pi.length(), &length);
             assert_eq!(proof_pi.root_hash_raw(), &root);
@@ -223,7 +222,7 @@ pub mod tests {
         pub pi: &'a [GFp],
     }
 
-    impl<'a> UserCircuit<GFp, D> for BranchTestCircuit<'a> {
+    impl UserCircuit<GFp, D> for BranchTestCircuit<'_> {
         type Wires = BranchTestWires;
 
         fn build(cb: &mut CBuilder) -> Self::Wires {

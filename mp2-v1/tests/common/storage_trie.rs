@@ -154,7 +154,7 @@ impl TrieNode {
     /// Prove a branch node.
     fn prove_value_branch(&self, ctx: ProvingContext) -> SerializedProof {
         // Has one child at least and 16 at maximum.
-        assert!(self.children.len() > 0);
+        assert!(!self.children.is_empty());
         assert!(self.children.len() <= MAX_BRANCH_CHILDREN);
 
         let node = self.raw.clone();
@@ -322,7 +322,7 @@ impl TrieNode {
     /// Prove a branch node.
     fn prove_length_branch(&self, ctx: ProvingContext) -> SerializedProof {
         // Has one child at least and 16 at maximum.
-        assert!(self.children.len() > 0);
+        assert!(!self.children.is_empty());
         assert!(self.children.len() <= MAX_BRANCH_CHILDREN);
 
         let node = self.raw.clone();
@@ -345,7 +345,7 @@ impl TrieNode {
     /// Prove an extension node.
     fn prove_length_extension(&self, ctx: ProvingContext) -> SerializedProof {
         // Has one child at least and 16 at maximum.
-        assert!(self.children.len() > 0);
+        assert!(!self.children.is_empty());
         assert!(self.children.len() <= MAX_BRANCH_CHILDREN);
 
         let node = self.raw.clone();
@@ -418,14 +418,13 @@ impl TestStorageTrie {
         &mut self,
         ctx: &TestContext,
         contract_address: &Address,
+        bn: BlockNumberOrTag,
         slot: usize,
     ) {
         log::debug!("Querying the simple slot `{slot:?}` of the contract `{contract_address}` from the test context's RPC");
 
         let query = ProofQuery::new_simple_slot(*contract_address, slot);
-        let response = ctx
-            .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
-            .await;
+        let response = ctx.query_mpt_proof(&query, bn).await;
 
         // Get the nodes to prove. Reverse to the sequence from leaf to root.
         let nodes: Vec<_> = response.storage_proof[0]

@@ -123,7 +123,7 @@ mod tests {
         exp_pi: PublicInputs<'a, F>,
     }
 
-    impl<'a> UserCircuit<F, D> for TestExtensionNodeCircuit<'a> {
+    impl UserCircuit<F, D> for TestExtensionNodeCircuit<'_> {
         // Extension node wires + child public inputs
         type Wires = (ExtensionNodeWires, Vec<Target>);
 

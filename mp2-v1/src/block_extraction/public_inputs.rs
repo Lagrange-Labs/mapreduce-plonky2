@@ -30,7 +30,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) sh: &'a [T],
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] = &[BH_RANGE, PREV_BH_RANGE, BN_RANGE, SH_RANGE];
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -74,7 +74,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 }
 
-impl<'a, T: Clone> PublicInputs<'a, T> {
+impl<T: Clone> PublicInputs<'_, T> {
     /// Creates a vector from the parts of the public inputs
     pub fn to_vec(&self) -> Vec<T> {
         self.bh

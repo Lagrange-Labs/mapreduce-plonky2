@@ -34,7 +34,7 @@ impl SecondaryIndexBounds {
 
     /// Generate a list of index and operator pattern to detect for a
     /// [`SecondaryIndexBounds`] instance.
-    fn to_kinds(&self) -> &[(ColumnKind, RelevantFor)] {
+    fn kinds(&self) -> &[(ColumnKind, RelevantFor)] {
         match self {
             SecondaryIndexBounds::BothSides => &[
                 (ColumnKind::PrimaryIndex, RelevantFor::Either),
@@ -86,10 +86,10 @@ impl<'a, C: ContextProvider> Isolator<'a, C> {
     }
 
     /// Return whether the given `Symbol` encodes the secondary index column.
-    fn is_symbol_idx(&self, s: &Symbol<Expr>, idx: ColumnKind) -> bool {
+    fn is_symbol_idx(s: &Symbol<Expr>, idx: ColumnKind) -> bool {
         match s {
             Symbol::Column { kind, .. } => *kind == idx,
-            Symbol::Alias { to, .. } => self.is_symbol_idx(to, idx),
+            Symbol::Alias { to, .. } => Self::is_symbol_idx(to, idx),
             _ => false,
         }
     }
@@ -122,9 +122,9 @@ impl<'a, C: ContextProvider> Isolator<'a, C> {
         }
 
         Ok(match expr {
-            Expr::Identifier(s) => self.is_symbol_idx(&self.scopes.resolve_freestanding(s)?, idx),
+            Expr::Identifier(s) => Self::is_symbol_idx(&self.scopes.resolve_freestanding(s)?, idx),
             Expr::CompoundIdentifier(c) => {
-                self.is_symbol_idx(&self.scopes.resolve_compound(c)?, idx)
+                Self::is_symbol_idx(&self.scopes.resolve_compound(c)?, idx)
             }
             Expr::UnaryOp { expr, .. } => self.contains_index(expr, idx, side)?,
             Expr::BinaryOp { left, right, op } => {
@@ -140,7 +140,7 @@ impl<'a, C: ContextProvider> Isolator<'a, C> {
     /// expression is relevant to index bounds or if it should be pruned.
     fn should_keep(&self, expr: &Expr) -> Result<bool> {
         let mut keep = false;
-        for (idx, side) in self.isolation.to_kinds() {
+        for (idx, side) in self.isolation.kinds() {
             keep |= self.contains_index(expr, *idx, *side)?;
         }
         Ok(keep)
@@ -154,30 +154,29 @@ impl<'a, C: ContextProvider> Isolator<'a, C> {
                 self.isolate(e)?;
                 None
             }
-            Expr::BinaryOp { left, right, op } => {
-                match op {
-                    BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor => {
-                        match (self.should_keep(&left)?, self.should_keep(&right)?) {
-                            (true, true) => {
-                                self.isolate(left)?;
-                                self.isolate(right)?;
-                                None
-                            }
-                            (true, false) => {
-                                self.isolate(left)?;
-                                Some(*left.to_owned())
-                            }
-                            (false, true) => {
-                                self.isolate(right)?;
-                                Some(*right.to_owned())
-                            }
-                            // NOTE: this cannot be reached, as then the expr
-                            // would never have been explored in the first
-                            // place.
-                            (false, false) => unreachable!(),
-                        }
+            Expr::BinaryOp {
+                left,
+                right,
+                op: BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor,
+            } => {
+                match (self.should_keep(left)?, self.should_keep(right)?) {
+                    (true, true) => {
+                        self.isolate(left)?;
+                        self.isolate(right)?;
+                        None
                     }
-                    _ => None,
+                    (true, false) => {
+                        self.isolate(left)?;
+                        Some(*left.to_owned())
+                    }
+                    (false, true) => {
+                        self.isolate(right)?;
+                        Some(*right.to_owned())
+                    }
+                    // NOTE: this cannot be reached, as then the expr
+                    // would never have been explored in the first
+                    // place.
+                    (false, false) => unreachable!(),
                 }
             }
             Expr::UnaryOp { expr, .. } => {
@@ -204,7 +203,7 @@ impl<'a, C: ContextProvider> Isolator<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstMutator for Isolator<'a, C> {
+impl<C: ContextProvider> AstMutator for Isolator<'_, C> {
     type Error = anyhow::Error;
 
     fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
@@ -234,7 +233,7 @@ impl<'a, C: ContextProvider> AstMutator for Isolator<'a, C> {
                     let table_columns = self
                         .settings
                         .context
-                        .fetch_table(&concrete_table_name)?
+                        .fetch_table(concrete_table_name)?
                         .columns;
 
                     // Extract the apparent table name (either the concrete one
@@ -368,12 +367,6 @@ impl<'a, C: ContextProvider> AstMutator for Isolator<'a, C> {
             SelectItem::QualifiedWildcard(_, _) => unreachable!(),
         };
         self.scopes.current_scope_mut().provides(provided);
-        Ok(())
-    }
-
-    fn pre_query(&mut self, query: &mut Query) -> Result<()> {
-        query.limit = None; // Remove any LIMIT specifier
-        query.offset = None; // Remove any OFFSET specifier
         Ok(())
     }
 }

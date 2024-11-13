@@ -29,8 +29,8 @@
 //!
 //! Therefore determining the parent of a node of general value x is achieved by:
 //!   1. determine the layer i to which x belongs, which is the smaller power of
-//!   2 to which x is congruent, i.e. the number of trailing zeros in its binary
-//!   representation;
+//!      2 to which x is congruent, i.e. the number of trailing zeros in its binary
+//!      representation;
 //!   2. determine x rank n in the layer l^i, which is equal to (x - 2^i)/2^(i+1);
 //!   3. if n is even then x parent is n + 2^i, or n - 2^i if n is odd.
 //!
@@ -122,7 +122,7 @@ impl State {
             if inner_idx <= inner_max {
                 if let Some(lineage) = self.lineage_inner(&inner_idx) {
                     for n in lineage.into_full_path() {
-                        if n < inner_max {
+                        if n <= inner_max {
                             ascendance.insert(self.outer_idx(n));
                         }
                     }
@@ -168,23 +168,11 @@ impl State {
 
     pub fn node_context(&self, k: &NodeIdx) -> Option<NodeContext<NodeIdx>> {
         if let Some(inner) = self.node_context_inner(&self.inner_idx(*k)) {
-            let parent_outer = if let Some(parent) = inner.parent {
-                Some(self.outer_idx(parent))
-            } else {
-                None
-            };
+            let parent_outer = inner.parent.map(|parent| self.outer_idx(parent));
 
-            let left_outer = if let Some(left) = inner.left {
-                Some(self.outer_idx(left))
-            } else {
-                None
-            };
+            let left_outer = inner.left.map(|left| self.outer_idx(left));
+            let right_outer = inner.right.map(|right| self.outer_idx(right));
 
-            let right_outer = if let Some(right) = inner.right {
-                Some(self.outer_idx(right))
-            } else {
-                None
-            };
             Some(NodeContext {
                 node_id: self.outer_idx(inner.node_id),
                 parent: parent_outer,
@@ -198,25 +186,10 @@ impl State {
 
     pub fn children(&self, n: &NodeIdx) -> Option<(Option<NodeIdx>, Option<NodeIdx>)> {
         if let Some((l, r)) = self.children_inner(&self.inner_idx(*n)) {
-            let l_option = if let Some(l) = l {
-                Some(self.outer_idx(l))
-            } else {
-                None
-            };
-            let r_option = if let Some(r) = r {
-                Some(self.outer_idx(r))
-            } else {
-                None
-            };
-            Some((l_option, r_option))
+            Some((l.map(|l| self.outer_idx(l)), r.map(|r| self.outer_idx(r))))
         } else {
             None
         }
-    }
-
-    /// Return the largest value currently stored in the tree
-    fn outer_max(&self) -> NodeIdx {
-        self.outer_idx(self.inner_max())
     }
 
     fn inner_max(&self) -> InnerIdx {
@@ -496,7 +469,9 @@ impl MutableTree for Tree {
 }
 
 impl PrintableTree for Tree {
-    async fn print<S: TreeStorage<Tree>>(&self, s: &S) {
+    async fn tree_to_string<S: TreeStorage<Tree>>(&self, s: &S) -> String {
+        let mut r = String::new();
+
         let state = s.state().fetch().await;
         let max_layer = state.inner_root().0.trailing_zeros();
         for layer in (0..max_layer).rev() {
@@ -505,10 +480,17 @@ impl PrintableTree for Tree {
                 let maybe_left = rank * (1 << (layer + 1)) + (1 << layer);
                 if maybe_left <= state.inner_max().0 {
                     let n = InnerIdx(maybe_left);
-                    print!("{}{}", state.outer_idx(n), spacing);
+                    r.push_str(&format!("{}{}", state.outer_idx(n), spacing))
                 }
             }
-            println!()
+            r.push('\n');
         }
+
+        r
+    }
+
+    // TODO: Leave the warning for `k`, since we will implement it later.
+    async fn subtree_to_string<S: TreeStorage<Self>>(&self, s: &S, _k: &Self::Key) -> String {
+        self.tree_to_string(s).await
     }
 }

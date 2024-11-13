@@ -568,12 +568,12 @@ where
     ) -> T {
         // Only use random_access when SIZE is a power of 2 and smaller than 64
         // see https://stackoverflow.com/a/600306/1202623 for the trick
-        if SIZE < RANDOM_ACCESS_SIZE && (SIZE & (SIZE - 1) == 0) {
+        if SIZE < RANDOM_ACCESS_SIZE && SIZE.is_power_of_two() {
             // Escape hatch when we can use random_access from plonky2 base
-            return T::from_target(b.random_access(
+            T::from_target(b.random_access(
                 at,
                 self.arr.iter().map(|v| v.to_target()).collect::<Vec<_>>(),
-            ));
+            ))
         } else {
             self.value_at_failover(b, at)
         }
@@ -1088,7 +1088,7 @@ mod test {
         };
         run_circuit::<F, D, C, _>(circuit);
 
-        arr2[0] = arr2[0] + 1; // ensure arr2 is different from arr
+        arr2[0] += 1; // ensure arr2 is different from arr
         let res = panic::catch_unwind(|| {
             let circuit = TestSliceEqual {
                 arr,
@@ -1133,7 +1133,7 @@ mod test {
             let inp = [77, 66, 55];
             let exp = [00, 77, 66, 55];
             run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> {
-                input: Vector::from_vec(&inp.to_vec()).unwrap(),
+                input: Vector::from_vec(&inp).unwrap(),
                 exp,
             });
         }
@@ -1143,7 +1143,7 @@ mod test {
             let inp = [33];
             let exp = [00, 00, 00, 33];
             run_circuit::<F, D, C, _>(TestNormalizeLeft::<VLEN, PAD> {
-                input: Vector::from_vec(&inp.to_vec()).unwrap(),
+                input: Vector::from_vec(&inp).unwrap(),
                 exp,
             });
         }

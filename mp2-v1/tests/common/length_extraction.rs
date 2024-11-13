@@ -1,4 +1,4 @@
-use alloy::primitives::Address;
+use alloy::{eips::BlockNumberOrTag, primitives::Address};
 use log::info;
 use mp2_common::{
     eth::StorageSlot, mpt_sequential::utils::bytes_to_nibbles, proof::ProofWithVK, types::GFp,
@@ -12,9 +12,11 @@ use super::TestContext;
 
 impl TestContext {
     /// Generate the Values Extraction (C.2) proof for single variables.
+    #[allow(dead_code)]
     pub(crate) async fn prove_length_extraction(
         &self,
         contract_address: &Address,
+        bn: BlockNumberOrTag,
         chain_id: u64,
         slot: u8,
         value: u8,
@@ -24,9 +26,9 @@ impl TestContext {
         info!("Initialized the test storage trie");
 
         // Query the slot and add the node path to the trie.
-        trie.query_proof_and_add_slot(self, contract_address, slot as usize)
+        trie.query_proof_and_add_slot(self, contract_address, bn, slot as usize)
             .await;
-        let proof = trie.prove_length(&contract_address, chain_id, value, &self.params(), &self.b);
+        let proof = trie.prove_length(contract_address, chain_id, value, self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::from_slice(&proof.proof().public_inputs);

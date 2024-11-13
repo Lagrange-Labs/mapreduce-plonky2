@@ -1,15 +1,17 @@
 use aggregated_queries::{
     cook_query_between_blocks, cook_query_no_matching_entries,
     cook_query_non_matching_entries_some_blocks, cook_query_partial_block_range,
-    cook_query_secondary_index_placeholder, cook_query_unique_secondary_index,
-    prove_query as prove_aggregation_query,
+    cook_query_secondary_index_nonexisting_placeholder, cook_query_secondary_index_placeholder,
+    cook_query_unique_secondary_index, prove_query as prove_aggregation_query,
 };
 use alloy::primitives::U256;
 use anyhow::{Context, Result};
 use itertools::Itertools;
 use log::info;
-use mp2_v1::{api::MetadataHash, indexing::block::BlockPrimaryIndex};
-use parsil::{parse_and_validate, ParsilSettings, PlaceholderSettings};
+use mp2_v1::{
+    api::MetadataHash, indexing::block::BlockPrimaryIndex, query::planner::execute_row_query,
+};
+use parsil::{parse_and_validate, utils::ParsilSettingsBuilder, PlaceholderSettings};
 use simple_select_queries::{
     cook_query_no_matching_rows, cook_query_too_big_offset, cook_query_with_distinct,
     cook_query_with_matching_rows, cook_query_with_max_num_matching_rows,
@@ -23,7 +25,7 @@ use verifiable_db::query::{
 
 use crate::common::{cases::planner::QueryPlanner, table::Table, TableInfo, TestContext};
 
-use super::TableSourceSlot;
+use super::table_source::TableSource;
 
 pub mod aggregated_queries;
 pub mod simple_select_queries;
@@ -72,55 +74,65 @@ pub struct QueryCooking {
     pub(crate) placeholders: Placeholders,
     pub(crate) min_block: BlockPrimaryIndex,
     pub(crate) max_block: BlockPrimaryIndex,
-    pub(crate) limit: Option<u64>,
-    pub(crate) offset: Option<u64>,
+    pub(crate) limit: Option<u32>,
+    pub(crate) offset: Option<u32>,
 }
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
     match &t.source {
-        TableSourceSlot::Mapping(_) => query_mapping(ctx, &table, t.metadata_hash()).await?,
+        TableSource::Mapping(_) | TableSource::Merge(_) => query_mapping(ctx, &table, &t).await?,
         _ => unimplemented!("yet"),
     }
     Ok(())
 }
 
-async fn query_mapping(
-    ctx: &mut TestContext,
-    table: &Table,
-    table_hash: MetadataHash,
-) -> Result<()> {
-    let query_info = cook_query_between_blocks(table).await?;
+async fn query_mapping(ctx: &mut TestContext, table: &Table, info: &TableInfo) -> Result<()> {
+    let table_hash = info.metadata_hash();
+    let query_info = cook_query_between_blocks(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
-    let query_info = cook_query_unique_secondary_index(table).await?;
+    let query_info = cook_query_unique_secondary_index(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     //// cook query with custom placeholders
-    let query_info = cook_query_secondary_index_placeholder(table).await?;
+    let query_info = cook_query_secondary_index_placeholder(table, info).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // cook query with a non-existing value for secondary index
+    let query_info = cook_query_secondary_index_nonexisting_placeholder(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query filtering over a secondary index value not valid in all the blocks
-    let query_info = cook_query_non_matching_entries_some_blocks(table).await?;
+    let query_info = cook_query_non_matching_entries_some_blocks(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with no valid blocks
-    let query_info = cook_query_no_matching_entries(table).await?;
+    let query_info = cook_query_no_matching_entries(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query with block query range partially overlapping with blocks in the DB
-    let query_info = cook_query_partial_block_range(table).await?;
+    let query_info = cook_query_partial_block_range(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook simple no aggregation query with matching rows
-    let query_info = cook_query_with_matching_rows(table).await?;
+    let query_info = cook_query_with_matching_rows(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook simple no aggregation query with maximum number of matching rows
-    let query_info = cook_query_with_max_num_matching_rows(table).await?;
+    let query_info = cook_query_with_max_num_matching_rows(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
-    let query_info = cook_query_no_matching_rows(table).await?;
+    let query_info = cook_query_no_matching_rows(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
-    let query_info = cook_query_too_big_offset(table).await?;
+    let query_info = cook_query_too_big_offset(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
-    let query_info = cook_query_with_wildcard_no_distinct(table).await?;
+    let query_info = cook_query_with_distinct(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
-    let query_info = cook_query_with_distinct(table).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await?;
-    let query_info = cook_query_with_wildcard_and_distinct(table).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // test queries with wilcards only if the number of columns of the table
+    // doesn't make the number of items returned for each row bigger than
+    // the maximum allowed value (i.e, MAX_NUM_ITEMS_PER_OUTPUT), as
+    // otherwise query validation on Parsil will fail
+    let num_output_items_wildcard_queries = info.columns.non_indexed_columns().len()
+    + 2 // primary and secondary indexed columns
+    + 1 // there is an additional item besides columns of the tables in SELECT
+    ;
+    if num_output_items_wildcard_queries <= MAX_NUM_ITEMS_PER_OUTPUT {
+        let query_info = cook_query_with_wildcard_no_distinct(table, info).await?;
+        test_query_mapping(ctx, table, query_info, &table_hash).await?;
+        let query_info = cook_query_with_wildcard_and_distinct(table, info).await?;
+        test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    }
     Ok(())
 }
 
@@ -131,10 +143,15 @@ async fn test_query_mapping(
     query_info: QueryCooking,
     table_hash: &MetadataHash,
 ) -> Result<()> {
-    let settings = ParsilSettings {
-        context: table,
-        placeholders: PlaceholderSettings::with_freestanding(MAX_NUM_PLACEHOLDERS - 2),
-    };
+    let settings = ParsilSettingsBuilder::default()
+        .context(table)
+        .placeholders(PlaceholderSettings::with_freestanding(
+            MAX_NUM_PLACEHOLDERS - 2,
+        ))
+        .maybe_limit(query_info.limit)
+        .maybe_offset(query_info.offset)
+        .build()
+        .unwrap();
 
     info!("QUERY on the testcase: {}", query_info.query);
     let mut parsed = parse_and_validate(&query_info.query, &settings)?;
@@ -147,14 +164,14 @@ async fn test_query_mapping(
     // the query to use to actually get the outputs expected
     let mut exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
     let query_params = exec_query.convert_placeholders(&query_info.placeholders);
-    let res = table
-        .execute_row_query(
-            &exec_query
-                .normalize_placeholder_names()
-                .to_pgsql_string_with_placeholder(),
-            &query_params,
-        )
-        .await?;
+    let res = execute_row_query(
+        &table.db_pool,
+        &exec_query
+            .normalize_placeholder_names()
+            .to_pgsql_string_with_placeholder(),
+        &query_params,
+    )
+    .await?;
     let res = if is_empty_result(&res, SqlType::Numeric) {
         vec![] // empty results, but Postgres still return 1 row
     } else {

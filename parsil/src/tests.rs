@@ -1,5 +1,6 @@
 use crate::assembler::{assemble_dynamic, DynamicCircuitPis};
 use crate::isolator;
+use crate::utils::ParsilSettingsBuilder;
 use crate::{
     symbols::FileContextProvider,
     utils::{parse_and_validate, ParsilSettings, PlaceholderSettings},
@@ -35,6 +36,8 @@ fn must_accept() -> Result<()> {
     let settings = ParsilSettings {
         context: TestFileContextProvider::from_file("tests/context.json")?,
         placeholders: PlaceholderSettings::with_freestanding(3),
+        limit: None,
+        offset: None,
     };
 
     for q in [
@@ -53,7 +56,6 @@ fn must_accept() -> Result<()> {
         "SELECT foo FROM table2 WHERE block IN (1, 2, 4)",
         "SELECT bar FROM table2 WHERE NOT block BETWEEN 12 AND 15",
         "SELECT a, c FROM table2 AS tt (a, b, c)",
-        "SELECT a+b FROM table2 AS tt (a, b, c) LIMIT 1+2",
     ] {
         parse_and_validate(q, &settings)?;
     }
@@ -62,10 +64,11 @@ fn must_accept() -> Result<()> {
 
 #[test]
 fn must_reject() {
-    let settings = ParsilSettings {
-        context: TestFileContextProvider::from_file("tests/context.json").unwrap(),
-        placeholders: PlaceholderSettings::with_freestanding(3),
-    };
+    let settings = ParsilSettingsBuilder::default()
+        .context(TestFileContextProvider::from_file("tests/context.json").unwrap())
+        .placeholders(PlaceholderSettings::with_freestanding(3))
+        .build()
+        .unwrap();
 
     for q in [
         // No ORDER BY
@@ -105,10 +108,12 @@ fn must_reject() {
         "SELECT a FROM table2 AS tt (a,b,c) WHERE c+b-c*(a+c)-75 < 42*(a-b*c+a*(b-c)) AND a*56 >= b+63 OR a < b AND (a-b)*(a+b) >= a*c+b-4",
         // Too many operations in SELECT
         "SELECT c+b-c*(a+c)-75 + 42*(a-b*c+a*(b-c)), a*56 >= b+63, a < b, (a-b)*(a+b) >= a*c+b-4 FROM table2 as tt (a,b,c)",
-        // Too high LIMIT
+        // LIMIT
         "SELECT a+b FROM t LIMIT 10",
-        // Invalid LIMIT value
         "SELECT b*c FROM t LIMIT a",
+        // OFFSET
+        "SELECT a+b FROM t OFFSET 10",
+        "SELECT b*c FROM t OFFSET $1",
     ] {
         assert!(dbg!(parse_and_validate(q, &settings)).is_err())
     }
@@ -116,22 +121,24 @@ fn must_reject() {
 
 #[test]
 fn ref_query() -> Result<()> {
-    let settings = ParsilSettings {
-        context: TestFileContextProvider::from_file("tests/context.json")?,
-        placeholders: PlaceholderSettings::with_freestanding(2),
-    };
+    let settings = ParsilSettingsBuilder::default()
+        .context(TestFileContextProvider::from_file("tests/context.json").unwrap())
+        .placeholders(PlaceholderSettings::with_freestanding(2))
+        .build()
+        .unwrap();
 
     let q = "SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99";
-    let query = parse_and_validate(q, &settings)?;
+    let _query = parse_and_validate(q, &settings)?;
     Ok(())
 }
 
 #[test]
 fn test_serde_circuit_pis() {
-    let settings = ParsilSettings {
-        context: TestFileContextProvider::from_file("tests/context.json").unwrap(),
-        placeholders: PlaceholderSettings::with_freestanding(3),
-    };
+    let settings = ParsilSettingsBuilder::default()
+        .context(TestFileContextProvider::from_file("tests/context.json").unwrap())
+        .placeholders(PlaceholderSettings::with_freestanding(3))
+        .build()
+        .unwrap();
 
     let q = "SELECT AVG(foo) FROM table2";
     let query = parse_and_validate(q, &settings).unwrap();
@@ -151,10 +158,11 @@ fn test_serde_circuit_pis() {
 #[test]
 fn isolation() {
     fn isolated_to_string(q: &str, lo_sec: bool, hi_sec: bool) -> String {
-        let settings = ParsilSettings {
-            context: TestFileContextProvider::from_file("tests/context.json").unwrap(),
-            placeholders: PlaceholderSettings::with_freestanding(3),
-        };
+        let settings = ParsilSettingsBuilder::default()
+            .context(TestFileContextProvider::from_file("tests/context.json").unwrap())
+            .placeholders(PlaceholderSettings::with_freestanding(3))
+            .build()
+            .unwrap();
 
         let mut query = parse_and_validate(q, &settings).unwrap();
         isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)
@@ -168,7 +176,7 @@ fn isolation() {
             false,
             false
         ),
-        "SELECT * FROM table1 WHERE (block >= 1 AND block <= 5)"
+        format!("SELECT * FROM table1 WHERE (block >= 1 AND block <= 5) LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Drop references to other columns
@@ -178,7 +186,7 @@ fn isolation() {
             false,
             false
         ),
-        "SELECT * FROM table2 WHERE (block >= 1 AND block <= 5)"
+        format!("SELECT * FROM table2 WHERE (block >= 1 AND block <= 5) LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Drop sec. ind. references if it has no kown bounds.
@@ -188,7 +196,7 @@ fn isolation() {
             false,
             false
         ),
-        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK)"
+        format!("SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Drop sec.ind. < [...] if it has a defined higher bound
@@ -198,7 +206,7 @@ fn isolation() {
             true,
             false
         ),
-        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK)"
+        format!("SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Keep sec.ind. < [...] if it has a defined higher bound
@@ -208,7 +216,7 @@ fn isolation() {
             false,
             true
         ),
-        "SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) AND foo < 5"
+        format!("SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) AND foo < 5 LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Nicholas's example
@@ -217,5 +225,6 @@ fn isolation() {
             "SELECT * FROM table2 WHERE block BETWEEN 5 AND 10 AND (foo = 4 OR foo = 15) AND bar = 12",
             false,
             false),
-        "SELECT * FROM table2 WHERE (block >= 5 AND block <= 10)");
+        format!("SELECT * FROM table2 WHERE (block >= 5 AND block <= 10) LIMIT {MAX_NUM_OUTPUTS}")
+    );
 }

@@ -21,13 +21,19 @@ in
   enterShell = ''figlet -f slant "MR2 loaded"'';
 
   # Env. variables
-  env.RUST_BACKTRACE = 1;
-  # Make Go dependencies RW
-  env.GOFLAGS = "-modcacherw";
-  # Required for Rust linking to OpenSSL
-  env.OPENSSL_DEV = pkgs.openssl.dev;
-  env.DB_URL = "host=localhost dbname=storage port=${builtins.toString config.env.PGPORT}";
-  env.RUST_LOG = "debug";
+  env = {
+    # Rust debuggingin
+    RUST_BACKTRACE = 1;
+    RUST_LOG = "debug";
+
+    # Required for Rust linking to OpenSSL
+    OPENSSL_DEV = pkgs.openssl.dev;
+
+    # Make Go dependencies RW
+    GOFLAGS = "-modcacherw";
+
+    DB_URL = "host=localhost dbname=storage port=${builtins.toString config.env.PGPORT}";
+  };
 
   # Use a DB_URL tuned for the dockerized processes.postgres-ci
   enterTest = ''
@@ -49,7 +55,13 @@ in
     }];
   };
 
-  scripts.db.exec = "psql storage -h localhost -p ${builtins.toString config.env.PGPORT}";
+  scripts = {
+    # Open a shell to the DB
+    db.exec = "psql storage -h localhost -p ${builtins.toString config.env.PGPORT}";
+
+    # Wipe out the database
+    reset-db.exec = "rm -rf ${config.env.DEVENV_STATE}/postgres";
+  };
 
   # https://devenv.sh/languages/
   languages.rust = {

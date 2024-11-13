@@ -183,14 +183,13 @@ impl Identifiers {
                         .into_iter()
                         .flat_map(|query_bound| {
                             query_bound
-                                .map(|bound| match bound {
+                                .and_then(|bound| match bound {
                                     QueryBoundSource::Placeholder(id) => Some(vec![id]),
                                     QueryBoundSource::Operation(op) => {
                                         Some(op.extract_placeholder_ids())
                                     }
                                     QueryBoundSource::Constant(_) => None,
                                 })
-                                .flatten()
                                 // If None, return a placeholder that is for sure already in the set
                                 .unwrap_or(vec![PlaceholderIdentifier::MinQueryOnIdx1])
                         }),
@@ -235,7 +234,7 @@ impl<F: RichField> ToField<F> for Identifiers {
     }
 }
 /// Data structure to provide identifiers of columns of a table to compute computational hash
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ColumnIDs {
     pub(crate) primary: F,
     pub(crate) secondary: F,

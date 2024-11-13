@@ -952,10 +952,15 @@ pub(crate) struct CurveOrU256<T>([T; CURVE_TARGET_LEN]);
 
 impl<T: Clone + Debug> CurveOrU256<T> {
     pub(crate) fn from_slice(t: &[T]) -> Self {
-        let mut result = t.to_vec();
-        let diff = (CURVE_TARGET_LEN - result.len()).max(0);
-        result.extend_from_slice(vec![result[0].clone(); diff].as_slice());
-        Self(result.try_into().unwrap())
+        Self(
+            t.into_iter()
+                .cloned()
+                .chain(repeat(t[0].clone()))
+                .take(CURVE_TARGET_LEN)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        )
     }
 
     fn to_u256_raw(&self) -> &[T] {

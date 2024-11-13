@@ -196,8 +196,7 @@ pub(crate) mod tests {
     {
         // Convert the entry count to an Uint256.
         let entry_count = U256::from(query_pi.num_matching_rows().to_canonical_u64());
-        let mut overflow = false;
-
+        
         let [op_avg, op_count] =
             [AggregationOperation::AvgOp, AggregationOperation::CountOp].map(|op| op.to_field());
 
@@ -208,14 +207,7 @@ pub(crate) mod tests {
 
             let op = ops[i];
             if op == op_avg {
-                match value.checked_div(entry_count) {
-                    Some(dividend) => dividend,
-                    None => {
-                        // Set the overflow flag to true if the divisor is zero.
-                        overflow = true;
-                        U256::ZERO
-                    }
-                }
+                value.checked_div(entry_count).unwrap_or(U256::ZERO)
             } else if op == op_count {
                 entry_count
             } else {
@@ -223,6 +215,6 @@ pub(crate) mod tests {
             }
         });
 
-        (result, query_pi.overflow_flag() || overflow)
+        (result, query_pi.overflow_flag())
     }
 }

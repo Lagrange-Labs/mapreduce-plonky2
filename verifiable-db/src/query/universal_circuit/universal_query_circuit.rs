@@ -284,9 +284,9 @@ pub(crate) fn placeholder_hash(
     // a constant or a placeholder. This information is available in `query_bounds`, so we just
     // process it
     let min_query =
-        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary())?;
+        QueryBound::new_secondary_index_bound(placeholders, query_bounds.min_query_secondary())?;
     let max_query =
-        QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary())?;
+        QueryBound::new_secondary_index_bound(placeholders, query_bounds.max_query_secondary())?;
     Ok(QueryBound::add_secondary_query_bounds_to_placeholder_hash(
         &min_query,
         &max_query,
@@ -837,7 +837,7 @@ mod tests {
             params
                 .generate_proof(input)
                 .and_then(|p| ProofWithVK::deserialize(&p))
-                .and_then(|p| Ok(p.proof().clone()))
+                .map(|p| p.proof().clone())
                 .unwrap()
         } else {
             run_circuit::<F, D, C, _>(circuit.clone())
@@ -1219,7 +1219,7 @@ mod tests {
             params
                 .generate_proof(input)
                 .and_then(|p| ProofWithVK::deserialize(&p))
-                .and_then(|p| Ok(p.proof().clone()))
+                .map(|p| p.proof().clone())
                 .unwrap()
         } else {
             run_circuit::<F, D, C, _>(circuit.clone())

@@ -6,9 +6,8 @@ use crate::{
         computational_hash_ids::AggregationOperation,
         public_inputs::PublicInputs as QueryProofPublicInputs,
     },
-    revelation::{placeholders_check::check_placeholders, PublicInputs},
+    revelation::PublicInputs,
 };
-use alloy::primitives::U256;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
@@ -17,18 +16,15 @@ use mp2_common::{
     poseidon::{flatten_poseidon_hash_target, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
-    serialization::{
-        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
-        serialize_long_array,
-    },
+    serialization::{deserialize, serialize},
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    u256::{CircuitBuilderU256, UInt256Target},
     utils::ToTargets,
     C, D, F,
 };
 use plonky2::{
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -45,13 +41,9 @@ use recursion_framework::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::array;
 
 use super::{
-    placeholders_check::{
-        CheckPlaceholderGadget, CheckPlaceholderInputWires, CheckedPlaceholder,
-        CheckedPlaceholderTarget, NUM_SECONDARY_INDEX_PLACEHOLDERS,
-    },
+    placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
     NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
 };
 
@@ -98,8 +90,6 @@ where
         let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
             .map(|op| b.constant(op.to_field()));
 
-        let mut overflow = query_proof.overflow_flag_target().target;
-
         // Convert the entry count to an Uint256.
         let entry_count = query_proof.num_matching_rows_target();
         let entry_count = UInt256Target::new_from_target(b, entry_count);
@@ -124,10 +114,6 @@ where
             b.connect(is_divisor_zero.target, is_entry_count_zero.target);
 
             results.push(result);
-
-            // Accumulate overflow.
-            let is_overflow = b.and(is_op_avg, is_divisor_zero);
-            overflow = b.add(overflow, is_overflow.target);
         });
         results.resize(L * S, u256_zero);
 
@@ -174,8 +160,6 @@ where
             .collect_vec();
         let results_slice = results.iter().flat_map(ToTargets::to_targets).collect_vec();
 
-        let overflow = b.is_not_equal(overflow, zero).target;
-
         let num_results = b.not(is_entry_count_zero);
 
         let flat_computational_hash = flatten_poseidon_hash_target(b, computational_hash);
@@ -190,7 +174,7 @@ where
             // The aggregation query proof only has one result.
             &[num_results.target],
             &[query_proof.num_matching_rows_target()],
-            &[overflow],
+            &[query_proof.overflow_flag_target().target],
             // Query limit
             &[zero],
             // Query offset
@@ -303,6 +287,7 @@ mod tests {
             random_original_tree_proof,
         },
     };
+    use alloy::primitives::U256;
     use mp2_common::{poseidon::flatten_poseidon_hash_value, utils::ToFields, C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{field::types::Field, plonk::config::Hasher};
@@ -337,7 +322,7 @@ mod tests {
         original_tree_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestRevelationWithoutResultsTreeCircuit<'a> {
+    impl UserCircuit<F, D> for TestRevelationWithoutResultsTreeCircuit<'_> {
         // Circuit wires + query proof + original tree proof (IVC proof)
         type Wires = (
             RevelationWithoutResultsTreeWires<L, S, PH, PP>,
@@ -524,7 +509,7 @@ mod tests {
     fn test_revelation_without_results_tree_for_no_op_avg_with_no_entries() {
         // Initialize the all operations to SUM or COUNT (not AVG).
         let mut rng = thread_rng();
-        let ops = array::from_fn(|_| {
+        let ops = std::array::from_fn(|_| {
             [AggregationOperation::SumOp, AggregationOperation::CountOp]
                 .choose(&mut rng)
                 .unwrap()

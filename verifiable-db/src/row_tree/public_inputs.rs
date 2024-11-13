@@ -5,12 +5,12 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::CURVE_TARGET_LEN,
     u256::{self, UInt256Target},
-    utils::{FromFields, FromTargets},
+    utils::{FromFields, FromTargets, TryIntoBool},
     D, F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
-    iop::target::Target,
+    iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
@@ -21,10 +21,12 @@ use std::array::from_fn as create_array;
 // - `DR : Digest[F]` : accumulated digest of all the rows up to this node
 // - `min : Uint256` : min value of the secondary index stored up to this node
 // - `max : Uint256` : max value of the secondary index stored up to this node
+// - `merge : bool` : Flag specifying whether we are building rows for a merge table or not
 const H_RANGE: PublicInputRange = 0..NUM_HASH_OUT_ELTS;
 const DR_RANGE: PublicInputRange = H_RANGE.end..H_RANGE.end + CURVE_TARGET_LEN;
 const MIN_RANGE: PublicInputRange = DR_RANGE.end..DR_RANGE.end + u256::NUM_LIMBS;
 const MAX_RANGE: PublicInputRange = MIN_RANGE.end..MIN_RANGE.end + u256::NUM_LIMBS;
+const MERGE_RANGE: PublicInputRange = MAX_RANGE.end..MAX_RANGE.end + 1;
 
 /// Public inputs for contract extraction
 #[derive(Clone, Debug)]
@@ -33,21 +35,24 @@ pub struct PublicInputs<'a, T> {
     pub(crate) dr: &'a [T],
     pub(crate) min: &'a [T],
     pub(crate) max: &'a [T],
+    pub(crate) merge: &'a [T],
 }
 
 impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
-    const RANGES: &'static [PublicInputRange] = &[H_RANGE, DR_RANGE, MIN_RANGE, MAX_RANGE];
+    const RANGES: &'static [PublicInputRange] =
+        &[H_RANGE, DR_RANGE, MIN_RANGE, MAX_RANGE, MERGE_RANGE];
 
     fn register_args(&self, cb: &mut CircuitBuilder<F, D>) {
         cb.register_public_inputs(self.h);
         cb.register_public_inputs(self.dr);
         cb.register_public_inputs(self.min);
         cb.register_public_inputs(self.max);
+        cb.register_public_input(self.merge[0]);
     }
 }
 
 // mostly used for testing
-impl<'a> PublicInputs<'a, F> {
+impl PublicInputs<'_, F> {
     /// Get the metadata point.
     pub fn rows_digest_field(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(self.dr)
@@ -66,9 +71,13 @@ impl<'a> PublicInputs<'a, F> {
             elements: create_array(|i| self.h[i]),
         }
     }
+
+    pub fn is_merge_flag(&self) -> bool {
+        self.merge[0].try_into_bool().unwrap()
+    }
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl PublicInputs<'_, Target> {
     /// Get the hash corresponding to the root of the subtree of this node
     pub fn root_hash(&self) -> HashOutTarget {
         HashOutTarget::from_targets(self.h)
@@ -85,13 +94,17 @@ impl<'a> PublicInputs<'a, Target> {
     pub fn max_value(&self) -> UInt256Target {
         UInt256Target::from_targets(self.max)
     }
+
+    pub fn is_merge_case(&self) -> BoolTarget {
+        BoolTarget::new_unsafe(self.merge[0])
+    }
 }
 
 pub const TOTAL_LEN: usize = PublicInputs::<Target>::TOTAL_LEN;
 
 impl<'a, T: Copy> PublicInputs<'a, T> {
     /// Total length of the public inputs
-    pub(crate) const TOTAL_LEN: usize = MAX_RANGE.end;
+    pub(crate) const TOTAL_LEN: usize = MERGE_RANGE.end;
 
     /// Create from a slice.
     pub fn from_slice(pi: &'a [T]) -> Self {
@@ -102,16 +115,24 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             dr: &pi[DR_RANGE],
             min: &pi[MIN_RANGE],
             max: &pi[MAX_RANGE],
+            merge: &pi[MERGE_RANGE],
         }
     }
 
     /// Create a new public inputs.
-    pub fn new(h: &'a [T], dr: &'a [T], min: &'a [T], max: &'a [T]) -> Self {
+    pub fn new(h: &'a [T], dr: &'a [T], min: &'a [T], max: &'a [T], merge: &'a [T]) -> Self {
         assert_eq!(h.len(), NUM_HASH_OUT_ELTS);
         assert_eq!(dr.len(), CURVE_TARGET_LEN);
         assert_eq!(min.len(), u256::NUM_LIMBS);
         assert_eq!(max.len(), u256::NUM_LIMBS);
-        Self { h, dr, min, max }
+        assert_eq!(merge.len(), 1);
+        Self {
+            h,
+            dr,
+            min,
+            max,
+            merge,
+        }
     }
 
     /// Combine to a vector.
@@ -121,6 +142,7 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
             .chain(self.dr)
             .chain(self.min)
             .chain(self.max)
+            .chain(self.merge)
             .cloned()
             .collect()
     }
@@ -133,7 +155,7 @@ mod tests {
     use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
-        field::types::Sample,
+        field::types::{Field, Sample},
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
@@ -148,7 +170,7 @@ mod tests {
         exp_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPICircuit<'a> {
+    impl UserCircuit<F, D> for TestPICircuit<'_> {
         type Wires = Vec<Target>;
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
@@ -173,7 +195,8 @@ mod tests {
         let drw = dr.to_weierstrass().to_fields();
         let min = U256::from_limbs(rng.gen::<[u64; 4]>()).to_fields();
         let max = U256::from_limbs(rng.gen::<[u64; 4]>()).to_fields();
-        let exp_pi = PublicInputs::new(&h, &drw, &min, &max);
+        let merge = [F::from_canonical_usize(rng.gen_bool(0.5) as usize)];
+        let exp_pi = PublicInputs::new(&h, &drw, &min, &max, &merge);
         let exp_pi = &exp_pi.to_vec();
         assert_eq!(exp_pi.len(), PublicInputs::<Target>::TOTAL_LEN);
         let test_circuit = TestPICircuit { exp_pi };

@@ -25,7 +25,7 @@ use crate::{
 
 /// Safely wraps a [`Query`], ensuring its meaning and the status of its
 /// placeholders.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SafeQuery {
     /// A query featuring placeholders as defined in a [`PlaceholderRegister`]
     ZkQuery(Query),
@@ -87,7 +87,7 @@ impl AsMut<Query> for SafeQuery {
 
 /// A data structure wrapping a zkSQL query converted into a pgSQL able to be
 /// executed on zkTables and its accompanying metadata.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TranslatedQuery {
     /// The translated query, should be converted to string
     pub query: SafeQuery,
@@ -104,10 +104,10 @@ impl TranslatedQuery {
         mut query: SafeQuery,
         settings: &ParsilSettings<C>,
     ) -> Result<Self> {
-        let largest_placeholder = placeholders::validate(settings, query.as_mut())?;
+        let used_placeholders = placeholders::gather_placeholders(settings, query.as_mut())?;
         let placeholder_mapping = std::iter::once(PlaceholderId::MinQueryOnIdx1)
             .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
-            .chain((1..=largest_placeholder).map(|i| PlaceholderId::Generic(i)))
+            .chain(used_placeholders.iter().map(|i| PlaceholderId::Generic(*i)))
             .enumerate()
             .map(|(i, p)| (p, i))
             .collect();
@@ -117,7 +117,7 @@ impl TranslatedQuery {
                 .chain(std::iter::once(
                     settings.placeholders.max_block_placeholder.clone(),
                 ))
-                .chain((1..=largest_placeholder).map(|i| format!("${i}")))
+                .chain(used_placeholders.iter().map(|i| format!("${i}")))
                 .enumerate()
                 .map(|(i, p)| (p, format!("${}", i + 1)))
                 .collect();
@@ -186,7 +186,7 @@ struct PlaceholderInterpolator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
     placeholders: &'a Placeholders,
 }
-impl<'a, C: ContextProvider> AstMutator for PlaceholderInterpolator<'a, C> {
+impl<C: ContextProvider> AstMutator for PlaceholderInterpolator<'_, C> {
     type Error = anyhow::Error;
 
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
@@ -388,7 +388,7 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
         Ok(())
     }
 }
-impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
+impl<C: ContextProvider> AstMutator for KeyFetcher<'_, C> {
     type Error = anyhow::Error;
 
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
@@ -414,7 +414,7 @@ impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
                 let user_facing_name = &name.0[0].value;
 
                 // Fetch all the column declared in this table
-                let table = self.settings.context.fetch_table(&user_facing_name)?;
+                let table = self.settings.context.fetch_table(user_facing_name)?;
                 let table_columns = &table.columns;
 
                 // Extract the apparent table name (either the concrete one
@@ -537,7 +537,7 @@ impl<'a, C: ContextProvider> Executor<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
+impl<C: ContextProvider> AstMutator for Executor<'_, C> {
     type Error = anyhow::Error;
 
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
@@ -564,7 +564,7 @@ impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
                     let concrete_table_name = &name.0[0].value;
 
                     // Fetch all the column declared in this table
-                    let table = self.settings.context.fetch_table(&concrete_table_name)?;
+                    let table = self.settings.context.fetch_table(concrete_table_name)?;
                     let table_columns = &table.columns;
 
                     // Extract the apparent table name (either the concrete one
@@ -715,11 +715,7 @@ impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
             assert_eq!(select.from.len(), 1); // single table queries
             let table = &select.from.first().unwrap().relation;
             match table {
-                TableFactor::Derived {
-                    lateral,
-                    subquery,
-                    alias,
-                } => {
+                TableFactor::Derived { subquery, .. } => {
                     subquery
                         .as_ref()
                         .body
@@ -730,7 +726,7 @@ impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
                         .iter()
                         .filter_map(|item| {
                             let expr = match item {
-                                SelectItem::ExprWithAlias { expr, alias } => {
+                                SelectItem::ExprWithAlias { alias, .. } => {
                                     Expr::Identifier(alias.clone())
                                 }
                                 SelectItem::UnnamedExpr(expr) => expr.clone(),
@@ -765,7 +761,7 @@ impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
                 .flat_map(|item| {
                     match item {
                         SelectItem::UnnamedExpr(expr) => vec![expr.clone()],
-                        SelectItem::ExprWithAlias { expr, alias } => vec![expr.clone()], // we don't care about alias here
+                        SelectItem::ExprWithAlias { expr, .. } => vec![expr.clone()], // we don't care about alias here
                         SelectItem::QualifiedWildcard(_, _) => unreachable!(),
                         SelectItem::Wildcard(_) => replace_wildcard(),
                     }

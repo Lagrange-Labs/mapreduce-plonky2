@@ -1,6 +1,5 @@
 use std::{collections::HashSet, future::Future};
 
-use alloy::{primitives::U256, rpc::types::Block};
 use anyhow::Result;
 use log::info;
 use mp2_v1::indexing::{
@@ -9,13 +8,12 @@ use mp2_v1::indexing::{
     row::{RowPayload, RowTreeKey},
 };
 use parsil::{assembler::DynamicCircuitPis, ParsilSettings};
-use ryhope::{storage::WideLineage, tree::NodeContext, Epoch, NodePayload};
-use verifiable_db::query::aggregation::QueryBounds;
+use ryhope::{storage::WideLineage, tree::NodeContext, Epoch};
 
 use crate::common::{
     cases::query::aggregated_queries::prove_non_existence_row,
     index_tree::MerkleIndexTree,
-    proof_storage::{ProofKey, ProofStorage, QueryID},
+    proof_storage::{PlaceholderValues, ProofKey, ProofStorage, QueryID},
     rowtree::MerkleRowTree,
     table::{Table, TableColumns},
     TestContext,
@@ -43,6 +41,7 @@ pub trait TreeInfo<K, V> {
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &K,
+        placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>>;
     fn save_proof(
         &self,
@@ -50,6 +49,7 @@ pub trait TreeInfo<K, V> {
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &K,
+        placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()>;
 
@@ -85,9 +85,15 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
+        placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>> {
         // TODO export that in single function
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -97,10 +103,16 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
+        placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()> {
         // TODO export that in single function
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -109,7 +121,7 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         planner: &mut QueryPlanner<'a>,
         primary: BlockPrimaryIndex,
         k: &RowTreeKey,
-        v: &RowPayload<BlockPrimaryIndex>,
+        _v: &RowPayload<BlockPrimaryIndex>,
     ) -> Result<Option<Vec<u8>>> {
         // TODO export that in single function
         Ok(if self.is_satisfying_query(k) {
@@ -120,8 +132,8 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
                     self,
                     &planner.columns,
                     primary,
-                    &k,
-                    &planner.pis,
+                    k,
+                    planner.pis,
                     &planner.query,
                 )
                 .await?,
@@ -131,13 +143,12 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         })
     }
 
-    fn fetch_ctx_and_payload_at(
+    async fn fetch_ctx_and_payload_at(
         &self,
         epoch: Epoch,
         key: &RowTreeKey,
-    ) -> impl Future<Output = Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)>> + Send
-    {
-        async move { self.ctx_and_payload_at(epoch, key) }
+    ) -> Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)> {
+        self.ctx_and_payload_at(epoch, key)
     }
 }
 
@@ -170,8 +181,14 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
+        placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>> {
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -181,9 +198,15 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
+        placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()> {
-        let proof_key = ProofKey::QueryAggregateRow((query_id.clone(), primary, key.clone()));
+        let proof_key = ProofKey::QueryAggregateRow((
+            query_id.clone(),
+            placeholder_values,
+            primary,
+            key.clone(),
+        ));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -202,8 +225,8 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
                     self,
                     &planner.columns,
                     primary,
-                    &k,
-                    &planner.pis,
+                    k,
+                    planner.pis,
                     &planner.query,
                 )
                 .await?,
@@ -213,13 +236,12 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         })
     }
 
-    fn fetch_ctx_and_payload_at(
+    async fn fetch_ctx_and_payload_at(
         &self,
         epoch: Epoch,
         key: &RowTreeKey,
-    ) -> impl Future<Output = Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)>> + Send
-    {
-        async move { self.tree.try_fetch_with_context_at(key, epoch).await }
+    ) -> Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)> {
+        self.tree.try_fetch_with_context_at(key, epoch).await
     }
 }
 
@@ -240,10 +262,11 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
+        placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>> {
         // TODO export that in single function - repetition
         info!("loading proof for {primary} -> {key:?}");
-        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
+        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -251,12 +274,13 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         &self,
         ctx: &mut TestContext,
         query_id: &QueryID,
-        primary: BlockPrimaryIndex,
+        _primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
+        placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()> {
         // TODO export that in single function
-        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
+        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -270,13 +294,12 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         load_or_prove_embedded_index(self, planner, primary, k, v).await
     }
 
-    fn fetch_ctx_and_payload_at(
+    async fn fetch_ctx_and_payload_at(
         &self,
         epoch: Epoch,
         key: &BlockPrimaryIndex,
-    ) -> impl Future<Output = Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)>>
-           + Send {
-        async move { self.ctx_and_payload_at(epoch, key) }
+    ) -> Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)> {
+        self.ctx_and_payload_at(epoch, key)
     }
 }
 
@@ -310,10 +333,11 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
         query_id: &QueryID,
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
+        placeholder_values: PlaceholderValues,
     ) -> Result<Vec<u8>> {
         //assert_eq!(primary, *key);
         info!("loading proof for {primary} -> {key:?}");
-        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
+        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
         ctx.storage.get_proof_exact(&proof_key)
     }
 
@@ -321,12 +345,13 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
         &self,
         ctx: &mut TestContext,
         query_id: &QueryID,
-        primary: BlockPrimaryIndex,
+        _primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
+        placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
     ) -> Result<()> {
         //assert_eq!(primary, *key);
-        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), *key));
+        let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
         ctx.storage.store_proof(proof_key, proof)
     }
 
@@ -340,13 +365,12 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
         load_or_prove_embedded_index(self, planner, primary, k, v).await
     }
 
-    fn fetch_ctx_and_payload_at(
+    async fn fetch_ctx_and_payload_at(
         &self,
         epoch: Epoch,
         key: &BlockPrimaryIndex,
-    ) -> impl Future<Output = Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)>>
-           + Send {
-        async move { self.tree.try_fetch_with_context_at(key, epoch).await }
+    ) -> Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)> {
+        self.tree.try_fetch_with_context_at(key, epoch).await
     }
 }
 
@@ -369,7 +393,8 @@ async fn load_or_prove_embedded_index<
         // generate a non-existence proof for the row tree
         let row_root_proof_key = ProofKey::QueryAggregateRow((
             planner.query.query.clone(),
-            k.clone(),
+            planner.query.placeholders.placeholder_values(),
+            *k,
             v.row_tree_root_key.clone(),
         ));
         let proof = match planner.ctx.storage.get_proof_exact(&row_root_proof_key) {
@@ -382,12 +407,9 @@ async fn load_or_prove_embedded_index<
                     .ctx
                     .storage
                     .get_proof_exact(&row_root_proof_key)
-                    .expect(
-                        format!(
-                            "non-existence root proof not found for key {row_root_proof_key:?}"
-                        )
-                        .as_str(),
-                    )
+                    .unwrap_or_else(|_| {
+                        panic!("non-existence root proof not found for key {row_root_proof_key:?}")
+                    })
             }
         };
         Some(proof)
