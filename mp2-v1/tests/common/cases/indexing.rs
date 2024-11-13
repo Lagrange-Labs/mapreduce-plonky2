@@ -206,8 +206,7 @@ impl TableIndexing {
                 }
                 _ => unreachable!(),
             };
-            let row_unique_id =
-                TableRowUniqueID::Mapping(secondary_column.info.identifier().to_canonical_u64());
+            let row_unique_id = TableRowUniqueID::Mapping(key_id);
 
             (secondary_column, rest_columns, row_unique_id, source)
         };
@@ -815,7 +814,7 @@ async fn build_mapping_table(
     };
     debug!("MAPPING ZK COLUMNS -> {:?}", columns);
     let index_genesis_block = ctx.block_number().await;
-    let row_unique_id = TableRowUniqueID::Mapping(columns.secondary.identifier());
+    let row_unique_id = TableRowUniqueID::Mapping(key_id);
     Table::new(
         index_genesis_block,
         "mapping_table".to_string(),
