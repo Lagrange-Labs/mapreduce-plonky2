@@ -337,6 +337,7 @@ pub struct ResultStructure {
     pub output_items: Vec<OutputItem>,
     pub output_ids: Vec<F>,
     pub output_variant: Output,
+    pub distinct: Option<bool>,
 }
 
 impl ResultStructure {
@@ -369,8 +370,12 @@ impl ResultStructure {
         result_operations: Vec<BasicOperation>,
         output_items: Vec<OutputItem>,
         aggregation_op_ids: Vec<u64>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        ensure!(
+            output_items.len() == aggregation_op_ids.len(),
+            "output items and aggregation operations identifiers have different length"
+        );
+        Ok(Self {
             result_operations,
             output_items,
             output_ids: aggregation_op_ids
@@ -378,20 +383,55 @@ impl ResultStructure {
                 .map(|id| id.to_field())
                 .collect_vec(),
             output_variant: Output::Aggregation,
-        }
+            distinct: None,
+        })
     }
 
     pub fn new_for_query_no_aggregation(
         result_operations: Vec<BasicOperation>,
         output_items: Vec<OutputItem>,
         output_ids: Vec<u64>,
-    ) -> Self {
-        Self {
+        distinct: bool,
+    ) -> Result<Self> {
+        ensure!(
+            output_items.len() == output_ids.len(),
+            "output items and output ids have different length"
+        );
+        Ok(Self {
             result_operations,
             output_items,
             output_ids: output_ids.into_iter().map(|id| id.to_field()).collect_vec(),
             output_variant: Output::NoAggregation,
-        }
+            distinct: Some(distinct),
+        })
+    }
+
+    pub fn query_variant(&self) -> Output {
+        self.output_variant
+    }
+
+    /// Validate an instance of `self` with respect to the upper bounds provided as input, that are:
+    /// - The upper bound `max_num_results_ops` on the number of basic operations allowed to
+    ///   compute the results
+    /// - The upper bound `max_num_results` on the number of results returned for each row
+    pub fn validate(&self, max_num_result_ops: usize, max_num_results: usize) -> Result<()> {
+        ensure!(
+            self.result_operations.len() <= max_num_result_ops,
+            format!(
+                "too many basic operations found in SELECT clause: found {}, maximum allowed is {}",
+                self.result_operations.len(),
+                max_num_result_ops,
+            )
+        );
+        ensure!(
+            self.output_items.len() <= max_num_results,
+            format!(
+                "too many result items specified in SELECT clause: found {}, maximum allowed is {}",
+                self.output_items.len(),
+                max_num_results,
+            )
+        );
+        Ok(())
     }
 }
 

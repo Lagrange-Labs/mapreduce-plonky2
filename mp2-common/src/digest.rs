@@ -189,10 +189,7 @@ mod test {
     };
     use crate::utils::TryIntoBool;
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{
-        field::types::Sample,
-        iop::witness::PartialWitness,
-    };
+    use plonky2::{field::types::Sample, iop::witness::PartialWitness};
     use plonky2_ecgfp5::{
         curve::curve::Point,
         gadgets::curve::{CircuitBuilderEcGFp5, PartialWitnessCurve},

@@ -1,5 +1,5 @@
 use alloy::primitives::U256;
-use anyhow::*;
+use anyhow::{bail, ensure};
 use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
 use std::str::FromStr;
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
@@ -13,12 +13,100 @@ use crate::{
     validate::{self},
 };
 
-#[derive(Debug)]
 pub struct ParsilSettings<C: ContextProvider> {
     /// A handle to an object providing a register of the existing virtual
     /// tables and their columns.
     pub context: C,
     pub placeholders: PlaceholderSettings,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+impl<C: ContextProvider> ParsilSettings<C> {
+    pub fn builder() -> ParsilSettingsBuilder<C> {
+        Default::default()
+    }
+
+    pub fn max_num_outputs() -> usize {
+        C::MAX_NUM_OUTPUTS
+    }
+
+    pub fn limit(&self) -> u32 {
+        self.limit.unwrap_or(C::MAX_NUM_OUTPUTS.try_into().unwrap())
+    }
+
+    pub fn offset(&self) -> u32 {
+        self.offset.unwrap_or(0)
+    }
+}
+
+pub struct ParsilSettingsBuilder<C: ContextProvider> {
+    context: Option<C>,
+    placeholders_settings: Option<PlaceholderSettings>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+impl<C: ContextProvider> std::default::Default for ParsilSettingsBuilder<C> {
+    fn default() -> Self {
+        ParsilSettingsBuilder {
+            context: None,
+            placeholders_settings: None,
+            limit: None,
+            offset: None,
+        }
+    }
+}
+impl<C: ContextProvider> ParsilSettingsBuilder<C> {
+    pub fn context(mut self, context: C) -> Self {
+        self.context = Some(context);
+        self
+    }
+
+    pub fn placeholders(mut self, placeholders_settings: PlaceholderSettings) -> Self {
+        self.placeholders_settings = Some(placeholders_settings);
+        self
+    }
+
+    pub fn maybe_limit(mut self, limit: Option<u32>) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    pub fn maybe_offset(mut self, offset: Option<u32>) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    pub fn limit(mut self, limit: u32) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    pub fn offset(mut self, offset: u32) -> Self {
+        self.offset = Some(offset);
+        self
+    }
+
+    pub fn build(mut self) -> anyhow::Result<ParsilSettings<C>> {
+        anyhow::ensure!(
+            self.limit
+                .map(|l| l <= C::MAX_NUM_OUTPUTS.try_into().unwrap())
+                .unwrap_or(true),
+            anyhow::anyhow!("limit can not be greater than `{}`", C::MAX_NUM_OUTPUTS)
+        );
+
+        Ok(ParsilSettings {
+            context: self
+                .context
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("context is not set"))?,
+            placeholders: self
+                .placeholders_settings
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("placehoder settings are not set"))?,
+            limit: self.limit,
+            offset: self.offset,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -52,7 +140,7 @@ impl PlaceholderSettings {
         min_block: &str,
         max_block: &str,
         n: usize,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         ensure!(
             min_block.starts_with('$'),
             "placeholders must start with '$'"
@@ -71,7 +159,7 @@ impl PlaceholderSettings {
 
     /// Ensure that the given placeholder is valid, and update the validator
     /// internal state accordingly.
-    pub fn resolve_placeholder(&self, name: &str) -> Result<PlaceholderIdentifier> {
+    pub fn resolve_placeholder(&self, name: &str) -> anyhow::Result<PlaceholderIdentifier> {
         if self.min_block_placeholder == name {
             return Ok(PlaceholderIdentifier::MinQueryOnIdx1);
         }
@@ -102,9 +190,9 @@ impl PlaceholderSettings {
 pub fn parse_and_validate<C: ContextProvider>(
     query: &str,
     settings: &ParsilSettings<C>,
-) -> Result<Query> {
-    let mut query = parser::parse(settings, query)?;
-    expand::expand(&mut query);
+) -> anyhow::Result<Query> {
+    let mut query = parser::parse(&settings, query)?;
+    expand::expand(&settings, &mut query)?;
 
     placeholders::validate(settings, &query)?;
     validate::validate(settings, &query)?;
@@ -114,16 +202,24 @@ pub fn parse_and_validate<C: ContextProvider>(
 
 /// Convert a string to a U256. Case is not conserved, and the string may be
 /// prefixed by a radix indicator.
-pub fn str_to_u256(s: &str) -> Result<U256> {
+pub fn str_to_u256(s: &str) -> anyhow::Result<U256> {
     let s = s.to_lowercase();
-    U256::from_str(&s).map_err(|e| anyhow!("{s}: invalid U256: {e}"))
+    U256::from_str(&s).map_err(|e| anyhow::anyhow!("{s}: invalid U256: {e}"))
 }
 
-fn val_to_expr(x: U256) -> Expr {
+pub(crate) fn u256_to_expr(x: U256) -> Expr {
     if let Result::Ok(x_int) = TryInto::<i32>::try_into(x) {
         Expr::Value(Value::Number(x_int.to_string(), false))
     } else {
         Expr::Value(Value::SingleQuotedString(format!("0x{x:x}")))
+    }
+}
+
+pub(crate) fn int_to_expr<X: Copy + TryInto<i32> + ToString>(x: X) -> Expr {
+    if let Result::Ok(x_int) = TryInto::<i32>::try_into(x) {
+        Expr::Value(Value::Number(x_int.to_string(), false))
+    } else {
+        Expr::Value(Value::SingleQuotedString(x.to_string()))
     }
 }
 
@@ -145,14 +241,14 @@ pub(crate) fn const_reduce(expr: &mut Expr) {
                 }
                 (None, Some(new_right)) => {
                     const_reduce(left);
-                    *right = Box::new(val_to_expr(new_right));
+                    *right = Box::new(u256_to_expr(new_right));
                 }
                 (Some(new_left), None) => {
                     const_reduce(right);
-                    *left = Box::new(val_to_expr(new_left));
+                    *left = Box::new(u256_to_expr(new_left));
                 }
                 (Some(new_left), Some(new_right)) => {
-                    *expr = val_to_expr(match op {
+                    *expr = u256_to_expr(match op {
                         BinaryOperator::Plus => new_left + new_right,
                         BinaryOperator::Minus => new_left - new_right,
                         BinaryOperator::Multiply => new_left * new_right,
@@ -229,9 +325,9 @@ pub(crate) fn const_reduce(expr: &mut Expr) {
         Expr::UnaryOp { op, expr } => {
             if let Result::Ok(new_e) = const_eval(expr) {
                 match op {
-                    UnaryOperator::Plus => *expr = Box::new(val_to_expr(new_e)),
+                    UnaryOperator::Plus => *expr = Box::new(u256_to_expr(new_e)),
                     UnaryOperator::Not => {
-                        *expr = Box::new(val_to_expr(if new_e.is_zero() { ONE } else { ZERO }));
+                        *expr = Box::new(u256_to_expr(if new_e.is_zero() { ONE } else { ZERO }));
                     }
                     _ => unreachable!(),
                 }
@@ -251,7 +347,7 @@ pub(crate) fn const_reduce(expr: &mut Expr) {
 ///
 /// NOTE: this will be used (i) in optimization and (ii) when boundaries
 /// will accept more complex expression.
-fn const_eval(expr: &Expr) -> Result<U256> {
+pub(crate) fn const_eval(expr: &Expr) -> anyhow::Result<U256> {
     #[allow(non_snake_case)]
     let ONE = U256::from_str_radix("1", 2).unwrap();
     const ZERO: U256 = U256::ZERO;

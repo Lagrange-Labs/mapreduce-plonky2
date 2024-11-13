@@ -8,10 +8,7 @@ use mp2_common::{
     C, D, F,
 };
 use plonky2::{
-    iop::{
-        target::Target,
-        witness::PartialWitness,
-    },
+    iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
 use recursion_framework::{

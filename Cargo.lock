@@ -6644,6 +6644,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "derive_more 0.99.18",
+ "futures",
  "itertools 0.12.1",
  "log",
  "mp2_common",

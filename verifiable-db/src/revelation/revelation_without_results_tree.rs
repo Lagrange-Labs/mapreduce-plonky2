@@ -6,9 +6,8 @@ use crate::{
         computational_hash_ids::AggregationOperation,
         public_inputs::PublicInputs as QueryProofPublicInputs,
     },
-    revelation::{placeholders_check::check_placeholders, PublicInputs},
+    revelation::PublicInputs,
 };
-use alloy::primitives::U256;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
@@ -17,18 +16,15 @@ use mp2_common::{
     poseidon::{flatten_poseidon_hash_target, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
-    serialization::{
-        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
-        serialize_long_array,
-    },
+    serialization::{deserialize, serialize},
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    u256::{CircuitBuilderU256, UInt256Target},
     utils::ToTargets,
     C, D, F,
 };
 use plonky2::{
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -45,12 +41,9 @@ use recursion_framework::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::array;
 
 use super::{
-    placeholders_check::{
-        CheckedPlaceholder, CheckedPlaceholderTarget, NUM_SECONDARY_INDEX_PLACEHOLDERS,
-    },
+    placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
     NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
 };
 
@@ -65,28 +58,7 @@ pub struct RevelationWithoutResultsTreeWires<
     const PH: usize,
     const PP: usize,
 > {
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    is_placeholder_valid: [BoolTarget; PH],
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    placeholder_ids: [Target; PH],
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    placeholder_values: [UInt256Target; PH],
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    to_be_checked_placeholders: [CheckedPlaceholderTarget; PP],
-    secondary_query_bound_placeholders:
-        [CheckedPlaceholderTarget; NUM_SECONDARY_INDEX_PLACEHOLDERS],
+    check_placeholder: CheckPlaceholderInputWires<PH, PP>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -96,47 +68,7 @@ pub struct RevelationWithoutResultsTreeCircuit<
     const PH: usize,
     const PP: usize,
 > {
-    /// Real number of the valid placeholders
-    pub(crate) num_placeholders: usize,
-    /// Array of the placeholder identifiers that can be employed in the query:
-    /// - The first 4 items are expected to be constant identifiers of the query
-    ///   bounds `MIN_I1, MAX_I1` and  `MIN_I2, MAX_I2`
-    /// - The following `num_placeholders - 4` values are expected to be the
-    ///   identifiers of the placeholders employed in the query
-    /// - The remaining `PH - num_placeholders` items are expected to be the
-    ///   same as `placeholders_ids[0]`
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) placeholder_ids: [F; PH],
-    /// Array of the placeholder values that can be employed in the query:
-    /// - The first 4 values are expected to be the bounds `MIN_I1, MAX_I1` and
-    ///   `MIN_I2, MAX_I2` found in the query for the primary and secondary
-    ///   indexed columns
-    /// - The following `num_placeholders - 4` values are expected to be the
-    ///   values for the placeholders employed in the query
-    /// - The remaining `PH - num_placeholders` values are expected to be the
-    ///   same as `placeholder_values[0]`
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) placeholder_values: [U256; PH],
-    /// Placeholders data to be provided to `check_placeholder` gadget to
-    /// check that placeholders employed in universal query circuit matches
-    /// with the `placeholder_values` exposed as public input by this proof
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) to_be_checked_placeholders: [CheckedPlaceholder; PP],
-    /// Placeholders data related to the placeholders employed in the
-    /// universal query circuit to hash the query bounds for the secondary
-    /// index; they are provided as well to `check_placeholder` gadget to
-    /// check the correctness of the placeholders employed for query bounds
-    pub(crate) secondary_query_bound_placeholders:
-        [CheckedPlaceholder; NUM_SECONDARY_INDEX_PLACEHOLDERS],
+    pub(crate) check_placeholder: CheckPlaceholderGadget<PH, PP>,
 }
 
 impl<const L: usize, const S: usize, const PH: usize, const PP: usize>
@@ -153,15 +85,6 @@ where
     ) -> RevelationWithoutResultsTreeWires<L, S, PH, PP> {
         let zero = b.zero();
         let u256_zero = b.zero_u256();
-
-        let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
-        let placeholder_ids = b.add_virtual_target_arr();
-        // `placeholder_values` are exposed as public inputs to the Solidity contract
-        // which will not do range-check.
-        let placeholder_values = array::from_fn(|_| b.add_virtual_u256());
-        let to_be_checked_placeholders = array::from_fn(|_| CheckedPlaceholderTarget::new(b));
-        let secondary_query_bound_placeholders =
-            array::from_fn(|_| CheckedPlaceholderTarget::new(b));
 
         // The operation cannot be ID for aggregation.
         let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
@@ -207,15 +130,8 @@ where
         let final_placeholder_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
         // Check the placeholder data.
-        let (num_placeholders, placeholder_ids_hash) = check_placeholders(
-            b,
-            &is_placeholder_valid,
-            &placeholder_ids,
-            &placeholder_values,
-            &to_be_checked_placeholders,
-            &secondary_query_bound_placeholders,
-            &final_placeholder_hash,
-        );
+        let check_placeholder_wires =
+            CheckPlaceholderGadget::<PH, PP>::build(b, &final_placeholder_hash);
 
         // Check that the tree employed to build the queries is the same as the
         // tree constructed in pre-processing.
@@ -230,13 +146,15 @@ where
         let inputs = query_proof
             .to_computational_hash_raw()
             .iter()
-            .chain(&placeholder_ids_hash.to_targets())
+            .chain(&check_placeholder_wires.placeholder_id_hash.to_targets())
             .chain(original_tree_proof.metadata_hash())
             .cloned()
             .collect();
         let computational_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        let placeholder_values_slice = placeholder_values
+        let placeholder_values_slice = check_placeholder_wires
+            .input_wires
+            .placeholder_values
             .iter()
             .flat_map(ToTargets::to_targets)
             .collect_vec();
@@ -252,7 +170,7 @@ where
             &flat_computational_hash,
             &placeholder_values_slice,
             &results_slice,
-            &[num_placeholders],
+            &[check_placeholder_wires.num_placeholders],
             // The aggregation query proof only has one result.
             &[num_results.target],
             &[query_proof.num_matching_rows_target()],
@@ -265,11 +183,7 @@ where
         .register(b);
 
         RevelationWithoutResultsTreeWires {
-            is_placeholder_valid,
-            placeholder_ids,
-            placeholder_values,
-            to_be_checked_placeholders,
-            secondary_query_bound_placeholders,
+            check_placeholder: check_placeholder_wires.input_wires,
         }
     }
 
@@ -278,30 +192,10 @@ where
         pw: &mut PartialWitness<F>,
         wires: &RevelationWithoutResultsTreeWires<L, S, PH, PP>,
     ) {
-        wires
-            .is_placeholder_valid
-            .iter()
-            .enumerate()
-            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_placeholders));
-        pw.set_target_arr(&wires.placeholder_ids, &self.placeholder_ids);
-        wires
-            .placeholder_values
-            .iter()
-            .zip(self.placeholder_values)
-            .for_each(|(t, v)| pw.set_u256_target(t, v));
-        wires
-            .to_be_checked_placeholders
-            .iter()
-            .zip(&self.to_be_checked_placeholders)
-            .for_each(|(t, v)| v.assign(pw, t));
-        wires
-            .secondary_query_bound_placeholders
-            .iter()
-            .zip(&self.secondary_query_bound_placeholders)
-            .for_each(|(t, v)| v.assign(pw, t));
+        self.check_placeholder.assign(pw, &wires.check_placeholder);
     }
 }
-
+#[derive(Clone, Debug)]
 pub struct CircuitBuilderParams {
     pub(crate) query_circuit_set: RecursiveCircuits<F, C, D>,
     pub(crate) preprocessing_circuit_set: RecursiveCircuits<F, C, D>,
@@ -393,6 +287,7 @@ mod tests {
             random_original_tree_proof,
         },
     };
+    use alloy::primitives::U256;
     use mp2_common::{poseidon::flatten_poseidon_hash_value, utils::ToFields, C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{field::types::Field, plonk::config::Hasher};
@@ -415,12 +310,7 @@ mod tests {
     impl From<&TestPlaceholders<PH, PP>> for RevelationWithoutResultsTreeCircuit<L, S, PH, PP> {
         fn from(test_placeholders: &TestPlaceholders<PH, PP>) -> Self {
             Self {
-                num_placeholders: test_placeholders.num_placeholders,
-                placeholder_ids: test_placeholders.placeholder_ids,
-                placeholder_values: test_placeholders.placeholder_values,
-                to_be_checked_placeholders: test_placeholders.to_be_checked_placeholders,
-                secondary_query_bound_placeholders: test_placeholders
-                    .secondary_query_bound_placeholders,
+                check_placeholder: test_placeholders.check_placeholder_inputs.clone(),
             }
         }
     }
@@ -547,12 +437,17 @@ mod tests {
         // Number of placeholders
         assert_eq!(
             pi.num_placeholders(),
-            test_placeholders.num_placeholders.to_field()
+            test_placeholders
+                .check_placeholder_inputs
+                .num_placeholders
+                .to_field()
         );
         // Placeholder values
         assert_eq!(
             pi.placeholder_values(),
-            test_placeholders.placeholder_values
+            test_placeholders
+                .check_placeholder_inputs
+                .placeholder_values
         );
         // Entry count
         assert_eq!(pi.entry_count(), entry_count);
@@ -614,7 +509,7 @@ mod tests {
     fn test_revelation_without_results_tree_for_no_op_avg_with_no_entries() {
         // Initialize the all operations to SUM or COUNT (not AVG).
         let mut rng = thread_rng();
-        let ops = array::from_fn(|_| {
+        let ops = std::array::from_fn(|_| {
             [AggregationOperation::SumOp, AggregationOperation::CountOp]
                 .choose(&mut rng)
                 .unwrap()

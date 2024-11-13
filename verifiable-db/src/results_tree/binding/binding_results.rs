@@ -4,6 +4,7 @@ use crate::{
     query::{
         computational_hash_ids::{AggregationOperation, ResultIdentifier},
         public_inputs::PublicInputs as QueryProofPI,
+        universal_circuit::ComputationalHashTarget,
     },
     results_tree::{
         binding::public_inputs::PublicInputs,
@@ -16,7 +17,7 @@ use mp2_common::{
 };
 use plonky2::iop::target::Target;
 use serde::{Deserialize, Serialize};
-use std::{iter::once, slice};
+use std::slice;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BindingResultsWires<const S: usize>;
@@ -56,24 +57,11 @@ impl<const S: usize> BindingResultsCircuit<S> {
         //     res_id = "RESULT_DISTINCT"
         // else:
         //     res_id = "RESULT"
-        let [res_no_distinct, res_with_distinct] = [
-            ResultIdentifier::ResultNoDistinct,
-            ResultIdentifier::ResultWithDistinct,
-        ]
-        .map(|id| b.constant(id.to_field()));
-        let res_id = b.select(
-            results_construction_proof.no_duplicates_flag_target(),
-            res_with_distinct,
-            res_no_distinct,
+        let computational_hash = ResultIdentifier::result_id_hash_circuit(
+            b,
+            ComputationalHashTarget::from_vec(query_proof.to_computational_hash_raw().to_vec()),
+            &results_construction_proof.no_duplicates_flag_target(),
         );
-
-        // Compute the computational hash:
-        // H(res_id || pQ.C)
-        let inputs = once(&res_id)
-            .chain(query_proof.to_computational_hash_raw())
-            .cloned()
-            .collect();
-        let computational_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
 
         // Compute the placeholder hash:
         // H(pQ.H_p || pQ.MIN_I || pQ.MAX_I)
@@ -211,7 +199,7 @@ mod tests {
             };
 
             // H(res_id || pQ.C)
-            let inputs = once(&res_id.to_field())
+            let inputs = std::iter::once(&res_id.to_field())
                 .chain(query_pi.to_computational_hash_raw())
                 .cloned()
                 .collect_vec();
