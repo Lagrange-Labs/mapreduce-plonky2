@@ -1,7 +1,6 @@
 use log::debug;
 use mp2_common::{
-    digest::TableDimension, group_hashing::weierstrass_to_point, proof::ProofWithVK,
-    types::HashOutput, utils::ToFields, F,
+    group_hashing::weierstrass_to_point, proof::ProofWithVK, types::HashOutput, utils::ToFields, F,
 };
 use mp2_v1::{
     api, contract_extraction,
@@ -15,7 +14,6 @@ use anyhow::Result;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExtractionTableProof {
     pub value_proof: Vec<u8>,
-    pub dimension: TableDimension,
     pub length_proof: Option<Vec<u8>>,
 }
 
@@ -65,12 +63,7 @@ impl TestContext {
                         (weierstrass_to_point(&value_pi.metadata_digest()) + weierstrass_to_point(&contract_pi.metadata_point())).to_weierstrass(),
                     );
                 }
-                CircuitInput::new_simple_input(
-                    block_proof,
-                    contract_proof,
-                    inputs.value_proof,
-                    inputs.dimension,
-                )
+                CircuitInput::new_simple_input(block_proof, contract_proof, inputs.value_proof)
             }
             // NOTE hardcoded for single and mapping right now
             ExtractionProofInput::Merge(inputs) => CircuitInput::new_merge_single_and_mapping(

@@ -16,7 +16,6 @@ use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
-    digest::TableDimension,
     eth::{ProofQuery, StorageSlot, StorageSlotNode},
     proof::ProofWithVK,
     types::HashOutput,
@@ -651,7 +650,6 @@ impl SingleExtractionArgs {
             vec![],
         );
         let input = ExtractionProofInput::Single(ExtractionTableProof {
-            dimension: TableDimension::Compound,
             value_proof,
             length_proof: None,
         });
@@ -1112,7 +1110,6 @@ where
         );
         // it's a compoound value type of proof since we're not using the length
         let input = ExtractionProofInput::Single(ExtractionTableProof {
-            dimension: TableDimension::Compound,
             value_proof: mapping_root_proof,
             length_proof: None,
         });

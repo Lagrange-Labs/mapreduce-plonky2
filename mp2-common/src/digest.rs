@@ -2,81 +2,16 @@ use crate::group_hashing::{
     circuit_hashed_scalar_mul, cond_circuit_hashed_scalar_mul, cond_field_hashed_scalar_mul,
     field_hashed_scalar_mul, map_to_curve_point,
 };
-use crate::serialization::{deserialize, serialize};
 use crate::types::CBuilder;
 use crate::utils::ToFields;
 use crate::{group_hashing::CircuitBuilderGroupHashing, utils::ToTargets};
-use crate::{D, F};
-use derive_more::{From, Into};
 use plonky2::iop::target::BoolTarget;
-use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2_ecgfp5::{
     curve::curve::Point,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
-use serde::{Deserialize, Serialize};
 pub type DigestTarget = CurveTarget;
 pub type Digest = Point;
-
-/// Whether the table's digest is composed of a single row, or multiple rows.
-/// For example when extracting mapping entries in one single sweep of the MPT, the digest contains
-/// multiple rows inside.
-/// When extracting single variables on one sweep, there is only a single row contained in the
-/// digest.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum TableDimension {
-    /// Set to Single for types that only generate a single row at a given block. For example, a
-    /// uint256 or a bytes32 will only generate a single row per block.
-    Single,
-    /// Set to Compound for types that
-    /// 1. have multiple entries (like an mapping, unlike a single uin256 for example)
-    /// 2. don't need or have an associated length slot to combine with
-    ///
-    /// It happens contracts don't have a length slot associated with the mapping like ERC20 and
-    /// thus there is no proof circuits have looked at _all_ the entries due to limitations on EVM
-    /// (there is no mapping.len()).
-    Compound,
-}
-
-impl TableDimension {
-    pub fn assign_wire(&self, pw: &mut PartialWitness<F>, wire: &TableDimensionWire) {
-        match self {
-            TableDimension::Single => pw.set_bool_target(wire.0, false),
-            TableDimension::Compound => pw.set_bool_target(wire.0, true),
-        }
-    }
-
-    pub fn conditional_row_digest(&self, digest: Digest) -> Digest {
-        match self {
-            TableDimension::Single => map_to_curve_point(&digest.to_fields()),
-            TableDimension::Compound => digest,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, From, Into, Eq, PartialEq)]
-pub struct TableDimensionWire(
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")] pub BoolTarget,
-);
-
-impl TableDimensionWire {
-    pub fn conditional_row_digest(
-        &self,
-        c: &mut CircuitBuilder<F, D>,
-        digest: CurveTarget,
-    ) -> CurveTarget {
-        let single = c.map_to_curve_point(&digest.to_targets());
-        // if the table is a compound table, i.e. multiple rows accumulated in the digest, then
-        // there is no need to apply digest one more time. On the other hand, if it is not
-        // compounded, i.e. there is only a sum of cells digest, then we need to create the "row"
-        // digest, thus applying the digest one more time.
-        //
-        // TableDimension::Single => false,
-        // TableDimension::Compound => true,
-        c.curve_select(self.0, digest, single)
-    }
-}
 
 /// Generic struct that can either hold a digest in circuit (DigestTarget) or a digest outside
 /// circuit, useful for testing.
@@ -183,10 +118,7 @@ impl SplitDigestTarget {
 mod test {
     use crate::{types::CBuilder, utils::FromFields, C, D, F};
 
-    use super::{
-        Digest, DigestTarget, SplitDigestPoint, SplitDigestTarget, TableDimension,
-        TableDimensionWire,
-    };
+    use super::{Digest, DigestTarget, SplitDigestPoint, SplitDigestTarget};
     use crate::utils::TryIntoBool;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{field::types::Sample, iop::witness::PartialWitness};
@@ -258,50 +190,6 @@ mod test {
                 .expect("cant get bool");
             let is_merge_case_point = sp.is_merge_case();
             assert_eq!(is_merge_case_circuit, is_merge_case_point);
-        }
-    }
-
-    #[derive(Clone, Debug)]
-    struct TestTableDimension {
-        digest: Digest,
-        dimension: TableDimension,
-    }
-
-    struct TestTableDimensionWire {
-        digest: DigestTarget,
-        dimension: TableDimensionWire,
-    }
-
-    impl UserCircuit<F, D> for TestTableDimension {
-        type Wires = TestTableDimensionWire;
-
-        fn build(b: &mut CBuilder) -> Self::Wires {
-            let digest = b.add_virtual_curve_target();
-            let dimension: TableDimensionWire = b.add_virtual_bool_target_safe().into();
-            let final_digest = dimension.conditional_row_digest(b, digest);
-            b.register_curve_public_input(final_digest);
-
-            TestTableDimensionWire { digest, dimension }
-        }
-
-        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            pw.set_curve_target(wires.digest, self.digest.to_weierstrass());
-            self.dimension.assign_wire(pw, &wires.dimension);
-        }
-    }
-
-    #[test]
-    fn test_dimension_wire() {
-        let cases = vec![TableDimension::Single, TableDimension::Compound];
-        for dimension in cases {
-            let circuit = TestTableDimension {
-                digest: Point::rand(),
-                dimension,
-            };
-            let proof = run_circuit::<F, D, C, _>(circuit.clone());
-            let combined = Digest::from_fields(&proof.public_inputs);
-            let expected = dimension.conditional_row_digest(circuit.digest);
-            assert_eq!(combined, expected);
         }
     }
 }

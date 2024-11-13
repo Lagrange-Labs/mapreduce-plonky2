@@ -160,7 +160,6 @@ mod test {
 
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
-    use mp2_common::digest::TableDimension;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::witness::WitnessWrite;
 
@@ -215,6 +214,6 @@ mod test {
         let len_pi = length_extraction::PublicInputs::<F>::from_slice(&test_circuit.len_pi);
         let len_dm = len_pi.metadata_point();
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-        pis.check_proof_public_inputs(&proof, TableDimension::Compound, Some(len_dm));
+        pis.check_proof_public_inputs(&proof, Some(len_dm));
     }
 }
