@@ -21,9 +21,12 @@ pub mod queries;
 pub mod symbols;
 #[cfg(test)]
 mod tests;
-mod utils;
+pub mod utils;
 mod validate;
 mod visitor;
+
+// required for enforcing the right number of placeholders is given during a query request
+pub use placeholders::gather_placeholders as placeholders_set;
 
 /// Given an SQL query textual representation, ensure it satisfies all the
 /// criterion imposed by the current proving architecture.

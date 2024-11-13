@@ -1,5 +1,7 @@
 //! This module handles the validation of adequate use of placeholders within a
 //! [`Query`].
+use std::collections::HashSet;
+
 use anyhow::*;
 use sqlparser::ast::{Expr, Query, Value};
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
@@ -41,9 +43,9 @@ impl<'a, C: ContextProvider> PlaceholderValidator<'a, C> {
         Ok(())
     }
 
-    /// Ensure that all the placeholders have been used. **Must** be called after
-    /// the [`Query`] has been visited.
-    fn close(&self) -> Result<usize> {
+    /// Ensure that all the placeholders have been used, and return the largest
+    /// one found.
+    fn ensured_used(&self) -> Result<usize> {
         for i in 0..self.current_max_freestanding {
             ensure!(
                 self.visited[i],
@@ -52,9 +54,21 @@ impl<'a, C: ContextProvider> PlaceholderValidator<'a, C> {
         }
         Ok(self.current_max_freestanding)
     }
+
+    /// Return a [`HashSet`] containing all the numeric placeholders found in
+    /// the query, without any guarantee of contiguity.
+    fn gather_placeholders(&self) -> Result<HashSet<usize>> {
+        Ok(self
+            .visited
+            .iter()
+            .enumerate()
+            // self.visited starts at 0, placeholders start a 1
+            .filter_map(|(i, used)| if *used { Some(i + 1) } else { None })
+            .collect())
+    }
 }
 
-impl<'a, C: ContextProvider> AstVisitor for PlaceholderValidator<'a, C> {
+impl<C: ContextProvider> AstVisitor for PlaceholderValidator<'_, C> {
     type Error = anyhow::Error;
 
     fn pre_expr(&mut self, expr: &Expr) -> anyhow::Result<()> {
@@ -71,5 +85,17 @@ impl<'a, C: ContextProvider> AstVisitor for PlaceholderValidator<'a, C> {
 pub fn validate<C: ContextProvider>(settings: &ParsilSettings<C>, query: &Query) -> Result<usize> {
     let mut validator = PlaceholderValidator::new(settings);
     query.visit(&mut validator)?;
-    validator.close()
+    validator.ensured_used()
+}
+
+/// Instantiate a [`PlaceholderValidator`], then run ot on the given query.
+/// Return the number of used free-standing placeholders if successful, or
+/// an error if the placeholder use is inappropriate.
+pub fn gather_placeholders<C: ContextProvider>(
+    settings: &ParsilSettings<C>,
+    query: &Query,
+) -> Result<HashSet<usize>> {
+    let mut validator = PlaceholderValidator::new(settings);
+    query.visit(&mut validator)?;
+    validator.gather_placeholders()
 }

@@ -461,15 +461,15 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
     // --------------------------------------------------------------------------
     // Private methods
     // --------------------------------------------------------------------------
-    async fn rec_print<S: TreeStorage<Tree<K>>>(i: &K, d: usize, s: &S) {
+    async fn rec_print<S: TreeStorage<Tree<K>>>(i: &K, d: usize, s: &S, r: &mut String) {
         Box::pin(async move {
             let n = &s.nodes().fetch(i).await;
             if let Some(left) = n.left() {
-                Self::rec_print(left, d + 1, s).await;
+                Self::rec_print(left, d + 1, s, r).await;
             }
-            println!("{}{:?} ({})", "  |".repeat(d), n.k, n.subtree_size);
+            r.push_str(&format!("{}{:?}\n", "    ".repeat(d), n.k,));
             if let Some(right) = n.right() {
-                Self::rec_print(right, d + 1, s).await;
+                Self::rec_print(right, d + 1, s, r).await;
             }
         })
         .await;
@@ -800,7 +800,7 @@ where
             s.nodes()
                 .try_fetch(root)
                 .await
-                .expect(&format!("Failed to fetch {:?}", root))
+                .unwrap_or_else(|| panic!("Failed to fetch {:?}", root))
                 .subtree_size
         } else {
             0
@@ -879,11 +879,19 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
 impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send>
     PrintableTree for Tree<K>
 {
-    async fn print<S: TreeStorage<Tree<K>>>(&self, s: &S) {
+    async fn tree_to_string<S: TreeStorage<Tree<K>>>(&self, s: &S) -> String {
         if let Some(root) = s.state().fetch().await.root.as_ref() {
-            Self::rec_print(root, 0, s).await;
+            let mut r = String::new();
+            Self::rec_print(root, 0, s, &mut r).await;
+            r
         } else {
-            println!("EMPTY TREE");
+            "EMPTY TREE".into()
         }
+    }
+
+    async fn subtree_to_string<S: TreeStorage<Self>>(&self, s: &S, k: &Self::Key) -> String {
+        let mut r = String::new();
+        Self::rec_print(k, 0, s, &mut r).await;
+        r
     }
 }

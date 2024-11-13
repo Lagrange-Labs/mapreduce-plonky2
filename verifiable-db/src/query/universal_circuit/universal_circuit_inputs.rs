@@ -208,7 +208,7 @@ impl BasicOperation {
         });
         [first_id, second_id.flatten()]
             .into_iter()
-            .filter_map(|id| id)
+            .flatten()
             .collect_vec()
     }
 

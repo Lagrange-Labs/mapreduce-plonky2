@@ -60,12 +60,18 @@ pub type PackedMappingKeyTarget = Array<U32Target, PACKED_MAPPING_KEY_LEN>;
 /// poseidon with the output serialized or via regular hash functions.
 #[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, Deref, PartialEq, Eq)]
 pub struct HashOutput(pub [u8; 32]);
+impl AsRef<[u8]> for &HashOutput {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 /// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
 /// since it still has to do 5 rounds in 622 or 650.
 pub const MAX_BLOCK_LEN: usize = 650;
 
 /// This constant represents the maximum size a value can be inside the storage trie.
+///
 /// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
 /// value **not** RLP encoded,i.e. without the 1-byte RLP header.
 pub const MAPPING_LEAF_VALUE_LEN: usize = 32;

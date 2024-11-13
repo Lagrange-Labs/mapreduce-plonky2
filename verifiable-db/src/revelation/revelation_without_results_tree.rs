@@ -10,9 +10,8 @@ use crate::{
             MembershipHashTarget, PlaceholderHashTarget,
         },
     },
-    revelation::{placeholders_check::check_placeholders, PublicInputs},
+    revelation::PublicInputs,
 };
-use alloy::primitives::U256;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
@@ -21,10 +20,7 @@ use mp2_common::{
     poseidon::{flatten_poseidon_hash_target, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
-    serialization::{
-        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
-        serialize_long_array,
-    },
+    serialization::{deserialize, serialize},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{FromTargets, ToTargets},
@@ -32,7 +28,7 @@ use mp2_common::{
 };
 use plonky2::{
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -49,13 +45,9 @@ use recursion_framework::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::array;
 
 use super::{
-    placeholders_check::{
-        CheckPlaceholderGadget, CheckPlaceholderInputWires, CheckedPlaceholder,
-        CheckedPlaceholderTarget, NUM_SECONDARY_INDEX_PLACEHOLDERS,
-    },
+    placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
     NUM_PREPROCESSING_IO, NUM_QUERY_IO_NO_RESULTS_TREE, PI_LEN as REVELATION_PI_LEN,
 };
 
@@ -367,6 +359,7 @@ mod tests {
             random_original_tree_proof,
         },
     };
+    use alloy::primitives::U256;
     use mp2_common::{
         poseidon::flatten_poseidon_hash_value,
         utils::{FromFields, ToFields},
@@ -405,7 +398,7 @@ mod tests {
         original_tree_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestRevelationWithoutResultsTreeCircuit<'a> {
+    impl UserCircuit<F, D> for TestRevelationWithoutResultsTreeCircuit<'_> {
         // Circuit wires + query proof + original tree proof (IVC proof)
         type Wires = (
             RevelationWithoutResultsTreeWires<L, S, PH, PP>,
@@ -596,7 +589,7 @@ mod tests {
     fn test_revelation_without_results_tree_for_no_op_avg_with_no_entries() {
         // Initialize the all operations to SUM or COUNT (not AVG).
         let mut rng = thread_rng();
-        let ops = array::from_fn(|_| {
+        let ops = std::array::from_fn(|_| {
             [AggregationOperation::SumOp, AggregationOperation::CountOp]
                 .choose(&mut rng)
                 .unwrap()

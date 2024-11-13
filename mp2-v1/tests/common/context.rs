@@ -263,12 +263,6 @@ impl TestContext {
             .unwrap()
     }
 
-    /// Reset the RPC provider. It could be used to query data from the
-    /// different RPCs during testing.
-    pub(crate) fn set_rpc(&mut self, rpc_url: &str) {
-        self.rpc = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
-    }
-
     pub fn run_query_proof(
         &self,
         name: &str,

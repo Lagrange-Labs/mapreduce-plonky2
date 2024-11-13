@@ -152,6 +152,12 @@ impl ParentCircuit {
             .collect();
         let h_new = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
+        // check that the rows tree built is for a merged table iff we extract data from MPT for a merged table
+        b.connect(
+            rows_tree_pi.is_merge_case().target,
+            extraction_pi.is_merge_case().target,
+        );
+
         // Register the public inputs.
         PublicInputs::new(
             &h_new,
@@ -303,7 +309,7 @@ mod tests {
         rows_tree_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestParentCircuit<'a> {
+    impl UserCircuit<F, D> for TestParentCircuit<'_> {
         // Parent node wires + extraction public inputs + rows tree public inputs
         type Wires = (ParentWires, Vec<Target>, Vec<Target>);
 
@@ -339,8 +345,9 @@ mod tests {
             [0; 3].map(|_| HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields()));
 
         let row_digest = Point::sample(&mut rng).to_weierstrass().to_fields();
-        let extraction_pi = &random_extraction_pi(&mut rng, old_max + U256::from(1), &row_digest);
-        let rows_tree_pi = &random_rows_tree_pi(&mut rng, &row_digest);
+        let extraction_pi =
+            &random_extraction_pi(&mut rng, old_max + U256::from(1), &row_digest, true);
+        let rows_tree_pi = &random_rows_tree_pi(&mut rng, &row_digest, true);
 
         let test_circuit = TestParentCircuit {
             c: ParentCircuit {

@@ -101,6 +101,12 @@ impl LeafCircuit {
             .collect();
         let h_new = b.hash_n_to_hash_no_pad::<CHasher>(inputs).to_targets();
 
+        // check that the rows tree built is for a merged table iff we extract data from MPT for a merged table
+        b.connect(
+            rows_tree_pi.is_merge_case().target,
+            extraction_pi.is_merge_case().target,
+        );
+
         // Register the public inputs.
         PublicInputs::new(
             &h_new,
@@ -299,8 +305,8 @@ pub mod tests {
         let block_number = U256::from_limbs(rng.gen::<[u64; 4]>());
 
         let row_digest = Point::sample(&mut rng).to_weierstrass().to_fields();
-        let extraction_pi = &random_extraction_pi(&mut rng, block_number, &row_digest);
-        let rows_tree_pi = &random_rows_tree_pi(&mut rng, &row_digest);
+        let extraction_pi = &random_extraction_pi(&mut rng, block_number, &row_digest, false);
+        let rows_tree_pi = &random_rows_tree_pi(&mut rng, &row_digest, false);
 
         let test_circuit = TestLeafCircuit {
             c: LeafCircuit {

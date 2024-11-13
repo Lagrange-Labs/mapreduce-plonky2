@@ -532,24 +532,24 @@ mod tests {
         let column_ids = ColumnIDs::new(column_ids[0], column_ids[1], column_ids[2..].to_vec());
 
         // query bound values
-        let min_primary = U256::from(2876);
-        let max_primary = U256::from(7894);
-        let min_secondary = U256::from(68);
-        let max_secondary = U256::from(9768443);
+        let min_query_primary = U256::from(2876);
+        let max_query_primary = U256::from(7894);
+        let min_query_secondary = U256::from(68);
+        let max_query_secondary = U256::from(9768443);
 
         // define placeholders
         let first_placeholder_id = PlaceholderId::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
-        let mut placeholders = Placeholders::new_empty(min_primary, max_primary);
+        let mut placeholders = Placeholders::new_empty(min_query_primary, max_query_primary);
         [first_placeholder_id, second_placeholder_id]
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         let third_placeholder_id = PlaceholderId::Generic(2);
         // value of $3 is min_secondary/4
-        placeholders.insert(third_placeholder_id, min_secondary / U256::from(4));
+        placeholders.insert(third_placeholder_id, min_query_secondary / U256::from(4));
         let fourth_placeholder_id = PlaceholderId::Generic(3);
         // $4 is equal to max_secondary
-        placeholders.insert(fourth_placeholder_id, max_secondary);
+        placeholders.insert(fourth_placeholder_id, max_query_secondary);
         let bounds = QueryBounds::new(
             &placeholders,
             Some(QueryBoundSource::Operation(BasicOperation {
@@ -988,17 +988,17 @@ mod tests {
         assert_eq!(pis.to_left_row_raw(), left_boundary_row.to_fields(),);
         assert_eq!(pis.to_right_row_raw(), right_boundary_row.to_fields(),);
 
-        assert_eq!(pis.min_primary(), min_primary);
-        assert_eq!(pis.max_primary(), max_primary);
-        assert_eq!(pis.min_secondary(), min_secondary);
-        assert_eq!(pis.max_secondary(), max_secondary);
+        assert_eq!(pis.min_primary(), min_query_primary);
+        assert_eq!(pis.max_primary(), max_query_primary);
+        assert_eq!(pis.min_secondary(), min_query_secondary);
+        assert_eq!(pis.max_secondary(), max_query_secondary);
         assert_eq!(pis.computational_hash(), computational_hash);
         assert_eq!(pis.placeholder_hash(), expected_placeholder_hash);
 
         // generate an index tree with all nodes out side of primary index range to test non-existence circuit API
         let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] = generate_test_tree(
             primary_index,
-            Some((max_primary + U256::from(1), U256::MAX)),
+            Some((max_query_primary + U256::from(1), U256::MAX)),
         );
         // we use node_e to prove non-existence
         let path_e = vec![
@@ -1034,8 +1034,8 @@ mod tests {
         assert_eq!(pis.to_values_raw(), &expected_outputs,);
         assert_eq!(pis.num_matching_rows(), F::ZERO,);
         assert_eq!(pis.overflow_flag(), false);
-        assert_eq!(pis.min_primary(), min_primary);
-        assert_eq!(pis.max_primary(), max_primary);
+        assert_eq!(pis.min_primary(), min_query_primary);
+        assert_eq!(pis.max_primary(), max_query_primary);
         assert_eq!(pis.computational_hash(), computational_hash);
         assert_eq!(pis.placeholder_hash(), expected_placeholder_hash);
     }

@@ -354,45 +354,6 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
     where
         [(); S - 1]:,
     {
-        /*// first, we need to determine whether the first output is a curve element or
-        // a U256, which depends on the aggregation operation of the first output slot
-        let first_op = self.to_ops_raw()[0];
-        let id_op = b.constant(
-            Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field()
-        );
-        let first_op_id = b.is_equal(first_op, id_op);
-        let curve_zero = b.curve_zero();
-        let u256_zero = b.zero_u256();
-        // select the dummy value for first output: must be neutral curve point
-        // if there are no aggregation operations in the query, `0u256` otherwise
-        let first_value_zero = b.curve_select(
-            first_op_id,
-            curve_zero,
-            CurveOrU256Target::from_targets(&u256_zero.to_targets()).as_curve_target(),
-        );
-
-        // now, choose between the dummy value for the first output and the value found
-        // in `self`
-        let output_values = OutputValuesTarget::from_targets(self.to_values_raw());
-        let first_value = b.curve_select(
-            is_non_dummy_chunk,
-            output_values.first_output.as_curve_target(),
-            first_value_zero
-        );
-        // for all the remaining output values, choose between the dummy values, which are
-        // always `0u256`, and the corresponding values found in `self`
-        let values = OutputValuesTarget::from_targets(
-            &first_value.to_targets().into_iter()
-                .chain(output_values.other_outputs.into_iter().flat_map(|out|
-                    b.select_u256(
-                        is_non_dummy_chunk,
-                        &out,
-                        &u256_zero,
-                    ).to_targets()
-                ))
-                .collect_vec()
-        );*/
-
         let dummy_values = compute_dummy_output_targets(b, &self.operation_ids_target());
         let output_values = self
             .to_values_raw()

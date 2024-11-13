@@ -14,9 +14,8 @@ use crate::{
         self, api::Parameters as RevelationParams, NUM_QUERY_IO_NO_RESULTS_TREE,
         PI_LEN as REVELATION_PI_LEN,
     },
-    row_tree,
+    row_tree::{self},
 };
-use alloy::primitives::U256;
 use anyhow::Result;
 use log::info;
 use mp2_common::{
@@ -38,13 +37,6 @@ use recursion_framework::framework::{
     RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
 };
 use serde::{Deserialize, Serialize};
-
-/// Struct containing the expected input of the Cell Tree node
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CellNode {
-    pub identifier: F,
-    pub value: U256,
-}
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the verifiable DB stage of LPN
 pub enum CircuitInput {

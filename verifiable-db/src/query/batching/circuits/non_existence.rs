@@ -56,12 +56,12 @@ where
     computational_hash: ComputationalHashTarget,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     placeholder_hash: PlaceholderHashTarget,
-    min_primary: UInt256Target,
-    max_primary: UInt256Target,
+    min_query_primary: UInt256Target,
+    max_query_primary: UInt256Target,
 }
 
 /// Circuit employed to prove the non-existence of a node in the index tree with
-/// a value in the query range [min_primary, max_primary]
+/// a value in the query range [min_query_primary, max_query_primary]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct NonExistenceCircuit<
     const INDEX_TREE_MAX_DEPTH: usize,
@@ -93,9 +93,9 @@ pub(crate) struct NonExistenceCircuit<
     // input compliance)
     placeholder_hash: PlaceholderHash,
     // lower bound of the query range
-    min_primary: U256,
+    min_query_primary: U256,
     // upper bound of the query range
-    max_primary: U256,
+    max_query_primary: U256,
 }
 
 impl<const INDEX_TREE_MAX_DEPTH: usize, const MAX_NUM_RESULTS: usize>
@@ -124,8 +124,8 @@ where
             ops: aggregation_ops,
             computational_hash,
             placeholder_hash,
-            min_primary: query_bounds.min_query_primary(),
-            max_primary: query_bounds.max_query_primary(),
+            min_query_primary: query_bounds.min_query_primary(),
+            max_query_primary: query_bounds.max_query_primary(),
         })
     }
 
@@ -138,7 +138,7 @@ where
             array::from_fn(|_| b.add_virtual_hash());
         let primary_index = b.add_virtual_target();
         let ops = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
-        let [min_primary, max_primary] = b.add_virtual_u256_arr_unsafe(); // unsafe is ok
+        let [min_query_primary, max_query_primary] = b.add_virtual_u256_arr_unsafe(); // unsafe is ok
                                                                           // since they are exposed as public inputs
         let index_path = MerklePathWithNeighborsGadget::build(
             b,
@@ -147,20 +147,20 @@ where
             primary_index,
         );
         // check that index_node_value is out of range
-        let smaller_than_min = b.is_less_than_u256(&index_node_value, &min_primary);
-        let bigger_than_max = b.is_less_than_u256(&max_primary, &index_node_value);
+        let smaller_than_min = b.is_less_than_u256(&index_node_value, &min_query_primary);
+        let bigger_than_max = b.is_less_than_u256(&max_query_primary, &index_node_value);
         let is_out_of_range = b.or(smaller_than_min, bigger_than_max);
         b.assert_one(is_out_of_range.target);
         let predecessor_info = &index_path.predecessor_info;
         let successor_info = &index_path.successor_info;
-        // assert NOT predecessor_info.is_found OR predecessor_info.value < min_primary
-        // equivalent to: assert predecessor_info.is_found AND predecessor_info.value < min_primary == predecessor_info.is_found
-        let predecessor_smaller = b.is_less_than_u256(&predecessor_info.value, &min_primary);
+        // assert NOT predecessor_info.is_found OR predecessor_info.value < min_query_primary
+        // equivalent to: assert predecessor_info.is_found AND predecessor_info.value < min_query_primary == predecessor_info.is_found
+        let predecessor_smaller = b.is_less_than_u256(&predecessor_info.value, &min_query_primary);
         let predecessor_flag = b.and(predecessor_info.is_found, predecessor_smaller);
         b.connect(predecessor_flag.target, predecessor_info.is_found.target);
-        // assert NOT successor_info.is_found OR successor_info.value > max_primary
-        // equivalent to: assert successor_info.is_found AND successor_info.value > min_primary == successor_info.is_found
-        let successor_bigger = b.is_less_than_u256(&max_primary, &successor_info.value);
+        // assert NOT successor_info.is_found OR successor_info.value > max_query_primary
+        // equivalent to: assert successor_info.is_found AND successor_info.value > max_query_primary == successor_info.is_found
+        let successor_bigger = b.is_less_than_u256(&max_query_primary, &successor_info.value);
         let successor_flag = b.and(successor_info.is_found, successor_bigger);
         b.connect(successor_flag.target, successor_info.is_found.target);
         // compute dummy output values
@@ -199,8 +199,8 @@ where
             &ops,
             &boundary_row.to_targets(),
             &boundary_row.to_targets(),
-            &min_primary.to_targets(),
-            &max_primary.to_targets(),
+            &min_query_primary.to_targets(),
+            &max_query_primary.to_targets(),
             &min_secondary.to_targets(),
             &max_secondary.to_targets(),
             &[zero], // no arithmetic operations done, so no error occurred
@@ -217,8 +217,8 @@ where
             ops,
             computational_hash,
             placeholder_hash,
-            min_primary,
-            max_primary,
+            min_query_primary,
+            max_query_primary,
         }
     }
 
@@ -230,8 +230,8 @@ where
         self.index_path.assign(pw, &wires.index_path);
         [
             (self.index_node_value, &wires.index_node_value),
-            (self.min_primary, &wires.min_primary),
-            (self.max_primary, &wires.max_primary),
+            (self.min_query_primary, &wires.min_query_primary),
+            (self.max_query_primary, &wires.max_query_primary),
         ]
         .into_iter()
         .for_each(|(value, target)| pw.set_u256_target(target, value));
@@ -333,11 +333,11 @@ mod tests {
         let rng = &mut thread_rng();
         let [computational_hash, placeholder_hash] = array::from_fn(|_| gen_random_field_hash());
         let ops = random_aggregation_operations();
-        // generate min_primary and max_primary
-        let [min_primary, max_primary] =
+        // generate min_query_primary and max_query_primary
+        let [min_query_primary, max_query_primary] =
             gen_values_in_range(rng, U256::from(42), U256::MAX - U256::from(42));
         let query_bounds = QueryBounds::new(
-            &Placeholders::new_empty(min_primary, max_primary),
+            &Placeholders::new_empty(min_query_primary, max_query_primary),
             None,
             None,
         )
@@ -345,7 +345,7 @@ mod tests {
         // generate a test index tree with all nodes bigger than max_primary
         let [node_a, node_b, node_c, node_d, node_e, node_f, _node_g] = generate_test_tree(
             primary_index,
-            Some((max_primary + U256::from(1), U256::MAX)),
+            Some((max_query_primary + U256::from(1), U256::MAX)),
         );
         // we prove non-existence employing the minimum node of the tree as the proven node, which is node_e
         let path_e = vec![
@@ -458,10 +458,10 @@ mod tests {
             "all bigger",
         );
 
-        // generate a test index tree with all nodes smaller than min_primary
+        // generate a test index tree with all nodes smaller than min_query_primary
         let [node_a, node_b, node_c, _node_d, _node_e, _node_f, node_g] = generate_test_tree(
             primary_index,
-            Some((U256::ZERO, min_primary - U256::from(1))),
+            Some((U256::ZERO, min_query_primary - U256::from(1))),
         );
         // we prove non-existence employing the maximum node of the tree as the proven node, which is node_g
         let path_g = vec![
@@ -505,23 +505,23 @@ mod tests {
             "all smaller",
         );
 
-        // now, we test non-existence over a tree where some nodes are smaller than min_primary, and all other nodes are
-        // bigger than max_primary
-        // We generate a test tree with random values, and then we set min_primary and max_primary to values which are
+        // now, we test non-existence over a tree where some nodes are smaller than min_query_primary, and all other nodes are
+        // bigger than max_query_primary
+        // We generate a test tree with random values, and then we set min_query_primary and max_query_primary to values which are
         // between node_f.value and node_b.value
         let ([node_a, node_b, node_c, node_d, node_e, node_f, _node_g], query_bounds) = loop {
             let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] =
                 generate_test_tree(primary_index, None);
             if node_b.value.checked_sub(node_f.value).unwrap() > U256::from(2) {
                 // if there is room between node_f.value and node_b.value, we
-                // set min_primary = node_f.value + 1 and max_primary = node_b.value - 1
-                let min_primary = node_f.value + U256::from(1);
-                let max_primary = node_b.value - U256::from(1);
+                // set min_query_primary = node_f.value + 1 and max_query_primary = node_b.value - 1
+                let min_query_primary = node_f.value + U256::from(1);
+                let max_query_primary = node_b.value - U256::from(1);
 
                 break (
                     [node_a, node_b, node_c, node_d, node_e, node_f, node_g],
                     QueryBounds::new(
-                        &Placeholders::new_empty(min_primary, max_primary),
+                        &Placeholders::new_empty(min_query_primary, max_query_primary),
                         None,
                         None,
                     )
@@ -613,7 +613,7 @@ mod tests {
 
         // negative test: check that if there are nodes in the query range, then the circuit fail for each node in
         // the tree
-        // set min_primary = node_f.value, max_primary = node_a.value
+        // set min_query_primary = node_f.value, max_query_primary = node_a.value
         let query_bounds = QueryBounds::new(
             &Placeholders::new_empty(node_f.value, node_a.value),
             None,

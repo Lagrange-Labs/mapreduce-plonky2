@@ -173,7 +173,7 @@ where
         Ok(Self {
             row_path,
             index_path,
-            input_values: UniversalQueryValueInputs::new(row_cells, true)?,
+            input_values: UniversalQueryValueInputs::new(row_cells, false)?,
         })
     }
 
@@ -185,13 +185,13 @@ where
         Ok(Self {
             row_path,
             index_path,
-            input_values: UniversalQueryValueInputs::new(row_cells, false)?,
+            input_values: UniversalQueryValueInputs::new(row_cells, true)?,
         })
     }
 
     pub(crate) fn clone_to_dummy_row(&self) -> Self {
         let mut input_values = self.input_values.clone();
-        input_values.is_non_dummy_row = false;
+        input_values.is_dummy_row = true;
         Self {
             row_path: self.row_path.clone(),
             index_path: self.index_path.clone(),
@@ -208,10 +208,10 @@ where
             MAX_NUM_RESULTS,
             T,
         >,
-        min_secondary: &UInt256Target,
-        max_secondary: &UInt256Target,
-        min_primary: &UInt256Target,
-        max_primary: &UInt256Target,
+        min_query_secondary: &UInt256Target,
+        max_query_secondary: &UInt256Target,
+        min_query_primary: &UInt256Target,
+        max_query_primary: &UInt256Target,
     ) -> RowProcessingGadgetWires<
         ROW_TREE_MAX_DEPTH,
         INDEX_TREE_MAX_DEPTH,
@@ -222,10 +222,10 @@ where
         let mut value_wires = UniversalQueryValueInputs::build(
             b,
             hash_input_wires,
-            min_secondary,
-            max_secondary,
-            Some(min_primary),
-            Some(max_primary),
+            min_query_secondary,
+            max_query_secondary,
+            Some(min_query_primary),
+            Some(max_query_primary),
             &zero,
         );
         let [primary_index_id, secondary_index_id] =

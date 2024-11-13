@@ -70,8 +70,8 @@ pub(crate) struct RowChunkProcessingWires<
         MAX_NUM_RESULTS,
         T,
     >,
-    min_primary: UInt256Target,
-    max_primary: UInt256Target,
+    min_query_primary: UInt256Target,
+    max_query_primary: UInt256Target,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -107,8 +107,8 @@ pub(crate) struct RowChunkProcessingCircuit<
         MAX_NUM_RESULTS,
         T,
     >,
-    min_primary: U256,
-    max_primary: U256,
+    min_query_primary: U256,
+    max_query_primary: U256,
 }
 
 impl<
@@ -178,8 +178,8 @@ where
                 .try_into()
                 .unwrap(),
             universal_query_inputs,
-            min_primary: query_bounds.min_query_primary(),
-            max_primary: query_bounds.max_query_primary(),
+            min_query_primary: query_bounds.min_query_primary(),
+            max_query_primary: query_bounds.max_query_primary(),
         })
     }
 
@@ -196,15 +196,15 @@ where
         T,
     > {
         let query_input_wires = UniversalQueryHashInputs::build(b);
-        let [min_primary, max_primary] = b.add_virtual_u256_arr_unsafe(); // unsafe should be ok since
+        let [min_query_primary, max_query_primary] = b.add_virtual_u256_arr_unsafe(); // unsafe should be ok since
                                                                           // we are exposing these values as public inputs
         let first_row_wires = RowProcessingGadgetInputs::build(
             b,
             &query_input_wires.input_wires,
             &query_input_wires.min_secondary,
             &query_input_wires.max_secondary,
-            &min_primary,
-            &max_primary,
+            &min_query_primary,
+            &max_query_primary,
         );
         // enforce first row is non-dummy
         b.assert_one(
@@ -225,8 +225,8 @@ where
                 &query_input_wires.input_wires,
                 &query_input_wires.min_secondary,
                 &query_input_wires.max_secondary,
-                &min_primary,
-                &max_primary,
+                &min_query_primary,
+                &max_query_primary,
             );
             row_inputs.push(RowProcessingGadgetInputWires::from(&row_wires));
             let is_second_non_dummy = row_wires.value_wires.input_wires.is_non_dummy_row;
@@ -235,8 +235,8 @@ where
                 b,
                 &chunk,
                 &current_chunk,
-                &min_primary,
-                &max_primary,
+                &min_query_primary,
+                &max_query_primary,
                 &query_input_wires.min_secondary,
                 &query_input_wires.max_secondary,
                 &query_input_wires.agg_ops_ids,
@@ -260,8 +260,8 @@ where
             &query_input_wires.agg_ops_ids,
             &row_chunk.left_boundary_row.to_targets(),
             &row_chunk.right_boundary_row.to_targets(),
-            &min_primary.to_targets(),
-            &max_primary.to_targets(),
+            &min_query_primary.to_targets(),
+            &max_query_primary.to_targets(),
             &query_input_wires.min_secondary.to_targets(),
             &query_input_wires.max_secondary.to_targets(),
             &[overflow.target],
@@ -273,8 +273,8 @@ where
         RowChunkProcessingWires {
             row_inputs: row_inputs.try_into().unwrap(),
             universal_query_inputs: query_input_wires.input_wires,
-            min_primary,
-            max_primary,
+            min_query_primary,
+            max_query_primary,
         }
     }
 
@@ -299,8 +299,8 @@ where
         self.universal_query_inputs
             .assign(pw, &wires.universal_query_inputs);
         [
-            (self.min_primary, &wires.min_primary),
-            (self.max_primary, &wires.max_primary),
+            (self.min_query_primary, &wires.min_query_primary),
+            (self.max_query_primary, &wires.max_query_primary),
         ]
         .into_iter()
         .for_each(|(value, target)| pw.set_u256_target(target, value));
@@ -497,23 +497,23 @@ mod tests {
         let primary_index = F::from_canonical_u64(column_ids[0]);
         let secondary_index = F::from_canonical_u64(column_ids[1]);
         let column_ids = ColumnIDs::new(column_ids[0], column_ids[1], column_ids[2..].to_vec());
-        let min_primary = U256::from(456);
-        let max_primary = U256::from(6789);
-        let min_secondary = U256::from(75);
-        let max_secondary = U256::from(97686754);
+        let min_query_primary = U256::from(456);
+        let max_query_primary = U256::from(6789);
+        let min_query_secondary = U256::from(75);
+        let max_query_secondary = U256::from(97686754);
         // define placeholders
         let first_placeholder_id = PlaceholderId::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
-        let mut placeholders = Placeholders::new_empty(min_primary, max_primary);
+        let mut placeholders = Placeholders::new_empty(min_query_primary, max_query_primary);
         [first_placeholder_id, second_placeholder_id]
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is max query bound + 1, since the bound is C2 < $3, rather than C2 <= $3
         let third_placeholder_id = PlaceholderId::Generic(2);
-        placeholders.insert(third_placeholder_id, max_secondary + U256::from(1));
+        placeholders.insert(third_placeholder_id, max_query_secondary + U256::from(1));
         let bounds = QueryBounds::new(
             &placeholders,
-            Some(QueryBoundSource::Constant(min_secondary)),
+            Some(QueryBoundSource::Constant(min_query_secondary)),
             Some(
                 QueryBoundSource::Operation(BasicOperation {
                     first_operand: InputOperand::Placeholder(third_placeholder_id),
@@ -947,10 +947,10 @@ mod tests {
         assert_eq!(pis.to_left_row_raw(), &left_boundary_row.to_fields(),);
         assert_eq!(pis.to_right_row_raw(), &right_boundary_row.to_fields(),);
 
-        assert_eq!(pis.min_primary(), min_primary,);
-        assert_eq!(pis.max_primary(), max_primary,);
-        assert_eq!(pis.min_secondary(), min_secondary,);
-        assert_eq!(pis.max_secondary(), max_secondary,);
+        assert_eq!(pis.min_primary(), min_query_primary,);
+        assert_eq!(pis.max_primary(), max_query_primary,);
+        assert_eq!(pis.min_secondary(), min_query_secondary,);
+        assert_eq!(pis.max_secondary(), max_query_secondary,);
         assert_eq!(pis.computational_hash(), computational_hash,);
         assert_eq!(pis.placeholder_hash(), placeholder_hash,);
 
@@ -1008,24 +1008,24 @@ mod tests {
         let primary_index = F::from_canonical_u64(column_ids[0]);
         let secondary_index = F::from_canonical_u64(column_ids[1]);
         let column_ids = ColumnIDs::new(column_ids[0], column_ids[1], column_ids[2..].to_vec());
-        let min_primary = U256::from(523);
-        let max_primary = U256::from(657);
-        let min_secondary = U256::from(42);
-        let max_secondary = U256::from(43);
+        let min_query_primary = U256::from(523);
+        let max_query_primary = U256::from(657);
+        let min_query_secondary = U256::from(42);
+        let max_query_secondary = U256::from(43);
         // define placeholders
         let first_placeholder_id = PlaceholderId::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
-        let mut placeholders = Placeholders::new_empty(min_primary, max_primary);
+        let mut placeholders = Placeholders::new_empty(min_query_primary, max_query_primary);
         [first_placeholder_id, second_placeholder_id]
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is the min query bound
         let third_placeholder_id = PlaceholderId::Generic(2);
-        placeholders.insert(third_placeholder_id, min_secondary);
+        placeholders.insert(third_placeholder_id, min_query_secondary);
         let query_bounds = QueryBounds::new(
             &placeholders,
             Some(QueryBoundSource::Placeholder(third_placeholder_id)),
-            Some(QueryBoundSource::Constant(max_secondary)),
+            Some(QueryBoundSource::Constant(max_query_secondary)),
         )
         .unwrap();
 
@@ -1532,10 +1532,10 @@ mod tests {
         assert_eq!(pis.to_left_row_raw(), &left_boundary_row.to_fields(),);
         assert_eq!(pis.to_right_row_raw(), &right_boundary_row.to_fields(),);
 
-        assert_eq!(pis.min_primary(), min_primary,);
-        assert_eq!(pis.max_primary(), max_primary,);
-        assert_eq!(pis.min_secondary(), min_secondary,);
-        assert_eq!(pis.max_secondary(), max_secondary,);
+        assert_eq!(pis.min_primary(), min_query_primary,);
+        assert_eq!(pis.max_primary(), max_query_primary,);
+        assert_eq!(pis.min_secondary(), min_query_secondary,);
+        assert_eq!(pis.max_secondary(), max_query_secondary,);
         assert_eq!(pis.computational_hash(), computational_hash,);
         assert_eq!(pis.placeholder_hash(), placeholder_hash,);
 

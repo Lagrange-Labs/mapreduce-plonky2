@@ -76,15 +76,26 @@ where
     is_real_node: [BoolTarget; MAX_DEPTH - 1],
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-/// Input wires related to the data of the end node whose membership is proven with `MerklePathWithNeighborsGadget`
+/// Input wires related to the data of the end node whose membership in the tree
+/// is proven with `MerklePathWithNeighborsGadget`.
 pub struct EndNodeInputs {
+    // minimum of the end node. It is necessary to recompute the hash of the node
+    // inside the circuit
     node_min: UInt256Target,
+    // maximum of the end node. It is necessary to recompute the hash of the node
+    // inside the circuit
     node_max: UInt256Target,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    // Flag specifying whether the end node has a left child
     left_child_exists: BoolTarget,
+    // The data about the left child of the node, which might be necessary to
+    // extract the value of the predecessor of the end node
     left_child_info: NodeInfoTarget,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    // Flag specifying whether the end node has a right child
     right_child_exists: BoolTarget,
+    // The data about the right child of the node, which might be necessary to
+    // extract the value of the successor of the end node
     right_child_info: NodeInfoTarget,
 }
 
@@ -351,13 +362,69 @@ where
         end_node: HashOutTarget,
         index_id: Target,
     ) -> MerklePathTarget<MAX_DEPTH> {
-        if let MerklePathWires::MerklePath(out_targets) =
-            build_common(b, end_node, index_id, false, None)
-        {
-            out_targets
-        } else {
-            unreachable!()
+        let (inputs, path) = Self::build_path(b, end_node, index_id);
+
+        MerklePathTarget {
+            inputs,
+            root: path.last().unwrap().clone(),
         }
+    }
+
+    /// Gadget to compute the hashes of all the nodes in the path from `end_node` to the root of
+    /// a Merkle-tree
+    fn build_path(
+        b: &mut CircuitBuilder<F, D>,
+        end_node: HashOutTarget,
+        index_id: Target,
+    ) -> (
+        MerklePathTargetInputs<MAX_DEPTH>,
+        [HashOutTarget; MAX_DEPTH - 1],
+    ) {
+        let is_left_child = array::from_fn(|_| b.add_virtual_bool_target_unsafe());
+        let [sibling_hash, embedded_tree_hash] =
+            [0, 1].map(|_| array::from_fn(|_| b.add_virtual_hash()));
+        let [node_min, node_max, node_value] = [0, 1, 2].map(
+            |_| b.add_virtual_u256_arr_unsafe(), // unsafe should be ok since we just need to hash them
+        );
+        let is_real_node = array::from_fn(|_| b.add_virtual_bool_target_safe());
+        let mut final_hash = end_node;
+        let mut path_nodes = vec![];
+        for i in 0..MAX_DEPTH - 1 {
+            let rest = node_min[i]
+                .to_targets()
+                .into_iter()
+                .chain(node_max[i].to_targets())
+                .chain(once(index_id))
+                .chain(node_value[i].to_targets())
+                .chain(embedded_tree_hash[i].to_targets())
+                .collect_vec();
+            let node_hash = HashOutTarget::from_vec(hash_maybe_first(
+                b,
+                is_left_child[i],
+                sibling_hash[i].elements,
+                final_hash.elements,
+                rest.as_slice(),
+            ));
+            final_hash = b.select_hash(is_real_node[i], &node_hash, &final_hash);
+            path_nodes.push(final_hash);
+        }
+
+        let inputs = MerklePathTargetInputs {
+            is_left_child,
+            sibling_hash,
+            node_min,
+            node_max,
+            node_value,
+            embedded_tree_hash,
+            is_real_node,
+        };
+
+        // ensure there is always one node in the path even if `MAX_DEPTH=1`
+        if path_nodes.len() == 0 {
+            path_nodes.push(end_node);
+        }
+
+        (inputs, path_nodes.try_into().unwrap())
     }
 
     pub fn assign(&self, pw: &mut PartialWitness<F>, wires: &MerklePathTargetInputs<MAX_DEPTH>) {
@@ -402,8 +469,18 @@ where
     [(); MAX_DEPTH - 1]:,
 {
     path_gadget: MerklePathGadget<MAX_DEPTH>,
+    // minimum value of the node whose membership in in tree is
+    // being proven with this gadget (referred to as `end_node`).
+    // It is necessary to recompute the hash of the end node
     end_node_min: U256,
+    // maximum value of the end node whose membership in the tree is
+    // being proven with this gadget (referred to as `end_node`).
+    // It is necessary to recompute the hash of the end node
     end_node_max: U256,
+    // Data about the children of the end node whose membership in the
+    // tree is being proven with this gadget (referred to as `end_node`).
+    // Children data might be necessary to compute the value of the
+    // predecessor/successor of the end node
     end_node_children: [Option<NodeInfo>; 2],
 }
 
@@ -466,12 +543,115 @@ where
             max: end_node_info.node_max.clone(),
         };
         let end_node_hash = end_node.compute_node_hash(b, index_id);
-        if let MerklePathWires::MerklePathWithNeighbors(out_targets) =
-            build_common(b, end_node_hash, index_id, true, Some(end_node_info))
-        {
-            out_targets
-        } else {
-            unreachable!()
+        let (inputs, path) = MerklePathGadget::build_path(b, end_node_hash, index_id);
+        // we need to initialize predecessor and successor data
+        let (mut predecessor_info, mut successor_info) = {
+            // the predecessor of end_node is an ancestor of end_node iff end_node has no left child
+            let is_predecessor_in_path = b.not(end_node_info.left_child_exists);
+            let zero_u256 = b.zero_u256();
+            let max_u256 = b.constant_u256(U256::MAX);
+            // Initialize value of predecessor node of end_node to a dummy value if the predecessor node
+            // will be found in the path; otherwise, the predecessor_value is the maximum value in
+            // the subtree rooted in the left child of end_node
+            let predecessor_value = b.select_u256(
+                is_predecessor_in_path,
+                &zero_u256,
+                &end_node_info.left_child_info.max,
+            );
+            // the predecessor value is already found if end_node has a left child
+            let predecessor_found = end_node_info.left_child_exists;
+            // Initialize predecessor node hash to a dummy value
+            let predecessor_hash = b.constant_hash(*empty_poseidon_hash());
+            // build predecessor info
+            let predecessor_info = NeighborInfoTarget {
+                is_found: predecessor_found,
+                is_in_path: is_predecessor_in_path,
+                value: predecessor_value,
+                hash: predecessor_hash,
+            };
+
+            // the successor of end_node is an ancestor of end_node iff end_node has no right child
+            let is_successor_in_path = b.not(end_node_info.right_child_exists);
+            // Initialize value of successor node of end_node to a dummy value if the successor node
+            // will be found in the path; otherwise, successor_value is the minimum value in
+            // the subtree rooted in the right child of end_node
+            let successor_value = b.select_u256(
+                is_successor_in_path,
+                &max_u256, // set dummy value of success to `U256::MAX`, it allows to satisfy constraints of
+                // `are_consecutive_nodes` gadget in case the node has no successor in the tree
+                &end_node_info.right_child_info.min,
+            );
+            // the successor value is already found if end_node has a right child
+            let successor_found = end_node_info.right_child_exists;
+            // Initialize successor node hash to a dummy value
+            let successor_hash = b.constant_hash(*empty_poseidon_hash());
+            // build successor info
+            let successor_info = NeighborInfoTarget {
+                is_found: successor_found,
+                is_in_path: is_successor_in_path,
+                value: successor_value,
+                hash: successor_hash,
+            };
+            (predecessor_info, successor_info)
+        };
+
+        for i in 0..MAX_DEPTH - 1 {
+            // we need to look for the predecessor
+            let is_right_child = b.not(inputs.is_left_child[i]);
+            /* First, we determine if the current node is the predecessor */
+            let mut is_current_node_predecessor = b.not(predecessor_info.is_found); // current node cannot
+                                                                                    // be the predecessor if predecessor has already been found
+            is_current_node_predecessor =
+                b.and(is_current_node_predecessor, inputs.is_real_node[i]); // current node
+                                                                            // cannot be the predecessor if it's not a real node
+            is_current_node_predecessor = b.and(is_current_node_predecessor, is_right_child); // current node
+                                                                                              // is the predecessor if the previous node in the path is its right child
+                                                                                              // we update predecessor_info.hash if current node is the predecessor
+            predecessor_info.hash = b.select_hash(
+                is_current_node_predecessor,
+                &path[i],
+                &predecessor_info.hash,
+            );
+            // we update predecessor_info.value if current node is the predecessor
+            predecessor_info.value = b.select_u256(
+                is_current_node_predecessor,
+                &inputs.node_value[i],
+                &predecessor_info.value,
+            );
+            // set predecessor_info.is_found if current node is the predecessor
+            predecessor_info.is_found =
+                b.or(predecessor_info.is_found, is_current_node_predecessor);
+
+            // we need to look for the successor
+            /* First, we determine if the current node is the successor */
+            let mut is_current_node_successor = b.not(successor_info.is_found); // current node cannot
+                                                                                // be the successor if successor has already been found
+            is_current_node_successor = b.and(is_current_node_successor, inputs.is_real_node[i]); // current node
+                                                                                                  // cannot be the successor if it's not a real node
+            is_current_node_successor = b.and(is_current_node_successor, inputs.is_left_child[i]); // current node
+                                                                                                   // is the successor if the previous node in the path is its left child
+                                                                                                   // we update successor_info.hash if current node is the successor
+            successor_info.hash =
+                b.select_hash(is_current_node_successor, &path[i], &successor_info.hash);
+            // we update successor_info.value if current node is the successor
+            successor_info.value = b.select_u256(
+                is_current_node_successor,
+                &inputs.node_value[i],
+                &successor_info.value,
+            );
+            // set successor_info.is_found if current node is the successor
+            successor_info.is_found = b.or(successor_info.is_found, is_current_node_successor);
+        }
+
+        MerklePathWithNeighborsTarget {
+            inputs: MerklePathWithNeighborsTargetInputs {
+                path_inputs: inputs,
+                end_node_inputs: end_node_info,
+            },
+            root: path.last().unwrap().clone(),
+            end_node_hash,
+            predecessor_info: predecessor_info,
+            successor_info: successor_info,
         }
     }
 
@@ -506,190 +686,6 @@ where
             .end_node_inputs
             .right_child_info
             .set_target(pw, &right_child_info);
-    }
-}
-
-#[derive(Clone, Debug)]
-/// Enum employed as output type for `build_common` method, which allows to implement the core logic
-/// of `MerklePathGadget` and `MerklePathGadgetWithNeighbors` in a single method, hence avoiding
-/// code duplication
-enum MerklePathWires<const MAX_DEPTH: usize>
-where
-    [(); MAX_DEPTH - 1]:,
-{
-    MerklePath(MerklePathTarget<MAX_DEPTH>),
-    MerklePathWithNeighbors(MerklePathWithNeighborsTarget<MAX_DEPTH>),
-}
-
-/// Build `MerklePathWires`, building `MerklePathWithNeighborsTarget` if the input flag `with_neighbors`
-/// is true, building `MerkelPathTarget` otherwise. The required inputs are:
-/// - `end_node`: The hash of the first node in the path
-/// - `index_id`: Integer identifier of the index column to be placed in the hash
-///     of the nodes of the path
-/// - `end_node_info` : Data about `end_node`; must be provided only if `with_neighbors == true`
-fn build_common<const MAX_DEPTH: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    end_node: HashOutTarget,
-    index_id: Target,
-    with_neighbors: bool,
-    end_node_info: Option<EndNodeInputs>,
-) -> MerklePathWires<MAX_DEPTH>
-where
-    [(); MAX_DEPTH - 1]:,
-{
-    let is_left_child = array::from_fn(|_| b.add_virtual_bool_target_unsafe());
-    let [sibling_hash, embedded_tree_hash] =
-        [0, 1].map(|_| array::from_fn(|_| b.add_virtual_hash()));
-    let [node_min, node_max, node_value] = [0, 1, 2].map(
-        |_| b.add_virtual_u256_arr_unsafe(), // unsafe should be ok since we just need to hash them
-    );
-    let is_real_node = array::from_fn(|_| b.add_virtual_bool_target_safe());
-
-    let (mut predecessor_info, mut successor_info) = if with_neighbors {
-        // we need to initialize predecessor and successor data
-        let end_node_info = end_node_info.as_ref().unwrap();
-        // the predecessor of end_node is an ancestor of end_node iff end_node has no left child
-        let is_predecessor_in_path = b.not(end_node_info.left_child_exists);
-        let zero_u256 = b.zero_u256();
-        let max_u256 = b.constant_u256(U256::MAX);
-        // Initialize value of predecessor node of end_node to a dummy value if the predecessor node
-        // will be found in the path; otherwise, the predecessor_value is the maximum value in
-        // the subtree rooted in the left child of end_node
-        let predecessor_value = b.select_u256(
-            is_predecessor_in_path,
-            &zero_u256,
-            &end_node_info.left_child_info.max,
-        );
-        // the predecessor value is already found if end_node has a left child
-        let predecessor_found = end_node_info.left_child_exists;
-        // Initialize predecessor node hash to a dummy value
-        let predecessor_hash = b.constant_hash(*empty_poseidon_hash());
-        // build predecessor info
-        let predecessor_info = NeighborInfoTarget {
-            is_found: predecessor_found,
-            is_in_path: is_predecessor_in_path,
-            value: predecessor_value,
-            hash: predecessor_hash,
-        };
-
-        // the successor of end_node is an ancestor of end_node iff end_node has no right child
-        let is_successor_in_path = b.not(end_node_info.right_child_exists);
-        // Initialize value of successor node of end_node to a dummy value if the successor node
-        // will be found in the path; otherwise, successor_value is the minimum value in
-        // the subtree rooted in the right child of end_node
-        let successor_value = b.select_u256(
-            is_successor_in_path,
-            &max_u256, // set dummy value of success to `U256::MAX`, it allows to satisfy constraints of
-            // `are_consecutive_nodes` gadget in case the node has no successor in the tree
-            &end_node_info.right_child_info.min,
-        );
-        // the successor value is already found if end_node has a right child
-        let successor_found = end_node_info.right_child_exists;
-        // Initialize successor node hash to a dummy value
-        let successor_hash = b.constant_hash(*empty_poseidon_hash());
-        // build successor info
-        let successor_info = NeighborInfoTarget {
-            is_found: successor_found,
-            is_in_path: is_successor_in_path,
-            value: successor_value,
-            hash: successor_hash,
-        };
-        (Some(predecessor_info), Some(successor_info))
-    } else {
-        (None, None)
-    };
-
-    let mut final_hash = end_node;
-    for i in 0..MAX_DEPTH - 1 {
-        let rest = node_min[i]
-            .to_targets()
-            .into_iter()
-            .chain(node_max[i].to_targets())
-            .chain(once(index_id))
-            .chain(node_value[i].to_targets())
-            .chain(embedded_tree_hash[i].to_targets())
-            .collect_vec();
-        let node_hash = HashOutTarget::from_vec(hash_maybe_first(
-            b,
-            is_left_child[i],
-            sibling_hash[i].elements,
-            final_hash.elements,
-            rest.as_slice(),
-        ));
-        final_hash = b.select_hash(is_real_node[i], &node_hash, &final_hash);
-        if let Some(predecessor_info) = predecessor_info.as_mut() {
-            // we need also to look for the predecessor
-            let is_right_child = b.not(is_left_child[i]);
-            /* First, we determine if the current node is the predecessor */
-            let mut is_current_node_predecessor = b.not(predecessor_info.is_found); // current node cannot
-                                                                                    // be the predecessor if predecessor has already been found
-            is_current_node_predecessor = b.and(is_current_node_predecessor, is_real_node[i]); // current node
-                                                                                               // cannot be the predecessor if it's not a real node
-            is_current_node_predecessor = b.and(is_current_node_predecessor, is_right_child); // current node
-                                                                                              // is the predecessor if the previous node in the path is its right child
-                                                                                              // we update predecessor_info.hash if current node is the predecessor
-            predecessor_info.hash = b.select_hash(
-                is_current_node_predecessor,
-                &node_hash,
-                &predecessor_info.hash,
-            );
-            // we update predecessor_info.value if current node is the predecessor
-            predecessor_info.value = b.select_u256(
-                is_current_node_predecessor,
-                &node_value[i],
-                &predecessor_info.value,
-            );
-            // set predecessor_info.is_found if current node is the predecessor
-            predecessor_info.is_found =
-                b.or(predecessor_info.is_found, is_current_node_predecessor);
-        }
-        if let Some(successor_info) = successor_info.as_mut() {
-            // we need also to look for the successor
-            /* First, we determine if the current node is the successor */
-            let mut is_current_node_successor = b.not(successor_info.is_found); // current node cannot
-                                                                                // be the successor if successor has already been found
-            is_current_node_successor = b.and(is_current_node_successor, is_real_node[i]); // current node
-                                                                                           // cannot be the successor if it's not a real node
-            is_current_node_successor = b.and(is_current_node_successor, is_left_child[i]); // current node
-                                                                                            // is the successor if the previous node in the path is its left child
-                                                                                            // we update successor_info.hash if current node is the successor
-            successor_info.hash =
-                b.select_hash(is_current_node_successor, &node_hash, &successor_info.hash);
-            // we update successor_info.value if current node is the successor
-            successor_info.value = b.select_u256(
-                is_current_node_successor,
-                &node_value[i],
-                &successor_info.value,
-            );
-            // set successor_info.is_found if current node is the successor
-            successor_info.is_found = b.or(successor_info.is_found, is_current_node_successor);
-        }
-    }
-    let inputs = MerklePathTargetInputs {
-        is_left_child,
-        sibling_hash,
-        node_min,
-        node_max,
-        node_value,
-        embedded_tree_hash,
-        is_real_node,
-    };
-    if with_neighbors {
-        MerklePathWires::MerklePathWithNeighbors(MerklePathWithNeighborsTarget {
-            inputs: MerklePathWithNeighborsTargetInputs {
-                path_inputs: inputs,
-                end_node_inputs: end_node_info.unwrap(),
-            },
-            root: final_hash,
-            end_node_hash: end_node,
-            predecessor_info: predecessor_info.unwrap(),
-            successor_info: successor_info.unwrap(),
-        })
-    } else {
-        MerklePathWires::MerklePath(MerklePathTarget {
-            inputs,
-            root: final_hash,
-        })
     }
 }
 

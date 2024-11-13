@@ -86,11 +86,14 @@ impl TestContext {
         let t = &table.row;
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(wk)) = workplan.next() {
-            let k = &wk.k;
-            let (context, row) = t.fetch_with_context(&k).await;
+            let k = wk.k();
+            let (context, row) = t.fetch_with_context(k).await;
             let id = row.secondary_index_column;
             // Sec. index value
             let value = row.secondary_index_value();
+            let multiplier = table.columns.column_info(id).multiplier;
+            // NOTE remove that when playing more with sec. index
+            assert!(!multiplier, "secondary index should be individual type");
             // find where the root cells proof has been stored. This comes from looking up the
             // column id, then searching for the cell info in the row payload about this
             // identifier. We now have the primary index for which the cells proof have been
@@ -124,6 +127,16 @@ impl TestContext {
                 row.cells,
             );
 
+            {
+                let pvk = ProofWithVK::deserialize(&cell_tree_proof)?;
+                let pis = cells_tree::PublicInputs::from_slice(&pvk.proof().public_inputs);
+                debug!(
+                    " Cell Root SPLIT digest: multiplier {:?}, individual {:?}",
+                    pis.multiplier_digest_point(),
+                    pis.individual_digest_point()
+                );
+            }
+
             let proof = if context.is_leaf() {
                 // Prove a leaf
                 println!(
@@ -134,8 +147,13 @@ impl TestContext {
                     hex::encode(row.cell_root_hash.unwrap().0)
                 );
                 let inputs = CircuitInput::RowsTree(
-                    verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
-                        .unwrap(),
+                    verifiable_db::row_tree::CircuitInput::leaf(
+                        id,
+                        value,
+                        multiplier,
+                        cell_tree_proof,
+                    )
+                    .unwrap(),
                 );
                 debug!("Before proving leaf node row tree key {:?}", k);
                 self.b
@@ -167,6 +185,7 @@ impl TestContext {
                     verifiable_db::row_tree::CircuitInput::partial(
                         id,
                         value,
+                        multiplier,
                         context.left.is_some(),
                         child_proof,
                         cell_tree_proof,
@@ -209,6 +228,7 @@ impl TestContext {
                     verifiable_db::row_tree::CircuitInput::full(
                         id,
                         value,
+                        multiplier,
                         left_proof,
                         right_proof,
                         cell_tree_proof,

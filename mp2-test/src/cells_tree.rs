@@ -139,7 +139,7 @@ pub async fn build_cell_tree(
 
 /// Compute the expected root hash of constructed cell tree.
 pub async fn compute_cells_tree_hash(cells: Vec<TestCell>) -> HashOut<F> {
-    if cells.len() == 0 {
+    if cells.is_empty() {
         return *empty_poseidon_hash();
     }
     let cell_tree = build_cell_tree(cells).await.unwrap().0;

@@ -264,7 +264,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputCommon for PublicInputs<'a, Target, S> {
+impl<const S: usize> PublicInputCommon for PublicInputs<'_, Target, S> {
     const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -284,7 +284,7 @@ impl<'a, const S: usize> PublicInputCommon for PublicInputs<'a, Target, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputs<'a, Target, S> {
+impl<const S: usize> PublicInputs<'_, Target, S> {
     pub fn tree_hash_target(&self) -> HashOutTarget {
         HashOutTarget::try_from(self.to_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
     }
@@ -358,7 +358,7 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputs<'a, F, S>
+impl<const S: usize> PublicInputs<'_, F, S>
 where
     [(); S - 1]:,
 {
@@ -459,7 +459,7 @@ mod tests {
         pis: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPublicInputs<'a> {
+    impl UserCircuit<F, D> for TestPublicInputs<'_> {
         type Wires = Vec<Target>;
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {

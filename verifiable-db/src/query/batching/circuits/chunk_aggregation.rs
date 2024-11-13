@@ -68,10 +68,10 @@ impl<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize>
         let mut row_chunk = chunk_proofs[0].to_row_chunk_target();
         // save query bounds of first chunk to check that they are the same across
         // all the aggregated chunks
-        let min_primary = chunk_proofs[0].min_primary_target();
-        let max_primary = chunk_proofs[0].max_primary_target();
-        let min_secondary = chunk_proofs[0].min_secondary_target();
-        let max_secondary = chunk_proofs[0].max_secondary_target();
+        let min_query_primary = chunk_proofs[0].min_primary_target();
+        let max_query_primary = chunk_proofs[0].max_primary_target();
+        let min_query_secondary = chunk_proofs[0].min_secondary_target();
+        let max_query_secondary = chunk_proofs[0].max_secondary_target();
         // save computational hash and placeholder hash of the first chunk to check
         // that they are the same across all the aggregated chunks
         let computational_hash = chunk_proofs[0].computational_hash_target();
@@ -87,19 +87,19 @@ impl<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize>
                 b,
                 &row_chunk,
                 &current_chunk,
-                &min_primary,
-                &max_primary,
-                &min_secondary,
-                &max_secondary,
+                &min_query_primary,
+                &max_query_primary,
+                &min_query_secondary,
+                &max_query_secondary,
                 &ops_ids,
                 &is_non_dummy_chunk[i],
             );
             // check the query bounds employed to prove the current chunk are the same
             // as all other chunks
-            b.enforce_equal_u256(&chunk_proof.min_primary_target(), &min_primary);
-            b.enforce_equal_u256(&chunk_proof.max_primary_target(), &max_primary);
-            b.enforce_equal_u256(&chunk_proof.min_secondary_target(), &min_secondary);
-            b.enforce_equal_u256(&chunk_proof.max_secondary_target(), &max_secondary);
+            b.enforce_equal_u256(&chunk_proof.min_primary_target(), &min_query_primary);
+            b.enforce_equal_u256(&chunk_proof.max_primary_target(), &max_query_primary);
+            b.enforce_equal_u256(&chunk_proof.min_secondary_target(), &min_query_secondary);
+            b.enforce_equal_u256(&chunk_proof.max_secondary_target(), &max_query_secondary);
             // check the same computational hash is associated to rows processed
             // in all the chunks
             b.connect_hashes(chunk_proof.computational_hash_target(), computational_hash);
@@ -127,10 +127,10 @@ impl<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize>
             &ops_ids,
             &row_chunk.left_boundary_row.to_targets(),
             &row_chunk.right_boundary_row.to_targets(),
-            &min_primary.to_targets(),
-            &max_primary.to_targets(),
-            &min_secondary.to_targets(),
-            &max_secondary.to_targets(),
+            &min_query_primary.to_targets(),
+            &max_query_primary.to_targets(),
+            &min_query_secondary.to_targets(),
+            &max_query_secondary.to_targets(),
             &[overflow_flag.target],
             &computational_hash.to_targets(),
             &placeholder_hash.to_targets(),

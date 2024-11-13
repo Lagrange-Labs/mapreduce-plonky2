@@ -1244,7 +1244,7 @@ pub(crate) struct UniversalQueryValueInputs<
         deserialize_with = "deserialize_long_array"
     )]
     pub(crate) column_values: [U256; MAX_NUM_COLUMNS],
-    pub(crate) is_non_dummy_row: bool,
+    pub(crate) is_dummy_row: bool,
 }
 
 impl<
@@ -1263,7 +1263,7 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_RESULTS - 1]:,
 {
-    pub(crate) fn new(row_cells: &RowCells, is_non_dummy_row: bool) -> Result<Self> {
+    pub(crate) fn new(row_cells: &RowCells, is_dummy_row: bool) -> Result<Self> {
         let num_columns = row_cells.num_columns();
         ensure!(
             num_columns <= MAX_NUM_COLUMNS,
@@ -1278,7 +1278,7 @@ where
             .collect_vec();
         Ok(Self {
             column_values: padded_column_values.try_into().unwrap(),
-            is_non_dummy_row,
+            is_dummy_row: is_dummy_row,
         })
     }
 
@@ -1442,7 +1442,7 @@ where
         wires: &UniversalQueryValueInputWires<MAX_NUM_COLUMNS>,
     ) {
         pw.set_u256_target_arr(&wires.column_values, &self.column_values);
-        pw.set_bool_target(wires.is_non_dummy_row, self.is_non_dummy_row);
+        pw.set_bool_target(wires.is_non_dummy_row, !self.is_dummy_row);
     }
 }
 
