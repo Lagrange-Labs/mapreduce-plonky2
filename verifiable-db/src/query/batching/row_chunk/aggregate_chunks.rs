@@ -11,14 +11,17 @@ use crate::query::universal_circuit::universal_query_gadget::{
 
 use super::{consecutive_rows::are_consecutive_rows, BoundaryRowDataTarget, RowChunkDataTarget};
 
+/// This method aggregates the 2 chunks `first` and `second`, also checking
+/// that they are consecutive. The returned aggregated chunk will 
+/// correspond to first if `is_second_dummy` flag is true
 pub(crate) fn aggregate_chunks<const MAX_NUM_RESULTS: usize>(
     b: &mut CBuilder,
     first: &RowChunkDataTarget<MAX_NUM_RESULTS>,
     second: &RowChunkDataTarget<MAX_NUM_RESULTS>,
-    min_primary: &UInt256Target,
-    max_primary: &UInt256Target,
-    min_secondary: &UInt256Target,
-    max_secondary: &UInt256Target,
+    min_query_primary: &UInt256Target,
+    max_query_primary: &UInt256Target,
+    min_query_secondary: &UInt256Target,
+    max_query_secondary: &UInt256Target,
     ops: &[Target; MAX_NUM_RESULTS],
     is_second_dummy: &BoolTarget,
 ) -> RowChunkDataTarget<MAX_NUM_RESULTS>
@@ -32,10 +35,10 @@ where
         b,
         &first.right_boundary_row,
         &second.left_boundary_row,
-        min_primary,
-        max_primary,
-        min_secondary,
-        max_secondary,
+        min_query_primary,
+        max_query_primary,
+        min_query_secondary,
+        max_query_secondary,
     );
     // assert that the 2 chunks are consecutive only if the second one is not dummy
     let are_consecutive = b.or(are_consecutive, *is_second_dummy);
@@ -321,10 +324,10 @@ mod tests {
     struct TestAggregateChunkWires {
         first: RowChunkDataInputTarget,
         second: RowChunkDataInputTarget,
-        min_primary: UInt256Target,
-        max_primary: UInt256Target,
-        min_secondary: UInt256Target,
-        max_secondary: UInt256Target,
+        min_query_primary: UInt256Target,
+        max_query_primary: UInt256Target,
+        min_query_secondary: UInt256Target,
+        max_query_secondary: UInt256Target,
         primary_index_id: Target,
         secondary_index_id: Target,
         ops: [Target; MAX_NUM_RESULTS],
@@ -334,10 +337,10 @@ mod tests {
     struct TestAggregateChunks {
         first: RowChunkDataInput,
         second: RowChunkDataInput,
-        min_primary: Option<U256>,
-        max_primary: Option<U256>,
-        min_secondary: Option<U256>,
-        max_secondary: Option<U256>,
+        min_query_primary: Option<U256>,
+        max_query_primary: Option<U256>,
+        min_query_secondary: Option<U256>,
+        max_query_secondary: Option<U256>,
         primary_index_id: F,
         secondary_index_id: F,
         ops: [F; MAX_NUM_RESULTS],
@@ -374,10 +377,10 @@ mod tests {
             TestAggregateChunkWires {
                 first: first_chunk_inputs,
                 second: second_chunk_inputs,
-                min_primary,
-                max_primary,
-                min_secondary,
-                max_secondary,
+                min_query_primary: min_primary,
+                max_query_primary: max_primary,
+                min_query_secondary: min_secondary,
+                max_query_secondary: max_secondary,
                 primary_index_id,
                 secondary_index_id,
                 ops,
@@ -389,15 +392,15 @@ mod tests {
             self.first.assign(pw, &wires.first);
             self.second.assign(pw, &wires.second);
             [
-                (&wires.min_primary, self.min_primary.unwrap_or(U256::ZERO)),
-                (&wires.max_primary, self.max_primary.unwrap_or(U256::MAX)),
+                (&wires.min_query_primary, self.min_query_primary.unwrap_or(U256::ZERO)),
+                (&wires.max_query_primary, self.max_query_primary.unwrap_or(U256::MAX)),
                 (
-                    &wires.min_secondary,
-                    self.min_secondary.unwrap_or(U256::ZERO),
+                    &wires.min_query_secondary,
+                    self.min_query_secondary.unwrap_or(U256::ZERO),
                 ),
                 (
-                    &wires.max_secondary,
-                    self.max_secondary.unwrap_or(U256::MAX),
+                    &wires.max_query_secondary,
+                    self.max_query_secondary.unwrap_or(U256::MAX),
                 ),
             ]
             .into_iter()
@@ -551,10 +554,10 @@ mod tests {
         let circuit = TestAggregateChunks {
             first: first_chunk.clone(),
             second: second_chunk.clone(),
-            min_primary: None,
-            max_primary: None,
-            min_secondary: None,
-            max_secondary: None,
+            min_query_primary: None,
+            max_query_primary: None,
+            min_query_secondary: None,
+            max_query_secondary: None,
             primary_index_id,
             secondary_index_id,
             ops,
@@ -638,14 +641,14 @@ mod tests {
         let circuit = TestAggregateChunks {
             first: first_chunk.clone(),
             second: second_chunk.clone(),
-            min_primary: None,
-            max_primary: None,
-            min_secondary: None,
-            max_secondary: None,
+            min_query_primary: None,
+            max_query_primary: None,
+            min_query_secondary: None,
+            max_query_secondary: None,
             primary_index_id,
             secondary_index_id,
             ops,
-            is_second_dummy: true,
+            is_second_dummy: true, // we set the second chunk to dummy
         };
 
         let proof = run_circuit::<F, D, C, _>(circuit);
@@ -680,10 +683,10 @@ mod tests {
         let circuit = TestAggregateChunks {
             first: first_chunk.clone(),
             second: second_chunk.clone(),
-            min_primary: None,
-            max_primary: None,
-            min_secondary: None,
-            max_secondary: None,
+            min_query_primary: None,
+            max_query_primary: None,
+            min_query_secondary: None,
+            max_query_secondary: None,
             primary_index_id,
             secondary_index_id,
             ops,
@@ -729,10 +732,10 @@ mod tests {
         let circuit = TestAggregateChunks {
             first: first_chunk.clone(),
             second: second_chunk.clone(),
-            min_primary: None,
-            max_primary: None,
-            min_secondary: None,
-            max_secondary: None,
+            min_query_primary: None,
+            max_query_primary: None,
+            min_query_secondary: None,
+            max_query_secondary: None,
             primary_index_id,
             secondary_index_id,
             ops,

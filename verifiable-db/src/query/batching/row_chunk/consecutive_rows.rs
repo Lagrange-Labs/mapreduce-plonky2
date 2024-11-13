@@ -8,6 +8,15 @@ use plonky2::{field::types::Field, iop::target::BoolTarget};
 
 use super::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget};
 
+/// This methods checks whether two nodes `first` and `second` are consecutive, according
+/// to the definition found in the docs 
+/// (https://www.notion.so/lagrangelabs/Aggregating-Query-Results-with-Individual-Merkle-Paths-10628d1c65a880b1b151d4ac017fa445?pvs=4#10d28d1c65a8804fb11ed5d14fa70ea3)
+/// The query bounds provided as inputs refer to either the secondary or primary index,
+/// depending on whether the nodes are in a rows tree or in the index tree.
+/// The method returns 2 flags:
+/// - The first one being true iff the 2 nodes are consecutive
+/// - The second one being true iff the successor of first node is found and its value is in the range
+///   specified by the query bounds provided as inputs
 fn are_consecutive_nodes(
     b: &mut CBuilder,
     first: &BoundaryRowNodeInfoTarget,
@@ -61,7 +70,7 @@ fn are_consecutive_nodes(
     let second_node_pred_in_range = b.and(bigger_than_min, second.predecessor_info.is_found);
     // if second_node_pred_in_range is true, and the predecessor of the second node was found in the path from
     // such node to the root of the tree, then the hash of predecessor node will be placed in
-    // `second..predecessor_info.hash` by `MerklePathWithNeighborsGadget: therefore, we can check that `second`
+    // `second.predecessor_info.hash` by `MerklePathWithNeighborsGadget: therefore, we can check that `second`
     // is consecutive of `first` by checking that `second.predecessor_info.hash` is the hash of the first node;
     // otherwise, we cannot check right now that the 2 nodes are consecutive, and it necessarily means we have
     // already done it before when checking that the successor of first node was the second node
@@ -120,8 +129,9 @@ fn are_consecutive_nodes(
             first_node_succ_in_range.target,
             second_node_pred_in_range.target,
         );
+        let minus_2 = F::NEG_ONE + F::NEG_ONE;
         let range_flags_xor = b.arithmetic(
-            F::NEG_ONE + F::NEG_ONE,
+            minus_2,
             F::ONE,
             first_node_succ_in_range.target,
             second_node_pred_in_range.target,
@@ -148,21 +158,24 @@ fn are_consecutive_nodes(
     (are_consecutive, first_node_succ_in_range)
 }
 
+/// This methods checks whether two rows `first` and `second` are consecutive, according
+/// to the definition found in the docs 
+/// (https://www.notion.so/lagrangelabs/Aggregating-Query-Results-with-Individual-Merkle-Paths-10628d1c65a880b1b151d4ac017fa445?pvs=4#10d28d1c65a8804fb11ed5d14fa70ea3)
 pub(crate) fn are_consecutive_rows(
     b: &mut CBuilder,
     first: &BoundaryRowDataTarget,
     second: &BoundaryRowDataTarget,
-    min_primary: &UInt256Target,
-    max_primary: &UInt256Target,
-    min_secondary: &UInt256Target,
-    max_secondary: &UInt256Target,
+    min_query_primary: &UInt256Target,
+    max_query_primary: &UInt256Target,
+    min_query_secondary: &UInt256Target,
+    max_query_secondary: &UInt256Target,
 ) -> BoolTarget {
     let (mut are_consecutive, first_row_succ_in_range) = are_consecutive_nodes(
         b,
         &first.row_node_info,
         &second.row_node_info,
-        min_secondary,
-        max_secondary,
+        min_query_secondary,
+        max_query_secondary,
         true,
     );
     // at this stage we checked that the rows tree nodes storing first and second row are consecutive; we need
@@ -180,8 +193,8 @@ pub(crate) fn are_consecutive_rows(
         b,
         &first.index_node_info,
         &second.index_node_info,
-        &min_primary,
-        &max_primary,
+        &min_query_primary,
+        &max_query_primary,
         false,
     );
     // compute the flag to be accumulated in `are_consecutive`, depending on whether the 2 rows are in the same

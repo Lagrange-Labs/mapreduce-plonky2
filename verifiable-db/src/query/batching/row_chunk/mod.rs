@@ -24,7 +24,7 @@ pub(crate) mod aggregate_chunks;
 /// This module contains gadgets to enforce whether 2 rows are consecutive
 pub(crate) mod consecutive_rows;
 
-/// Data structure containing the wires representing the data realted to the node of
+/// Data structure containing the wires representing the data related to the node of
 /// the row/index tree containing a row that is on the boundary of a row chunk.
 #[derive(Clone, Debug)]
 pub(crate) struct BoundaryRowNodeInfoTarget {
@@ -102,7 +102,7 @@ impl ToTargets for BoundaryRowNodeInfoTarget {
 }
 
 /// Data structure containing the `BoundaryRowNodeInfoTarget` wires for the nodes
-/// realted to a given boundary row. In particular, it contains the
+/// related to a given boundary row. In particular, it contains the
 /// `BoundaryRowNodeInfoTarget` related to the following nodes:
 /// - `row_node`: the node of the rows tree containing the given boundary row
 /// - `index_node`: the node of the index tree that stores the rows tree containing

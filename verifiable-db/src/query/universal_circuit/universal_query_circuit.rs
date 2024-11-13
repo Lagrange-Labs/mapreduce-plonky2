@@ -125,7 +125,7 @@ where
             results,
         )?;
 
-        let value_gadget_inputs = UniversalQueryValueInputs::new(row_cells, true)?;
+        let value_gadget_inputs = UniversalQueryValueInputs::new(row_cells, false)?;
 
         Ok(Self {
             is_leaf,

@@ -97,12 +97,12 @@ where
         row_path: MerklePathWithNeighborsGadget<ROW_TREE_MAX_DEPTH>,
         index_path: MerklePathWithNeighborsGadget<INDEX_TREE_MAX_DEPTH>,
         row_cells: &RowCells,
-        is_non_dummy_row: bool,
+        is_dummy_row: bool,
     ) -> Result<Self> {
         Ok(Self {
             row_path,
             index_path,
-            input_values: UniversalQueryValueInputs::new(row_cells, is_non_dummy_row)?,
+            input_values: UniversalQueryValueInputs::new(row_cells, is_dummy_row)?,
         })
     }
 
@@ -115,10 +115,10 @@ where
             MAX_NUM_RESULTS,
             T,
         >,
-        min_secondary: &UInt256Target,
-        max_secondary: &UInt256Target,
-        min_primary: &UInt256Target,
-        max_primary: &UInt256Target,
+        min_query_secondary: &UInt256Target,
+        max_query_secondary: &UInt256Target,
+        min_query_primary: &UInt256Target,
+        max_query_primary: &UInt256Target,
         num_overflows: &Target,
     ) -> RowProcessingGadgetWires<
         ROW_TREE_MAX_DEPTH,
@@ -129,10 +129,10 @@ where
         let mut value_wires = UniversalQueryValueInputs::build(
             b,
             hash_input_wires,
-            min_secondary,
-            max_secondary,
-            Some(min_primary),
-            Some(max_primary),
+            min_query_secondary,
+            max_query_secondary,
+            Some(min_query_primary),
+            Some(max_query_primary),
             num_overflows,
         );
         let [primary_index_id, secondary_index_id] =
