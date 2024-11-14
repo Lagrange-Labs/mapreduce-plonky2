@@ -1,38 +1,7 @@
-use alloy::primitives::U256;
-use anyhow::{Error, Result};
-use itertools::Itertools;
-use log::info;
-use mp2_common::types::HashOutput;
-use mp2_v1::{
-    api::MetadataHash,
-    indexing::{block::BlockPrimaryIndex, row::RowTreeKey, LagrangeNode},
-    query::planner::execute_row_query,
-};
-use parsil::{
-    executor::generate_query_execution_with_keys, DEFAULT_MAX_BLOCK_PLACEHOLDER,
-    DEFAULT_MIN_BLOCK_PLACEHOLDER,
-};
-use ryhope::{
-    storage::{pgsql::ToFromBytea, RoEpochKvStorage},
-    Epoch, NodePayload,
-};
-use sqlparser::ast::Query;
-use std::{fmt::Debug, hash::Hash};
-use tokio_postgres::Row as PgSqlRow;
-use verifiable_db::{
-    query::{
-        aggregation::{ChildPosition, NodeInfo},
-        computational_hash_ids::ColumnIDs,
-        universal_circuit::universal_circuit_inputs::{PlaceholderId, Placeholders},
-    },
-    revelation::{api::MatchingRow, RowPath},
-    test_utils::MAX_NUM_OUTPUTS,
-};
-
 use crate::common::{
     cases::{
         indexing::BLOCK_COLUMN_NAME,
-        planner::{IndexInfo, QueryPlanner, RowInfo, TreeInfo},
+        planner::{IndexInfo, QueryPlanner, RowInfo},
         query::{
             aggregated_queries::{
                 check_final_outputs, find_longest_lived_key, get_node_info, prove_single_row,
@@ -43,6 +12,33 @@ use crate::common::{
     proof_storage::{ProofKey, ProofStorage},
     table::Table,
     TableInfo,
+};
+use alloy::primitives::U256;
+use anyhow::Result;
+use itertools::Itertools;
+use log::info;
+use mp2_v1::{
+    api::MetadataHash,
+    indexing::{block::BlockPrimaryIndex, row::RowTreeKey},
+    query::planner::{execute_row_query, get_path_info},
+};
+use parsil::{
+    executor::generate_query_execution_with_keys, DEFAULT_MAX_BLOCK_PLACEHOLDER,
+    DEFAULT_MIN_BLOCK_PLACEHOLDER,
+};
+use ryhope::{
+    storage::{pgsql::ToFromBytea, RoEpochKvStorage},
+    Epoch,
+};
+use sqlparser::ast::Query;
+use tokio_postgres::Row as PgSqlRow;
+use verifiable_db::{
+    query::{
+        computational_hash_ids::ColumnIDs,
+        universal_circuit::universal_circuit_inputs::{PlaceholderId, Placeholders},
+    },
+    revelation::{api::MatchingRow, RowPath},
+    test_utils::MAX_NUM_OUTPUTS,
 };
 
 use super::QueryCooking;
@@ -106,12 +102,13 @@ pub(crate) async fn prove_query<'a>(
         )
         .await?;
         let (row_node_info, _, _) = get_node_info(&row_tree_info, &key, epoch).await;
-        let (row_tree_path, row_tree_siblings) = get_path_info(&key, &row_tree_info, epoch).await?;
+        let (row_tree_path, row_tree_siblings) =
+            get_path_info(&row_tree_info.tree, &key, epoch).await?;
         let index_node_key = epoch as BlockPrimaryIndex;
         let (index_node_info, _, _) =
             get_node_info(&index_tree_info, &index_node_key, current_epoch).await;
         let (index_tree_path, index_tree_siblings) =
-            get_path_info(&index_node_key, &index_tree_info, current_epoch).await?;
+            get_path_info(&index_tree_info.tree, &index_node_key, current_epoch).await?;
         let path = RowPath::new(
             row_node_info,
             row_tree_path,
@@ -161,93 +158,6 @@ pub(crate) async fn prove_query<'a>(
     )?;
     info!("Revelation done!");
     Ok(())
-}
-
-async fn get_path_info<K, V, T: TreeInfo<K, V>>(
-    key: &K,
-    tree_info: &T,
-    epoch: Epoch,
-) -> Result<(Vec<(NodeInfo, ChildPosition)>, Vec<Option<HashOutput>>)>
-where
-    K: Debug + Hash + Clone + Send + Sync + Eq,
-    V: NodePayload + Send + Sync + LagrangeNode + Clone,
-{
-    let mut tree_path = vec![];
-    let mut siblings = vec![];
-    let (mut node_ctx, mut node_payload) = tree_info
-        .fetch_ctx_and_payload_at(epoch, key)
-        .await
-        .ok_or(Error::msg(format!("Node not found for key {:?}", key)))?;
-    let mut previous_node_hash = node_payload.hash();
-    let mut previous_node_key = key.clone();
-    while node_ctx.parent.is_some() {
-        let parent_key = node_ctx.parent.unwrap();
-        (node_ctx, node_payload) = tree_info
-            .fetch_ctx_and_payload_at(epoch, &parent_key)
-            .await
-            .ok_or(Error::msg(format!(
-                "Node not found for key {:?}",
-                parent_key
-            )))?;
-        let child_pos = node_ctx
-            .iter_children()
-            .position(|child| child.map(|c| *c == previous_node_key).unwrap_or(false));
-        let is_left_child = child_pos.unwrap() == 0; // unwrap is safe
-        let (left_child_hash, right_child_hash) = if is_left_child {
-            (
-                Some(previous_node_hash),
-                match node_ctx.right {
-                    Some(k) => {
-                        let (_, payload) = tree_info
-                            .fetch_ctx_and_payload_at(epoch, &k)
-                            .await
-                            .ok_or(Error::msg(format!("Node not found for key {:?}", k)))?;
-                        Some(payload.hash())
-                    }
-                    None => None,
-                },
-            )
-        } else {
-            (
-                match node_ctx.left {
-                    Some(k) => {
-                        let (_, payload) = tree_info
-                            .fetch_ctx_and_payload_at(epoch, &k)
-                            .await
-                            .ok_or(Error::msg(format!("Node not found for key {:?}", k)))?;
-                        Some(payload.hash())
-                    }
-                    None => None,
-                },
-                Some(previous_node_hash),
-            )
-        };
-        let node_info = NodeInfo::new(
-            &node_payload.embedded_hash(),
-            left_child_hash.as_ref(),
-            right_child_hash.as_ref(),
-            node_payload.value(),
-            node_payload.min(),
-            node_payload.max(),
-        );
-        tree_path.push((
-            node_info,
-            if is_left_child {
-                ChildPosition::Left
-            } else {
-                ChildPosition::Right
-            },
-        ));
-        siblings.push(if is_left_child {
-            right_child_hash
-        } else {
-            left_child_hash
-        });
-        previous_node_hash = node_payload.hash();
-        previous_node_key = parent_key;
-    }
-
-    Ok((tree_path, siblings))
 }
 
 /// Cook a query where the number of matching rows is the same as the maximum number of

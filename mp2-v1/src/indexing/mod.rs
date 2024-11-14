@@ -1,6 +1,7 @@
 use crate::indexing::{index::IndexNode, row::RowPayload};
 use alloy::primitives::U256;
 use mp2_common::types::HashOutput;
+pub use verifiable_db::api::LagrangeNode;
 
 pub mod block;
 pub mod cell;
@@ -8,16 +9,6 @@ pub mod index;
 pub mod row;
 
 pub type ColumnID = u64;
-
-// NOTE this might be good to have on public API ?
-// cc/ @andrus
-pub trait LagrangeNode {
-    fn value(&self) -> U256;
-    fn hash(&self) -> HashOutput;
-    fn min(&self) -> U256;
-    fn max(&self) -> U256;
-    fn embedded_hash(&self) -> HashOutput;
-}
 
 impl<T: Eq + Default + std::fmt::Debug + Clone> LagrangeNode for RowPayload<T> {
     fn value(&self) -> U256 {

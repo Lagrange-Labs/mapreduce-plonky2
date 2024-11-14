@@ -234,11 +234,9 @@ pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
 
 #[cfg(test)]
 mod test {
-    use crate::{cells_tree, row_tree::public_inputs::PublicInputs};
-
     use super::*;
+    use crate::{cells_tree, row_tree::public_inputs::PublicInputs};
     use mp2_common::{
-        group_hashing::{cond_field_hashed_scalar_mul, map_to_curve_point},
         poseidon::{empty_poseidon_hash, H},
         utils::ToFields,
         F,

@@ -10,14 +10,14 @@ use ryhope::{
     storage::{
         pgsql::{PgsqlStorage, ToFromBytea},
         updatetree::UpdateTree,
-        FromSettings, PayloadStorage, TransactionalStorage, TreeStorage,
+        FromSettings, PayloadStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage,
     },
     tree::{MutableTree, NodeContext, TreeTopology},
     Epoch, MerkleTreeKvDb, NodePayload,
 };
 use std::fmt::Debug;
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql, NoTls};
-use verifiable_db::query::aggregation::{NodeInfo, QueryBounds};
+use verifiable_db::query::aggregation::{ChildPosition, NodeInfo, QueryBounds};
 
 use crate::indexing::{
     block::BlockPrimaryIndex,
@@ -345,6 +345,7 @@ pub async fn execute_row_query2(
         .context("while fetching current epoch")?;
     Ok(res)
 }
+
 pub async fn execute_row_query(
     pool: &DBPool,
     query: &str,
@@ -359,7 +360,7 @@ pub async fn execute_row_query(
     Ok(rows)
 }
 
-pub async fn get_node_info<T, V, S>(
+pub async fn get_node_and_children<T, V, S>(
     lookup: &MerkleTreeKvDb<T, V, S>,
     k: &T::Key,
     at: Epoch,
@@ -433,4 +434,138 @@ where
         left_node,
         right_node,
     )
+}
+
+pub async fn get_node_info<T, V, S>(
+    tree: &MerkleTreeKvDb<T, V, S>,
+    k: Option<T::Key>,
+    epoch: Epoch,
+) -> (Option<NodeInfo>, Option<HashOutput>)
+where
+    T: TreeTopology + MutableTree,
+    // NOTICE the ToValue here to get the value associated to a node
+    V: NodePayload + Send + Sync + LagrangeNode,
+    S: TransactionalStorage
+        + TreeStorage<T>
+        + PayloadStorage<T::Key, V>
+        + FromSettings<T::State>
+        + Send
+        + Sync,
+{
+    match k {
+        None => (None, None),
+        Some(child_k) => {
+            let (child_ctx, child_payload) = tree.fetch_with_context_at(&child_k, epoch).await;
+            // we need the grand child hashes for constructing the node info of the
+            // children of the node in argument
+            let child_left_hash = match child_ctx.left {
+                Some(left_left_k) => Some(tree.fetch_at(&left_left_k, epoch).await.hash()),
+                None => None,
+            };
+            let child_right_hash = match child_ctx.right {
+                Some(left_right_k) => Some(tree.fetch_at(&left_right_k, epoch).await.hash()),
+                None => None,
+            };
+            let left_ni = NodeInfo::new(
+                &child_payload.embedded_hash(),
+                child_left_hash.as_ref(),
+                child_right_hash.as_ref(),
+                child_payload.value(),
+                child_payload.min(),
+                child_payload.max(),
+            );
+            (Some(left_ni), Some(child_payload.hash()))
+        }
+    }
+}
+
+pub async fn get_path_info<T, V, S>(
+    tree: &MerkleTreeKvDb<T, V, S>,
+    key: &T::Key,
+    epoch: Epoch,
+) -> anyhow::Result<(Vec<(NodeInfo, ChildPosition)>, Vec<Option<HashOutput>>)>
+where
+    T: TreeTopology + MutableTree,
+    // NOTICE the ToValue here to get the value associated to a node
+    V: NodePayload + Send + Sync + LagrangeNode,
+    S: TransactionalStorage
+        + TreeStorage<T>
+        + PayloadStorage<T::Key, V>
+        + FromSettings<T::State>
+        + Send
+        + Sync,
+{
+    let mut tree_path = vec![];
+    let mut siblings = vec![];
+    let (mut node_ctx, mut node_payload) = tree
+        .try_fetch_with_context_at(key, epoch)
+        .await
+        .with_context(|| format!("while fetching {key:?}@{epoch}"))?;
+    let mut previous_node_hash = node_payload.hash();
+    let mut previous_node_key = key.clone();
+    while node_ctx.parent.is_some() {
+        let parent_key = node_ctx.parent.unwrap();
+        (node_ctx, node_payload) = tree
+            .try_fetch_with_context_at(&parent_key, epoch)
+            .await
+            .with_context(|| format!("while fetching {parent_key:?}@{epoch}"))?;
+        let child_pos = node_ctx
+            .iter_children()
+            .position(|child| child.map(|c| *c == previous_node_key).unwrap_or(false));
+        let is_left_child = child_pos.unwrap() == 0; // unwrap is safe
+        let (left_child_hash, right_child_hash) = if is_left_child {
+            (
+                Some(previous_node_hash),
+                match node_ctx.right {
+                    Some(k) => {
+                        let payload = tree
+                            .try_fetch_at(&k, epoch)
+                            .await
+                            .with_context(|| format!("while fetching {k:?}@{epoch}"))?;
+                        Some(payload.hash())
+                    }
+                    None => None,
+                },
+            )
+        } else {
+            (
+                match node_ctx.left {
+                    Some(k) => {
+                        let payload = tree
+                            .try_fetch_at(&k, epoch)
+                            .await
+                            .with_context(|| format!("while fetching {k:?}@{epoch}"))?;
+                        Some(payload.hash())
+                    }
+                    None => None,
+                },
+                Some(previous_node_hash),
+            )
+        };
+        let node_info = NodeInfo::new(
+            &node_payload.embedded_hash(),
+            left_child_hash.as_ref(),
+            right_child_hash.as_ref(),
+            node_payload.value(),
+            node_payload.min(),
+            node_payload.max(),
+        );
+        tree_path.push((
+            node_info,
+            if is_left_child {
+                ChildPosition::Left
+            } else {
+                ChildPosition::Right
+            },
+        ));
+        siblings.push(if is_left_child {
+            right_child_hash
+        } else {
+            left_child_hash
+        });
+        previous_node_hash = node_payload.hash();
+        previous_node_key = parent_key;
+    }
+
+    Ok((tree_path, siblings))
 }
