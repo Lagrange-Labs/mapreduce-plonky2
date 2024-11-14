@@ -19,7 +19,7 @@ use mp2_v1::{
 };
 use plonky2::field::types::PrimeField64;
 use rlp::{Prototype, Rlp};
-use std::collections::HashMap;
+use std::{collections::HashMap, thread::current};
 
 /// Maximum child number of a branch node
 const MAX_BRANCH_CHILDREN: usize = 16;
@@ -503,25 +503,22 @@ impl TestStorageTrie {
     fn check_new_slot(&self, new_slot: &StorageSlot, new_nodes: &[RawNode]) {
         if let Some((_, slot)) = self.slots.iter().next() {
             // The new slot must be the same type.
-            match (slot.slot(), new_slot) {
-                (&StorageSlot::Simple(_), &StorageSlot::Simple(_)) => (),
-                (
-                    &StorageSlot::Simple(_),
-                    &StorageSlot::Node(StorageSlotNode::Struct(ref parent_slot, _)),
-                ) => {
-                    assert!(parent_slot.is_simple_slot());
+            let current_slot = slot.slot();
+            match (current_slot.is_simple_slot(), new_slot.is_simple_slot()) {
+                // We could combine the different simple slots.
+                (true, true) => (),
+                (false, false) => {
+                    assert_eq!(
+                        current_slot.slot(),
+                        new_slot.slot(),
+                        "Mapping slot number must be same in a storage trie",
+                    );
+                    assert_eq!(
+                        current_slot.mapping_keys().len(),
+                        new_slot.mapping_keys().len(),
+                        "Mapping keys must have the same number in a storage trie",
+                    );
                 }
-                (
-                    &StorageSlot::Node(StorageSlotNode::Struct(ref parent_slot, _)),
-                    &StorageSlot::Simple(_),
-                ) => {
-                    assert!(parent_slot.is_simple_slot());
-                }
-                (&StorageSlot::Mapping(_, slot), &StorageSlot::Mapping(_, new_slot)) => {
-                    // Must have the same slot number for the mapping type.
-                    assert_eq!(slot, new_slot);
-                }
-                (&StorageSlot::Node(_), &StorageSlot::Node(_)) => (),
                 _ => panic!("Add the different type of storage slots: {slot:?}, {new_slot:?}"),
             }
         }

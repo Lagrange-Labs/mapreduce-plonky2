@@ -240,6 +240,23 @@ impl StorageSlot {
             StorageSlot::Node(node) => node.parent().is_simple_slot(),
         }
     }
+    /// Get the mapping key path from the outer key to the inner.
+    pub fn mapping_keys(&self) -> Vec<Vec<u8>> {
+        match self {
+            StorageSlot::Simple(_) => vec![],
+            StorageSlot::Mapping(mapping_key, _) => {
+                vec![mapping_key.clone()]
+            }
+            StorageSlot::Node(StorageSlotNode::Mapping(parent, mapping_key)) => {
+                // [parent_mapping_keys || mapping_key]
+                let mut mapping_keys = parent.mapping_keys();
+                mapping_keys.push(mapping_key.clone());
+
+                mapping_keys
+            }
+            StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => parent.mapping_keys(),
+        }
+    }
 }
 impl ProofQuery {
     pub fn new(contract: Address, slot: StorageSlot) -> Self {
