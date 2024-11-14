@@ -31,19 +31,11 @@ use mp2_common::{proof::ProofWithVK, types::HashOutput};
 use plonky2::plonk::config::GenericHashOut;
 
 /// Testing maximum columns
-const TEST_MAX_COLUMNS: usize = 32;
+pub(crate) const TEST_MAX_COLUMNS: usize = 32;
 /// Testing maximum fields for each EVM word
-const TEST_MAX_FIELD_PER_EVM: usize = 32;
+pub(crate) const TEST_MAX_FIELD_PER_EVM: usize = 32;
 
 type ColumnIdentifier = u64;
-type StorageSlotInfo =
-    mp2_v1::values_extraction::StorageSlotInfo<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
-type ColumnsMetadata = mp2_v1::values_extraction::gadgets::metadata_gadget::ColumnsMetadata<
-    TEST_MAX_COLUMNS,
-    TEST_MAX_FIELD_PER_EVM,
->;
-type ColumnGadgetData =
-    mp2_v1::values_extraction::gadgets::column_gadget::ColumnGadgetData<TEST_MAX_FIELD_PER_EVM>;
 type PublicParameters = mp2_v1::api::PublicParameters<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {

@@ -29,7 +29,7 @@ use mp2_v1::{
     },
     values_extraction::{
         gadgets::{column_gadget::extract_value, column_info::ColumnInfo},
-        identifier_for_mapping_key_column, identifier_for_value_column,
+        identifier_for_mapping_key_column, identifier_for_value_column, StorageSlotInfo,
     },
 };
 use plonky2::field::types::PrimeField64;
@@ -45,7 +45,7 @@ use crate::common::{
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
-    ColumnsMetadata, StorageSlotInfo, TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
+    TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
 };
 
 use super::{
@@ -56,6 +56,35 @@ use super::{
     },
     storage_slot_value::{LargeStruct, StorageSlotValue},
 };
+
+/// Save the columns information of same slot and EVM word.
+#[derive(Debug)]
+struct SlotEvmWordColumns(Vec<ColumnInfo>);
+
+impl SlotEvmWordColumns {
+    fn new(column_info: Vec<ColumnInfo>) -> Self {
+        // Ensure the column information should have the same slot and EVM word.
+        let slot = column_info[0].slot();
+        let evm_word = column_info[0].evm_word();
+        column_info[1..].iter().for_each(|col| {
+            assert_eq!(col.slot(), slot);
+            assert_eq!(col.evm_word(), evm_word);
+        });
+
+        Self(column_info)
+    }
+    fn slot(&self) -> u8 {
+        // The columns should have the same slot.
+        u8::try_from(self.0[0].slot().to_canonical_u64()).unwrap()
+    }
+    fn evm_word(&self) -> u32 {
+        // The columns should have the same EVM word.
+        u32::try_from(self.0[0].evm_word().to_canonical_u64()).unwrap()
+    }
+    fn column_info(&self) -> &[ColumnInfo] {
+        &self.0
+    }
+}
 
 /// What is the secondary index chosen for the table in the mapping.
 /// Each entry contains the identifier of the column expected to store in our tree
@@ -606,8 +635,7 @@ impl SingleExtractionArgs {
         let value_proof = match ctx.storage.get_proof_exact(&proof_key) {
             Ok(p) => p,
             Err(_) => {
-                let metadata = self.metadata(contract);
-                let storage_slot_info = self.storage_slot_info(&metadata);
+                let storage_slot_info = self.storage_slot_info(contract);
                 let root_proof = ctx
                     .prove_values_extraction(
                         &contract.address,
@@ -661,9 +689,9 @@ impl SingleExtractionArgs {
         let mut secondary_cell = None;
         let mut rest_cells = Vec::new();
         let secondary_id = self.secondary_index_identifier(contract);
-        let metadata = self.metadata(contract);
-        let storage_slots = self.storage_slots(&metadata);
-        for (metadata, storage_slot) in metadata.into_iter().zip(storage_slots) {
+        let evm_word_cols = self.evm_word_column_info(contract);
+        let storage_slots = self.storage_slots(&evm_word_cols);
+        for (evm_word_col, storage_slot) in evm_word_cols.into_iter().zip(storage_slots) {
             let query = ProofQuery::new(contract.address, storage_slot);
             let value = ctx
                 .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
@@ -671,22 +699,18 @@ impl SingleExtractionArgs {
                 .storage_proof[0]
                 .value;
             let value_bytes = value.to_be_bytes();
-            metadata
-                .extracted_table_info()
-                .iter()
-                .for_each(|column_info| {
-                    let extracted_value = extract_value(&value_bytes, column_info);
-                    let extracted_value = U256::from_be_bytes(extracted_value);
-                    let id = column_info.identifier().to_canonical_u64();
-                    let cell =
-                        Cell::new(column_info.identifier().to_canonical_u64(), extracted_value);
-                    if Some(id) == secondary_id {
-                        assert!(secondary_cell.is_none());
-                        secondary_cell = Some(SecondaryIndexCell::new_from(cell, 0));
-                    } else {
-                        rest_cells.push(cell);
-                    }
-                });
+            evm_word_col.column_info().iter().for_each(|col_info| {
+                let extracted_value = extract_value(&value_bytes, col_info);
+                let extracted_value = U256::from_be_bytes(extracted_value);
+                let id = col_info.identifier().to_canonical_u64();
+                let cell = Cell::new(col_info.identifier().to_canonical_u64(), extracted_value);
+                if Some(id) == secondary_id {
+                    assert!(secondary_cell.is_none());
+                    secondary_cell = Some(SecondaryIndexCell::new_from(cell, 0));
+                } else {
+                    rest_cells.push(cell);
+                }
+            });
         }
         vec![TableRowValues {
             current_cells: rest_cells,
@@ -701,25 +725,27 @@ impl SingleExtractionArgs {
         })
     }
 
-    fn metadata(&self, contract: &Contract) -> Vec<ColumnsMetadata> {
-        let table_info = table_info(contract, self.slot_inputs.clone());
-        metadata(&table_info)
+    fn table_info(&self, contract: &Contract) -> Vec<ColumnInfo> {
+        table_info(contract, self.slot_inputs.clone())
     }
 
-    fn storage_slots(&self, metadata: &[ColumnsMetadata]) -> Vec<StorageSlot> {
-        metadata
+    fn evm_word_column_info(&self, contract: &Contract) -> Vec<SlotEvmWordColumns> {
+        let table_info = table_info(contract, self.slot_inputs.clone());
+        evm_word_column_info(&table_info)
+    }
+
+    fn storage_slots(&self, evm_word_cols: &[SlotEvmWordColumns]) -> Vec<StorageSlot> {
+        evm_word_cols
             .iter()
-            .map(|metadata| {
+            .map(|evm_word_col| {
                 // The slot number and EVM word of extracted columns are same in the metadata.
-                let slot =
-                    u8::try_from(metadata.extracted_table_info()[0].slot().to_canonical_u64())
-                        .unwrap();
-                let evm_word = metadata.evm_word();
+                let slot = evm_word_col.slot();
+                let evm_word = evm_word_col.evm_word();
                 // We could assume it's a single value slot if the EVM word is 0, even if it's the
                 // first field of a Struct. Since the computed slot location is same either it's
                 // considered as a single value slot or the first field of a Struct slot.
                 let storage_slot = StorageSlot::Simple(slot as usize);
-                if metadata.evm_word() == 0 {
+                if evm_word == 0 {
                     storage_slot
                 } else {
                     StorageSlot::Node(StorageSlotNode::new_struct(storage_slot, evm_word))
@@ -728,16 +754,11 @@ impl SingleExtractionArgs {
             .collect()
     }
 
-    fn storage_slot_info(&self, metadata: &[ColumnsMetadata]) -> Vec<StorageSlotInfo> {
-        let storage_slots = self.storage_slots(metadata);
-
-        metadata
-            .iter()
-            .cloned()
-            .zip(storage_slots)
-            .map(|(metadata, storage_slot)| {
-                StorageSlotInfo::new(storage_slot, metadata, None, None)
-            })
+    fn storage_slot_info(&self, contract: &Contract) -> Vec<StorageSlotInfo> {
+        let table_info = self.table_info(contract);
+        self.storage_slots(&self.evm_word_column_info(contract))
+            .into_iter()
+            .map(|storage_slot| StorageSlotInfo::new(storage_slot, table_info.clone()))
             .collect()
     }
 }
@@ -1221,29 +1242,28 @@ where
     /// Construct a storage slot info by metadata and a mapping key.
     fn storage_slot_info(
         &self,
-        key_id: u64,
-        metadata: &ColumnsMetadata,
+        evm_word: u32,
+        table_info: Vec<ColumnInfo>,
         mapping_key: Vec<u8>,
     ) -> StorageSlotInfo {
-        let storage_slot = V::mapping_storage_slot(self.slot, metadata.evm_word(), mapping_key);
+        let storage_slot = V::mapping_storage_slot(self.slot, evm_word, mapping_key);
 
-        StorageSlotInfo::new(storage_slot, metadata.clone(), Some(key_id), None)
+        StorageSlotInfo::new(storage_slot, table_info)
     }
 
     /// Construct the storage slot info by the all mapping keys.
     fn all_storage_slot_info(&self, contract: &Contract) -> Vec<StorageSlotInfo> {
-        let key_id = identifier_for_mapping_key_column(
-            self.slot,
-            &contract.address,
-            contract.chain_id,
-            vec![],
-        );
-        let metadata = self.metadata(contract);
-        metadata
+        let table_info = self.table_info(contract);
+        let evm_word_cols = self.evm_word_column_info(contract);
+        evm_word_cols
             .iter()
             .cartesian_product(self.mapping_keys.iter())
-            .map(|(metadata, mapping_key)| {
-                self.storage_slot_info(key_id, metadata, mapping_key.clone())
+            .map(|(evm_word_col, mapping_key)| {
+                self.storage_slot_info(
+                    evm_word_col.evm_word(),
+                    table_info.clone(),
+                    mapping_key.clone(),
+                )
             })
             .collect()
     }
@@ -1256,10 +1276,10 @@ where
         mapping_key: Vec<u8>,
     ) -> V {
         let mut extracted_values = vec![];
-        let metadata = self.metadata(contract);
-        for metadata in metadata {
+        let evm_word_cols = self.evm_word_column_info(contract);
+        for evm_word_col in evm_word_cols {
             let storage_slot =
-                V::mapping_storage_slot(self.slot, metadata.evm_word(), mapping_key.clone());
+                V::mapping_storage_slot(self.slot, evm_word_col.evm_word(), mapping_key.clone());
             let query = ProofQuery::new(contract.address, storage_slot);
             let value = ctx
                 .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
@@ -1267,14 +1287,13 @@ where
                 .storage_proof[0]
                 .value;
 
-            let table_info = metadata.extracted_table_info();
             let value_bytes = value.to_be_bytes();
-            table_info.iter().for_each(|column_info| {
-                let bytes = extract_value(&value_bytes, column_info);
+            evm_word_col.column_info().iter().for_each(|col_info| {
+                let bytes = extract_value(&value_bytes, col_info);
                 let value = U256::from_be_bytes(bytes);
                 debug!(
                     "Mapping extract value: column: {:?}, value = {}",
-                    column_info, value,
+                    col_info, value,
                 );
 
                 extracted_values.push(value);
@@ -1284,9 +1303,13 @@ where
         V::from_u256_slice(&extracted_values)
     }
 
-    fn metadata(&self, contract: &Contract) -> Vec<ColumnsMetadata> {
-        let table_info = table_info(contract, self.slot_inputs.clone());
-        metadata(&table_info)
+    fn table_info(&self, contract: &Contract) -> Vec<ColumnInfo> {
+        table_info(contract, self.slot_inputs.clone())
+    }
+
+    fn evm_word_column_info(&self, contract: &Contract) -> Vec<SlotEvmWordColumns> {
+        let table_info = self.table_info(contract);
+        evm_word_column_info(&table_info)
     }
 }
 
@@ -1295,28 +1318,23 @@ fn table_info(contract: &Contract, slot_inputs: Vec<SlotInput>) -> Vec<ColumnInf
     compute_table_info(slot_inputs, &contract.address, contract.chain_id, vec![])
 }
 
-/// Construct the metadata for each slot and EVM word.
-fn metadata(table_info: &[ColumnInfo]) -> Vec<ColumnsMetadata> {
+/// Construct the column information for each slot and EVM word.
+fn evm_word_column_info(table_info: &[ColumnInfo]) -> Vec<SlotEvmWordColumns> {
     // Initialize a mapping of `(slot, evm_word) -> column_Identifier`.
-    let mut slots_ids = HashMap::new();
+    let mut column_info_map = HashMap::new();
     table_info.iter().for_each(|col| {
-        let id = col.identifier().to_canonical_u64();
-
-        slots_ids
+        column_info_map
             .entry((col.slot(), col.evm_word()))
-            .and_modify(|ids: &mut Vec<_>| ids.push(id))
-            .or_insert(vec![id]);
+            .and_modify(|cols: &mut Vec<_>| cols.push(col.clone()))
+            .or_insert(vec![col.clone()]);
     });
 
-    slots_ids
-        .into_iter()
-        .map(|((_, evm_word), ids)| {
-            ColumnsMetadata::new(
-                table_info.to_vec(),
-                &ids,
-                u32::try_from(evm_word.to_canonical_u64()).unwrap(),
-            )
-        })
-        .sorted_by_key(|metadata| metadata.evm_word())
+    column_info_map
+        .values()
+        .cloned()
+        .map(SlotEvmWordColumns::new)
+        // This sort is used for the storage slot Struct extraction (in generic),
+        // since we need to collect the Struct field in the right order.
+        .sorted_by_key(|info| info.evm_word())
         .collect()
 }
