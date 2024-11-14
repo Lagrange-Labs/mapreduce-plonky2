@@ -383,6 +383,27 @@ pub fn extract_value(
     left_pad32(&result_bytes)
 }
 
+/// Filter to get the column identifiers of one table by the slot and EVM word.
+/// We save multiple simple slots in one table, and only one mapping slot in one table.
+pub fn filter_table_column_identifiers(
+    table_info: &[ColumnInfo],
+    slot: u8,
+    evm_word: u32,
+) -> Vec<u64> {
+    table_info
+        .iter()
+        .filter_map(|col_info| {
+            if col_info.slot() == F::from_canonical_u8(slot)
+                && col_info.evm_word() == F::from_canonical_u32(evm_word)
+            {
+                Some(col_info.identifier().to_canonical_u64())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::{super::column_info::ColumnInfoTarget, *};

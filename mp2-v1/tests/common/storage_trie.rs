@@ -1,6 +1,6 @@
 //! Storage trie for proving tests
 
-use super::{benchmarker::Benchmarker, PublicParameters, StorageSlotInfo, TestContext};
+use super::{benchmarker::Benchmarker, PublicParameters, TestContext};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
@@ -15,11 +15,12 @@ use mp2_common::{
 };
 use mp2_v1::{
     api::{generate_proof, CircuitInput},
-    length_extraction, values_extraction,
+    length_extraction,
+    values_extraction::{self, StorageSlotInfo},
 };
 use plonky2::field::types::PrimeField64;
 use rlp::{Prototype, Rlp};
-use std::{collections::HashMap, thread::current};
+use std::collections::HashMap;
 
 /// Maximum child number of a branch node
 const MAX_BRANCH_CHILDREN: usize = 16;
@@ -201,7 +202,6 @@ impl TrieNode {
 
         // Find the storage slot information for this leaf node.
         let slot_info = ctx.slots.get(&node).unwrap();
-        let metadata = slot_info.metadata().clone();
 
         // Build the leaf circuit input.
         let (name, input) = match slot_info.slot() {
@@ -211,7 +211,8 @@ impl TrieNode {
                 values_extraction::CircuitInput::new_single_variable_leaf(
                     node.clone(),
                     *slot as u8,
-                    metadata,
+                    slot_info.evm_word(),
+                    slot_info.table_info().to_vec(),
                 ),
             ),
             // Mapping variable
@@ -221,8 +222,11 @@ impl TrieNode {
                     node.clone(),
                     *slot as u8,
                     mapping_key.clone(),
-                    slot_info.outer_key_id().unwrap(),
-                    metadata,
+                    slot_info
+                        .outer_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                        .unwrap(),
+                    slot_info.evm_word(),
+                    slot_info.table_info().to_vec(),
                 ),
             ),
             StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => match &**parent {
@@ -232,7 +236,8 @@ impl TrieNode {
                     values_extraction::CircuitInput::new_single_variable_leaf(
                         node.clone(),
                         *slot as u8,
-                        metadata,
+                        slot_info.evm_word(),
+                        slot_info.table_info().to_vec(),
                     ),
                 ),
                 // Mapping Struct
@@ -242,8 +247,11 @@ impl TrieNode {
                         node.clone(),
                         *slot as u8,
                         mapping_key.clone(),
-                        slot_info.outer_key_id().unwrap(),
-                        metadata,
+                        slot_info
+                            .outer_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                            .unwrap(),
+                        slot_info.evm_word(),
+                        slot_info.table_info().to_vec(),
                     ),
                 ),
                 // Mapping of mappings Struct
@@ -256,9 +264,14 @@ impl TrieNode {
                                 *slot as u8,
                                 outer_mapping_key.clone(),
                                 inner_mapping_key.clone(),
-                                slot_info.outer_key_id().unwrap(),
-                                slot_info.inner_key_id().unwrap(),
-                                metadata,
+                                slot_info
+                                    .outer_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                                    .unwrap(),
+                                slot_info
+                                    .inner_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                                    .unwrap(),
+                                slot_info.evm_word(),
+                                slot_info.table_info().to_vec(),
                             ),
                         ),
                         _ => unreachable!(),
@@ -283,8 +296,7 @@ impl TrieNode {
             "[+] [+] MPT SLOT {} -> identifiers {:?} value {:?} value.digest() = {:?}",
             slot_info.slot().slot(),
             slot_info
-                .metadata()
-                .extracted_table_info()
+                .table_info()
                 .iter()
                 .map(|info| info.identifier().to_canonical_u64())
                 .collect_vec(),

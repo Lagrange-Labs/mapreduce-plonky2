@@ -1,7 +1,9 @@
 use crate::api::SlotInput;
 use alloy::primitives::Address;
 use gadgets::{
-    column_gadget::ColumnGadgetData, column_info::ColumnInfo, metadata_gadget::ColumnsMetadata,
+    column_gadget::{filter_table_column_identifiers, ColumnGadgetData},
+    column_info::ColumnInfo,
+    metadata_gadget::ColumnsMetadata,
 };
 use itertools::Itertools;
 use mp2_common::{
@@ -45,48 +47,93 @@ pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
 /// Storage slot information for generating the extraction proof
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct StorageSlotInfo<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
+pub struct StorageSlotInfo {
     slot: StorageSlot,
-    metadata: ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    outer_key_id: Option<u64>,
-    inner_key_id: Option<u64>,
+    table_info: Vec<ColumnInfo>,
 }
 
-impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    StorageSlotInfo<MAX_COLUMNS, MAX_FIELD_PER_EVM>
-{
-    pub fn new(
-        slot: StorageSlot,
-        metadata: ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-        outer_key_id: Option<u64>,
-        inner_key_id: Option<u64>,
-    ) -> Self {
-        Self {
-            slot,
-            metadata,
-            outer_key_id,
-            inner_key_id,
-        }
+impl StorageSlotInfo {
+    pub fn new(slot: StorageSlot, table_info: Vec<ColumnInfo>) -> Self {
+        Self { slot, table_info }
     }
 
     pub fn slot(&self) -> &StorageSlot {
         &self.slot
     }
 
-    pub fn metadata(&self) -> &ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
-        &self.metadata
+    pub fn table_info(&self) -> &[ColumnInfo] {
+        &self.table_info
     }
 
-    pub fn outer_key_id(&self) -> Option<u64> {
-        self.outer_key_id
+    pub fn evm_word(&self) -> u32 {
+        self.slot.evm_offset()
     }
 
-    pub fn inner_key_id(&self) -> Option<u64> {
-        self.inner_key_id
+    pub fn metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+        &self,
+    ) -> ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
+        let evm_word = self.evm_word();
+        let extracted_column_identifiers =
+            filter_table_column_identifiers(&self.table_info, self.slot.slot(), evm_word);
+
+        ColumnsMetadata::new(
+            self.table_info.clone(),
+            &extracted_column_identifiers,
+            evm_word,
+        )
     }
 
-    pub fn slot_inputs(&self) -> Vec<SlotInput> {
-        self.metadata()
+    pub fn outer_key_id(
+        &self,
+        contract_address: &Address,
+        chain_id: u64,
+        extra: Vec<u8>,
+    ) -> Option<u64> {
+        let extra = identifier_raw_extra(contract_address, chain_id, extra);
+
+        self.outer_key_id_raw(extra)
+    }
+
+    pub fn inner_key_id(
+        &self,
+        contract_address: &Address,
+        chain_id: u64,
+        extra: Vec<u8>,
+    ) -> Option<u64> {
+        let extra = identifier_raw_extra(contract_address, chain_id, extra);
+
+        self.inner_key_id_raw(extra)
+    }
+
+    pub fn outer_key_id_raw(&self, extra: Vec<u8>) -> Option<u64> {
+        let slot = self.slot().slot();
+        let num_mapping_keys = self.slot().mapping_keys().len();
+        match num_mapping_keys {
+            _ if num_mapping_keys == 0 => None,
+            _ if num_mapping_keys == 1 => Some(identifier_for_mapping_key_column_raw(slot, extra)),
+            _ if num_mapping_keys == 2 => {
+                Some(identifier_for_outer_mapping_key_column_raw(slot, extra))
+            }
+            _ => panic!("Unsupport for the nested mapping keys of length greater than 2"),
+        }
+    }
+
+    pub fn inner_key_id_raw(&self, extra: Vec<u8>) -> Option<u64> {
+        let slot = self.slot().slot();
+        let num_mapping_keys = self.slot().mapping_keys().len();
+        match num_mapping_keys {
+            _ if num_mapping_keys < 2 => None,
+            _ if num_mapping_keys == 2 => {
+                Some(identifier_for_inner_mapping_key_column_raw(slot, extra))
+            }
+            _ => panic!("Unsupport for the nested mapping keys of length greater than 2"),
+        }
+    }
+
+    pub fn slot_inputs<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+        &self,
+    ) -> Vec<SlotInput> {
+        self.metadata::<MAX_COLUMNS, MAX_FIELD_PER_EVM>()
             .extracted_table_info()
             .iter()
             .map(Into::into)
@@ -204,14 +251,19 @@ fn compute_id_with_prefix(
     chain_id: u64,
     extra: Vec<u8>,
 ) -> u64 {
-    let extra = contract_address
+    let extra = identifier_raw_extra(contract_address, chain_id, extra);
+
+    compute_id_with_prefix_raw(prefix, slot, extra)
+}
+
+/// Construct the raw extra by contract address, chain ID and extra data.
+pub fn identifier_raw_extra(contract_address: &Address, chain_id: u64, extra: Vec<u8>) -> Vec<u8> {
+    contract_address
         .0
         .into_iter()
         .chain(chain_id.to_be_bytes())
         .chain(extra)
-        .collect_vec();
-
-    compute_id_with_prefix_raw(prefix, slot, extra)
+        .collect()
 }
 
 /// Calculate ID with prefix in raw mode.

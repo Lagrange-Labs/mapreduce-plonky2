@@ -1,12 +1,11 @@
 //! Test utilities for Values Extraction (C.1)
 
 use super::{storage_trie::TestStorageTrie, TestContext};
-use crate::common::StorageSlotInfo;
 use alloy::{eips::BlockNumberOrTag, primitives::Address, providers::Provider};
 use itertools::Itertools;
 use log::info;
 use mp2_common::{mpt_sequential::utils::bytes_to_nibbles, F};
-use mp2_v1::values_extraction::public_inputs::PublicInputs;
+use mp2_v1::values_extraction::{public_inputs::PublicInputs, StorageSlotInfo};
 use plonky2::field::types::Field;
 
 impl TestContext {
