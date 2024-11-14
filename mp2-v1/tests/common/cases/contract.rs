@@ -196,10 +196,9 @@ impl ContractController for Vec<MappingUpdate<LargeStruct>> {
                 let operation: MappingOperation = tuple.into();
                 let operation = operation.into();
                 let (key, field1, field2, field3) = match tuple {
-                    MappingUpdate::Deletion(k, v) => (*k, v.field1, v.field2, v.field3),
-                    MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => {
-                        (*k, v.field1, v.field2, v.field3)
-                    }
+                    MappingUpdate::Insertion(k, v)
+                    | MappingUpdate::Deletion(k, v)
+                    | MappingUpdate::Update(k, _, v) => (*k, v.field1, v.field2, v.field3),
                 };
                 MappingStructChange {
                     operation,
