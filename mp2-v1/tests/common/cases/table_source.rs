@@ -180,37 +180,34 @@ impl<V: StorageSlotValue> UniqueMappingEntry<V> {
         index: &MappingIndex,
         slot_inputs: &[SlotInput],
     ) -> RowTreeKey {
-        let mut rest = self.value.to_u256_vec();
-        let row_key = match index {
-            MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => self.key,
+        let (row_key, rest) = match index {
+            MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => {
+                // The mapping key is unique for rows.
+                (self.key, vec![])
+            }
             MappingIndex::Value(secondary_value_id) => {
-                let mut value_ids = slot_inputs.iter().map(|slot_input| {
-                    identifier_for_value_column(
-                        slot_input,
-                        &contract.address,
-                        contract.chain_id,
-                        vec![],
-                    )
-                });
-                let pos = value_ids.position(|id| &id == secondary_value_id).unwrap();
-                let secondary_value = rest.remove(pos);
+                let pos = slot_inputs
+                    .iter()
+                    .position(|slot_input| {
+                        &identifier_for_value_column(
+                            slot_input,
+                            &contract.address,
+                            contract.chain_id,
+                            vec![],
+                        ) == secondary_value_id
+                    })
+                    .unwrap();
+                let secondary_value = self.value.to_u256_vec().remove(pos);
 
-                rest.push(self.key);
-
-                secondary_value
+                // The mapping key is unique for rows.
+                (secondary_value, self.key.to_be_bytes_vec())
             }
             MappingIndex::None => unreachable!(),
         };
 
-        let rest = rest
-            .into_iter()
-            .flat_map(|u| u.to_be_bytes_vec())
-            .collect_vec()
-            .to_nonce();
-
         RowTreeKey {
             value: row_key,
-            rest,
+            rest: rest.to_nonce(),
         }
     }
 }
