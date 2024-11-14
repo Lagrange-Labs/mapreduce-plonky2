@@ -1,6 +1,9 @@
 //! Storage trie for proving tests
 
-use super::{benchmarker::Benchmarker, PublicParameters, TestContext};
+use super::{
+    benchmarker::Benchmarker, PublicParameters, TestContext, TEST_MAX_COLUMNS,
+    TEST_MAX_FIELD_PER_EVM,
+};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
@@ -296,7 +299,8 @@ impl TrieNode {
             "[+] [+] MPT SLOT {} -> identifiers {:?} value {:?} value.digest() = {:?}",
             slot_info.slot().slot(),
             slot_info
-                .table_info()
+                .metadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>()
+                .extracted_table_info()
                 .iter()
                 .map(|info| info.identifier().to_canonical_u64())
                 .collect_vec(),
