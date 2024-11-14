@@ -12,7 +12,7 @@ use alloy::{
     primitives::{Address, U256},
 };
 use anyhow::{bail, Result};
-use futures::{future::BoxFuture, FutureExt};
+use futures::{future::BoxFuture, FutureExt, SinkExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
@@ -635,8 +635,7 @@ impl SingleExtractionArgs {
         let value_proof = match ctx.storage.get_proof_exact(&proof_key) {
             Ok(p) => p,
             Err(_) => {
-                let metadata = self.metadata(contract);
-                let storage_slot_info = self.storage_slot_info(&metadata);
+                let storage_slot_info = self.storage_slot_info(&contract);
                 let root_proof = ctx
                     .prove_values_extraction(
                         &contract.address,
@@ -755,15 +754,11 @@ impl SingleExtractionArgs {
             .collect()
     }
 
-    fn storage_slot_info(&self, metadata: &[SlotEvmWordMetadata]) -> Vec<StorageSlotInfo> {
-        let storage_slots = self.storage_slots(metadata);
-
-        metadata
-            .iter()
-            .zip(storage_slots)
-            .map(|(metadata, storage_slot)| {
-                StorageSlotInfo::new(storage_slot, metadata.column_info().to_vec())
-            })
+    fn storage_slot_info(&self, contract: &Contract) -> Vec<StorageSlotInfo> {
+        let table_info = self.table_info(contract);
+        self.storage_slots(&self.metadata(contract))
+            .into_iter()
+            .map(|storage_slot| StorageSlotInfo::new(storage_slot, table_info.clone()))
             .collect()
     }
 }
