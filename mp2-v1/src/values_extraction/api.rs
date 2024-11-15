@@ -496,9 +496,11 @@ mod tests {
             compute_leaf_mapping_metadata_digest, compute_leaf_mapping_of_mappings_metadata_digest,
             compute_leaf_mapping_of_mappings_values_digest, compute_leaf_mapping_values_digest,
             compute_leaf_single_metadata_digest, compute_leaf_single_values_digest,
+            identifier_raw_extra,
         },
         MAX_LEAF_NODE_LEN,
     };
+    use alloy::primitives::Address;
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use itertools::Itertools;
     use log::info;
@@ -512,7 +514,7 @@ mod tests {
     use plonky2::field::types::Field;
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
-    use std::sync::Arc;
+    use std::{str::FromStr, sync::Arc};
 
     type CircuitInput =
         super::CircuitInput<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
@@ -879,7 +881,15 @@ mod tests {
         let table_info = test_slot.table_info();
         let metadata = test_slot.metadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>();
         let extracted_column_identifiers = metadata.extracted_column_identifiers();
-        let id_extra = random_vector(10);
+
+        // Build the identifier extra data, it's used to compute the key IDs.
+        const TEST_CONTRACT_ADDRESS: &str = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
+        const TEST_CHAIN_ID: u64 = 1000;
+        let id_extra = identifier_raw_extra(
+            &Address::from_str(TEST_CONTRACT_ADDRESS).unwrap(),
+            TEST_CHAIN_ID,
+            vec![],
+        );
 
         let (expected_metadata_digest, expected_values_digest, circuit_input) = match &test_slot
             .slot
