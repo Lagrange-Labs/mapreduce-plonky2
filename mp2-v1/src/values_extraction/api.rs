@@ -876,9 +876,9 @@ mod tests {
         let value = leaf_tuple[1][1..].to_vec().try_into().unwrap();
 
         let evm_word = test_slot.evm_word();
+        let table_info = test_slot.table_info();
         let metadata = test_slot.metadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>();
         let extracted_column_identifiers = metadata.extracted_column_identifiers();
-        let table_info = metadata.extracted_table_info();
         let id_extra = random_vector(10);
 
         let (expected_metadata_digest, expected_values_digest, circuit_input) = match &test_slot
