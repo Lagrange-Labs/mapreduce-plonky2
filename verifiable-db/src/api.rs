@@ -345,7 +345,16 @@ where
         let batching_query_params = BatchingQueryParams::build();
         let query_params = QueryParams::build();
         info!("Building the revelation circuit parameters...");
+        #[cfg(feature = "batching_circuits")]
         let revelation_params = RevelationParams::build(
+            batching_query_params.get_circuit_set(),
+            query_params.get_circuit_set(),
+            &params_info.preprocessing_circuit_set,
+            &params_info.preprocessing_vk,
+        );
+        #[cfg(not(feature = "batching_circuits"))]
+        let revelation_params = RevelationParams::build(
+            query_params.get_circuit_set(), // unused, so we provide same query params
             query_params.get_circuit_set(),
             &params_info.preprocessing_circuit_set,
             &params_info.preprocessing_vk,
@@ -384,8 +393,17 @@ where
             }
             QueryCircuitInput::Query(input) => self.query_params.generate_proof(input),
             QueryCircuitInput::Revelation(input) => {
+                #[cfg(feature = "batching_circuits")]
                 let proof = self.revelation_params.generate_proof(
                     input,
+                    self.batching_query_params.get_circuit_set(),
+                    self.query_params.get_circuit_set(),
+                    Some(&self.query_params),
+                )?;
+                #[cfg(not(feature = "batching_circuits"))]
+                let proof = self.revelation_params.generate_proof(
+                    input,
+                    self.query_params.get_circuit_set(), // unused, so we provide a dummy one
                     self.query_params.get_circuit_set(),
                     Some(&self.query_params),
                 )?;

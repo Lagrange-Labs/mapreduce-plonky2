@@ -10,14 +10,15 @@ use ryhope::{
     storage::{
         pgsql::{PgsqlStorage, ToFromBytea},
         updatetree::UpdateTree,
-        FromSettings, PayloadStorage, TransactionalStorage, TreeStorage,
+        FromSettings, PayloadStorage, TransactionalStorage, TreeStorage, WideLineage,
     },
     tree::{MutableTree, NodeContext, TreeTopology},
     Epoch, MerkleTreeKvDb, NodePayload,
 };
-use std::fmt::Debug;
+use std::{fmt::Debug, future::Future};
+use core::hash::Hash;
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql, NoTls};
-use verifiable_db::query::aggregation::{NodeInfo, QueryBounds};
+use verifiable_db::query::{aggregation::{ChildPosition, NodeInfo, QueryBounds}, batching::TreePathInputs};
 
 use crate::indexing::{
     block::BlockPrimaryIndex,
@@ -35,6 +36,163 @@ pub struct NonExistenceInfo<K: Clone + std::hash::Hash + std::cmp::Eq> {
     pub proving_plan: UpdateTree<K>,
 }
 
+#[derive(Clone)]
+pub struct NonExistenceInput<'a, C: ContextProvider> {
+    pub(crate) row_tree: &'a MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
+    pub(crate) table_name: String,
+    pub(crate) pool: &'a DBPool,
+    pub(crate) settings: &'a ParsilSettings<C>,
+    pub(crate) bounds: QueryBounds,
+}
+
+impl<'a, C: ContextProvider> NonExistenceInput<'a, C> {
+    pub fn new(
+        row_tree: &'a MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
+        table_name: String,
+        pool: &'a DBPool,
+        settings: &'a ParsilSettings<C>,
+        bounds: &'a QueryBounds,
+    ) -> Self {
+        Self {
+            row_tree,
+            table_name,
+            pool,
+            settings,
+            bounds: bounds.clone(),
+        }
+    }
+
+    pub(crate) async fn find_row_node_for_non_existence(
+        &self,
+        primary: BlockPrimaryIndex,
+    ) -> anyhow::Result<RowTreeKey>
+    {
+        let (query_for_min, query_for_max) =
+            bracket_secondary_index(&self.table_name, self.settings, primary as Epoch, &self.bounds);
+    
+        // try first with lower node than secondary min query bound
+        let to_be_proven_node =
+            match find_node_for_proof(self.pool, self.row_tree, query_for_min, primary, true).await? {
+                Some(node) => node,
+                None => find_node_for_proof(self.pool, self.row_tree, query_for_max, primary, false)
+                    .await?
+                    .expect("No valid node found to prove non-existence, something is wrong"),
+            };
+        
+        Ok(to_be_proven_node)
+    }
+}
+
+pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized {
+    /// Constant flag specifying whether the implementor is a `WideLineage` or not
+    const IS_WIDE_LINEAGE: bool;
+
+    fn fetch_ctx_and_payload_at(
+        &self,
+        k: &K,
+        epoch: Epoch,
+    ) -> impl Future<Output = Option<(NodeContext<K>, V)>> + Send;
+
+    async fn compute_path(
+        &self,
+        node_key: &K,
+        epoch: Epoch,
+    ) -> Option<TreePathInputs> {
+        let Some((node_ctx, node_payload)) = self.fetch_ctx_and_payload_at(node_key, epoch).await else {
+            return None;
+        };
+        let mut current_node_key = node_ctx.parent.clone();
+        let mut previous_node_key = node_key.clone();
+        let mut path = vec![];
+        while current_node_key.is_some() {
+            let (ctx, payload) = self.fetch_ctx_and_payload_at(
+                current_node_key.as_ref().unwrap(), 
+                epoch
+            ).await
+            .expect(
+                format!("node with key {:?} not found in tree", current_node_key).as_str()
+            );
+            let child_position = match ctx.iter_children().find_position(|child|
+                child.is_some() && child.unwrap().clone() == previous_node_key
+            ).unwrap().0 {
+                0 => ChildPosition::Left,
+                1 => ChildPosition::Right,
+                _ => unreachable!(),
+            };
+            previous_node_key = current_node_key.unwrap();
+            current_node_key = ctx.parent.clone();
+            let node_info = self.compute_node_info(ctx, payload, epoch).await;
+            path.push((node_info, child_position));
+        }
+        let (node_info, left_child, right_child) = get_node_info_from_ctx_and_payload(self, node_ctx, node_payload, epoch).await;
+        
+        Some(
+            TreePathInputs::new(
+                node_info, 
+                path, 
+                [left_child, right_child]
+            )
+        )
+    }
+
+    async fn compute_node_info(
+        &self,
+        node_ctx: NodeContext<K>,
+        node_payload: V,
+        at: Epoch,
+    ) -> NodeInfo {
+        let child_hash = async |k: Option<K>| -> Option<HashOutput> {
+            match k {
+                Some(child_key) => self.fetch_ctx_and_payload_at(&child_key, at).await.map(|(ctx, payload)|
+                    payload.hash()
+                ),
+                None => None,
+            }
+        };
+
+        let left_child_hash = child_hash(node_ctx.left).await;
+        let right_child_hash = child_hash(node_ctx.right).await;
+        NodeInfo::new(
+            &node_payload.embedded_hash(),
+            left_child_hash.as_ref(),
+            right_child_hash.as_ref(),
+            node_payload.value(),
+            node_payload.min(),
+            node_payload.max(),
+        )
+    }
+}
+
+impl<K, V: Clone + Send + Sync + LagrangeNode> TreeFetcher<K,V> for WideLineage<K, V> 
+where K: Debug + Hash + Eq + Clone + Sync + Send,
+{
+    const IS_WIDE_LINEAGE: bool = true;
+
+    async fn fetch_ctx_and_payload_at(
+        &self,
+        k: &K,
+        epoch: Epoch,
+    ) -> Option<(NodeContext<K>, V)> {
+        self.ctx_and_payload_at(epoch, k)
+    }
+}
+
+impl<
+    V: NodePayload + Send + Sync + LagrangeNode, 
+    T: TreeTopology + MutableTree + 'static, 
+    S: TransactionalStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State> + 'static,
+> TreeFetcher<T::Key, V> for MerkleTreeKvDb<T, V, S> {
+    const IS_WIDE_LINEAGE: bool = false;
+
+    async fn fetch_ctx_and_payload_at(
+        &self,
+        k: &T::Key,
+        epoch: Epoch,
+    ) -> Option<(NodeContext<T::Key>, V)> {
+        self.try_fetch_with_context_at(k, epoch).await
+    }
+}
+
 /// Returns the proving plan to prove the non existence of node of the query in this row tree at
 /// the epoch primary. It also returns the leaf node chosen.
 ///
@@ -47,7 +205,7 @@ pub struct NonExistenceInfo<K: Clone + std::hash::Hash + std::cmp::Eq> {
 /// Settings are the parsil settings corresponding to the current SQL and current table looked at.
 /// Pis contain the bounds and placeholders values.
 /// TODO: we should extend ryhope to offer this API directly on the tree since it's very related.
-pub async fn find_row_node_for_non_existence<C>(
+pub async fn proving_plan_for_non_existence<C>(
     row_tree: &MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
     table_name: String,
     pool: &DBPool,
@@ -58,17 +216,16 @@ pub async fn find_row_node_for_non_existence<C>(
 where
     C: ContextProvider,
 {
-    let (query_for_min, query_for_max) =
-        bracket_secondary_index(&table_name, settings, primary as Epoch, &bounds);
-
-    // try first with lower node than secondary min query bound
-    let to_be_proven_node =
-        match find_node_for_proof(pool, row_tree, query_for_min, primary, true).await? {
-            Some(node) => node,
-            None => find_node_for_proof(pool, row_tree, query_for_max, primary, false)
-                .await?
-                .expect("No valid node found to prove non-existence, something is wrong"),
+    let to_be_proven_node = {
+        let input = NonExistenceInput {
+            row_tree,
+            table_name,
+            pool,
+            settings,
+            bounds: bounds.clone(),
         };
+        input.find_row_node_for_non_existence(primary).await
+    }?;
 
     let path = row_tree
         // since the epoch starts at genesis we can directly give the block number !
@@ -80,6 +237,118 @@ where
     let proving_tree = UpdateTree::from_paths([path], primary as Epoch);
     Ok((to_be_proven_node.clone(), proving_tree))
 }
+/// Fetch a key `k` from a tree, assuming that the key is in the
+/// tree. Therefore, it handles differently the case when `k` is not found: 
+/// - If `T::WIDE_LINEAGE` is true, then `k` might not be found because the
+///   node associated to key `k` is in the tree, but not in the lineage
+/// - Otherwise, it panics because it's not expected to happen, as we are
+///   assuming to call this method only on keys which are in the tree
+async fn fetch_existing_node_from_tree<K: Debug, V: LagrangeNode, T: TreeFetcher<K, V>>(
+    tree: &T,
+    k: &K,
+    epoch: Epoch,
+) -> Option<(NodeContext<K>, V)> 
+where 
+    K: Clone + Debug + Eq + PartialEq,
+{
+    if T::IS_WIDE_LINEAGE {
+        // we simply return the result, since in case of `WideLineage`
+        // fetching might fail because the node was not in the lineage
+        tree.fetch_ctx_and_payload_at(k, epoch).await
+    } else {
+        // Otherwise, we are fetching from an entire tree, so 
+        Some(
+            tree.fetch_ctx_and_payload_at(k, epoch)
+            .await
+            .expect(
+                format!(
+                    "Node context not found for node {:?}",
+                    k
+                )
+                .as_str(),
+            ) 
+        )
+    }
+}
+
+/// This method computes the successor of the node with context `node_ctx` in the input `tree`
+/// at the given `epoch`. It returns the context of the successor node and its payload
+pub(crate) async fn get_successor<K, V: LagrangeNode, T: TreeFetcher<K, V>>(
+    tree: &T,
+    node_ctx: &NodeContext<K>,
+    epoch: Epoch,
+) -> Option<(NodeContext<K>, V)> 
+where 
+    K: Clone + Debug + Eq + PartialEq,
+{
+    if node_ctx.right.is_some() {
+        if let Some((right_child_ctx, right_child_payload)) = fetch_existing_node_from_tree(
+                tree,
+                node_ctx.right.as_ref().unwrap(),
+                epoch,
+            ).await {
+                // find successor in the subtree rooted in the right child: it is
+                // the leftmost node in such a subtree
+                let (mut successor_ctx, mut successor_payload) = (right_child_ctx, right_child_payload);
+                while successor_ctx.left.is_some() {
+                    let Some((ctx, payload)) = fetch_existing_node_from_tree(
+                        tree,
+                        successor_ctx.left.as_ref().unwrap(),
+                        epoch,
+                    ).await else {
+                        // we don't found the left child node in the tree, which means that the 
+                        // successor might be out of range, so we return None
+                        return None;
+                    };
+                    successor_ctx = ctx;
+                    successor_payload = payload;
+                }
+                Some((successor_ctx, successor_payload))
+        } else {
+            // we don't found the right child node in the tree, which means that the 
+            // successor might be out of range, so we return None
+            return None;
+        }
+    } else {
+        // find successor among the ancestors of current node: we go up in the path
+        // until we either found a node whose left child is the previous node in the
+        // path, or we get to the root of the tree
+        let mut candidate_successor_ctx = node_ctx.clone();
+        let mut successor = None;
+        while candidate_successor_ctx.parent.is_some() {
+            let (parent_ctx, parent_payload) = tree
+                .fetch_ctx_and_payload_at(
+                    candidate_successor_ctx.parent.as_ref().unwrap(),
+                    epoch,
+                )
+                .await
+                .expect(
+                    format!(
+                        "Node context not found for parent of node {:?}",
+                        candidate_successor_ctx.node_id
+                    )
+                    .as_str(),
+                );
+            if parent_ctx
+                .iter_children()
+                .find_position(|child| {
+                    child.is_some() && child.unwrap().clone() == candidate_successor_ctx.node_id
+                })
+                .unwrap()
+                .0
+                == 0
+            {
+                // successor_ctx.node_id is left child of parent_ctx node, so parent_ctx is
+                // the successor
+                successor = Some((parent_ctx, parent_payload));
+                break;
+            } else {
+                candidate_successor_ctx = parent_ctx;
+            }
+        }
+        successor
+    }
+}
 
 // this method returns the `NodeContext` of the successor of the node provided as input,
 // if the successor exists in the row tree and it stores the same value of the input node (i.e., `value`);
@@ -90,7 +359,17 @@ async fn get_successor_node_with_same_value(
     value: U256,
     primary: BlockPrimaryIndex,
 ) -> Option<NodeContext<RowTreeKey>> {
-    if node_ctx.right.is_some() {
+    get_successor(row_tree, node_ctx, primary as Epoch).await
+        .map(|(successor_ctx, successor_payload)|
+            if successor_payload.value() != value {
+                // the value of successor is different from `value`, so we don't return the
+                // successor node
+                None
+            } else {
+                Some(successor_ctx)
+            }
+        ).flatten()
+    /*if node_ctx.right.is_some() {
         let (right_child_ctx, payload) = row_tree
             .fetch_with_context_at(node_ctx.right.as_ref().unwrap(), primary as Epoch)
             .await;
@@ -162,6 +441,83 @@ async fn get_successor_node_with_same_value(
             // so we don't return any node
             None
         }
+    }*/
+}
+
+pub(crate) async fn get_predecessor<K, V: LagrangeNode, T: TreeFetcher<K, V>>(
+    tree: &T,
+    node_ctx: &NodeContext<K>,
+    epoch: Epoch,
+) -> Option<(NodeContext<K>, V)> 
+where 
+    K: Clone + Debug + Eq + PartialEq,
+{
+    if node_ctx.left.is_some() {
+        if let Some((left_child_ctx, left_child_payload)) = fetch_existing_node_from_tree(
+                tree,
+                node_ctx.left.as_ref().unwrap(),
+                epoch,
+            ).await {
+                // find predecessor in the subtree rooted in the left child: it is
+                // the rightmost node in such a subtree
+                let (mut predecessor_ctx, mut predecessor_payload) = (left_child_ctx, left_child_payload);
+                while predecessor_ctx.right.is_some() {
+                    let Some((ctx, payload)) = fetch_existing_node_from_tree(
+                        tree, 
+                        predecessor_ctx.right.as_ref().unwrap(), 
+                        epoch)
+                    .await else {
+                        // we don't found the right child node in the tree, which means that the 
+                        // predecessor might be out of range, so we return None
+                        return None;
+                    };
+                    predecessor_ctx = ctx;
+                    predecessor_payload = payload;
+                }
+                Some((predecessor_ctx, predecessor_payload))
+            } else {
+                // we don't found the left child node in the tree, which means that the 
+                // predecessor might be out of range, so we return None
+                return None;
+            }
+    } else {
+        // find predecessor among the ancestors of current node: we go up in the path
+        // until we either found a node whose right child is the previous node in the
+        // path, or we get to the root of the tree
+        let mut candidate_predecessor_ctx = node_ctx.clone();
+        let mut predecessor = None;
+        while candidate_predecessor_ctx.parent.is_some() {
+            let (parent_ctx, parent_payload) = fetch_existing_node_from_tree(
+                    tree,   
+                    candidate_predecessor_ctx.parent.as_ref().unwrap(),
+                    epoch,
+                )
+                .await
+                .expect(
+                    format!(
+                        "Node context not found for parent of node {:?}",
+                        candidate_predecessor_ctx.node_id
+                    )
+                    .as_str()
+                );
+            if parent_ctx
+                .iter_children()
+                .find_position(|child| {
+                    child.is_some() && child.unwrap().clone() == candidate_predecessor_ctx.node_id
+                })
+                .unwrap()
+                .0
+                == 1
+            {
+                // predecessor_ctx.node_id is right child of parent_ctx node, so parent_ctx is
+                // the predecessor
+                predecessor = Some((parent_ctx, parent_payload));
+                break;
+            } else {
+                candidate_predecessor_ctx = parent_ctx;
+            }
+        }
+        predecessor
     }
 }
 
@@ -174,9 +530,19 @@ async fn get_predecessor_node_with_same_value(
     value: U256,
     primary: BlockPrimaryIndex,
 ) -> Option<NodeContext<RowTreeKey>> {
-    if node_ctx.left.is_some() {
+    get_predecessor(row_tree, node_ctx, primary as Epoch).await
+        .map(|(predecessor_ctx, predecessor_payload)|
+            if predecessor_payload.value() != value {
+                // the value of successor is different from `value`, so we don't return the
+                // successor node
+                None
+            } else {
+                Some(predecessor_ctx)
+            }
+        ).flatten()
+    /*if node_ctx.left.is_some() {
         let (left_child_ctx, payload) = row_tree
-            .fetch_with_context_at(node_ctx.right.as_ref().unwrap(), primary as Epoch)
+            .fetch_with_context_at(node_ctx.left.as_ref().unwrap(), primary as Epoch)
             .await;
         // the value of the predecessor in this case is `payload.max`, since the predecessor is the
         // maximum of the subtree rooted in the left child
@@ -247,7 +613,7 @@ async fn get_predecessor_node_with_same_value(
             // so we don't return any node
             None
         }
-    }
+    }*/
 }
 
 async fn find_node_for_proof(
@@ -359,50 +725,44 @@ pub async fn execute_row_query(
     Ok(rows)
 }
 
-pub async fn get_node_info<T, V, S>(
-    lookup: &MerkleTreeKvDb<T, V, S>,
-    k: &T::Key,
+async fn get_node_info_from_ctx_and_payload<
+    K: Debug + Clone + Eq + PartialEq, 
+    V: LagrangeNode, 
+    T: TreeFetcher<K, V>
+>(
+    tree: &T,
+    node_ctx: NodeContext<K>,
+    node_payload: V,
     at: Epoch,
-) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>)
-where
-    T: TreeTopology + MutableTree + Send,
-    V: NodePayload + Send + Sync + LagrangeNode,
-    S: TransactionalStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
-    T::Key: Debug,
-{
-    // look at the left child first then right child, then build the node info
-    let (ctx, node_payload) = lookup
-        .try_fetch_with_context_at(k, at)
-        .await
-        .expect("cache not filled");
+) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>) {
     // this looks at the value of a child node (left and right), and fetches the grandchildren
     // information to be able to build their respective node info.
-    let fetch_ni = async |k: Option<T::Key>| -> (Option<NodeInfo>, Option<HashOutput>) {
+    let fetch_ni = async |k: Option<K>| -> (Option<NodeInfo>, Option<HashOutput>) {
         match k {
             None => (None, None),
             Some(child_k) => {
-                let (child_ctx, child_payload) = lookup
-                    .try_fetch_with_context_at(&child_k, at)
+                let (child_ctx, child_payload) = tree
+                .fetch_ctx_and_payload_at(&child_k, at)
                     .await
-                    .expect("cache not filled");
+                    .expect(format!("key {:?} not found in the tree", child_k).as_str());
                 // we need the grand child hashes for constructing the node info of the
                 // children of the node in argument
                 let child_left_hash = match child_ctx.left {
                     Some(left_left_k) => {
-                        let (_, payload) = lookup
-                            .try_fetch_with_context_at(&left_left_k, at)
+                        let (_, payload) = tree
+                            .fetch_ctx_and_payload_at(&left_left_k, at)
                             .await
-                            .expect("cache not filled");
+                            .expect(format!("key {:?} not found in the tree", left_left_k).as_str());
                         Some(payload.hash())
                     }
                     None => None,
                 };
                 let child_right_hash = match child_ctx.right {
                     Some(left_right_k) => {
-                        let (_, payload) = lookup
-                            .try_fetch_with_context_at(&left_right_k, at)
+                        let (_, payload) = tree
+                            .fetch_ctx_and_payload_at(&left_right_k, at)
                             .await
-                            .expect("cache not full");
+                            .expect(format!("key {:?} not found in the tree", left_right_k).as_str());
                         Some(payload.hash())
                     }
                     None => None,
@@ -419,8 +779,8 @@ where
             }
         }
     };
-    let (left_node, left_hash) = fetch_ni(ctx.left).await;
-    let (right_node, right_hash) = fetch_ni(ctx.right).await;
+    let (left_node, left_hash) = fetch_ni(node_ctx.left).await;
+    let (right_node, right_hash) = fetch_ni(node_ctx.right).await;
     (
         NodeInfo::new(
             &node_payload.embedded_hash(),
@@ -433,4 +793,20 @@ where
         left_node,
         right_node,
     )
+}
+
+pub async fn get_node_info<
+    K: Debug + Clone + Eq + PartialEq, 
+    V: LagrangeNode, 
+    T: TreeFetcher<K, V>
+>(
+    tree: &T,
+    k: &K,
+    at: Epoch,
+) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>) {
+    let (node_ctx, node_payload) = tree
+        .fetch_ctx_and_payload_at(k, at)
+        .await
+        .expect(format!("key {:?} not found in the tree", k).as_str());
+    get_node_info_from_ctx_and_payload(tree, node_ctx, node_payload, at).await
 }

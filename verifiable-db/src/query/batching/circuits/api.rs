@@ -56,9 +56,15 @@ impl TreePathInputs {
     pub fn new(
         node_info: NodeInfo,
         path: Vec<(NodeInfo, ChildPosition)>,
-        siblings: Vec<Option<HashOutput>>,
         children: [Option<NodeInfo>; 2],
     ) -> Self {
+        let siblings = path.iter().map(|(node, child_pos)| {
+            let sibling_index = match child_pos {
+                &ChildPosition::Left => 1,
+                &ChildPosition::Right => 0,
+            };
+            Some(HashOutput::try_from(node.child_hashes[sibling_index]).unwrap())        
+        }).collect_vec();
         Self {
             node_info,
             path,
@@ -92,23 +98,19 @@ impl RowPath {
     pub fn new(
         row_node_info: NodeInfo,
         row_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        row_path_siblings: Vec<Option<HashOutput>>,
         row_node_children: [Option<NodeInfo>; 2],
         index_node_info: NodeInfo,
         index_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        index_path_siblings: Vec<Option<HashOutput>>,
         index_node_children: [Option<NodeInfo>; 2],
     ) -> Self {
         let row_path = TreePathInputs::new(
             row_node_info,
             row_tree_path,
-            row_path_siblings,
             row_node_children,
         );
         let index_path = TreePathInputs::new(
             index_node_info,
             index_tree_path,
-            index_path_siblings,
             index_node_children,
         );
         Self {
@@ -116,8 +118,19 @@ impl RowPath {
             index_tree_path: index_path,
         }
     }
+
+    pub fn new_from_paths(
+        row_path: TreePathInputs,
+        index_path: TreePathInputs,
+    ) -> Self {
+        Self {
+            row_tree_path: row_path,
+            index_tree_path: index_path,
+        }
+    }
 }
 
+#[derive(Clone, Debug)]
 pub struct RowWithPath {
     pub(crate) cells: RowCells,
     pub(crate) path: RowPath,
@@ -132,7 +145,7 @@ impl RowWithPath {
     }
 }
 #[derive(Serialize, Deserialize)]
-pub(crate) enum CircuitInput<
+pub enum CircuitInput<
     const NUM_CHUNKS: usize,
     const NUM_ROWS: usize,
     const ROW_TREE_MAX_DEPTH: usize,
@@ -188,7 +201,8 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
-    pub(crate) fn new_row_chunks_input(
+    /// Instantiate new input for `RowChunkProcessingCircuit`
+    pub fn new_row_chunks_input(
         rows: &[RowWithPath],
         predicate_operations: &[BasicOperation],
         placeholders: &Placeholders,
@@ -214,7 +228,8 @@ where
         ))
     }
 
-    pub(crate) fn new_chunk_aggregation_input(chunks_proofs: &[Vec<u8>]) -> Result<Self> {
+    /// Instantiate new input for chunk aggregation circuit
+    pub fn new_chunk_aggregation_input(chunks_proofs: &[Vec<u8>]) -> Result<Self> {
         ensure!(
             chunks_proofs.len() >= 1,
             "At least one chunk proof must be provided"
@@ -238,7 +253,9 @@ where
         }))
     }
 
-    pub(crate) fn new_non_existence_input(
+    /// Instantiate a new input to prove non-existence of any matching row
+    /// for a query
+    pub fn new_non_existence_input(
         index_node_path: TreePathInputs,
         column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
@@ -459,6 +476,10 @@ where
                 .into(),
         };
         proof.serialize()
+    }
+
+    pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.circuit_set
     }
 }
 

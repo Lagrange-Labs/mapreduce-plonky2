@@ -11,7 +11,7 @@ use crate::common::{
     cases::{
         indexing::BLOCK_COLUMN_NAME,
         planner::{IndexInfo, QueryPlanner, RowInfo, TreeInfo},
-        query::{QueryCooking, SqlReturn, SqlType},
+        query::{BatchingQueryCircuitInput, QueryCooking, SqlReturn, SqlType, NUM_CHUNKS, NUM_ROWS},
         table_source::BASE_VALUE,
     },
     proof_storage::{ProofKey, ProofStorage},
@@ -42,7 +42,7 @@ use mp2_v1::{
         row::{Row, RowPayload, RowTreeKey},
         LagrangeNode,
     },
-    query::planner::{execute_row_query, find_row_node_for_non_existence},
+    query::{batching_planner::generate_chunks, planner::{execute_row_query, proving_plan_for_non_existence, NonExistenceInput, TreeFetcher}},
     values_extraction::identifier_block_column,
 };
 use parsil::{
@@ -83,9 +83,187 @@ use super::{
 pub type RevelationPublicInputs<'a> =
     PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
 
-/// Execute a query to know all the touched rows, and then call the universal circuit on all rows
 #[warn(clippy::too_many_arguments)]
 pub(crate) async fn prove_query(
+    ctx: &mut TestContext,
+    table: &Table,
+    query: QueryCooking,
+    mut parsed: Query,
+    settings: &ParsilSettings<&Table>,
+    res: Vec<PsqlRow>,
+    metadata: MetadataHash,
+    pis: DynamicCircuitPis,
+) -> Result<()> {
+    #[cfg(not(feature = "batching_circuits"))]
+    let res = prove_query_non_batching(ctx, table, query, parsed, settings, res, metadata, pis).await;
+    #[cfg(feature = "batching_circuits")]
+    let res = prove_query_batching(ctx, table, query, parsed, settings, res, metadata, pis).await;
+    res
+}
+
+#[cfg(feature = "batching_circuits")]
+#[warn(clippy::too_many_arguments)]
+pub(crate) async fn prove_query_batching(
+    ctx: &mut TestContext,
+    table: &Table,
+    query: QueryCooking,
+    mut parsed: Query,
+    settings: &ParsilSettings<&Table>,
+    res: Vec<PsqlRow>,
+    metadata: MetadataHash,
+    pis: DynamicCircuitPis,
+) -> Result<()> {
+    let row_cache = table
+        .row
+        .wide_lineage_between(
+            table.row.current_epoch(),
+            &core_keys_for_row_tree(&query.query, &settings, &pis.bounds, &query.placeholders)?,
+            (query.min_block as Epoch, query.max_block as Epoch),
+        )
+        .await?;
+    // prove the index tree, on a single version. Both path can be taken depending if we do have
+    // some nodes or not
+    let initial_epoch = table.index.initial_epoch() as BlockPrimaryIndex;
+    let current_epoch = table.index.current_epoch() as BlockPrimaryIndex;
+    let block_range = query.min_block.max(initial_epoch + 1)..=query.max_block.min(current_epoch);
+    info!(
+        "found {} blocks in range: {:?}",
+        block_range.clone().count(),
+        block_range
+    );
+    let column_ids = ColumnIDs::from(&table.columns);
+    let query_proof = if block_range.is_empty() {
+        info!("Running INDEX TREE proving for EMPTY query");
+        // no valid blocks in the query range, so we need to choose a block to prove
+        // non-existence. Either the one after genesis or the last one
+        let to_be_proven_node = if query.max_block < initial_epoch {
+            initial_epoch + 1
+        } else if query.min_block > current_epoch {
+            current_epoch
+        } else {
+            bail!(
+                "Empty block range to be proven for query bounds {}, {}, but no node
+                    to be proven with non-existence circuit was found. Something is wrong",
+                query.min_block,
+                query.max_block
+            );
+        } as BlockPrimaryIndex;
+        let index_path = table.index.compute_path(&to_be_proven_node, current_epoch as Epoch)
+            .await
+            .expect(format!("Compute path for index node with key {to_be_proven_node} failed").as_str());
+        let input = BatchingQueryCircuitInput::new_non_existence_input(
+            index_path,
+            &column_ids, 
+            &pis.predication_operations, 
+            &pis.result,
+            &query.placeholders, 
+            &pis.bounds, 
+        )?;
+        ctx.run_query_proof(
+            "batching::non_existence", 
+            GlobalCircuitInput::BatchingQuery(input),
+        )?
+    } else {
+        info!("Running INDEX tree proving from cache");
+        // Only here we can run the SQL query for index so it doesn't crash
+        let index_query =
+            core_keys_for_index_tree(current_epoch as Epoch, (query.min_block, query.max_block))?;
+        let big_index_cache = table
+            .index
+            // The bounds here means between which versions of the tree should we look. For index tree,
+            // we only look at _one_ version of the tree.
+            .wide_lineage_between(
+                current_epoch as Epoch,
+                &index_query,
+                (current_epoch as Epoch, current_epoch as Epoch),
+            )
+            .await?;
+        let proven_chunks = generate_chunks::<NUM_ROWS, _>(
+            row_cache, 
+            big_index_cache, 
+            &column_ids,
+            NonExistenceInput::new(
+                &table.row, 
+                table.public_name.clone(), 
+                &table.db_pool,
+                settings, 
+                &pis.bounds,
+            )
+        ).await?;
+        let mut chunk_proofs = proven_chunks.into_iter().enumerate().map(|(i, chunk)| {
+            let input = BatchingQueryCircuitInput::new_row_chunks_input(
+                &chunk, 
+                &pis.predication_operations, 
+                &query.placeholders, 
+                &pis.bounds, 
+                &pis.result,
+            )?;
+            info!("Proving {i}-th chunk");
+            ctx.run_query_proof(
+                "batching::chunk_processing", 
+                GlobalCircuitInput::BatchingQuery(input),
+            )
+        }).collect::<Result<Vec<_>>>()?;
+        info!("{} chunks proven", chunk_proofs.len());
+        while chunk_proofs.len() > 1 {
+            chunk_proofs = chunk_proofs.chunks(NUM_CHUNKS).enumerate().map(|(i,proofs)| {
+                let input = BatchingQueryCircuitInput::new_chunk_aggregation_input(proofs)?;
+                info!("Aggregating {i}-th chunk");
+                ctx.run_query_proof(
+                    "batching::chunk_aggregation", 
+                    GlobalCircuitInput::BatchingQuery(input),
+                )
+            }).collect::<Result<Vec<_>>>()?;
+        }
+        let [query_proof] = chunk_proofs.try_into().unwrap();
+        query_proof
+    };
+    let root_key = table.index.root_at(current_epoch as Epoch).await.unwrap();
+    let proof_key = ProofKey::QueryAggregateIndex((
+        query.query.clone(),
+        query.placeholders.placeholder_values(),
+        root_key,
+    ));
+    ctx.storage.store_proof(proof_key, query_proof)?;
+
+    let proof = prove_revelation(ctx, table, &query, &pis, table.index.current_epoch()).await?;
+    info!("Revelation proof done! Checking public inputs...");
+
+    // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
+    // to check the public inputs
+    let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
+    // get number of matching rows
+    let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
+    let query_params = exec_query.convert_placeholders(&query.placeholders);
+    let num_touched_rows = execute_row_query(
+        &table.db_pool,
+        &exec_query
+            .normalize_placeholder_names()
+            .to_pgsql_string_with_placeholder(),
+        &query_params,
+    )
+    .await?
+    .len();
+
+    check_final_outputs(
+        proof,
+        ctx,
+        table,
+        &query,
+        &pis,
+        table.index.current_epoch(),
+        num_touched_rows,
+        res,
+        metadata,
+    )?;
+    info!("Revelation done!");
+    Ok(())
+}
+
+
+/// Execute a query to know all the touched rows, and then call the universal circuit on all rows
+#[warn(clippy::too_many_arguments)]
+pub(crate) async fn prove_query_non_batching(
     ctx: &mut TestContext,
     table: &Table,
     query: QueryCooking,
@@ -798,7 +976,7 @@ pub async fn prove_non_existence_row<'a>(
     planner: &mut QueryPlanner<'a>,
     primary: BlockPrimaryIndex,
 ) -> Result<()> {
-    let (chosen_node, plan) = find_row_node_for_non_existence(
+    let (chosen_node, plan) = proving_plan_for_non_existence(
         &planner.table.row,
         planner.table.public_name.clone(),
         &planner.table.db_pool,

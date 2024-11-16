@@ -445,6 +445,7 @@ where
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
     pub fn build(
+        batching_query_circuit_set: &RecursiveCircuits<F, C, D>,
         query_circuit_set: &RecursiveCircuits<F, C, D>,
         preprocessing_circuit_set: &RecursiveCircuits<F, C, D>,
         preprocessing_vk: &VerifierOnlyCircuitData<C, D>,
@@ -459,6 +460,14 @@ where
             preprocessing_circuit_set: preprocessing_circuit_set.clone(),
             preprocessing_vk: preprocessing_vk.clone(),
         };
+        let batching_build_params = CircuitBuilderParams {
+            query_circuit_set: batching_query_circuit_set.clone(),
+            preprocessing_circuit_set: preprocessing_circuit_set.clone(),
+            preprocessing_vk: preprocessing_vk.clone(),
+        };
+        #[cfg(feature = "batching_circuits")]
+        let revelation_no_results_tree = builder.build_circuit(batching_build_params);
+        #[cfg(not(feature = "batching_circuits"))]
         let revelation_no_results_tree = builder.build_circuit(build_parameters.clone());
         let revelation_unproven_offset = builder.build_circuit(build_parameters);
 
@@ -488,6 +497,7 @@ where
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
         >,
+        batching_query_circuit_set: &RecursiveCircuits<F, C, D>,
         query_circuit_set: &RecursiveCircuits<F, C, D>,
         query_params: Option<
             &QueryParams<
@@ -504,6 +514,14 @@ where
                 preprocessing_proof,
                 revelation_circuit,
             } => {
+                #[cfg(feature = "batching_circuits")]
+                let input = RecursiveCircuitInputs {
+                    inputs: revelation_circuit,
+                    query_proof,
+                    preprocessing_proof,
+                    query_circuit_set: batching_query_circuit_set.clone(),
+                };
+                #[cfg(not(feature = "batching_circuits"))]
                 let input = RecursiveCircuitInputs {
                     inputs: revelation_circuit,
                     query_proof,

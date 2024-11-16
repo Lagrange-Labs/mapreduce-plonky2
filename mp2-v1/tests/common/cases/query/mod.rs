@@ -31,7 +31,7 @@ pub mod aggregated_queries;
 pub mod simple_select_queries;
 
 pub const NUM_CHUNKS: usize = 5;
-pub const NUM_ROWS: usize = 5;
+pub const NUM_ROWS: usize = 3;
 pub const MAX_NUM_RESULT_OPS: usize = 20;
 pub const MAX_NUM_OUTPUTS: usize = 3;
 pub const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
@@ -55,6 +55,17 @@ pub type GlobalCircuitInput = verifiable_db::api::QueryCircuitInput<
 >;
 
 pub type QueryCircuitInput = verifiable_db::query::api::CircuitInput<
+    MAX_NUM_COLUMNS,
+    MAX_NUM_PREDICATE_OPS,
+    MAX_NUM_RESULT_OPS,
+    MAX_NUM_ITEMS_PER_OUTPUT,
+>;
+
+pub type BatchingQueryCircuitInput = verifiable_db::query::batching::CircuitInput<
+    NUM_CHUNKS,
+    NUM_ROWS,
+    ROW_TREE_MAX_DEPTH,
+    INDEX_TREE_MAX_DEPTH,
     MAX_NUM_COLUMNS,
     MAX_NUM_PREDICATE_OPS,
     MAX_NUM_RESULT_OPS,
