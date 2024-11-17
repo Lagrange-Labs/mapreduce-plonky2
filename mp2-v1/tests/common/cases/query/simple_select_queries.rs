@@ -6,6 +6,7 @@ use mp2_common::types::HashOutput;
 use mp2_v1::{
     api::MetadataHash,
     indexing::{block::BlockPrimaryIndex, row::RowTreeKey, LagrangeNode},
+    query::planner::execute_row_query,
 };
 use parsil::{
     executor::generate_query_execution_with_keys, DEFAULT_MAX_BLOCK_PLACEHOLDER,
@@ -54,15 +55,14 @@ pub(crate) async fn prove_query<'a>(
 ) -> Result<()> {
     let mut exec_query = generate_query_execution_with_keys(&mut parsed, &planner.settings)?;
     let query_params = exec_query.convert_placeholders(&planner.query.placeholders);
-    let res = planner
-        .table
-        .execute_row_query(
-            &exec_query
-                .normalize_placeholder_names()
-                .to_pgsql_string_with_placeholder(),
-            &query_params,
-        )
-        .await?;
+    let res = execute_row_query(
+        &planner.table.db_pool,
+        &exec_query
+            .normalize_placeholder_names()
+            .to_pgsql_string_with_placeholder(),
+        &query_params,
+    )
+    .await?;
     let matching_rows = res
         .iter()
         .map(|row| {

@@ -11,7 +11,7 @@ use alloy::{
     providers::Provider,
 };
 use anyhow::{bail, Result};
-use futures::{future::BoxFuture, FutureExt, StreamExt};
+use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
@@ -235,6 +235,7 @@ impl TableSource {
         }
     }
 
+    #[allow(elided_named_lifetimes)]
     pub fn init_contract_data<'a>(
         &'a mut self,
         ctx: &'a mut TestContext,
@@ -275,6 +276,7 @@ impl TableSource {
         }
     }
 
+    #[allow(elided_named_lifetimes)]
     pub fn random_contract_update<'a>(
         &'a mut self,
         ctx: &'a mut TestContext,
@@ -436,7 +438,7 @@ impl SingleValuesExtractionArgs {
         proof_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
         let chain_id = ctx.rpc.get_chain_id().await?;
-        let ProofKey::ValueExtraction((id, bn)) = proof_key.clone() else {
+        let ProofKey::ValueExtraction((_id, bn)) = proof_key.clone() else {
             bail!("invalid proof key");
         };
         let single_value_proof = match ctx.storage.get_proof_exact(&proof_key) {
@@ -1007,6 +1009,7 @@ impl MergeSource {
         }
     }
 
+    #[allow(elided_named_lifetimes)]
     pub fn generate_extraction_proof_inputs<'a>(
         &'a self,
         ctx: &'a mut TestContext,
