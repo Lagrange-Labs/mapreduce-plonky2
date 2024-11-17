@@ -2,7 +2,7 @@
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use alloy::{
     eips::BlockNumberOrTag,
-    primitives::{Address, B256},
+    primitives::{Address, B256, U256},
     providers::{Provider, RootProvider},
     rlp::Encodable as AlloyEncodable,
     rpc::types::{Block, EIP1186AccountProofResponse},
@@ -11,6 +11,7 @@ use alloy::{
 use anyhow::{bail, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethereum_types::H256;
+use itertools::Itertools;
 use log::warn;
 use rlp::Rlp;
 use serde::{Deserialize, Serialize};
@@ -111,7 +112,50 @@ pub struct ProofQuery {
     pub(crate) slot: StorageSlot,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Represent an intermediate or leaf node of a storage slot in contract.
+///
+/// It has a `parent` node, and its ancestor (root) must be a simple or mapping slot.
+/// Any intermediate nodes could be represented as:
+/// - For mapping entry, it has a parent node and the mapping key.
+/// - For Struct entry, it has a parent node and the EVM offset.
+// NOTE: This is not strict, since the parent of a Slot mapping entry must type of
+// mapping (cannot be a Struct).
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum StorageSlotNode {
+    /// Mapping entry including a parent node and the mapping key
+    Mapping(Box<StorageSlot>, Vec<u8>),
+    /// Struct entry including a parent node and EVM offset
+    Struct(Box<StorageSlot>, u32),
+}
+
+impl StorageSlotNode {
+    pub fn new_mapping(parent: StorageSlot, mapping_key: Vec<u8>) -> Result<Self> {
+        let parent = Box::new(parent);
+        if !matches!(
+            *parent,
+            StorageSlot::Mapping(_, _) | StorageSlot::Node(Self::Mapping(_, _))
+        ) {
+            bail!("The parent of a Slot mapping entry must be type of mapping");
+        }
+
+        Ok(Self::Mapping(parent, mapping_key))
+    }
+
+    pub fn new_struct(parent: StorageSlot, evm_offset: u32) -> Self {
+        let parent = Box::new(parent);
+
+        Self::Struct(parent, evm_offset)
+    }
+
+    pub fn parent(&self) -> &StorageSlot {
+        match self {
+            Self::Mapping(parent, _) => parent,
+            Self::Struct(parent, _) => parent,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum StorageSlot {
     /// simple storage slot like a uin256 etc that fits in 32bytes
     /// Argument is the slot location in the contract
@@ -121,12 +165,26 @@ pub enum StorageSlot {
     /// Second argument is the slot location inthe contract
     /// (mapping_key, mapping_slot)
     Mapping(Vec<u8>, usize),
+    /// Represent an intermediate or leaf node of a storage slot in contract.
+    /// It has a `parent` node, and its ancestor (root) must be a simple or mapping slot.
+    Node(StorageSlotNode),
 }
+
 impl StorageSlot {
     pub fn slot(&self) -> u8 {
         match self {
             StorageSlot::Simple(slot) => *slot as u8,
             StorageSlot::Mapping(_, slot) => *slot as u8,
+            StorageSlot::Node(node) => node.parent().slot(),
+        }
+    }
+    pub fn evm_offset(&self) -> u32 {
+        match self {
+            // Only the Struct storage has the EVM offset.
+            StorageSlot::Node(StorageSlotNode::Struct(_, evm_offset)) => *evm_offset,
+            StorageSlot::Simple(_)
+            | StorageSlot::Mapping(_, _)
+            | StorageSlot::Node(StorageSlotNode::Mapping(_, _)) => 0,
         }
     }
     pub fn location(&self) -> B256 {
@@ -136,11 +194,27 @@ impl StorageSlot {
                 // H( pad32(address), pad32(mapping_slot))
                 let padded_mkey = left_pad32(mapping_key);
                 let padded_slot = left_pad32(&[*mapping_slot as u8]);
-                let concat = padded_mkey
+                let inputs = padded_mkey.into_iter().chain(padded_slot).collect_vec();
+                B256::from_slice(&keccak256(&inputs))
+            }
+            StorageSlot::Node(StorageSlotNode::Mapping(parent, mapping_key)) => {
+                // location = keccak256(left_pad32(mapping_key) || parent_location)
+                let padded_mapping_key = left_pad32(mapping_key);
+                let parent_location = parent.location();
+                let inputs = padded_mapping_key
                     .into_iter()
-                    .chain(padded_slot)
-                    .collect::<Vec<_>>();
-                B256::from_slice(&keccak256(&concat))
+                    .chain(parent_location.0)
+                    .collect_vec();
+                B256::from_slice(&keccak256(&inputs))
+            }
+            StorageSlot::Node(StorageSlotNode::Struct(parent, evm_offset)) => {
+                // location = parent_location + evm_offset
+                let parent_location = U256::from_be_slice(parent.location().as_slice());
+                let location: [_; U256::BYTES] = parent_location
+                    .checked_add(U256::from(*evm_offset))
+                    .unwrap()
+                    .to_be_bytes();
+                B256::from_slice(&location)
             }
         }
     }
@@ -158,6 +232,7 @@ impl StorageSlot {
         match self {
             StorageSlot::Simple(_) => true,
             StorageSlot::Mapping(_, _) => false,
+            StorageSlot::Node(node) => node.parent().is_simple_slot(),
         }
     }
 }
@@ -266,7 +341,7 @@ fn from_rpc_header_to_consensus(h: &alloy::rpc::types::Header) -> alloy::consens
         withdrawals_root: h.withdrawals_root,
         logs_bloom: h.logs_bloom,
         difficulty: h.difficulty,
-        number: h.number.unwrap(),
+        number: h.number,
         gas_limit: h.gas_limit,
         gas_used: h.gas_used,
         timestamp: h.timestamp,
@@ -541,10 +616,7 @@ mod test {
             .await?
             .unwrap();
         let previous_block = provider
-            .get_block_by_number(
-                BlockNumberOrTag::Number(block.header.number.unwrap() - 1),
-                true,
-            )
+            .get_block_by_number(BlockNumberOrTag::Number(block.header.number - 1), true)
             .await?
             .unwrap();
 
@@ -556,14 +628,11 @@ mod test {
         let ethers_provider = ethers::providers::Provider::<Http>::try_from(url)
             .expect("could not instantiate HTTP Provider");
         let ethers_block = ethers_provider
-            .get_block_with_txs(BlockNumber::Number(U64::from(block.header.number.unwrap())))
+            .get_block_with_txs(BlockNumber::Number(U64::from(block.header.number)))
             .await?
             .unwrap();
         // sanity check that ethers manual rlp implementation works
-        assert_eq!(
-            block.header.hash.unwrap().as_slice(),
-            ethers_block.block_hash()
-        );
+        assert_eq!(block.header.hash.as_slice(), ethers_block.block_hash());
         let ethers_rlp = ethers_block.rlp();
         let alloy_rlp = from_rpc_header_to_consensus(&block.header).rlp();
         assert_eq!(ethers_rlp, alloy_rlp);
@@ -575,7 +644,7 @@ mod test {
 
         let previous_computed = previous_block.block_hash();
         assert_eq!(&previous_computed, block.header.parent_hash.as_slice());
-        let alloy_given = block.header.hash.unwrap();
+        let alloy_given = block.header.hash;
         assert_eq!(alloy_given, alloy_computed);
         Ok(())
     }

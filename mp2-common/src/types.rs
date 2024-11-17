@@ -76,6 +76,9 @@ pub const MAX_BLOCK_LEN: usize = 650;
 /// value **not** RLP encoded,i.e. without the 1-byte RLP header.
 pub const MAPPING_LEAF_VALUE_LEN: usize = 32;
 
+/// The length of an EVM word
+pub const EVM_WORD_LEN: usize = 32;
+
 impl From<[u8; 32]> for HashOutput {
     fn from(value: [u8; 32]) -> Self {
         Self(value)

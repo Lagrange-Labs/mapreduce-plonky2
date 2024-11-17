@@ -17,10 +17,13 @@ use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTa
 use sha3::Digest;
 use sha3::Keccak256;
 
-use crate::array::Targetable;
-use crate::poseidon::{HashableField, H};
-use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
-use crate::{D, F};
+use crate::{
+    array::Targetable,
+    group_hashing::EXTENSION_DEGREE,
+    poseidon::{HashableField, H},
+    types::HashOutput,
+    ProofTuple, D, F,
+};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
@@ -522,6 +525,7 @@ pub trait PackableRichField: RichField {}
 
 impl PackableRichField for GoldilocksField {}
 
+#[derive(Clone, Copy, Debug)]
 pub enum Endianness {
     Big,
     Little,
@@ -761,15 +765,50 @@ impl<F: RichField + Extendable<D>, const D: usize> SliceConnector for CircuitBui
     }
 }
 
+/// Convert an Uint32 target to Uint8 targets.
+pub(crate) fn unpack_u32_to_u8_targets<F: RichField + Extendable<D>, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    u: Target,
+    endianness: Endianness,
+) -> Vec<Target> {
+    let zero = b.zero();
+    let mut bits = b.split_le(u, u32::BITS as usize);
+    match endianness {
+        Endianness::Big => bits.reverse(),
+        Endianness::Little => (),
+    };
+    bits.chunks(8)
+        .map(|chunk| {
+            // let bits: Box<dyn Iterator<Item = &BoolTarget>> = match endianness {
+            let bits: Box<dyn Iterator<Item = _>> = match endianness {
+                Endianness::Big => Box::new(chunk.iter()),
+                Endianness::Little => Box::new(chunk.iter().rev()),
+            };
+            bits.fold(zero, |acc, bit| b.mul_const_add(F::TWO, acc, bit.target))
+        })
+        .collect()
+}
+
+/// Convert Uint32 targets to Uint8 targets.
+pub(crate) fn unpack_u32s_to_u8_targets<F: RichField + Extendable<D>, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    u32s: Vec<Target>,
+    endianness: Endianness,
+) -> Vec<Target> {
+    u32s.into_iter()
+        .flat_map(|u| unpack_u32_to_u8_targets(b, u, endianness))
+        .collect()
+}
+
 #[cfg(test)]
 mod test {
-
-    use super::{bits_to_num, Packer, ToFields};
+    use super::{bits_to_num, unpack_u32_to_u8_targets, Packer, TargetsConnector, ToFields};
+    use crate::types::CBuilder;
     use crate::utils::{
         greater_than, greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits,
         Endianness, PackerTarget,
     };
-    use crate::{C, D, F};
+    use crate::{default_config, C, D, F};
     use alloy::primitives::Address;
     use anyhow::Result;
     use plonky2::field::goldilocks_field::GoldilocksField;
@@ -778,8 +817,8 @@ mod test {
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
-
     use rand::{thread_rng, Rng, RngCore};
+    use std::array;
 
     #[test]
     fn test_pack() {
@@ -994,6 +1033,47 @@ mod test {
         builder.register_public_input(result.target);
 
         let data = builder.build::<C>();
+        let proof = data.prove(pw)?;
+        data.verify(proof)
+    }
+
+    #[test]
+    fn test_unpack_u32_to_u8_targets() -> Result<()> {
+        let rng = &mut thread_rng();
+        let u32_value: u32 = rng.gen();
+        let big_endian_u8_values = u32_value.to_be_bytes().to_fields();
+        let little_endian_u8_values = u32_value.to_le_bytes().to_fields();
+
+        let config = default_config();
+        let mut builder = CBuilder::new(config);
+        let b = &mut builder;
+
+        let [exp_big_endian_u8_targets, exp_little_endian_u8_targets] =
+            array::from_fn(|_| b.add_virtual_target_arr::<4>());
+
+        let u32_target = b.constant(F::from_canonical_u32(u32_value));
+        let real_big_endian_u8_targets = unpack_u32_to_u8_targets(b, u32_target, Endianness::Big);
+        let real_little_endian_u8_targets =
+            unpack_u32_to_u8_targets(b, u32_target, Endianness::Little);
+
+        b.connect_targets(
+            real_big_endian_u8_targets,
+            exp_big_endian_u8_targets.to_vec(),
+        );
+        b.connect_targets(
+            real_little_endian_u8_targets,
+            exp_little_endian_u8_targets.to_vec(),
+        );
+
+        let data = builder.build::<C>();
+        let mut pw = PartialWitness::new();
+        [
+            (big_endian_u8_values, exp_big_endian_u8_targets),
+            (little_endian_u8_values, exp_little_endian_u8_targets),
+        ]
+        .into_iter()
+        .for_each(|(values, targets)| pw.set_target_arr(&targets, &values));
+
         let proof = data.prove(pw)?;
         data.verify(proof)
     }
