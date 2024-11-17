@@ -42,19 +42,18 @@ use mp2_v1::{
         row::{Row, RowPayload, RowTreeKey},
         LagrangeNode,
     },
-    query::planner::{execute_row_query, find_row_node_for_non_existence},
+    query::planner::{execute_row_query, find_row_node_for_non_existence, get_node_and_children},
     values_extraction::identifier_block_column,
 };
 use parsil::{
     assembler::{DynamicCircuitPis, StaticCircuitPis},
-    parse_and_validate,
     queries::{core_keys_for_index_tree, core_keys_for_row_tree},
     ParsilSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{
         updatetree::{Next, UpdateTree, WorkplanItem},
-        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage, WideLineage,
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
     tree::NodeContext,
     Epoch, NodePayload,
@@ -71,13 +70,12 @@ use verifiable_db::{
         },
     },
     revelation::PublicInputs,
-    row_tree,
 };
 
 use super::{
-    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, INDEX_TREE_MAX_DEPTH,
-    MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
-    MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH,
+    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, MAX_NUM_COLUMNS,
+    MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
+    MAX_NUM_RESULT_OPS,
 };
 
 pub type RevelationPublicInputs<'a> =
@@ -808,8 +806,7 @@ pub async fn prove_non_existence_row<'a>(
     )
     .await?;
     let (node_info, left_child_info, right_child_info) =
-        mp2_v1::query::planner::get_node_info(&planner.table.row, &chosen_node, primary as Epoch)
-            .await;
+        get_node_and_children(&planner.table.row, &chosen_node, primary as Epoch).await;
 
     let proof_key = ProofKey::QueryAggregateRow((
         planner.query.query.clone(),

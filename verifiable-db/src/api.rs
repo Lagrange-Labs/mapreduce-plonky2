@@ -1,5 +1,4 @@
 //! Main APIs and related structures
-
 use crate::{
     block_tree, cells_tree,
     extraction::{ExtractionPI, ExtractionPIWrap},
@@ -8,8 +7,9 @@ use crate::{
     revelation::{
         self, api::Parameters as RevelationParams, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
     },
-    row_tree::{self},
+    row_tree,
 };
+use alloy::primitives::U256;
 use anyhow::Result;
 use log::info;
 use mp2_common::{
@@ -17,6 +17,7 @@ use mp2_common::{
     poseidon::H,
     proof::{serialize_proof, ProofWithVK},
     serialization::{deserialize, serialize},
+    types::HashOutput,
     C, D, F,
 };
 use plonky2::{
@@ -31,6 +32,14 @@ use recursion_framework::framework::{
     RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
 };
 use serde::{Deserialize, Serialize};
+
+pub trait LagrangeNode {
+    fn value(&self) -> U256;
+    fn hash(&self) -> HashOutput;
+    fn min(&self) -> U256;
+    fn max(&self) -> U256;
+    fn embedded_hash(&self) -> HashOutput;
+}
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the verifiable DB stage of LPN
 pub enum CircuitInput {

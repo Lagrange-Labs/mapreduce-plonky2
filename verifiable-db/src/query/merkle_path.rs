@@ -302,7 +302,7 @@ mod tests {
     };
     use plonky2::{
         field::types::{PrimeField64, Sample},
-        hash::hash_types::{HashOut, HashOutTarget},
+        hash::hash_types::HashOutTarget,
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
