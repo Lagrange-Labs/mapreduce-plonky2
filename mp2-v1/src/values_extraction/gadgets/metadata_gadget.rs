@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::{array, iter::once};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct MetadataGadget<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
+pub struct ColumnsMetadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
@@ -45,7 +45,7 @@ pub struct MetadataGadget<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usi
 }
 
 impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>
+    ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM>
 {
     /// Create a new MPT metadata.
     pub fn new(
@@ -145,7 +145,13 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     pub fn evm_word(&self) -> u32 {
         self.evm_word
     }
+}
 
+pub struct MetadataGadget<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>;
+
+impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
+    MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>
+{
     pub(crate) fn build(b: &mut CBuilder) -> MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
         let table_info = array::from_fn(|_| b.add_virtual_column_info());
         let [is_actual_columns, is_extracted_columns] =
@@ -161,24 +167,24 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     }
 
     pub(crate) fn assign(
-        &self,
         pw: &mut PartialWitness<F>,
+        columns_metadata: &ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
         metadata_target: &MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
     ) {
-        pw.set_column_info_target_arr(&metadata_target.table_info, &self.table_info);
+        pw.set_column_info_target_arr(&metadata_target.table_info, &columns_metadata.table_info);
         metadata_target
             .is_actual_columns
             .iter()
             .enumerate()
-            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_actual_columns));
+            .for_each(|(i, t)| pw.set_bool_target(*t, i < columns_metadata.num_actual_columns));
         metadata_target
             .is_extracted_columns
             .iter()
             .enumerate()
-            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_extracted_columns));
+            .for_each(|(i, t)| pw.set_bool_target(*t, i < columns_metadata.num_extracted_columns));
         pw.set_target(
             metadata_target.evm_word,
-            F::from_canonical_u32(self.evm_word),
+            F::from_canonical_u32(columns_metadata.evm_word),
         );
     }
 }
@@ -314,7 +320,7 @@ pub(crate) mod tests {
 
     #[derive(Clone, Debug)]
     struct TestMedataCircuit {
-        metadata_gadget: MetadataGadget<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>,
+        columns_metadata: ColumnsMetadata<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>,
         slot: u8,
         expected_num_actual_columns: usize,
         expected_metadata_digest: Point,
@@ -348,7 +354,7 @@ pub(crate) mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.metadata_gadget.assign(pw, &wires.0);
+            MetadataGadget::assign(pw, &self.columns_metadata, &wires.0);
             pw.set_target(wires.1, F::from_canonical_u8(self.slot));
             pw.set_target(
                 wires.2,
@@ -365,12 +371,12 @@ pub(crate) mod tests {
         let slot = rng.gen();
         let evm_word = rng.gen();
 
-        let metadata_gadget = MetadataGadget::sample(slot, evm_word);
+        let metadata_gadget = ColumnsMetadata::sample(slot, evm_word);
         let expected_num_actual_columns = metadata_gadget.num_actual_columns();
         let expected_metadata_digest = metadata_gadget.digest();
 
         let test_circuit = TestMedataCircuit {
-            metadata_gadget,
+            columns_metadata: metadata_gadget,
             slot,
             expected_num_actual_columns,
             expected_metadata_digest,
