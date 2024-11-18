@@ -191,7 +191,7 @@ pub fn parse_and_validate<C: ContextProvider>(
     query: &str,
     settings: &ParsilSettings<C>,
 ) -> anyhow::Result<Query> {
-    let mut query = parser::parse(&settings, query)?;
+    let mut query = parser::parse(query)?;
     expand::expand(&settings, &mut query)?;
 
     placeholders::validate(settings, &query)?;
