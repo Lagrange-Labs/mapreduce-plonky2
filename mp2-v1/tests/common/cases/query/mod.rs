@@ -1,14 +1,16 @@
 use aggregated_queries::{
     cook_query_between_blocks, cook_query_no_matching_entries,
     cook_query_non_matching_entries_some_blocks, cook_query_partial_block_range,
-    cook_query_secondary_index_placeholder, cook_query_unique_secondary_index,
-    prove_query as prove_aggregation_query,
+    cook_query_secondary_index_nonexisting_placeholder, cook_query_secondary_index_placeholder,
+    cook_query_unique_secondary_index, prove_query as prove_aggregation_query,
 };
 use alloy::primitives::U256;
 use anyhow::{Context, Result};
 use itertools::Itertools;
 use log::info;
-use mp2_v1::{api::MetadataHash, indexing::block::BlockPrimaryIndex};
+use mp2_v1::{
+    api::MetadataHash, indexing::block::BlockPrimaryIndex, query::planner::execute_row_query,
+};
 use parsil::{parse_and_validate, utils::ParsilSettingsBuilder, PlaceholderSettings};
 use simple_select_queries::{
     cook_query_no_matching_rows, cook_query_too_big_offset, cook_query_with_distinct,
@@ -95,6 +97,9 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table, info: &TableInfo) -
     //// cook query with custom placeholders
     let query_info = cook_query_secondary_index_placeholder(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // cook query with a non-existing value for secondary index
+    let query_info = cook_query_secondary_index_nonexisting_placeholder(table, info).await?;
+    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     // cook query filtering over a secondary index value not valid in all the blocks
     let query_info = cook_query_non_matching_entries_some_blocks(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
@@ -161,14 +166,14 @@ async fn test_query_mapping(
     // the query to use to actually get the outputs expected
     let mut exec_query = parsil::executor::generate_query_execution(&mut parsed, &settings)?;
     let query_params = exec_query.convert_placeholders(&query_info.placeholders);
-    let res = table
-        .execute_row_query(
-            &exec_query
-                .normalize_placeholder_names()
-                .to_pgsql_string_with_placeholder(),
-            &query_params,
-        )
-        .await?;
+    let res = execute_row_query(
+        &table.db_pool,
+        &exec_query
+            .normalize_placeholder_names()
+            .to_pgsql_string_with_placeholder(),
+        &query_params,
+    )
+    .await?;
     let res = if is_empty_result(&res, SqlType::Numeric) {
         vec![] // empty results, but Postgres still return 1 row
     } else {

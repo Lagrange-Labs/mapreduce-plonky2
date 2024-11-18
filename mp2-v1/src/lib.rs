@@ -1,10 +1,12 @@
 //! Circuits for v1 of Lagrange Proof Network (LPN)
-
+#![allow(incomplete_features)]
 // Add this to allow generic const expressions, e.g. `PAD_LEN(NODE_LEN)`.
 #![feature(generic_const_exprs)]
 // Add this so we don't need to always specify const generic in generic
 // parameters (i.e. use "_")
 #![feature(generic_arg_infer)]
+// stylistic feature
+#![feature(async_closure)]
 use mp2_common::mpt_sequential::PAD_LEN;
 
 pub const MAX_BRANCH_NODE_LEN: usize = 532;
@@ -21,6 +23,7 @@ pub mod contract_extraction;
 pub mod final_extraction;
 pub mod indexing;
 pub mod length_extraction;
+pub mod query;
 pub mod values_extraction;
 
 #[cfg(test)]

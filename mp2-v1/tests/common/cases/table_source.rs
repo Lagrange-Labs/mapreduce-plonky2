@@ -283,6 +283,7 @@ impl TableSource {
         }
     }
 
+    #[allow(elided_named_lifetimes)]
     pub fn init_contract_data<'a>(
         &'a mut self,
         ctx: &'a mut TestContext,
@@ -303,6 +304,7 @@ impl TableSource {
         .boxed()
     }
 
+    #[allow(elided_named_lifetimes)]
     pub fn random_contract_update<'a>(
         &'a mut self,
         ctx: &'a mut TestContext,
@@ -347,6 +349,7 @@ impl MergeSource {
         Self { single, mapping }
     }
 
+    #[allow(elided_named_lifetimes)]
     pub fn generate_extraction_proof_inputs<'a>(
         &'a self,
         ctx: &'a mut TestContext,
