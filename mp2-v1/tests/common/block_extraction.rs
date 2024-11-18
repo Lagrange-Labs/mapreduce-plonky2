@@ -1,21 +1,14 @@
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
-    eth::{left_pad_generic, BlockUtil},
+    eth::BlockUtil,
     proof::deserialize_proof,
-    u256,
     utils::{Endianness, Packer, ToFields},
     C, D, F,
 };
 use mp2_v1::{api, block_extraction, indexing::block::BlockPrimaryIndex};
 
 use super::TestContext;
-
-pub(crate) fn block_number_to_u256_limbs(number: u64) -> Vec<F> {
-    const NUM_LIMBS: usize = u256::NUM_LIMBS;
-    let block_number_buff = number.to_be_bytes();
-    left_pad_generic::<u32, NUM_LIMBS>(&block_number_buff.pack(Endianness::Big)).to_fields()
-}
 
 impl TestContext {
     pub(crate) async fn prove_block_extraction(&self, bn: BlockPrimaryIndex) -> Result<Vec<u8>> {

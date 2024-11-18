@@ -121,7 +121,7 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         planner: &mut QueryPlanner<'a>,
         primary: BlockPrimaryIndex,
         k: &RowTreeKey,
-        v: &RowPayload<BlockPrimaryIndex>,
+        _v: &RowPayload<BlockPrimaryIndex>,
     ) -> Result<Option<Vec<u8>>> {
         // TODO export that in single function
         Ok(if self.is_satisfying_query(k) {
@@ -274,7 +274,7 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         &self,
         ctx: &mut TestContext,
         query_id: &QueryID,
-        primary: BlockPrimaryIndex,
+        _primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
         placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
@@ -345,7 +345,7 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
         &self,
         ctx: &mut TestContext,
         query_id: &QueryID,
-        primary: BlockPrimaryIndex,
+        _primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
         placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
