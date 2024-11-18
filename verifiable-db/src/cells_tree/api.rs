@@ -39,12 +39,18 @@ impl CircuitInput {
     /// Create a circuit input for proving a leaf node whose value is considered as a multiplier
     /// depending on the boolean value.
     /// i.e. it means it's one of the repeated value amongst all the rows
-    pub fn leaf(identifier: u64, value: U256, is_multiplier: bool) -> Self {
+    pub fn leaf(
+        identifier: u64,
+        value: U256,
+        is_multiplier: bool,
+        mpt_metadata: HashOut<F>,
+    ) -> Self {
         CircuitInput::Leaf(
             Cell {
                 identifier: F::from_canonical_u64(identifier),
                 value,
                 is_multiplier,
+                mpt_metadata,
             }
             .into(),
         )
@@ -55,12 +61,14 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
+        mpt_metadata: HashOut<F>,
         child_proofs: [Vec<u8>; 2],
     ) -> Self {
         CircuitInput::FullNode(new_child_input(
             F::from_canonical_u64(identifier),
             value,
             is_multiplier,
+            mpt_metadata,
             child_proofs.to_vec(),
         ))
     }
@@ -69,12 +77,14 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
+        mpt_metadata: HashOut<F>,
         child_proof: Vec<u8>,
     ) -> Self {
         CircuitInput::PartialNode(new_child_input(
             F::from_canonical_u64(identifier),
             value,
             is_multiplier,
+            mpt_metadata,
             vec![child_proof],
         ))
     }
@@ -85,6 +95,7 @@ fn new_child_input(
     identifier: F,
     value: U256,
     is_multiplier: bool,
+    mpt_metadata: HashOut<F>,
     serialized_child_proofs: Vec<Vec<u8>>,
 ) -> ChildInput {
     ChildInput {
@@ -92,6 +103,7 @@ fn new_child_input(
             identifier,
             value,
             is_multiplier,
+            mpt_metadata,
         },
         serialized_child_proofs,
     }
@@ -113,7 +125,7 @@ pub fn build_circuits_params() -> PublicParameters {
     PublicParameters::build()
 }
 
-const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
+const NUM_IO: usize = PublicInputs::<F>::total_len();
 
 /// Number of circuits in the set
 /// 1 leaf + 1 full node + 1 partial node + 1 empty node
@@ -211,21 +223,21 @@ impl PublicParameters {
 
 pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
     let p = ProofWithVK::deserialize(proof)?;
-    Ok(PublicInputs::from_slice(&p.proof.public_inputs).root_hash_hashout())
+    Ok(PublicInputs::from_slice(&p.proof.public_inputs).node_hash())
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use itertools::Itertools;
     use mp2_common::{
-        group_hashing::{add_curve_point, map_to_curve_point},
         poseidon::{empty_poseidon_hash, H},
-        utils::{Fieldable, ToFields},
+        utils::ToFields,
     };
     use plonky2::{field::types::PrimeField64, plonk::config::Hasher};
-    use plonky2_ecgfp5::curve::curve::{Point, WeierstrassPoint};
-    use rand::{thread_rng, Rng};
+    use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use serial_test::serial;
-    use std::iter;
+    use std::iter::once;
 
     #[test]
     #[serial]
@@ -248,11 +260,13 @@ mod tests {
 
     fn generate_leaf_proof(params: &PublicParameters) -> Vec<u8> {
         // Build the circuit input.
-        let mut rng = thread_rng();
-        let identifier: F = rng.gen::<u32>().to_field();
-        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
-        let value_fields = value.to_fields();
-        let input = CircuitInput::leaf(identifier.to_canonical_u64(), value, false);
+        let cell = Cell::sample(false);
+        let id = cell.identifier;
+        let value = cell.value;
+        let mpt_metadata = cell.mpt_metadata;
+        let values_digests = cell.split_values_digest();
+        let metadata_digests = cell.split_metadata_digest();
+        let input = CircuitInput::leaf(id.to_canonical_u64(), value, false, mpt_metadata);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -263,27 +277,42 @@ mod tests {
             .proof
             .public_inputs;
         let pi = PublicInputs::from_slice(&pi);
+        // Check the node hash
         {
             let empty_hash = empty_poseidon_hash();
-            let inputs: Vec<_> = empty_hash
+            let inputs = empty_hash
                 .elements
                 .iter()
                 .cloned()
                 .chain(empty_hash.elements)
-                .chain(iter::once(identifier))
-                .chain(value_fields.clone())
-                .collect();
+                .chain(once(id))
+                .chain(value.to_fields())
+                .collect_vec();
             // TODO: Fix to employ the same hash method in the ryhope tree library.
             let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
         }
-        {
-            let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
-            let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
-
-            assert_eq!(pi.individual_digest_point(), exp_digest);
-        }
+        // Check individual values digest
+        assert_eq!(
+            pi.individual_values_digest_point(),
+            values_digests.individual.to_weierstrass(),
+        );
+        // Check multiplier values digest
+        assert_eq!(
+            pi.multiplier_values_digest_point(),
+            values_digests.multiplier.to_weierstrass(),
+        );
+        // Check individual metadata digest
+        assert_eq!(
+            pi.individual_metadata_digest_point(),
+            metadata_digests.individual.to_weierstrass(),
+        );
+        // Check multiplier metadata digest
+        assert_eq!(
+            pi.multiplier_metadata_digest_point(),
+            metadata_digests.multiplier.to_weierstrass(),
+        );
 
         proof
     }
@@ -302,9 +331,26 @@ mod tests {
             let empty_hash = empty_poseidon_hash();
             assert_eq!(pi.h, empty_hash.elements);
         }
-        {
-            assert_eq!(pi.individual_digest_point(), WeierstrassPoint::NEUTRAL);
-        }
+        // Check individual values digest
+        assert_eq!(
+            pi.individual_values_digest_point(),
+            WeierstrassPoint::NEUTRAL
+        );
+        // Check multiplier values digest
+        assert_eq!(
+            pi.multiplier_values_digest_point(),
+            WeierstrassPoint::NEUTRAL
+        );
+        // Check individual metadata digest
+        assert_eq!(
+            pi.individual_metadata_digest_point(),
+            WeierstrassPoint::NEUTRAL
+        );
+        // Check multiplier metadata digest
+        assert_eq!(
+            pi.multiplier_metadata_digest_point(),
+            WeierstrassPoint::NEUTRAL
+        );
 
         proof
     }
@@ -321,11 +367,19 @@ mod tests {
             .collect();
 
         // Build the circuit input.
-        let mut rng = thread_rng();
-        let identifier: F = rng.gen::<u32>().to_field();
-        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
-        let packed_value = value.to_fields();
-        let input = CircuitInput::full(identifier.to_canonical_u64(), value, false, child_proofs);
+        let cell = Cell::sample(false);
+        let id = cell.identifier;
+        let value = cell.value;
+        let mpt_metadata = cell.mpt_metadata;
+        let values_digests = cell.split_values_digest();
+        let metadata_digests = cell.split_metadata_digest();
+        let input = CircuitInput::full(
+            id.to_canonical_u64(),
+            value,
+            false,
+            mpt_metadata,
+            child_proofs,
+        );
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -336,32 +390,49 @@ mod tests {
             .proof
             .public_inputs;
         let pi = PublicInputs::from_slice(&pi);
+
+        let values_digests = child_pis.iter().fold(values_digests, |acc, pi| {
+            acc.accumulate(&pi.split_values_digest_point())
+        });
+        let metadata_digests = child_pis.iter().fold(metadata_digests, |acc, pi| {
+            acc.accumulate(&pi.split_metadata_digest_point())
+        });
+
+        // Check the node hash
         {
-            let inputs: Vec<_> = child_pis[0]
-                .h_raw()
+            let inputs = child_pis[0]
+                .to_node_hash_raw()
                 .iter()
-                .chain(child_pis[1].h_raw())
+                .chain(child_pis[1].to_node_hash_raw())
                 .cloned()
-                .chain(iter::once(identifier))
-                .chain(packed_value.clone())
-                .collect();
+                .chain(once(id))
+                .chain(value.to_fields())
+                .collect_vec();
             // TODO: Fix to employ the same hash method in the ryhope tree library.
             let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
         }
-        {
-            let child_digests: Vec<_> = child_pis
-                .iter()
-                .map(|pi| Point::decode(pi.individual_digest_point().encode()).unwrap())
-                .collect();
-            let inputs: Vec<_> = iter::once(identifier).chain(packed_value).collect();
-            let exp_digest = map_to_curve_point(&inputs);
-            let exp_digest =
-                add_curve_point(&[exp_digest, child_digests[0], child_digests[1]]).to_weierstrass();
-
-            assert_eq!(pi.individual_digest_point(), exp_digest);
-        }
+        // Check individual values digest
+        assert_eq!(
+            pi.individual_values_digest_point(),
+            values_digests.individual.to_weierstrass(),
+        );
+        // Check multiplier values digest
+        assert_eq!(
+            pi.multiplier_values_digest_point(),
+            values_digests.multiplier.to_weierstrass(),
+        );
+        // Check individual metadata digest
+        assert_eq!(
+            pi.individual_metadata_digest_point(),
+            metadata_digests.individual.to_weierstrass(),
+        );
+        // Check multiplier metadata digest
+        assert_eq!(
+            pi.multiplier_metadata_digest_point(),
+            metadata_digests.multiplier.to_weierstrass(),
+        );
 
         proof
     }
@@ -375,11 +446,19 @@ mod tests {
         let child_pi = PublicInputs::from_slice(&child_pi);
 
         // Build the circuit input.
-        let mut rng = thread_rng();
-        let identifier: F = rng.gen::<u32>().to_field();
-        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
-        let packed_value = value.to_fields();
-        let input = CircuitInput::partial(identifier.to_canonical_u64(), value, false, child_proof);
+        let cell = Cell::sample(false);
+        let id = cell.identifier;
+        let value = cell.value;
+        let mpt_metadata = cell.mpt_metadata;
+        let values_digests = cell.split_values_digest();
+        let metadata_digests = cell.split_metadata_digest();
+        let input = CircuitInput::partial(
+            id.to_canonical_u64(),
+            value,
+            false,
+            mpt_metadata,
+            child_proof,
+        );
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -390,29 +469,46 @@ mod tests {
             .proof
             .public_inputs;
         let pi = PublicInputs::from_slice(&pi);
+
+        let values_digests = values_digests.accumulate(&child_pi.split_values_digest_point());
+        let metadata_digests = metadata_digests.accumulate(&child_pi.split_metadata_digest_point());
+
+        // Check the node hash
         {
             let empty_hash = empty_poseidon_hash();
-            let inputs: Vec<_> = child_pi
-                .h_raw()
+            let inputs = child_pi
+                .to_node_hash_raw()
                 .iter()
                 .cloned()
                 .chain(empty_hash.elements)
-                .chain(iter::once(identifier))
-                .chain(packed_value.clone())
-                .collect();
+                .chain(once(id))
+                .chain(value.to_fields())
+                .collect_vec();
             // TODO: Fix to employ the same hash method in the ryhope tree library.
             let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
         }
-        {
-            let child_digest = Point::decode(child_pi.individual_digest_point().encode()).unwrap();
-            let inputs: Vec<_> = iter::once(identifier).chain(packed_value).collect();
-            let exp_digest = map_to_curve_point(&inputs);
-            let exp_digest = add_curve_point(&[exp_digest, child_digest]).to_weierstrass();
-
-            assert_eq!(pi.individual_digest_point(), exp_digest);
-        }
+        // Check individual values digest
+        assert_eq!(
+            pi.individual_values_digest_point(),
+            values_digests.individual.to_weierstrass(),
+        );
+        // Check multiplier values digest
+        assert_eq!(
+            pi.multiplier_values_digest_point(),
+            values_digests.multiplier.to_weierstrass(),
+        );
+        // Check individual metadata digest
+        assert_eq!(
+            pi.individual_metadata_digest_point(),
+            metadata_digests.individual.to_weierstrass(),
+        );
+        // Check multiplier metadata digest
+        assert_eq!(
+            pi.multiplier_metadata_digest_point(),
+            metadata_digests.multiplier.to_weierstrass(),
+        );
 
         proof
     }
