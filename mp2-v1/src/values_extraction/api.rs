@@ -3,7 +3,7 @@
 use super::{
     branch::{BranchCircuit, BranchWires},
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
-    gadgets::{column_info::ColumnInfo, metadata_gadget::MetadataGadget},
+    gadgets::metadata_gadget::MetadataGadget,
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
     leaf_mapping_of_mappings::{LeafMappingOfMappingsCircuit, LeafMappingOfMappingsWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
@@ -882,7 +882,6 @@ mod tests {
                 >(table_info.clone());
 
                 let values_digest = compute_leaf_single_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                    &metadata_digest,
                     table_info,
                     &extracted_column_identifiers,
                     value,
@@ -903,7 +902,6 @@ mod tests {
                 );
 
                 let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                    &metadata_digest,
                     table_info,
                     &extracted_column_identifiers,
                     value,
@@ -931,7 +929,6 @@ mod tests {
                     >(table_info.clone());
 
                     let values_digest = compute_leaf_single_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                        &metadata_digest,
                         table_info,
                         &extracted_column_identifiers,
                         value,
@@ -952,7 +949,6 @@ mod tests {
                     );
 
                     let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                        &metadata_digest,
                         table_info,
                         &extracted_column_identifiers,
                         value,
@@ -988,7 +984,6 @@ mod tests {
                             let values_digest = compute_leaf_mapping_of_mappings_values_digest::<
                                 TEST_MAX_FIELD_PER_EVM,
                             >(
-                                &metadata_digest,
                                 table_info,
                                 &extracted_column_identifiers,
                                 value,

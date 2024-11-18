@@ -69,8 +69,6 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
-                        // TODO:
-                        HashOut::rand(),
                     ));
                 self.b.bench("indexing::cell_tree::leaf", || {
                     api::generate_proof(self.params(), inputs)
@@ -95,8 +93,6 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
-                        // TODO:
-                        HashOut::rand(),
                         left_proof.clone(),
                     ));
                 debug!(
@@ -151,8 +147,6 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
-                        // TODO:
-                        HashOut::rand(),
                         [left_proof, right_proof],
                     ));
 
