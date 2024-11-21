@@ -196,7 +196,7 @@ pub(crate) mod tests {
     {
         // Convert the entry count to an Uint256.
         let entry_count = U256::from(query_pi.num_matching_rows().to_canonical_u64());
-        
+
         let [op_avg, op_count] =
             [AggregationOperation::AvgOp, AggregationOperation::CountOp].map(|op| op.to_field());
 
