@@ -723,20 +723,16 @@ mod tests {
             .try_into()
             .unwrap();
         let path_1a = vec![];
-        let siblings_1a = vec![];
-
+        
         let path_1 = vec![];
-        let siblings_1 = vec![];
         let node_1_children = [Some(node_0.node.clone()), Some(node_2.node.clone())];
 
         let row_path_1a = RowPath::new(
             node_1a,
             path_1a,
-            siblings_1a,
             [Some(node_1b.clone()), Some(node_1c.clone())],
             node_1.node,
             path_1.clone(),
-            siblings_1.clone(),
             node_1_children,
         );
 
@@ -744,17 +740,12 @@ mod tests {
         let row_1a = RowWithPath::new(&row_cells_1a, &row_path_1a);
 
         let path_1c = vec![(node_1a.clone(), ChildPosition::Right)];
-        let node_1b_hash =
-            HashOutput::try_from(node_1b.compute_node_hash(secondary_index)).unwrap();
-        let siblings_1c = vec![Some(node_1b_hash.clone())];
         let row_path_1c = RowPath::new(
             node_1c,
             path_1c,
-            siblings_1c,
             [None, Some(node_1d.clone())],
             node_1.node,
             path_1,
-            siblings_1,
             node_1_children,
         );
 
@@ -792,23 +783,17 @@ mod tests {
             (node_2b.clone(), ChildPosition::Right),
             (node_2a.clone(), ChildPosition::Left),
         ];
-        let node_2c_hash =
-            HashOutput::try_from(node_2c.compute_node_hash(secondary_index)).unwrap();
-        let siblings_2d = vec![Some(node_2c_hash), None];
-
+        
         let path_2 = vec![(node_1.node.clone(), ChildPosition::Right)];
         let node_0_hash =
             HashOutput::try_from(node_0.node.compute_node_hash(primary_index)).unwrap();
-        let siblings_2 = vec![Some(node_0_hash)];
         let node_2_children = [None, None];
         let row_path_2d = RowPath::new(
             node_2d,
             path_2d,
-            siblings_2d,
             [None, None],
             node_2.node,
             path_2.clone(),
-            siblings_2.clone(),
             node_2_children,
         );
 
@@ -817,15 +802,12 @@ mod tests {
         let row_2d = RowWithPath::new(&row_cells_2d, &row_path_2d);
 
         let path_2b = vec![(node_2a.clone(), ChildPosition::Left)];
-        let siblings_2b = vec![None];
         let row_path_2b = RowPath::new(
             node_2b,
             path_2b,
-            siblings_2b,
             [Some(node_2c.clone()), Some(node_2d.clone())],
             node_2.node,
             path_2.clone(),
-            siblings_2.clone(),
             node_2_children,
         );
 
@@ -834,15 +816,12 @@ mod tests {
         let row_2b = RowWithPath::new(&row_cells_2b, &row_path_2b);
 
         let path_2a = vec![];
-        let siblings_2a = vec![];
         let row_path_2a = RowPath::new(
             node_2a,
             path_2a,
-            siblings_2a,
             [Some(node_2b.clone()), None],
             node_2.node,
             path_2,
-            siblings_2,
             node_2_children,
         );
 
@@ -1029,8 +1008,7 @@ mod tests {
         ];
         let node_f_hash = HashOutput::try_from(node_f.compute_node_hash(primary_index)).unwrap();
         let node_c_hash = HashOutput::try_from(node_c.compute_node_hash(primary_index)).unwrap();
-        let siblings_e = vec![Some(node_f_hash), None, Some(node_c_hash)];
-        let merkle_path_e = TreePathInputs::new(node_e, path_e, siblings_e, [None, None]);
+        let merkle_path_e = TreePathInputs::new(node_e, path_e, [None, None]);
 
         let input = CircuitInput::new_non_existence_input(
             merkle_path_e,

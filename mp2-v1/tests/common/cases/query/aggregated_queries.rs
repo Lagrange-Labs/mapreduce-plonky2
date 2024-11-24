@@ -226,6 +226,8 @@ pub(crate) async fn prove_query_batching(
     ));
     ctx.storage.store_proof(proof_key, query_proof)?;
 
+    info!("proving revelation");
+
     let proof = prove_revelation(ctx, table, &query, &pis, table.index.current_epoch()).await?;
     info!("Revelation proof done! Checking public inputs...");
 

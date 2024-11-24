@@ -647,6 +647,7 @@ mod tests {
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
         >::build(
+            query_circuits.get_recursive_circuit_set(), // unused, so we use a dummy one
             query_circuits.get_recursive_circuit_set(),
             preprocessing_circuits.get_recursive_circuit_set(),
             preprocessing_circuits
@@ -685,7 +686,12 @@ mod tests {
         )
         .unwrap();
         let proof = params
-            .generate_proof(input, query_circuits.get_recursive_circuit_set(), None)
+            .generate_proof(
+                input, 
+                query_circuits.get_recursive_circuit_set(), // unused in this test, so we provide a dummy one 
+                query_circuits.get_recursive_circuit_set(),
+                None
+            )
             .unwrap();
         let (proof, _) = ProofWithVK::deserialize(&proof).unwrap().into();
         let pi = PublicInputs::<F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>::from_slice(&proof.public_inputs);

@@ -52,6 +52,7 @@ impl TestContext {
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
         >::build(
+            query_circuits.get_recursive_circuit_set(), // unused, so we provide a dummy one
             query_circuits.get_recursive_circuit_set(),
             preprocessing_circuits.get_recursive_circuit_set(),
             preprocessing_circuits
