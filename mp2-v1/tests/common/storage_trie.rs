@@ -232,6 +232,29 @@ impl TrieNode {
                     slot_info.table_info().to_vec(),
                 ),
             ),
+            StorageSlot::Node(StorageSlotNode::Mapping(parent, inner_mapping_key)) => {
+                match &**parent {
+                    // Mapping of single value mappings
+                    StorageSlot::Mapping(outer_mapping_key, slot) => (
+                        "indexing::extraction::mpt::leaf::mapping_of_single_value_mappings",
+                        values_extraction::CircuitInput::new_mapping_of_mappings_leaf(
+                            node.clone(),
+                            *slot as u8,
+                            outer_mapping_key.clone(),
+                            inner_mapping_key.clone(),
+                            slot_info
+                                .outer_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                                .unwrap(),
+                            slot_info
+                                .inner_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                                .unwrap(),
+                            slot_info.evm_word(),
+                            slot_info.table_info().to_vec(),
+                        ),
+                    ),
+                    _ => unreachable!(),
+                }
+            }
             StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => match &**parent {
                 // Simple Struct
                 StorageSlot::Simple(slot) => (
@@ -257,11 +280,11 @@ impl TrieNode {
                         slot_info.table_info().to_vec(),
                     ),
                 ),
-                // Mapping of mappings Struct
+                // Mapping of struct mappings
                 StorageSlot::Node(StorageSlotNode::Mapping(grand, inner_mapping_key)) => {
                     match &**grand {
                         StorageSlot::Mapping(outer_mapping_key, slot) => (
-                            "indexing::extraction::mpt::leaf::mapping_of_mappings",
+                            "indexing::extraction::mpt::leaf::mapping_of_struct_mappings",
                             values_extraction::CircuitInput::new_mapping_of_mappings_leaf(
                                 node.clone(),
                                 *slot as u8,
@@ -282,7 +305,6 @@ impl TrieNode {
                 }
                 _ => unreachable!(),
             },
-            _ => unreachable!(),
         };
         let input = CircuitInput::ValuesExtraction(input);
 

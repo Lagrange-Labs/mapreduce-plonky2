@@ -22,6 +22,22 @@ contract Simple {
         MappingOperation operation;
     }
 
+    struct MappingOfSingleValueMappingsChange {
+        uint256 outerKey;
+        uint256 innerKey;
+        uint256 value;
+        MappingOperation operation;
+    }
+
+    struct MappingOfStructMappingsChange {
+        uint256 outerKey;
+        uint256 innerKey;
+        uint256 field1;
+        uint128 field2;
+        uint128 field3;
+        MappingOperation operation;
+    }
+
     struct LargeStruct {
         // This field should live in one EVM word
         uint256 field1;
@@ -48,9 +64,13 @@ contract Simple {
     // Test mapping struct (slot 8)
     mapping(uint256 => LargeStruct) public structMapping;
 
-    // Test mapping of mappings (slot 9)
+    // Test mapping of single value mappings (slot 9)
+    mapping(uint256 => mapping(uint256 => uint256))
+        public mappingOfSingleValueMappings;
+
+    // Test mapping of struct mappings (slot 10)
     mapping(uint256 => mapping(uint256 => LargeStruct))
-        public mappingOfMappings;
+        public mappingOfStructMappings;
 
     // Set the simple slots.
     function setSimples(
@@ -125,4 +145,49 @@ contract Simple {
         }
     }
 
+    // Set mapping of single value mappings.
+    function setMappingOfSingleValueMappings(
+      uint256 outerKey,
+      uint256 innerKey,
+      uint256 value
+    ) public {
+      mappingOfSingleValueMappings[outerKey][innerKey] = value;
+    }
+
+    function changeMappingOfSingleValueMappings(MappingOfSingleValueMappingsChange[] memory changes) public {
+        for (uint256 i = 0; i < changes.length; i++) {
+            if (changes[i].operation == MappingOperation.Deletion) {
+                delete mappingOfSingleValueMappings[changes[i].outerKey][changes[i].innerKey];
+            } else if (
+                changes[i].operation == MappingOperation.Insertion ||
+                changes[i].operation == MappingOperation.Update
+            ) {
+                setMappingOfSingleValueMappings(changes[i].outerKey, changes[i].innerKey, changes[i].value);
+            }
+        }
+    }
+
+    // Set mapping of struct mappings.
+    function setMappingOfStructMappings(
+      uint256 outerKey,
+      uint256 innerKey,
+      uint256 field1,
+      uint128 field2,
+      uint128 field3
+    ) public {
+      mappingOfStructMappings[outerKey][innerKey] = LargeStruct(field1, field2, field3);
+    }
+
+    function changeMappingOfStructMappings(MappingOfStructMappingsChange[] memory changes) public {
+        for (uint256 i = 0; i < changes.length; i++) {
+            if (changes[i].operation == MappingOperation.Deletion) {
+                delete mappingOfStructMappings[changes[i].outerKey][changes[i].innerKey];
+            } else if (
+                changes[i].operation == MappingOperation.Insertion ||
+                changes[i].operation == MappingOperation.Update
+            ) {
+                setMappingOfStructMappings(changes[i].outerKey, changes[i].innerKey, changes[i].field1, changes[i].field2, changes[i].field3);
+            }
+        }
+    }
 }
