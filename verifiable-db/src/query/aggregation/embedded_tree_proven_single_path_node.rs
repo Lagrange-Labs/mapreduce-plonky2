@@ -327,7 +327,7 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::{
-        query::PI_LEN,
+        query::pi_len,
         test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
 
@@ -347,7 +347,7 @@ mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let embedded_tree_proof = b
-                .add_virtual_target_arr::<{ PI_LEN::<MAX_NUM_RESULTS> }>()
+                .add_virtual_target_arr::<{ pi_len::<MAX_NUM_RESULTS>() }>()
                 .to_vec();
             let pi = PublicInputs::<Target, MAX_NUM_RESULTS>::from_slice(&embedded_tree_proof);
 

@@ -183,7 +183,7 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
             query_offset: &input[Self::PI_RANGES[9].clone()][0],
         }
     }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         original_block_hash: &'a [T],
         flat_computational_hash: &'a [T],
@@ -398,7 +398,7 @@ mod tests {
     type PI<'a> = PublicInputs<'a, F, L, S, PH>;
     type PITargets<'a> = PublicInputs<'a, Target, L, S, PH>;
 
-    const PI_LEN: usize = crate::revelation::PI_LEN::<L, S, PH>;
+    const PI_LEN: usize = crate::revelation::pi_len::<L, S, PH>();
 
     #[derive(Clone, Debug)]
     struct TestPublicInputs<'a> {

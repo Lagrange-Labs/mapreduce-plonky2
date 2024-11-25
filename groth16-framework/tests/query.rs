@@ -1,5 +1,5 @@
 //! Test the Groth16 proving process for the query circuits.
-
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
 mod common;

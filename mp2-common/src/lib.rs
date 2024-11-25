@@ -1,5 +1,5 @@
 //! Utility functions and gadgets
-
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(generic_arg_infer)]
 #![feature(const_for)]

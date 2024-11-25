@@ -26,6 +26,8 @@ pub struct BindingResultsWires<const S: usize>;
 pub struct BindingResultsCircuit<const S: usize>;
 
 impl<const S: usize> BindingResultsCircuit<S> {
+    // CHORE: Remove this when relevant PR is merged
+    #[allow(dead_code)]
     pub fn build(
         b: &mut CBuilder,
         query_proof: &QueryProofPI<Target, S>,
@@ -97,9 +99,10 @@ impl<const S: usize> BindingResultsCircuit<S> {
 mod tests {
     use super::*;
     use crate::{
+        query::pi_len as query_pi_len,
         results_tree::construction::{
             public_inputs::ResultsConstructionPublicInputs,
-            tests::random_results_construction_public_inputs,
+            tests::{pi_len, random_results_construction_public_inputs},
         },
         test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
@@ -114,8 +117,8 @@ mod tests {
 
     const S: usize = 20;
 
-    const QUERY_PI_LEN: usize = crate::query::PI_LEN::<S>;
-    const RESULTS_CONSTRUCTION_PI_LEN: usize = crate::results_tree::construction::PI_LEN::<S>;
+    const QUERY_PI_LEN: usize = query_pi_len::<S>();
+    const RESULTS_CONSTRUCTION_PI_LEN: usize = pi_len::<S>();
 
     #[derive(Clone, Debug)]
     struct TestBindingResultsCircuit<'a> {

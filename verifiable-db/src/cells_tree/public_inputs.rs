@@ -30,7 +30,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) mul: &'a [T],
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] = &[H_RANGE, DI_RANGE, DM_RANGE];
 
     fn register_args(&self, cb: &mut CBuilder) {
