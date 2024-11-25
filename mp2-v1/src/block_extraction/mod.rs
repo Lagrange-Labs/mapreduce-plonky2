@@ -64,7 +64,6 @@ impl PublicParameters {
 mod test {
     use alloy::{
         eips::BlockNumberOrTag,
-        network::primitives::BlockTransactionsKind,
         primitives::U256,
         providers::{Provider, ProviderBuilder},
     };
@@ -85,7 +84,7 @@ mod test {
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
         let block_number = BlockNumberOrTag::Latest;
         let block = provider
-            .get_block_by_number(block_number, BlockTransactionsKind::Full.into())
+            .get_block_by_number(block_number, true.into())
             .await
             .unwrap()
             .unwrap();

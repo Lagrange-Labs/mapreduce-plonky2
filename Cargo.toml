@@ -14,7 +14,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-alloy = { version = "0.4", default-features = false, features = [
+alloy = { version = "0.6", default-features = false, features = [
   "consensus",
   "contract",
   "getrandom",

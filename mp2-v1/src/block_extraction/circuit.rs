@@ -126,7 +126,6 @@ mod test {
 
     use alloy::{
         eips::BlockNumberOrTag,
-        network::primitives::BlockTransactionsKind,
         providers::{Provider, ProviderBuilder},
     };
     use mp2_common::{eth::left_pad_generic, u256, utils::ToFields, C, F};
@@ -155,7 +154,7 @@ mod test {
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
         let block_number = BlockNumberOrTag::Latest;
         let block = provider
-            .get_block_by_number(block_number, BlockTransactionsKind::Full.into())
+            .get_block_by_number(block_number, true.into())
             .await
             .unwrap()
             .unwrap();

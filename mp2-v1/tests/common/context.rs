@@ -4,7 +4,7 @@ use alloy::{
     network::EthereumWallet,
     node_bindings::{Anvil, AnvilInstance},
     providers::{Provider, ProviderBuilder, RootProvider},
-    rpc::types::{Block, BlockTransactionsKind, EIP1186AccountProofResponse},
+    rpc::types::{Block, EIP1186AccountProofResponse},
     signers::local::PrivateKeySigner,
     transports::http::{Client, Http},
 };
@@ -244,7 +244,7 @@ impl TestContext {
         // assume there is always a block so None.unwrap() should not occur
         // and it's still a test...
         self.rpc
-            .get_block(BlockId::Number(bn), BlockTransactionsKind::Hashes)
+            .get_block(BlockId::Number(bn), false.into())
             .await
             .unwrap()
             .unwrap()
