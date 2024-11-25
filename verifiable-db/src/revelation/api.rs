@@ -11,9 +11,8 @@ use mp2_common::{
     u256::is_less_than_or_equal_to_u256_arr,
     C, D, F,
 };
-use plonky2::{
-    field::types::PrimeField64,
-    plonk::{circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs},
+use plonky2::plonk::{
+    circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs,
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -195,6 +194,7 @@ pub struct Parameters<
 ///     upper bound on the number of items being found in `SELECT` statement of the query
 /// - `MAX_NUM_PLACEHOLDERS`: upper bound on the number of placeholders we allow in a query
 /// - `NUM_PLACEHOLDERS_HASHED`: number of placeholders being hashed in the placeholder hash
+#[allow(clippy::large_enum_variant)]
 pub enum CircuitInput<
     const ROW_TREE_MAX_DEPTH: usize,
     const INDEX_TREE_MAX_DEPTH: usize,
@@ -331,6 +331,7 @@ where
     /// - `results_structure`: Data about the operations and items returned in the `SELECT` clause of the query
     /// - `limit, offset`: limit and offset values specified in the query
     /// - `distinct`: Flag specifying whether the DISTINCT keyword was specified in the query
+    #[allow(clippy::too_many_arguments)]
     pub fn new_revelation_tabular(
         preprocessing_proof: Vec<u8>,
         matching_rows: Vec<MatchingRow>,
@@ -391,13 +392,9 @@ where
         )?;
         let placeholder_inputs =
             CheckPlaceholderGadget::new(query_bounds, placeholders, placeholder_hash_ids)?;
-        let index_ids = [
-            column_ids.primary.to_canonical_u64(),
-            column_ids.secondary.to_canonical_u64(),
-        ];
+
         let revelation_circuit = RevelationCircuitUnprovenOffset::new(
             row_paths,
-            index_ids,
             &results_structure.output_ids,
             result_values,
             limit,

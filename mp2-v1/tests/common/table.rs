@@ -6,7 +6,7 @@ use futures::{
     FutureExt,
 };
 use itertools::Itertools;
-use log::{debug, info};
+use log::debug;
 use mp2_v1::indexing::{
     block::{BlockPrimaryIndex, BlockTreeKey},
     cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},

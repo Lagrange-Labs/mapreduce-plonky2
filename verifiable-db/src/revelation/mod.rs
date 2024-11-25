@@ -34,10 +34,7 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use mp2_common::{array::ToField, poseidon::H, utils::ToFields, F};
     use mp2_test::utils::gen_random_u256;
-    use placeholders_check::{
-        placeholder_ids_hash, CheckPlaceholderGadget, CheckedPlaceholder,
-        NUM_SECONDARY_INDEX_PLACEHOLDERS,
-    };
+    use placeholders_check::{placeholder_ids_hash, CheckPlaceholderGadget, CheckedPlaceholder};
     use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
     use std::{array, iter::once};
@@ -147,7 +144,10 @@ pub(crate) mod tests {
             // Re-compute the placeholder hash from placeholder_pairs and minmum,
             // maximum query bounds. Then check it should be same with the specified
             // final placeholder hash.
-            let (min_i1, max_i1) = check_placeholder_inputs.primary_query_bounds();
+            let (min_i1, max_i1) = (
+                check_placeholder_inputs.placeholder_values[0],
+                check_placeholder_inputs.placeholder_values[1],
+            );
             let placeholder_hash = H::hash_no_pad(&placeholder_hash_payload);
             // query_placeholder_hash = H(placeholder_hash || min_i2 || max_i2)
             let inputs = placeholder_hash
@@ -195,7 +195,7 @@ pub(crate) mod tests {
     {
         // Convert the entry count to an Uint256.
         let entry_count = U256::from(query_pi.num_matching_rows().to_canonical_u64());
-        
+
         let [op_avg, op_count] =
             [AggregationOperation::AvgOp, AggregationOperation::CountOp].map(|op| op.to_field());
 

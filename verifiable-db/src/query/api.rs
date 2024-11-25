@@ -779,20 +779,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{cmp::Ordering, iter::once};
+    use std::cmp::Ordering;
 
     use alloy::primitives::U256;
     use itertools::Itertools;
-    use mp2_common::{
-        proof::ProofWithVK,
-        types::HashOutput,
-        utils::{Fieldable, ToFields},
-        F,
-    };
+    use mp2_common::{proof::ProofWithVK, types::HashOutput, utils::Fieldable, F};
     use mp2_test::utils::{gen_random_field_hash, gen_random_u256};
     use plonky2::{
         field::types::{PrimeField64, Sample},
-        hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
         plonk::config::GenericHashOut,
     };
     use rand::{thread_rng, Rng};
@@ -804,7 +798,7 @@ mod tests {
         },
         api::{CircuitInput, Parameters},
         computational_hash_ids::{
-            AggregationOperation, ColumnIDs, HashPermutation, Operation, PlaceholderIdentifier,
+            AggregationOperation, ColumnIDs, Operation, PlaceholderIdentifier,
         },
         public_inputs::PublicInputs,
         universal_circuit::universal_circuit_inputs::{
@@ -1303,7 +1297,7 @@ mod tests {
             subtree_proof,
             Some(node_info_3),
             Some(node_info_9),
-            node_info_8.clone(),
+            node_info_8,
             false,
             &query_bounds,
         )
@@ -1332,7 +1326,7 @@ mod tests {
             subtree_proof,
             None,
             Some(node_info_8),
-            node_info_0.clone(),
+            node_info_0,
             false,
             &query_bounds,
         )
@@ -1388,7 +1382,7 @@ mod tests {
         )
         .unwrap();
         let input = Input::new_non_existence_input(
-            node_info_0.clone(),
+            node_info_0,
             None,
             None,
             node_info_0.value,
@@ -1422,9 +1416,9 @@ mod tests {
         let subtree_proof = SubProof::new_child_proof(proof_0, ChildPosition::Left).unwrap();
         let input = Input::new_single_path(
             subtree_proof,
-            Some(node_info_0.clone()),
+            Some(node_info_0),
             None,
-            node_info_1.clone(),
+            node_info_1,
             false,
             &query_bounds,
         )
@@ -1455,9 +1449,9 @@ mod tests {
         let subtree_proof = SubProof::new_child_proof(proof_1, ChildPosition::Left).unwrap();
         let input = Input::new_single_path(
             subtree_proof,
-            Some(node_info_1.clone()),
-            Some(node_info_3.clone()),
-            node_info_2.clone(),
+            Some(node_info_1),
+            Some(node_info_3),
+            node_info_2,
             false,
             &query_bounds,
         )
@@ -1466,11 +1460,7 @@ mod tests {
             .unwrap()
             .into();
 
-        check_pis(
-            &root_proof.public_inputs,
-            node_info_2.clone(),
-            &column_values,
-        );
+        check_pis(&root_proof.public_inputs, node_info_2, &column_values);
 
         // generate non-existence proof starting from intermediate node (i.e., node 1) rather than a leaf node
         // generate proof with non-existence circuit for node 1
@@ -1491,7 +1481,7 @@ mod tests {
         )
         .unwrap();
         let input = Input::new_non_existence_input(
-            node_info_1.clone(),
+            node_info_1,
             Some(node_info_0), // node 0 is the left child
             None,
             node_info_1.value,
@@ -1514,9 +1504,9 @@ mod tests {
         let subtree_proof = SubProof::new_child_proof(proof_1, ChildPosition::Left).unwrap();
         let input = Input::new_single_path(
             subtree_proof,
-            Some(node_info_1.clone()),
-            Some(node_info_3.clone()),
-            node_info_2.clone(),
+            Some(node_info_1),
+            Some(node_info_3),
+            node_info_2,
             false,
             &query_bounds,
         )
@@ -1584,7 +1574,7 @@ mod tests {
         )
         .unwrap();
         let input = Input::new_non_existence_input(
-            node_info_2.clone(),
+            node_info_2,
             None,
             None,
             column_values[2][0], // we need to place the primary index value associated to this row
@@ -1646,15 +1636,9 @@ mod tests {
         );
         let hash_a = node_info_a.compute_node_hash(primary_index_id);
         let subtree_proof = SubProof::new_embedded_tree_proof(proof_1).unwrap();
-        let input = Input::new_single_path(
-            subtree_proof,
-            None,
-            None,
-            node_info_a.clone(),
-            false,
-            &query_bounds,
-        )
-        .unwrap();
+        let input =
+            Input::new_single_path(subtree_proof, None, None, node_info_a, false, &query_bounds)
+                .unwrap();
         let proof_a = params.generate_proof(input).unwrap();
         // check hash
         assert_eq!(hash_a, get_tree_hash_from_proof(&proof_a),);

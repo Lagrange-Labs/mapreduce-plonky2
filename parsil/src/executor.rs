@@ -692,19 +692,19 @@ impl<'a, C: ContextProvider> ExecutorWithKey<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
+impl<C: ContextProvider> AstMutator for ExecutorWithKey<'_, C> {
     type Error = anyhow::Error;
 
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
         let mut executor = Executor {
-            settings: &mut self.settings,
+            settings: self.settings,
         };
         executor.post_expr(expr)
     }
 
     fn post_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
         let mut key_fetcher = KeyFetcher {
-            settings: &mut self.settings,
+            settings: self.settings,
         };
         key_fetcher.post_table_factor(table_factor)
     }
@@ -779,7 +779,7 @@ impl<'a, C: ContextProvider> AstMutator for ExecutorWithKey<'a, C> {
             match item {
                 SelectItem::Wildcard(_) => replace_wildcard()
                     .into_iter()
-                    .map(|expr| SelectItem::UnnamedExpr(expr))
+                    .map(SelectItem::UnnamedExpr)
                     .collect(),
                 _ => vec![item.clone()],
             }

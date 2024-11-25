@@ -47,14 +47,13 @@ use mp2_v1::{
 };
 use parsil::{
     assembler::{DynamicCircuitPis, StaticCircuitPis},
-    parse_and_validate,
     queries::{core_keys_for_index_tree, core_keys_for_row_tree},
     ParsilSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{
         updatetree::{Next, UpdateTree, WorkplanItem},
-        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage, WideLineage,
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
     tree::NodeContext,
     Epoch, NodePayload,
@@ -71,13 +70,12 @@ use verifiable_db::{
         },
     },
     revelation::PublicInputs,
-    row_tree,
 };
 
 use super::{
-    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, INDEX_TREE_MAX_DEPTH,
-    MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
-    MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH,
+    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, MAX_NUM_COLUMNS,
+    MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
+    MAX_NUM_RESULT_OPS,
 };
 
 pub type RevelationPublicInputs<'a> =
@@ -85,7 +83,7 @@ pub type RevelationPublicInputs<'a> =
 
 /// Execute a query to know all the touched rows, and then call the universal circuit on all rows
 #[allow(clippy::too_many_arguments)]
-async fn prove_query(
+pub(crate) async fn prove_query(
     ctx: &mut TestContext,
     table: &Table,
     query: QueryCooking,
@@ -99,7 +97,7 @@ async fn prove_query(
         .row
         .wide_lineage_between(
             table.row.current_epoch(),
-            &core_keys_for_row_tree(&query.query, &settings, &pis.bounds, &query.placeholders)?,
+            &core_keys_for_row_tree(&query.query, settings, &pis.bounds, &query.placeholders)?,
             (query.min_block as Epoch, query.max_block as Epoch),
         )
         .await?;
@@ -215,7 +213,7 @@ async fn prove_query(
 
     // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
     // to check the public inputs
-    let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
+    let pis = parsil::assembler::assemble_static(&parsed, settings)?;
     // get number of matching rows
     let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
     let query_params = exec_query.convert_placeholders(&query.placeholders);
@@ -282,7 +280,7 @@ async fn prove_revelation(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn check_final_outputs(
+pub(crate) fn check_final_outputs(
     revelation_proof: Vec<u8>,
     ctx: &TestContext,
     table: &Table,
@@ -1349,7 +1347,6 @@ async fn check_correct_cells_tree(
     let local_cells = all_cells.to_vec();
     let expected_cells_root = payload
         .cell_root_hash
-        .clone()
         .unwrap_or(HashOutput::from(*empty_poseidon_hash()));
     let mut tree = indexing::cell::new_tree().await;
     tree.in_transaction(|t| {

@@ -206,19 +206,15 @@ impl<const PH: usize, const PP: usize> CheckPlaceholderGadget<PH, PP> {
         };
         let to_be_checked_placeholders = placeholder_hash_ids
             .into_iter()
-            .map(|placeholder_id| compute_checked_placeholder_for_id(placeholder_id))
+            .map(&compute_checked_placeholder_for_id)
             .collect::<Result<Vec<_>>>()?;
         // compute placeholders data to be hashed for secondary query bounds
-        let min_query_secondary = QueryBound::new_secondary_index_bound(
-            &placeholders,
-            &query_bounds.min_query_secondary(),
-        )
-        .unwrap();
-        let max_query_secondary = QueryBound::new_secondary_index_bound(
-            &placeholders,
-            &query_bounds.max_query_secondary(),
-        )
-        .unwrap();
+        let min_query_secondary =
+            QueryBound::new_secondary_index_bound(placeholders, query_bounds.min_query_secondary())
+                .unwrap();
+        let max_query_secondary =
+            QueryBound::new_secondary_index_bound(placeholders, query_bounds.max_query_secondary())
+                .unwrap();
         let secondary_query_bound_placeholders = [min_query_secondary, max_query_secondary]
             .into_iter()
             .flat_map(|query_bound| {
@@ -305,10 +301,6 @@ impl<const PH: usize, const PP: usize> CheckPlaceholderGadget<PH, PP> {
             .iter()
             .zip(&self.secondary_query_bound_placeholders)
             .for_each(|(t, v)| v.assign(pw, t));
-    }
-    // Return the query bounds on the primary index, taken from the placeholder values
-    pub(crate) fn primary_query_bounds(&self) -> (U256, U256) {
-        (self.placeholder_values[0], self.placeholder_values[1])
     }
 }
 
@@ -467,7 +459,7 @@ pub(crate) fn placeholder_ids_hash<I: IntoIterator<Item = PlaceholderIdentifier>
 mod tests {
     use super::*;
     use crate::revelation::tests::TestPlaceholders;
-    use mp2_common::{u256::WitnessWriteU256, C, D, F};
+    use mp2_common::{C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,
