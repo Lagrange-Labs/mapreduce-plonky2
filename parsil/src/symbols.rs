@@ -369,6 +369,12 @@ pub struct ScopeTable<ScopeMetadata: Debug + Default, SymbolMetadata: Debug + Cl
     pointer: Vec<usize>,
 }
 
+impl<M: Debug + Default, P: Debug + Clone> Default for ScopeTable<M, P> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<M: Debug + Default, P: Debug + Clone> ScopeTable<M, P> {
     pub fn new() -> Self {
         ScopeTable {

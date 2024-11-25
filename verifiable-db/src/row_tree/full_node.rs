@@ -142,12 +142,7 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
 pub(crate) mod test {
 
     use alloy::primitives::U256;
-    use mp2_common::{
-        group_hashing::{cond_field_hashed_scalar_mul, map_to_curve_point},
-        poseidon::H,
-        utils::ToFields,
-        C, D, F,
-    };
+    use mp2_common::{poseidon::H, utils::ToFields, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::weierstrass_to_point,

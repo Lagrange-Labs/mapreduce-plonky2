@@ -1,6 +1,6 @@
 //! Module including the revelation circuits for query
 
-use crate::{ivc::NUM_IO, query::PI_LEN as QUERY_PI_LEN};
+use crate::{ivc::NUM_IO, query::pi_len as query_pi_len};
 use mp2_common::F;
 
 pub mod api;
@@ -12,18 +12,17 @@ mod revelation_without_results_tree;
 pub use public_inputs::PublicInputs;
 pub use revelation_unproven_offset::RowPath;
 
-// L: maximum number of results
-// S: maximum number of items in each result
-// PH: maximum number of unique placeholder IDs and values bound for query
-// Without this skipping config, the generic parameter was deleted when `cargo fmt`.
-#[rustfmt::skip]
-pub(crate) const PI_LEN<const L: usize, const S: usize, const PH: usize>: usize =
-    PublicInputs::<F, L, S, PH>::total_len();
-
+/// L: maximum number of results
+/// S: maximum number of items in each result
+/// PH: maximum number of unique placeholder IDs and values bound for query
+pub const fn pi_len<const L: usize, const S: usize, const PH: usize>() -> usize {
+    PublicInputs::<F, L, S, PH>::total_len()
+}
 pub const NUM_PREPROCESSING_IO: usize = NUM_IO;
-#[rustfmt::skip]
-pub const NUM_QUERY_IO<const S: usize>: usize = QUERY_PI_LEN::<S>;
 
+pub const fn num_query_io<const S: usize>() -> usize {
+    query_pi_len::<S>()
+}
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -35,10 +34,7 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use mp2_common::{array::ToField, poseidon::H, utils::ToFields, F};
     use mp2_test::utils::gen_random_u256;
-    use placeholders_check::{
-        placeholder_ids_hash, CheckPlaceholderGadget, CheckedPlaceholder,
-        NUM_SECONDARY_INDEX_PLACEHOLDERS,
-    };
+    use placeholders_check::{placeholder_ids_hash, CheckPlaceholderGadget, CheckedPlaceholder};
     use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
     use std::{array, iter::once};
@@ -148,7 +144,10 @@ pub(crate) mod tests {
             // Re-compute the placeholder hash from placeholder_pairs and minmum,
             // maximum query bounds. Then check it should be same with the specified
             // final placeholder hash.
-            let (min_i1, max_i1) = check_placeholder_inputs.primary_query_bounds();
+            let (min_i1, max_i1) = (
+                check_placeholder_inputs.placeholder_values[0],
+                check_placeholder_inputs.placeholder_values[1],
+            );
             let placeholder_hash = H::hash_no_pad(&placeholder_hash_payload);
             // query_placeholder_hash = H(placeholder_hash || min_i2 || max_i2)
             let inputs = placeholder_hash
@@ -196,7 +195,7 @@ pub(crate) mod tests {
     {
         // Convert the entry count to an Uint256.
         let entry_count = U256::from(query_pi.num_matching_rows().to_canonical_u64());
-        
+
         let [op_avg, op_count] =
             [AggregationOperation::AvgOp, AggregationOperation::CountOp].map(|op| op.to_field());
 

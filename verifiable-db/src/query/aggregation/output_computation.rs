@@ -159,7 +159,7 @@ where
 pub(crate) mod tests {
     use super::*;
     use crate::{
-        query::{aggregation::tests::compute_output_item_value, PI_LEN},
+        query::{aggregation::tests::compute_output_item_value, pi_len},
         test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
     use mp2_common::{types::CURVE_TARGET_LEN, u256::NUM_LIMBS, utils::ToFields, C, D, F};
@@ -179,8 +179,8 @@ pub(crate) mod tests {
 
         let mut outputs = vec![];
 
-        for i in 0..S {
-            let mut output = if ops[i] == op_min {
+        for (i, &item) in ops.iter().enumerate().take(S) {
+            let mut output = if item == op_min {
                 U256::MAX
             } else {
                 U256::ZERO
@@ -188,7 +188,7 @@ pub(crate) mod tests {
             .to_fields();
 
             if i == 0 {
-                output = if ops[i] == op_id {
+                output = if item == op_id {
                     Point::NEUTRAL.to_fields()
                 } else {
                     // Pad the current output to `CURVE_TARGET_LEN` for the first item.
@@ -223,14 +223,15 @@ pub(crate) mod tests {
         for TestOutputComputationCircuit<S, PROOF_NUM>
     where
         [(); S - 1]:,
-        [(); PI_LEN::<S>]:,
+        [(); pi_len::<S>()]:,
     {
         // Proof public inputs + expected outputs
         type Wires = ([Vec<Target>; PROOF_NUM], [TestOutputWires; S]);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             // Initialize the proofs and the expected outputs.
-            let proofs = array::from_fn(|_| b.add_virtual_target_arr::<{ PI_LEN::<S> }>().to_vec());
+            let proofs =
+                array::from_fn(|_| b.add_virtual_target_arr::<{ pi_len::<S>() }>().to_vec());
             let exp_outputs = array::from_fn(|i| {
                 let output = if i == 0 {
                     b.add_virtual_target_arr::<CURVE_TARGET_LEN>().to_vec()
