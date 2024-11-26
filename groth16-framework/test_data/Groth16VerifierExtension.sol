@@ -2,7 +2,7 @@
 
 pragma solidity ^0.8.0;
 
-import {Verifier} from "./verifier.sol";
+import {Verifier} from "./Verifier.sol";
 
 // The query input struct passed into the processQuery function
 struct QueryInput {
@@ -40,7 +40,7 @@ enum QueryErrorCode {
     ComputationOverflow
 }
 
-contract Query is Verifier {
+contract Groth16VerifierExtension is Verifier {
     // Top 3 bits mask.
     uint256 constant TOP_THREE_BIT_MASK = ~(uint256(7) << 253);
 
@@ -94,7 +94,12 @@ contract Query is Verifier {
     //    Then ensure this hash value equals to the last Groth16 input (groth16_inputs[2]).
     // 3. Parse the items from public inputs, and check as expected for query.
     // 4. Parse and return the query output from public inputs.
-    function processQuery(bytes32[] calldata data, QueryInput memory query) public view returns (QueryOutput memory) {
+    function processQuery(bytes32[] calldata data, QueryInput memory query)
+        public
+        view
+        virtual
+        returns (QueryOutput memory)
+    {
         // 1. Groth16 verification
         uint256[3] memory groth16Inputs = verifyGroth16Proof(data);
 
@@ -109,7 +114,7 @@ contract Query is Verifier {
     }
 
     // Parse the Groth16 proofs and inputs, do verification, and returns the Groth16 inputs.
-    function verifyGroth16Proof(bytes32[] calldata data) internal view returns (uint256[3] memory) {
+    function verifyGroth16Proof(bytes32[] calldata data) internal view virtual returns (uint256[3] memory) {
         uint256[8] memory proofs;
         uint256[3] memory inputs;
 
@@ -130,7 +135,7 @@ contract Query is Verifier {
     }
 
     // Compute sha256 on the public inputs, and ensure it equals to the last Groth16 input.
-    function verifyPublicInputs(bytes32[] calldata data, uint256[3] memory groth16Inputs) internal pure {
+    function verifyPublicInputs(bytes32[] calldata data, uint256[3] memory groth16Inputs) internal pure virtual {
         // Parse the public inputs from calldata.
         bytes memory pi = parsePublicInputs(data);
 
@@ -166,7 +171,12 @@ contract Query is Verifier {
     }
 
     // Verify the public inputs with the expected query.
-    function verifyQuery(bytes32[] calldata data, QueryInput memory query) internal pure returns (QueryErrorCode) {
+    function verifyQuery(bytes32[] calldata data, QueryInput memory query)
+        internal
+        pure
+        virtual
+        returns (QueryErrorCode)
+    {
         // Retrieve the last Uint256 of public inputs.
         bytes32 rem = data[PI_REM_OFFSET];
 
@@ -216,7 +226,12 @@ contract Query is Verifier {
     }
 
     // Parse the query output from the public inputs.
-    function parseOutput(bytes32[] calldata data, QueryErrorCode error) internal pure returns (QueryOutput memory) {
+    function parseOutput(bytes32[] calldata data, QueryErrorCode error)
+        internal
+        pure
+        virtual
+        returns (QueryOutput memory)
+    {
         bytes32 rem = data[PI_REM_OFFSET];
 
         // Retrieve total number of the matched rows.
