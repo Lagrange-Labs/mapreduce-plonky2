@@ -31,6 +31,7 @@ bb8 = "0.8.5"
 bb8-postgres = "0.8.1"
 tokio-postgres = "0.7.12"
 futures = "0.3.30"
+tracing = "0.1"
 
 [dev-dependencies]
 alloy.workspace = true
