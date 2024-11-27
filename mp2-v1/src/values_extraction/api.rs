@@ -6,15 +6,17 @@ use super::{
     gadgets::{column_gadget::filter_table_column_identifiers, metadata_gadget::ColumnsMetadata},
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
     leaf_mapping_of_mappings::{LeafMappingOfMappingsCircuit, LeafMappingOfMappingsWires},
+    leaf_receipt::{ReceiptLeafCircuit, ReceiptLeafWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
     ColumnInfo,
 };
-use crate::{api::InputNode, MAX_BRANCH_NODE_LEN};
+use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN, MAX_RECEIPT_LEAF_NODE_LEN};
 use anyhow::{bail, ensure, Result};
 use log::debug;
 use mp2_common::{
     default_config,
+    eth::ReceiptProofInfo,
     mpt_sequential::PAD_LEN,
     poseidon::H,
     proof::{ProofInputSerialized, ProofWithVK},
@@ -55,7 +57,7 @@ pub enum CircuitInput<
     LeafSingle(LeafSingleCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
     LeafMapping(LeafMappingCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
     LeafMappingOfMappings(LeafMappingOfMappingsCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
-    Extension(ExtensionInput),
+    LeafReceipt(ReceiptLeafCircuit<MAX_RECEIPT_LEAF_NODE_LEN>),
     Branch(BranchInput),
 }
 
@@ -138,6 +140,11 @@ where
         })
     }
 
+    /// Create a circuit input for proving a leaf MPT node of a transaction receipt.
+    pub fn new_receipt_leaf(info: ReceiptProofInfo) -> Self {
+        CircuitInput::LeafReceipt(ReceiptLeafCircuit { info })
+    }
+
     /// Create a circuit input for proving an extension MPT node.
     pub fn new_extension(node: Vec<u8>, child_proof: Vec<u8>) -> Self {
         CircuitInput::Extension(ExtensionInput {
@@ -188,6 +195,7 @@ pub struct PublicParameters<
         0,
         LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
     >,
+    leaf_receipt: CircuitWithUniversalVerifier<F, C, D, 0, LeafReceiptWire>,
     extension: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionNodeWires>,
     #[cfg(not(test))]
     branches: BranchCircuits,
@@ -377,8 +385,8 @@ impl_branch_circuits!(BranchCircuits, 2, 9, 16);
 impl_branch_circuits!(TestBranchCircuits, 1, 4, 9);
 
 /// Number of circuits in the set
-/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 leaf mapping of mappings
-const MAPPING_CIRCUIT_SET_SIZE: usize = 7;
+/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 leaf mapping of mappings + 1 leaf receipt
+const MAPPING_CIRCUIT_SET_SIZE: usize = 8;
 
 impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
@@ -417,6 +425,10 @@ where
                 LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
                         >(());
 
+        debug!("Building leaf receipt circuit");
+        let leaf_receipt =
+            circuit_builder.build_circuit::<C, 0, ReceiptLeafWires<MAX_RECEIPT_LEAF_NODE_LEN>>(());
+
         debug!("Building extension circuit");
         let extension = circuit_builder.build_circuit::<C, 1, ExtensionNodeWires>(());
 
@@ -430,6 +442,7 @@ where
             leaf_single.get_verifier_data().circuit_digest,
             leaf_mapping.get_verifier_data().circuit_digest,
             leaf_mapping_of_mappings.get_verifier_data().circuit_digest,
+            leaf_receipt.get_verifier_data().circuit_digest,
             extension.get_verifier_data().circuit_digest,
         ];
         circuits_set.extend(branches.circuit_set());
@@ -439,6 +452,7 @@ where
             leaf_single,
             leaf_mapping,
             leaf_mapping_of_mappings,
+            leaf_receipt,
             extension,
             branches,
             #[cfg(not(test))]
@@ -463,6 +477,10 @@ where
             CircuitInput::LeafMappingOfMappings(leaf) => set
                 .generate_proof(&self.leaf_mapping_of_mappings, [], [], leaf)
                 .map(|p| (p, self.leaf_mapping_of_mappings.get_verifier_data().clone()).into()),
+            CircuitInput::LeafReceipt(leaf) => set
+                .generate_proof(&self.leaf_receipt, [], [], leaf)
+                .map(|p| (p, self.leaf_receipt.get_verifier_data().clone()).into()),
+
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
                 let (child_proof, child_vk) = child_proofs

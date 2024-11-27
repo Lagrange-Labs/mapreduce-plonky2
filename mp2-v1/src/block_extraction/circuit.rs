@@ -22,6 +22,12 @@ const HEADER_PARENT_HASH_OFFSET: usize = 4;
 /// State root offset in RLP encoded header.
 const HEADER_STATE_ROOT_OFFSET: usize = 91;
 
+/// Transaction root offset in RLP encoded header.
+const HEADER_TRANSACTION_ROOT_OFFSET: usize = 124;
+
+/// Receipt root offset in RLP encoded header.
+const HEADER_RECEIPT_ROOT_OFFSET: usize = 157;
+
 /// Block number offset in RLP encoded header.
 const HEADER_BLOCK_NUMBER_OFFSET: usize = 449;
 /// We define u64 as the maximum block mnumber ever to be reached
@@ -50,6 +56,25 @@ pub struct BlockCircuit {
     pub rlp_headers: Vec<u8>,
 }
 
+/// Enum that represents the extraction type, storage, receipt or transaction
+#[derive(Debug, Clone, Serialize, Deserialize, Copy)]
+pub enum ExtractionType {
+    Storage,
+    Receipt,
+    Transaction,
+}
+
+impl ExtractionType {
+    /// This function returns the offset of the relevant root for that type of extraction
+    pub fn offset(&self) -> usize {
+        match self {
+            ExtractionType::Storage => HEADER_STATE_ROOT_OFFSET,
+            ExtractionType::Receipt => HEADER_RECEIPT_ROOT_OFFSET,
+            ExtractionType::Transaction => HEADER_TRANSACTION_ROOT_OFFSET,
+        }
+    }
+}
+
 impl BlockCircuit {
     /// Creates a new instance of the circuit.
     pub fn new(rlp_headers: Vec<u8>) -> Result<Self> {
@@ -61,7 +86,7 @@ impl BlockCircuit {
     }
 
     /// Build the circuit, assigning the public inputs and returning the internal wires.
-    pub fn build(cb: &mut CBuilder) -> BlockWires {
+    pub fn build(cb: &mut CBuilder, extraction_type: ExtractionType) -> BlockWires {
         // already right padded to right size for keccak
         let rlp_headers = VectorWire::new(cb);
 
@@ -69,15 +94,16 @@ impl BlockCircuit {
         rlp_headers.assert_bytes(cb);
 
         // extract the previous block hash from the RLP header
-        let prev_bh = Array::<Target, HASH_LEN>::from_array(create_array(|i| {
+        let prev_bh: Array<Target, 32> = Array::<Target, HASH_LEN>::from_array(create_array(|i| {
             rlp_headers.arr.arr[HEADER_PARENT_HASH_OFFSET + i]
         }));
         let packed_prev_bh = prev_bh.pack(cb, Endianness::Little).downcast_to_targets();
 
         // extract the state root of the block
-        let state_root = Array::<Target, HASH_LEN>::from_array(create_array(|i| {
-            rlp_headers.arr.arr[HEADER_STATE_ROOT_OFFSET + i]
-        }));
+        let state_root: Array<Target, 32> =
+            Array::<Target, HASH_LEN>::from_array(create_array(|i| {
+                rlp_headers.arr.arr[extraction_type.offset() + i]
+            }));
         let state_root_packed = state_root.pack(cb, Endianness::Little);
 
         // compute the block hash
@@ -200,7 +226,7 @@ mod test {
         type Wires = BlockWires;
 
         fn build(cb: &mut CBuilder) -> Self::Wires {
-            Self::build(cb)
+            Self::build(cb, super::ExtractionType::Storage)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
