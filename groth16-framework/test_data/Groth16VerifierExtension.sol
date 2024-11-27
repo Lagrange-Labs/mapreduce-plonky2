@@ -182,7 +182,7 @@ contract Groth16VerifierExtension is Verifier {
 
         // Check the block hash and computational hash.
         bytes32 blockHash = convertToBlockHash(data[PI_OFFSET + BLOCK_HASH_POS]);
-        require(blockHash == query.blockHash, "Block hash must equal as expected.");
+        verifyBlockHash(blockHash, query.blockHash);
         bytes32 computationalHash = data[PI_OFFSET + COMPUTATIONAL_HASH_POS];
         require(computationalHash == query.computationalHash, "Computational hash must equal as expected.");
 
@@ -223,6 +223,14 @@ contract Groth16VerifierExtension is Verifier {
             return QueryErrorCode.NoError;
         }
         return QueryErrorCode.ComputationOverflow;
+    }
+
+    /// @notice verifies two blockhashed are equal
+    /// @param blockHash the blockhash computed from the proof
+    /// @param expectedBlockHash the expected blockhash, retrieved from the query
+    /// @dev this function is virtual to allow for different implementations in different environments
+    function verifyBlockHash(bytes32 blockHash, bytes32 expectedBlockHash) internal pure virtual {
+        require(blockHash == expectedBlockHash, "Block hash must equal as expected.");
     }
 
     // Parse the query output from the public inputs.
