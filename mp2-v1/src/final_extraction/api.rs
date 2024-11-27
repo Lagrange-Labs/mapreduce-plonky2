@@ -1,25 +1,36 @@
-use mp2_common::{self, default_config, digest::TableDimension, proof::ProofWithVK, C, D, F};
-use plonky2::{iop::target::Target, plonk::circuit_data::VerifierCircuitData};
+use alloy::primitives::U256;
+use anyhow::Result;
+use itertools::Itertools;
+use mp2_common::{
+    self, default_config,
+    digest::{Digest, TableDimension},
+    proof::ProofWithVK,
+    types::HashOutput,
+    utils::Packer,
+    C, D, F,
+};
+use plonky2::{field::types::Field, iop::target::Target, plonk::circuit_data::VerifierCircuitData};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
 };
-
 use serde::{Deserialize, Serialize};
 
 use super::{
     base_circuit::BaseCircuitInput,
+    dummy_circuit::DummyWires,
     lengthed_circuit::LengthedRecursiveWires,
     merge_circuit::{MergeTable, MergeTableRecursiveWires},
     simple_circuit::SimpleCircuitRecursiveWires,
-    BaseCircuitProofInputs, LengthedCircuit, MergeCircuit, PublicInputs, SimpleCircuit,
+    BaseCircuitProofInputs, DummyCircuit, LengthedCircuit, MergeCircuit, PublicInputs,
+    SimpleCircuit,
 };
 
-use anyhow::Result;
 pub enum CircuitInput {
     Simple(SimpleCircuitInput),
     Lengthed(LengthedCircuitInput),
     MergeTable(MergeCircuitInput),
+    NoProvable(DummyCircuit),
 }
 #[derive(Clone, Debug)]
 pub struct FinalExtractionBuilderParams {
@@ -51,10 +62,11 @@ pub struct PublicParameters {
     simple: CircuitWithUniversalVerifier<F, C, D, 0, SimpleCircuitRecursiveWires>,
     lengthed: CircuitWithUniversalVerifier<F, C, D, 0, LengthedRecursiveWires>,
     merge: CircuitWithUniversalVerifier<F, C, D, 0, MergeTableRecursiveWires>,
+    dummy: CircuitWithUniversalVerifier<F, C, D, 0, DummyWires>,
     circuit_set: RecursiveCircuits<F, C, D>,
 }
 
-const FINAL_EXTRACTION_CIRCUIT_SET_SIZE: usize = 2;
+const FINAL_EXTRACTION_CIRCUIT_SET_SIZE: usize = 4;
 pub(super) const NUM_IO: usize = PublicInputs::<Target>::TOTAL_LEN;
 
 impl PublicParameters {
@@ -76,12 +88,14 @@ impl PublicParameters {
         );
         let simple = builder.build_circuit(builder_params.clone());
         let lengthed = builder.build_circuit(builder_params.clone());
-        let merge = builder.build_circuit(builder_params);
+        let merge = builder.build_circuit(builder_params.clone());
+        let dummy = builder.build_circuit(builder_params);
 
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&simple),
             prepare_recursive_circuit_for_circuit_set(&lengthed),
             prepare_recursive_circuit_for_circuit_set(&merge),
+            prepare_recursive_circuit_for_circuit_set(&dummy),
         ];
 
         let circuit_set = RecursiveCircuits::new(circuits);
@@ -90,6 +104,7 @@ impl PublicParameters {
             simple,
             lengthed,
             merge,
+            dummy,
             circuit_set,
         }
     }
@@ -158,6 +173,13 @@ impl PublicParameters {
             .circuit_set
             .generate_proof(&self.lengthed, [], [], lengthed_input)?;
         ProofWithVK::serialize(&(proof, self.lengthed.circuit_data().verifier_only.clone()).into())
+    }
+
+    pub(crate) fn generate_no_provable_proof(&self, input: DummyCircuit) -> Result<Vec<u8>> {
+        let proof = self
+            .circuit_set
+            .generate_proof(&self.dummy, [], [], input)?;
+        ProofWithVK::serialize(&(proof, self.dummy.circuit_data().verifier_only.clone()).into())
     }
 
     pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
@@ -229,6 +251,33 @@ impl CircuitInput {
         let base = BaseCircuitInput::new(block_proof, contract_proof, vec![value_proof])?;
         let length_proof = ProofWithVK::deserialize(&length_proof)?;
         Ok(Self::Lengthed(LengthedCircuitInput { base, length_proof }))
+    }
+    /// Instantiate inputs for the dummy circuit dealing with no provable extraction case
+    pub fn new_no_provable_input(
+        is_merge: bool,
+        block_number: U256,
+        block_hash: HashOutput,
+        prev_block_hash: HashOutput,
+        metadata_digest: Digest,
+        row_digest: Digest,
+    ) -> Self {
+        let [block_hash, prev_block_hash] = [block_hash, prev_block_hash].map(|h| {
+            h.pack(mp2_common::utils::Endianness::Little)
+                .into_iter()
+                .map(F::from_canonical_u32)
+                .collect_vec()
+                .try_into()
+                .unwrap()
+        });
+
+        Self::NoProvable(DummyCircuit::new(
+            is_merge,
+            block_number,
+            block_hash,
+            prev_block_hash,
+            metadata_digest,
+            row_digest,
+        ))
     }
 }
 

@@ -84,6 +84,11 @@ impl TestContext {
                     &ext_proof.proof().public_inputs,
                 );
                 assert_eq!(
+                    row_pi.is_merge_flag(),
+                    ext_pi.is_merge_case(),
+                    "Merge flags of values extraction and rows in DB don't match",
+                );
+                assert_eq!(
                     row_pi.rows_digest_field(),
                     ext_pi.value_point(),
                     "values extracted vs value in db don't match (left row, right mpt (block {})",

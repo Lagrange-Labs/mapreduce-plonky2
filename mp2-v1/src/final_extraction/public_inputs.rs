@@ -6,7 +6,7 @@ use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::{CBuilder, CURVE_TARGET_LEN},
     u256::{self, UInt256Target},
-    utils::{FromFields, FromTargets, ToTargets},
+    utils::{FromFields, FromTargets, ToTargets, TryIntoBool},
     F,
 };
 use plonky2::iop::target::{BoolTarget, Target};
@@ -109,6 +109,9 @@ impl PublicInputs<'_, F> {
     /// Get block number as U64
     pub fn block_number(&self) -> u64 {
         U256::from_fields(self.bn).to()
+    }
+    pub fn is_merge_case(&self) -> bool {
+        self.merge[0].try_into_bool().unwrap()
     }
 }
 

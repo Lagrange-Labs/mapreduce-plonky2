@@ -20,6 +20,7 @@ use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     digest::Digest,
+    group_hashing::map_to_curve_point,
     poseidon::H,
     types::HashOutput,
     utils::{Fieldable, ToFields},
@@ -141,6 +142,9 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                         length_circuit_set,
                     )
                 }
+                final_extraction::CircuitInput::NoProvable(input) => {
+                    params.final_extraction.generate_no_provable_proof(input)
+                }
             }
         }
         CircuitInput::CellsTree(input) => verifiable_db::api::generate_proof(
@@ -242,4 +246,21 @@ pub fn metadata_hash(
     let contract_digest = contract_metadata_digest(contract_address);
     // compute final hash
     combine_digest_and_block(contract_digest + value_digest)
+}
+
+/// Compute the metadata hash for a table including no provable extraction data.
+/// The input is a metadata digest set by the caller, then generate the metadata hash
+/// same as the DB computation.
+pub fn no_provable_metadata_hash(metadata_digest: &Digest) -> MetadataHash {
+    // Add the prefix to the metadata digest to ensure the metadata digest
+    // will keep track of whether we use this dummy circuit or not.
+    // It's similar logic as the dummy circuit of final extraction.
+    let prefix = final_extraction::DUMMY_METADATA_DIGEST_PREFIX.to_fields();
+    let inputs = prefix
+        .into_iter()
+        .chain(metadata_digest.to_fields())
+        .collect_vec();
+    let digest = map_to_curve_point(&inputs);
+
+    combine_digest_and_block(digest)
 }
