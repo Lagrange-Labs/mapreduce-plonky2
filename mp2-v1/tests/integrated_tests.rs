@@ -113,6 +113,36 @@ async fn integrated_indexing() -> Result<()> {
     ];
     merged.run(&mut ctx, genesis, changes).await?;
 
+    // Run a test case for no provable extraction of single value slots.
+    let (mut no_provable, genesis) = {
+        let (single, genesis) = TableIndexing::single_value_test_case(&mut ctx).await?;
+        let no_provable = single.to_no_provable_test_case();
+
+        (no_provable, genesis)
+    };
+    let changes = vec![
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
+        ChangeType::Update(UpdateType::SecondaryIndex),
+    ];
+    no_provable.run(&mut ctx, genesis, changes).await?;
+
+    // Run a test case for no provable extraction of merge table.
+    let (mut no_provable, genesis) = {
+        let (merge, genesis) = TableIndexing::merge_table_test_case(&mut ctx).await?;
+        let no_provable = merge.to_no_provable_test_case();
+
+        (no_provable, genesis)
+    };
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
+        ChangeType::Deletion,
+    ];
+    no_provable.run(&mut ctx, genesis, changes).await?;
+
     // save columns information and table information in JSON so querying test can pick up
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
     write_table_info(MERGE_TABLE_INFO_FILE, merged.table_info())?;

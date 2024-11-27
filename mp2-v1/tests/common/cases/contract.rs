@@ -1,11 +1,11 @@
+use super::indexing::{SimpleSingleValue, UpdateSimpleStorage};
+use crate::common::{bindings::simple::Simple, TestContext};
 use alloy::{primitives::Address, providers::ProviderBuilder};
 use anyhow::Result;
 use log::info;
+use serde::{Deserialize, Serialize};
 
-use crate::common::{bindings::simple::Simple, TestContext};
-
-use super::indexing::{SimpleSingleValue, UpdateSimpleStorage};
-
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Contract {
     pub address: Address,
     pub chain_id: u64,

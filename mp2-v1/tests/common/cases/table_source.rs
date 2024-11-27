@@ -10,32 +10,42 @@ use alloy::{
     providers::Provider,
 };
 use anyhow::{bail, Result};
+use derive_more::derive::Constructor;
 use futures::{future::BoxFuture, FutureExt};
 use log::{debug, info};
 use mp2_common::{
-    digest::TableDimension,
+    digest::{Digest, TableDimension},
     eth::{ProofQuery, StorageSlot},
     proof::ProofWithVK,
     types::HashOutput,
 };
 use mp2_v1::{
-    api::{merge_metadata_hash, metadata_hash, SlotInputs},
+    api::{
+        merge_metadata_hash, metadata_hash, no_provable_metadata_hash, MetadataHash, SlotInputs,
+    },
+    contract_extraction,
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
         row::{RowTreeKey, ToNonce},
     },
     values_extraction::{
-        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column,
+        compute_leaf_mapping_values_digest, compute_leaf_single_values_digest,
+        compute_table_row_digest, identifier_for_mapping_key_column,
+        identifier_for_mapping_value_column, identifier_single_var_column, merge_table_row_digests,
     },
 };
-use rand::{Rng, SeedableRng};
+use plonky2::field::types::Sample;
+use plonky2_ecgfp5::curve::curve::Point;
+use rand::{thread_rng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
     cases::indexing::{MappingUpdate, SimpleSingleValue, TableRowValues},
-    final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
+    final_extraction::{
+        ExtractionProofInput, ExtractionTableProof, MergeExtractionProof,
+        NoProvableExtractionProof, NormalExtractionProof,
+    },
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
@@ -190,14 +200,50 @@ pub(crate) enum TableSource {
     /// We can test with and without the length
     Mapping((MappingValuesExtractionArgs, Option<LengthExtractionArgs>)),
     Merge(MergeSource),
+    /// Test arguments for indexing data with no provable extraction
+    NoProvable(NoProvableExtractionArgs),
 }
 
 impl TableSource {
+    pub async fn compute_row_digest(&self, ctx: &TestContext, contract: &Contract) -> Digest {
+        match self {
+            TableSource::SingleValues(args) => args.compute_row_digest(ctx, contract).await,
+            TableSource::Mapping((args, _)) => args.compute_row_digest(ctx, contract).await,
+            TableSource::Merge(args) => args.compute_row_digest(ctx, contract).await,
+            TableSource::NoProvable(_) => {
+                panic!("Cannot call row digest computation for no provable table")
+            }
+        }
+    }
+
+    pub fn metadata_hash(&self, contract: &Contract) -> MetadataHash {
+        match self {
+            TableSource::Mapping((mapping, _)) => {
+                let slot = SlotInputs::Mapping(mapping.slot);
+                metadata_hash(slot, &contract.address, contract.chain_id, vec![])
+            }
+            // mapping with length not tested right now
+            TableSource::SingleValues(args) => {
+                let slot = SlotInputs::Simple(args.slots.clone());
+                metadata_hash(slot, &contract.address, contract.chain_id, vec![])
+            }
+            TableSource::Merge(merge) => {
+                let single = SlotInputs::Simple(merge.single.slots.clone());
+                let mapping = SlotInputs::Mapping(merge.mapping.slot);
+                merge_metadata_hash(contract.address, contract.chain_id, vec![], single, mapping)
+            }
+            TableSource::NoProvable(NoProvableExtractionArgs { inner }) => {
+                inner.metadata_hash(contract)
+            }
+        }
+    }
+
     pub fn slot_input(&self) -> SlotInputs {
         match self {
             TableSource::SingleValues(single) => SlotInputs::Simple(single.slots.clone()),
             TableSource::Mapping((m, _)) => SlotInputs::Mapping(m.slot),
             TableSource::Merge(_) => panic!("can't call slot inputs on merge table"),
+            TableSource::NoProvable(NoProvableExtractionArgs { inner }) => inner.slot_input(),
         }
     }
 
@@ -212,6 +258,9 @@ impl TableSource {
                 TableSource::SingleValues(ref mut s) => s.init_contract_data(ctx, contract).await,
                 TableSource::Mapping((ref mut m, _)) => m.init_contract_data(ctx, contract).await,
                 TableSource::Merge(ref mut merge) => merge.init_contract_data(ctx, contract).await,
+                TableSource::NoProvable(NoProvableExtractionArgs { inner }) => {
+                    inner.init_contract_data(ctx, contract).await
+                }
             }
         }
         .boxed()
@@ -221,22 +270,42 @@ impl TableSource {
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
+        contract_extraction_args: &ContractExtractionArgs,
         value_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
         match self {
             // first lets do without length
             TableSource::Mapping((ref mapping, _)) => {
                 mapping
-                    .generate_extraction_proof_inputs(ctx, contract, value_key)
+                    .generate_extraction_proof_inputs(
+                        ctx,
+                        contract,
+                        contract_extraction_args,
+                        value_key,
+                    )
                     .await
             }
             TableSource::SingleValues(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
-                    .await
+                args.generate_extraction_proof_inputs(
+                    ctx,
+                    contract,
+                    contract_extraction_args,
+                    value_key,
+                )
+                .await
             }
             TableSource::Merge(ref merge) => {
                 merge
-                    .generate_extraction_proof_inputs(ctx, contract, value_key)
+                    .generate_extraction_proof_inputs(
+                        ctx,
+                        contract,
+                        contract_extraction_args,
+                        value_key,
+                    )
+                    .await
+            }
+            TableSource::NoProvable(args) => {
+                args.generate_extraction_proof_inputs(ctx, contract, value_key)
                     .await
             }
         }
@@ -260,6 +329,9 @@ impl TableSource {
                 TableSource::Merge(ref mut merge) => {
                     merge.random_contract_update(ctx, contract, c).await
                 }
+                TableSource::NoProvable(NoProvableExtractionArgs { inner }) => {
+                    inner.random_contract_update(ctx, contract, c).await
+                }
             }
         }
         .boxed()
@@ -276,6 +348,30 @@ pub(crate) struct SingleValuesExtractionArgs {
 }
 
 impl SingleValuesExtractionArgs {
+    async fn compute_row_digest(&self, ctx: &TestContext, contract: &Contract) -> Digest {
+        let mut digests = Vec::with_capacity(self.slots.len());
+        for slot in self.slots.iter() {
+            // Compute the slot identifier.
+            let id =
+                identifier_single_var_column(*slot, &contract.address, contract.chain_id, vec![]);
+
+            // Query the slot value.
+            let query = ProofQuery::new_simple_slot(contract.address, *slot as usize);
+            let value = ctx
+                .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
+                .await
+                .storage_proof[0]
+                .value;
+
+            // Compute the digest.
+            let digest = compute_leaf_single_values_digest(id, &value.to_be_bytes_vec());
+
+            digests.push(digest);
+        }
+
+        compute_table_row_digest(TableDimension::Single, &digests)
+    }
+
     async fn init_contract_data(
         &mut self,
         ctx: &mut TestContext,
@@ -398,12 +494,16 @@ impl SingleValuesExtractionArgs {
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
+        contract_extraction_args: &ContractExtractionArgs,
         proof_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
         let chain_id = ctx.rpc.get_chain_id().await?;
         let ProofKey::ValueExtraction((_id, bn)) = proof_key.clone() else {
             bail!("invalid proof key");
         };
+        let contract_proof =
+            generate_contract_extraction_proof(ctx, bn, contract, contract_extraction_args).await;
+        let block_proof = generate_block_extraction_proof(ctx, bn).await;
         let single_value_proof = match ctx.storage.get_proof_exact(&proof_key) {
             Ok(p) => p,
             Err(_) => {
@@ -441,10 +541,14 @@ impl SingleValuesExtractionArgs {
         let slot_input = SlotInputs::Simple(self.slots.clone());
         let metadata_hash = metadata_hash(slot_input, &contract.address, chain_id, vec![]);
         // we're just proving a single set of a value
-        let input = ExtractionProofInput::Single(ExtractionTableProof {
-            dimension: TableDimension::Single,
-            value_proof: single_value_proof,
-            length_proof: None,
+        let input = ExtractionProofInput::Normal(NormalExtractionProof {
+            inner: ExtractionTableProof {
+                dimension: TableDimension::Single,
+                value_proof: single_value_proof,
+                length_proof: None,
+            },
+            block_proof,
+            contract_proof,
         });
         Ok((input, metadata_hash))
     }
@@ -465,6 +569,48 @@ pub(crate) struct MappingValuesExtractionArgs {
 }
 
 impl MappingValuesExtractionArgs {
+    async fn compute_row_digest(&self, ctx: &TestContext, contract: &Contract) -> Digest {
+        let mut digests = Vec::with_capacity(self.mapping_keys.len());
+        for mapping_key in &self.mapping_keys {
+            // Compute the mapping key and value identifiers.
+            let key_id = identifier_for_mapping_key_column(
+                self.slot,
+                &contract.address,
+                contract.chain_id,
+                vec![],
+            );
+            let value_id = identifier_for_mapping_value_column(
+                self.slot,
+                &contract.address,
+                contract.chain_id,
+                vec![],
+            );
+
+            // Query the mapping value.
+            let query = ProofQuery::new_mapping_slot(
+                contract.address,
+                self.slot as usize,
+                mapping_key.clone(),
+            );
+            let response = ctx
+                .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
+                .await;
+            let mapping_value = response.storage_proof[0].value;
+
+            // Compute the digest.
+            let digest = compute_leaf_mapping_values_digest(
+                key_id,
+                value_id,
+                mapping_key,
+                &mapping_value.to_be_bytes_vec(),
+            );
+
+            digests.push(digest);
+        }
+
+        compute_table_row_digest(TableDimension::Compound, &digests)
+    }
+
     pub async fn init_contract_data(
         &mut self,
         ctx: &mut TestContext,
@@ -642,9 +788,16 @@ impl MappingValuesExtractionArgs {
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
+        contract_extraction_args: &ContractExtractionArgs,
         proof_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
         let chain_id = ctx.rpc.get_chain_id().await?;
+        let ProofKey::ValueExtraction((_id, bn)) = proof_key.clone() else {
+            bail!("invalid proof key");
+        };
+        let contract_proof =
+            generate_contract_extraction_proof(ctx, bn, contract, contract_extraction_args).await;
+        let block_proof = generate_block_extraction_proof(ctx, bn).await;
         let mapping_root_proof = match ctx.storage.get_proof_exact(&proof_key) {
             Ok(p) => p,
             Err(_) => {
@@ -683,10 +836,14 @@ impl MappingValuesExtractionArgs {
         let slot_input = SlotInputs::Mapping(self.slot);
         let metadata_hash = metadata_hash(slot_input, &contract.address, chain_id, vec![]);
         // it's a compoound value type of proof since we're not using the length
-        let input = ExtractionProofInput::Single(ExtractionTableProof {
-            dimension: TableDimension::Compound,
-            value_proof: mapping_root_proof,
-            length_proof: None,
+        let input = ExtractionProofInput::Normal(NormalExtractionProof {
+            inner: ExtractionTableProof {
+                dimension: TableDimension::Compound,
+                value_proof: mapping_root_proof,
+                length_proof: None,
+            },
+            block_proof,
+            contract_proof,
         });
         Ok((input, metadata_hash))
     }
@@ -799,6 +956,13 @@ pub struct MergeSource {
 impl MergeSource {
     pub fn new(single: SingleValuesExtractionArgs, mapping: MappingValuesExtractionArgs) -> Self {
         Self { single, mapping }
+    }
+
+    async fn compute_row_digest(&self, ctx: &TestContext, contract: &Contract) -> Digest {
+        let single_digest = self.single.compute_row_digest(ctx, contract).await;
+        let mapping_digest = self.mapping.compute_row_digest(ctx, contract).await;
+
+        merge_table_row_digests(&[single_digest], &[mapping_digest])
     }
 
     pub async fn init_contract_data(
@@ -944,6 +1108,7 @@ impl MergeSource {
         &'a self,
         ctx: &'a mut TestContext,
         contract: &'a Contract,
+        contract_extraction_args: &'a ContractExtractionArgs,
         proof_key: ProofKey,
     ) -> BoxFuture<Result<(ExtractionProofInput, HashOutput)>> {
         async move {
@@ -958,10 +1123,11 @@ impl MergeSource {
                 .generate_extraction_proof_inputs(
                     ctx,
                     contract,
+                    contract_extraction_args,
                     ProofKey::ValueExtraction((id_a, bn)),
                 )
                 .await?;
-            let ExtractionProofInput::Single(extract_a) = extract_single else {
+            let ExtractionProofInput::Normal(extract_a) = extract_single else {
                 bail!("can't merge non single tables")
             };
             let (extract_mappping, _) = self
@@ -969,10 +1135,11 @@ impl MergeSource {
                 .generate_extraction_proof_inputs(
                     ctx,
                     contract,
+                    contract_extraction_args,
                     ProofKey::ValueExtraction((id_b, bn)),
                 )
                 .await?;
-            let ExtractionProofInput::Single(extract_b) = extract_mappping else {
+            let ExtractionProofInput::Normal(extract_b) = extract_mappping else {
                 bail!("can't merge non single tables")
             };
 
@@ -987,8 +1154,10 @@ impl MergeSource {
             assert!(extract_a != extract_b);
             Ok((
                 ExtractionProofInput::Merge(MergeExtractionProof {
-                    single: extract_a,
-                    mapping: extract_b,
+                    single: extract_a.inner,
+                    mapping: extract_b.inner,
+                    block_proof: extract_b.block_proof,
+                    contract_proof: extract_b.contract_proof,
                 }),
                 md,
             ))
@@ -996,6 +1165,7 @@ impl MergeSource {
         .boxed()
     }
 }
+
 /// Length extraction arguments (C.2)
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct LengthExtractionArgs {
@@ -1039,4 +1209,132 @@ pub fn next_value() -> U256 {
     let shift = SHIFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let bv: U256 = *BASE_VALUE;
     bv + U256::from(shift)
+}
+
+/// Generate the contract extraction proof.
+async fn generate_contract_extraction_proof(
+    ctx: &mut TestContext,
+    bn: BlockPrimaryIndex,
+    contract: &Contract,
+    contract_extraction_args: &ContractExtractionArgs,
+) -> Vec<u8> {
+    let contract_proof_key = ProofKey::ContractExtraction((contract.address, bn));
+    match ctx.storage.get_proof_exact(&contract_proof_key) {
+        Ok(proof) => {
+            info!(
+                "Loaded Contract Extraction (C.3) proof for block number {}",
+                bn
+            );
+            proof
+        }
+        Err(_) => {
+            let contract_proof = ctx
+                .prove_contract_extraction(
+                    &contract.address,
+                    contract_extraction_args.slot.clone(),
+                    bn,
+                )
+                .await;
+            ctx.storage
+                .store_proof(contract_proof_key, contract_proof.clone())
+                .unwrap();
+            info!(
+                "Generated Contract Extraction (C.3) proof for block number {}",
+                bn
+            );
+            {
+                let pvk = ProofWithVK::deserialize(&contract_proof).unwrap();
+                let pis = contract_extraction::PublicInputs::from_slice(&pvk.proof().public_inputs);
+                debug!(
+                    " CONTRACT storage root pis.storage_root() {:?}",
+                    hex::encode(
+                        pis.root_hash_field()
+                            .into_iter()
+                            .flat_map(|u| u.to_be_bytes())
+                            .collect::<Vec<_>>()
+                    )
+                );
+            }
+            contract_proof
+        }
+    }
+}
+
+/// Generate the block extraction proof.
+async fn generate_block_extraction_proof(ctx: &mut TestContext, bn: BlockPrimaryIndex) -> Vec<u8> {
+    // We look if block proof has already been generated for this block
+    // since it is the same between proofs
+    let block_proof_key = ProofKey::BlockExtraction(bn as BlockPrimaryIndex);
+    match ctx.storage.get_proof_exact(&block_proof_key) {
+        Ok(proof) => {
+            info!(
+                "Loaded Block Extraction (C.4) proof for block number {}",
+                bn
+            );
+            proof
+        }
+        Err(_) => {
+            let proof = ctx
+                .prove_block_extraction(bn as BlockPrimaryIndex)
+                .await
+                .unwrap();
+            ctx.storage
+                .store_proof(block_proof_key, proof.clone())
+                .unwrap();
+            info!(
+                "Generated Block Extraction (C.4) proof for block number {}",
+                bn
+            );
+            proof
+        }
+    }
+}
+
+/// No provable extraction arguments
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Constructor)]
+pub(crate) struct NoProvableExtractionArgs {
+    inner: Box<TableSource>,
+}
+
+impl NoProvableExtractionArgs {
+    /// Generate the extraction inputs without provable.
+    pub async fn generate_extraction_proof_inputs(
+        &self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        proof_key: ProofKey,
+    ) -> Result<(ExtractionProofInput, HashOutput)> {
+        let ProofKey::ValueExtraction((_, block_number)) = proof_key else {
+            bail!("invalid proof key");
+        };
+        let block = ctx
+            .query_block_at(BlockNumberOrTag::Number(block_number as u64))
+            .await;
+
+        let block_number = U256::from(block_number);
+        let [block_hash, prev_block_hash] =
+            [block.header.hash, block.header.parent_hash].map(|b| HashOutput(b.0));
+
+        // We don't care the metadata digest in integration test.
+        // Since in circuit, we add a prefix `DUMMY_EXTRACTION` to
+        // generate a new digest and don't prove it.
+        let rng = &mut thread_rng();
+        let metadata_digest = Point::sample(rng);
+        let metadata_hash = no_provable_metadata_hash(&metadata_digest);
+
+        // Compute the row digest.
+        let row_digest = self.inner.compute_row_digest(ctx, contract).await;
+
+        Ok((
+            ExtractionProofInput::NoProvable(NoProvableExtractionProof {
+                is_merge: false,
+                block_hash,
+                prev_block_hash,
+                block_number,
+                metadata_digest,
+                row_digest,
+            }),
+            metadata_hash,
+        ))
+    }
 }
