@@ -230,7 +230,7 @@ impl TryFrom<&Log<LogData>> for EventLogInfo {
             .take(remaining_topics)
             .for_each(|(j, info)| {
                 *info = LogDataInfo {
-                    column_id: j + 1,
+                    column_id: j + 2,
                     rel_byte_offset: current_topic_offset,
                     len: 32,
                 };
@@ -263,7 +263,7 @@ impl TryFrom<&Log<LogData>> for EventLogInfo {
                     let chunk_header = chunk_rlp.payload_info()?;
                     if chunk_header.value_len <= 32 {
                         data[j] = LogDataInfo {
-                            column_id: remaining_topics + 1 + j,
+                            column_id: remaining_topics + 2 + j,
                             rel_byte_offset: current_topic_offset
                                 + additional_offset
                                 + chunk_header.header_len,
