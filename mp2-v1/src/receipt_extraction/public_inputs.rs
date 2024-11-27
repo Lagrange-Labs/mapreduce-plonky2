@@ -46,7 +46,7 @@ pub struct PublicInputArgs<'a> {
     pub(crate) dm: CurveTarget,
 }
 
-impl<'a> PublicInputCommon for PublicInputArgs<'a> {
+impl PublicInputCommon for PublicInputArgs<'_> {
     const RANGES: &'static [PublicInputRange] = &[H_RANGE, K_RANGE, T_RANGE, DV_RANGE, DM_RANGE];
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -61,7 +61,7 @@ impl<'a> PublicInputArgs<'a> {
     }
 }
 
-impl<'a> PublicInputArgs<'a> {
+impl PublicInputArgs<'_> {
     pub fn generic_register_args(&self, cb: &mut CBuilder) {
         self.h.register_as_public_input(cb);
         self.k.register_as_input(cb);
