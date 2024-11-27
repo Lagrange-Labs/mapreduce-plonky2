@@ -12,7 +12,7 @@ use mp2_common::{
     mpt_sequential::{MPTReceiptLeafNode, ReceiptKeyWire, MAX_TX_KEY_NIBBLE_LEN, PAD_LEN},
     public_inputs::PublicInputCommon,
     types::{CBuilder, GFp},
-    utils::{Endianness, PackerTarget},
+    utils::{less_than, less_than_or_equal_to, Endianness, PackerTarget},
     D, F,
 };
 use plonky2::{
@@ -129,17 +129,66 @@ impl EventWires {
         &self,
         b: &mut CBuilder,
         value: &VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
-        status_offset: Target,
         relevant_logs_offsets: &VectorWire<Target, MAX_LOGS_PER_TX>,
     ) -> CurveTarget {
         let t = b._true();
+        let one = b.one();
+        let two = b.two();
         let zero = b.zero();
         let curve_zero = b.curve_zero();
         let mut points = Vec::new();
 
-        // Enforce status is true.
-        let status = value.arr.random_access_large_array(b, status_offset);
-        b.connect(status, t.target);
+        // Extract the gas used in the transaction, since the position of this can vary because it is after the key
+        // we have to prove we extracted from the correct location.
+        let header_len_len = b.add_const(
+            value.arr[0],
+            F::from_canonical_u64(1) - F::from_canonical_u64(247),
+        );
+        // let key_header = value.arr.random_access_large_array(b, header_len_len);
+        // let key_header_len = b.add_const(key_header, F::ONE - F::from_canonical_u64(128));
+
+        // This is the start of the string that is the rlp encoded receipt (a string since the first element is transaction type).
+        // From here we subtract 183 to get the length of the length, then the encoded gas used is at length of length + 1 (for tx type) + (1 + list length)
+        // + 1 (for status) + 1 to get the header for the gas used string.
+        let string_offset = b.add(one, header_len_len);
+        let string_header = value.arr.random_access_large_array(b, string_offset);
+        let string_len_len = b.add_const(string_header, -F::from_canonical_u64(183));
+
+        let list_offset = b.add_many([string_offset, string_len_len, two]);
+        let list_header = value.arr.random_access_large_array(b, list_offset);
+
+        let gas_used_offset_lo = b.add_const(
+            list_header,
+            F::from_canonical_u64(2) - F::from_canonical_u64(247),
+        );
+        let gas_used_offset = b.add(gas_used_offset_lo, list_offset);
+
+        let gas_used_header = value.arr.random_access_large_array(b, gas_used_offset);
+        let gas_used_len = b.add_const(gas_used_header, -F::from_canonical_u64(128));
+
+        let initial_gas_index = b.add(gas_used_offset, one);
+        let final_gas_index = b.add(gas_used_offset, gas_used_len);
+
+        let combiner = b.constant(F::from_canonical_u64(1 << 8));
+
+        let gas_used = (0..3u64).fold(zero, |acc, i| {
+            let access_index = b.add_const(initial_gas_index, F::from_canonical_u64(i));
+            let array_value = value.arr.random_access_large_array(b, access_index);
+
+            // If we have extracted a value from an index in the desired range (so lte final_gas_index) we want to add it.
+            // If access_index was strictly less than final_gas_index we need to multiply by 1 << 8 after (since the encoding is big endian)
+            let valid = less_than_or_equal_to(b, access_index, final_gas_index, 12);
+            let need_scalar = less_than(b, access_index, final_gas_index, 12);
+
+            let to_add = b.select(valid, array_value, zero);
+
+            let scalar = b.select(need_scalar, combiner, one);
+            let tmp = b.add(acc, to_add);
+            b.mul(tmp, scalar)
+        });
+
+        // Map the gas used to a curve point for the value digest, gas used is the first column so use one as its column id.
+        let gas_digest = b.map_to_curve_point(&[zero, gas_used]);
 
         for log_offset in relevant_logs_offsets.arr.arr {
             // Extract the address bytes
@@ -179,13 +228,17 @@ impl EventWires {
 
                 // For each column we use the `column_id` field to tell if its a dummy or not, zero indicates a dummy.
                 let dummy_column = b.is_equal(log_column.column_id, zero);
-                let selector = b.and(dummy_column, dummy);
 
-                let selected_point = b.select_curve_point(selector, curve_zero, data_digest);
+                let selected_point = b.select_curve_point(dummy_column, curve_zero, data_digest);
+                let selected_point = b.select_curve_point(dummy, curve_zero, selected_point);
+
                 points.push(selected_point);
             }
-        }
 
+            let gas_select = b.select_curve_point(dummy, curve_zero, gas_digest);
+            points.push(gas_select);
+        }
+        println!("points length: {}", points.len());
         b.add_curve_point(&points)
     }
 }
@@ -218,13 +271,9 @@ where
         let root = wires.root;
 
         // For each relevant log in the transaction we have to verify it lines up with the event we are monitoring for
-        let mut dv = event_wires.verify_logs_and_extract_values::<NODE_LEN>(
-            b,
-            &node,
-            status_offset,
-            &relevant_logs_offset,
-        );
-
+        let mut dv =
+            event_wires.verify_logs_and_extract_values::<NODE_LEN>(b, &node, &relevant_logs_offset);
+        println!("dv target: {:?}", dv);
         let value_id = b.map_to_curve_point(&[index]);
 
         dv = b.add_curve_point(&[value_id, dv]);
@@ -356,17 +405,16 @@ where
 
         wires
             .address
-            .assign(pw, &address.0.map(|byte| GFp::from_canonical_u8(byte)));
+            .assign(pw, &address.0.map(GFp::from_canonical_u8));
 
         pw.set_target(
             wires.add_rel_offset,
             F::from_canonical_usize(add_rel_offset),
         );
 
-        wires.event_signature.assign(
-            pw,
-            &event_signature.map(|byte| GFp::from_canonical_u8(byte)),
-        );
+        wires
+            .event_signature
+            .assign(pw, &event_signature.map(GFp::from_canonical_u8));
 
         pw.set_target(
             wires.sig_rel_offset,
@@ -376,12 +424,12 @@ where
         wires
             .topics
             .iter()
-            .zip(topics.into_iter())
+            .zip(topics)
             .for_each(|(topic_wire, topic)| topic_wire.assign(pw, topic));
         wires
             .data
             .iter()
-            .zip(data.into_iter())
+            .zip(data)
             .for_each(|(data_wire, data)| data_wire.assign(pw, data));
     }
 }
@@ -415,7 +463,9 @@ impl CircuitLogicWires<GFp, D, 0> for ReceiptLeafWires<MAX_RECEIPT_LEAF_NODE_LEN
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::receipt_extraction::compute_receipt_leaf_metadata_digest;
+    use crate::receipt_extraction::{
+        compute_receipt_leaf_metadata_digest, compute_receipt_leaf_value_digest,
+    };
     use mp2_common::{
         utils::{keccak256, Packer},
         C,
@@ -441,7 +491,7 @@ mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.c.assign(pw, &wires);
+            self.c.assign(pw, wires);
         }
     }
     #[test]
@@ -450,16 +500,25 @@ mod tests {
 
         let receipt_proof_infos = generate_receipt_proofs();
         let info = receipt_proof_infos.first().unwrap().clone();
+
         let c = ReceiptLeafCircuit::<NODE_LEN> { info: info.clone() };
         let test_circuit = TestReceiptLeafCircuit { c };
 
+        let node = info.mpt_proof.last().unwrap().clone();
+
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::new(&proof.public_inputs);
-        let node = info.mpt_proof.last().unwrap().clone();
+
         // Check the output hash
         {
             let exp_hash = keccak256(&node).pack(Endianness::Little);
             assert_eq!(pi.root_hash(), exp_hash);
+        }
+
+        // Check value digest
+        {
+            let exp_digest = compute_receipt_leaf_value_digest(&info);
+            assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
         }
 
         // Check metadata digest

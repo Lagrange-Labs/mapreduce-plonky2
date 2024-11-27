@@ -168,7 +168,7 @@ pub fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
         let receipt_query = ReceiptQuery::new(*event_contract.address(), events[0].clone());
 
         receipt_query
-            .query_receipt_proofs(&rpc.root(), BlockNumberOrTag::Number(block_number))
+            .query_receipt_proofs(rpc.root(), BlockNumberOrTag::Number(block_number))
             .await
             .unwrap()
     })
