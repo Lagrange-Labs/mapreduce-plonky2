@@ -101,10 +101,9 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
-pub fn build_circuits_params<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-) -> PublicParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
-    sanity_check();
-
+pub fn build_circuits_params(
+    extraction_type: block_extraction::ExtractionType,
+) -> PublicParameters {
     log::info!("Building contract_extraction parameters...");
     let contract_extraction = contract_extraction::build_circuits_params();
     log::info!("Building length_extraction parameters...");
@@ -112,7 +111,7 @@ pub fn build_circuits_params<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: 
     log::info!("Building values_extraction parameters...");
     let values_extraction = values_extraction::build_circuits_params();
     log::info!("Building block_extraction parameters...");
-    let block_extraction = block_extraction::build_circuits_params();
+    let block_extraction = block_extraction::build_circuits_params(extraction_type);
     log::info!("Building final_extraction parameters...");
     let final_extraction = final_extraction::PublicParameters::build(
         block_extraction.circuit_data().verifier_data(),
@@ -169,6 +168,9 @@ pub fn generate_proof<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
                         length_circuit_set,
                     )
                 }
+                final_extraction::CircuitInput::Receipt(input) => params
+                    .final_extraction
+                    .generate_receipt_proof(input, value_circuit_set),
             }
         }
         CircuitInput::CellsTree(input) => verifiable_db::api::generate_proof(

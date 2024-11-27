@@ -15,6 +15,7 @@ use mp2_common::{
 };
 use serde::{Deserialize, Serialize};
 
+pub use circuit::ExtractionType;
 pub use public_inputs::PublicInputs;
 pub struct CircuitInput(Vec<u8>);
 impl CircuitInput {
@@ -31,15 +32,15 @@ pub struct PublicParameters {
 }
 
 /// Returns the parameters necessary to prove block extraction circuits
-pub fn build_circuits_params() -> PublicParameters {
-    PublicParameters::build()
+pub fn build_circuits_params(extraction_type: ExtractionType) -> PublicParameters {
+    PublicParameters::build(extraction_type)
 }
 
 impl PublicParameters {
-    pub fn build() -> Self {
+    pub fn build(extraction_type: ExtractionType) -> Self {
         let config = default_config();
         let mut cb = CircuitBuilder::new(config);
-        let wires = circuit::BlockCircuit::build(&mut cb);
+        let wires = circuit::BlockCircuit::build(&mut cb, extraction_type);
         let cd = cb.build();
         Self {
             circuit_data: cd,
@@ -76,10 +77,13 @@ mod test {
     };
     use mp2_test::eth::get_sepolia_url;
 
-    use crate::block_extraction::{public_inputs::PublicInputs, PublicParameters};
+    use crate::block_extraction::{
+        circuit::ExtractionType, public_inputs::PublicInputs, PublicParameters,
+    };
+
     #[tokio::test]
-    async fn test_api() -> Result<()> {
-        let params = PublicParameters::build();
+    async fn test_api_storage() -> Result<()> {
+        let params = PublicParameters::build(ExtractionType::Storage);
         let url = get_sepolia_url();
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
         let block_number = BlockNumberOrTag::Latest;

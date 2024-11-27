@@ -3,6 +3,7 @@ mod base_circuit;
 mod lengthed_circuit;
 mod merge_circuit;
 mod public_inputs;
+mod receipt_circuit;
 mod simple_circuit;
 
 pub use api::{CircuitInput, PublicParameters};

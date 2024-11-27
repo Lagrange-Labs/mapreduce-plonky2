@@ -2,15 +2,16 @@
 
 use crate::MAX_RECEIPT_LEAF_NODE_LEN;
 
-use super::public_inputs::{PublicInputArgs, PublicInputs};
+use super::public_inputs::{PublicInputs, PublicInputsArgs};
 
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     eth::{EventLogInfo, LogDataInfo, ReceiptProofInfo},
     group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires},
-    mpt_sequential::{MPTReceiptLeafNode, ReceiptKeyWire, MAX_TX_KEY_NIBBLE_LEN, PAD_LEN},
+    mpt_sequential::{MPTKeyWire, MPTReceiptLeafNode, PAD_LEN},
     public_inputs::PublicInputCommon,
+    rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp},
     utils::{less_than, less_than_or_equal_to, Endianness, PackerTarget},
     D, F,
@@ -29,7 +30,7 @@ use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use rlp::Encodable;
 use serde::{Deserialize, Serialize};
-use std::array::from_fn;
+use std::{array::from_fn, iter};
 /// Maximum number of logs per transaction we can process
 const MAX_LOGS_PER_TX: usize = 2;
 
@@ -51,7 +52,7 @@ where
     /// The offsets of the relevant logs inside the node
     pub relevant_logs_offset: VectorWire<Target, MAX_LOGS_PER_TX>,
     /// The key in the MPT Trie
-    pub mpt_key: ReceiptKeyWire,
+    pub mpt_key: MPTKeyWire,
 }
 
 /// Contains all the information for an [`Event`] in rlp form
@@ -85,7 +86,7 @@ pub struct LogColumn {
 
 impl LogColumn {
     /// Convert to an array for metadata digest
-    pub fn to_array(&self) -> [Target; 3] {
+    pub fn to_array(self) -> [Target; 3] {
         [self.column_id, self.rel_byte_offset, self.len]
     }
 
@@ -130,7 +131,7 @@ impl EventWires {
         b: &mut CBuilder,
         value: &VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
         relevant_logs_offsets: &VectorWire<Target, MAX_LOGS_PER_TX>,
-    ) -> CurveTarget {
+    ) -> (Target, CurveTarget) {
         let t = b._true();
         let one = b.one();
         let two = b.two();
@@ -144,13 +145,16 @@ impl EventWires {
             value.arr[0],
             F::from_canonical_u64(1) - F::from_canonical_u64(247),
         );
-        // let key_header = value.arr.random_access_large_array(b, header_len_len);
-        // let key_header_len = b.add_const(key_header, F::ONE - F::from_canonical_u64(128));
+        let key_header = value.arr.random_access_large_array(b, header_len_len);
+        let less_than_val = b.constant(F::from_canonical_u8(128));
+        let single_value = less_than(b, key_header, less_than_val, 8);
+        let key_len_maybe = b.add_const(key_header, F::ONE - F::from_canonical_u64(128));
+        let key_len = b.select(single_value, one, key_len_maybe);
 
         // This is the start of the string that is the rlp encoded receipt (a string since the first element is transaction type).
         // From here we subtract 183 to get the length of the length, then the encoded gas used is at length of length + 1 (for tx type) + (1 + list length)
         // + 1 (for status) + 1 to get the header for the gas used string.
-        let string_offset = b.add(one, header_len_len);
+        let string_offset = b.add(key_len, header_len_len);
         let string_header = value.arr.random_access_large_array(b, string_offset);
         let string_len_len = b.add_const(string_header, -F::from_canonical_u64(183));
 
@@ -190,7 +194,9 @@ impl EventWires {
         // Map the gas used to a curve point for the value digest, gas used is the first column so use one as its column id.
         let gas_digest = b.map_to_curve_point(&[zero, gas_used]);
 
-        for log_offset in relevant_logs_offsets.arr.arr {
+        // We also keep track of the number of real logs we process as each log forms a row in our table
+        let mut n = zero;
+        for (index, log_offset) in relevant_logs_offsets.arr.arr.into_iter().enumerate() {
             // Extract the address bytes
             let address_start = b.add(log_offset, self.add_rel_offset);
 
@@ -234,12 +240,22 @@ impl EventWires {
 
                 points.push(selected_point);
             }
-
+            // If this is a real row we record the gas used in the transaction
             let gas_select = b.select_curve_point(dummy, curve_zero, gas_digest);
             points.push(gas_select);
+
+            // We also keep track of which log this is in the receipt to avoid having identical rows in the table in the case
+            // that the event we are tracking can be emitted multiple times in the same transaction but has no topics or data.
+            let log_number = b.constant(F::from_canonical_usize(index + 1));
+            let log_no_digest = b.map_to_curve_point(&[one, log_number]);
+            let log_no_select = b.select_curve_point(dummy, curve_zero, log_no_digest);
+            points.push(log_no_select);
+
+            let increment = b.select(dummy, zero, one);
+            n = b.add(n, increment);
         }
-        println!("points length: {}", points.len());
-        b.add_curve_point(&points)
+
+        (n, b.add_curve_point(&points))
     }
 }
 
@@ -262,7 +278,7 @@ where
         let status_offset = b.add_virtual_target();
         let relevant_logs_offset = VectorWire::<Target, MAX_LOGS_PER_TX>::new(b);
 
-        let mpt_key = ReceiptKeyWire::new(b);
+        let mpt_key = MPTKeyWire::new(b);
 
         // Build the node wires.
         let wires = MPTReceiptLeafNode::build_and_advance_key::<_, D, NODE_LEN>(b, &mpt_key);
@@ -271,9 +287,9 @@ where
         let root = wires.root;
 
         // For each relevant log in the transaction we have to verify it lines up with the event we are monitoring for
-        let mut dv =
+        let (n, mut dv) =
             event_wires.verify_logs_and_extract_values::<NODE_LEN>(b, &node, &relevant_logs_offset);
-        println!("dv target: {:?}", dv);
+
         let value_id = b.map_to_curve_point(&[index]);
 
         dv = b.add_curve_point(&[value_id, dv]);
@@ -281,11 +297,12 @@ where
         let dm = b.map_to_curve_point(&event_wires.to_vec());
 
         // Register the public inputs
-        PublicInputArgs {
+        PublicInputsArgs {
             h: &root.output_array,
             k: &wires.key,
             dv,
             dm,
+            n,
         }
         .register_args(b);
 
@@ -372,20 +389,14 @@ where
         wires.relevant_logs_offset.assign(pw, &relevant_logs_vector);
 
         let key_encoded = self.info.tx_index.rlp_bytes();
-        let nibbles = key_encoded
+        let key_nibbles: [u8; MAX_KEY_NIBBLE_LEN] = key_encoded
             .iter()
             .flat_map(|byte| [byte / 16, byte % 16])
-            .collect::<Vec<u8>>();
-
-        let mut key_nibbles = [0u8; MAX_TX_KEY_NIBBLE_LEN];
-        key_nibbles
-            .iter_mut()
-            .enumerate()
-            .for_each(|(index, nibble)| {
-                if index < nibbles.len() {
-                    *nibble = nibbles[index]
-                }
-            });
+            .chain(iter::repeat(0u8))
+            .take(64)
+            .collect::<Vec<u8>>()
+            .try_into()
+            .expect("Couldn't create mpt key with correct length");
 
         wires.mpt_key.assign(pw, &key_nibbles, self.info.index_size);
     }
@@ -462,10 +473,11 @@ impl CircuitLogicWires<GFp, D, 0> for ReceiptLeafWires<MAX_RECEIPT_LEAF_NODE_LEN
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::receipt_extraction::{
-        compute_receipt_leaf_metadata_digest, compute_receipt_leaf_value_digest,
+    use super::{
+        super::{compute_receipt_leaf_metadata_digest, compute_receipt_leaf_value_digest},
+        *,
     };
+
     use mp2_common::{
         utils::{keccak256, Packer},
         C,
