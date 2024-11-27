@@ -173,7 +173,7 @@ contract Groth16VerifierExtension is Verifier {
     // Verify the public inputs with the expected query.
     function verifyQuery(bytes32[] calldata data, QueryInput memory query)
         internal
-        pure
+        view
         virtual
         returns (QueryErrorCode)
     {
@@ -229,7 +229,7 @@ contract Groth16VerifierExtension is Verifier {
     /// @param blockHash the blockhash computed from the proof
     /// @param expectedBlockHash the expected blockhash, retrieved from the query
     /// @dev this function is virtual to allow for different implementations in different environments
-    function verifyBlockHash(bytes32 blockHash, bytes32 expectedBlockHash) internal pure virtual {
+    function verifyBlockHash(bytes32 blockHash, bytes32 expectedBlockHash) internal view virtual {
         require(blockHash == expectedBlockHash, "Block hash must equal as expected.");
     }
 
