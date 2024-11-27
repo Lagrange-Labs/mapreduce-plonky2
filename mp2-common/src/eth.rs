@@ -6,7 +6,7 @@ use alloy::{
     network::{eip2718::Encodable2718, TransactionResponse},
     primitives::{Address, B256},
     providers::{Provider, RootProvider},
-    rlp::Encodable as AlloyEncodable,
+    rlp::{Decodable, Encodable as AlloyEncodable},
     rpc::types::{
         Block, BlockTransactions, EIP1186AccountProofResponse, Filter, ReceiptEnvelope, Transaction,
     },
@@ -131,6 +131,8 @@ pub struct ReceiptQuery {
 pub struct ReceiptProofInfo {
     /// The MPT proof that this Receipt is in the tree
     pub mpt_proof: Vec<Vec<u8>>,
+    /// The root of the Receipt Trie this receipt belongs to
+    pub mpt_root: H256,
     /// The index of this transaction in the block
     pub tx_index: u64,
     /// The size of the index in bytes
@@ -228,7 +230,7 @@ impl TryFrom<&Log<LogData>> for EventLogInfo {
             .take(remaining_topics)
             .for_each(|(j, info)| {
                 *info = LogDataInfo {
-                    column_id: j,
+                    column_id: j + 1,
                     rel_byte_offset: current_topic_offset,
                     len: 32,
                 };
@@ -261,7 +263,7 @@ impl TryFrom<&Log<LogData>> for EventLogInfo {
                     let chunk_header = chunk_rlp.payload_info()?;
                     if chunk_header.value_len <= 32 {
                         data[j] = LogDataInfo {
-                            column_id: 3 + j,
+                            column_id: remaining_topics + 1 + j,
                             rel_byte_offset: current_topic_offset
                                 + additional_offset
                                 + chunk_header.header_len,
@@ -531,6 +533,23 @@ impl ProofQuery {
     }
 }
 
+impl ReceiptProofInfo {
+    pub fn to_receipt(&self) -> Result<ReceiptWithBloom> {
+        let memdb = Arc::new(MemoryDB::new(true));
+        let tx_trie = EthTrie::new(Arc::clone(&memdb));
+
+        let mpt_key = self.tx_index.rlp_bytes();
+
+        let valid = tx_trie
+            .verify_proof(self.mpt_root, &mpt_key, self.mpt_proof.clone())?
+            .ok_or(anyhow!("No proof found when verifying"))?;
+
+        let rlp_receipt = rlp::Rlp::new(&valid[1..]);
+        ReceiptWithBloom::decode(&mut rlp_receipt.as_raw())
+            .map_err(|e| anyhow!("Could not decode receipt got: {}", e))
+    }
+}
+
 impl ReceiptQuery {
     pub fn new(contract: Address, event: Event) -> Self {
         Self { contract, event }
@@ -567,7 +586,7 @@ impl ReceiptQuery {
 
         // Construct the Receipt Trie for this block so we can retrieve MPT proofs.
         let mut block_util = BlockUtil::fetch(provider, block).await?;
-
+        let mpt_root = block_util.receipts_trie.root_hash()?;
         let proofs = tx_indices
             .into_iter()
             .map(|index| {
@@ -632,6 +651,7 @@ impl ReceiptQuery {
 
                 Ok(ReceiptProofInfo {
                     mpt_proof: proof,
+                    mpt_root,
                     tx_index: index,
                     index_size,
                     status_offset,
@@ -707,7 +727,7 @@ impl BlockUtil {
         let mut transactions_trie = EthTrie::new(memdb.clone());
         let consensus_receipts = receipts
             .into_iter()
-            .zip(all_tx.into_iter())
+            .zip(all_tx.iter())
             .map(|(receipt, transaction)| {
                 let tx_index = receipt.transaction_index.unwrap().rlp_bytes();
 
@@ -783,157 +803,6 @@ fn from_rpc_logs_to_consensus(
     }
 }
 
-// for compatibility check with alloy
-#[cfg(test)]
-mod tryethers {
-
-    use std::sync::Arc;
-
-    use anyhow::Result;
-    use eth_trie::{EthTrie, MemoryDB, Trie};
-    use ethers::{
-        providers::{Http, Middleware, Provider},
-        types::{BlockId, Bytes, Transaction, TransactionReceipt, U64},
-    };
-    use rlp::{Encodable, RlpStream};
-
-    /// A wrapper around a transaction and its receipt. The receipt is used to filter
-    /// bad transactions, so we only compute over valid transactions.
-    pub struct TxAndReceipt(Transaction, TransactionReceipt);
-
-    impl TxAndReceipt {
-        pub fn tx(&self) -> &Transaction {
-            &self.0
-        }
-        pub fn receipt(&self) -> &TransactionReceipt {
-            &self.1
-        }
-        pub fn tx_rlp(&self) -> Bytes {
-            self.0.rlp()
-        }
-        // TODO: this should be upstreamed to ethers-rs
-        pub fn receipt_rlp(&self) -> Bytes {
-            let tx_type = self.tx().transaction_type;
-            let mut rlp = RlpStream::new();
-            rlp.begin_unbounded_list();
-            match &self.1.status {
-                Some(s) if s.as_u32() == 1 => rlp.append(s),
-                _ => rlp.append_empty_data(),
-            };
-            rlp.append(&self.1.cumulative_gas_used)
-                .append(&self.1.logs_bloom)
-                .append_list(&self.1.logs);
-
-            rlp.finalize_unbounded_list();
-            let rlp_bytes: Bytes = rlp.out().freeze().into();
-            let mut encoded = vec![];
-            match tx_type {
-                // EIP-2930 (0x01)
-                Some(x) if x == U64::from(0x1) => {
-                    encoded.extend_from_slice(&[0x1]);
-                    encoded.extend_from_slice(rlp_bytes.as_ref());
-                    encoded.into()
-                }
-                // EIP-1559 (0x02)
-                Some(x) if x == U64::from(0x2) => {
-                    encoded.extend_from_slice(&[0x2]);
-                    encoded.extend_from_slice(rlp_bytes.as_ref());
-                    encoded.into()
-                }
-                _ => rlp_bytes,
-            }
-        }
-    }
-    /// Structure containing the block header and its transactions / receipts. Amongst other things,
-    /// it is used to create a proof of inclusion for any transaction inside this block.
-    pub struct BlockData {
-        pub block: ethers::types::Block<Transaction>,
-        pub txs: Vec<TxAndReceipt>,
-        // TODO: add generics later - this may be re-used amongst different workers
-        pub tx_trie: EthTrie<MemoryDB>,
-        pub receipts_trie: EthTrie<MemoryDB>,
-    }
-
-    impl BlockData {
-        pub async fn fetch<T: Into<BlockId> + Send + Sync>(
-            blockid: T,
-            url: String,
-        ) -> Result<Self> {
-            let provider =
-                Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
-            Self::fetch_from(&provider, blockid).await
-        }
-        pub async fn fetch_from<T: Into<BlockId> + Send + Sync>(
-            provider: &Provider<Http>,
-            blockid: T,
-        ) -> Result<Self> {
-            let block = provider
-                .get_block_with_txs(blockid)
-                .await?
-                .expect("should have been a block");
-            let receipts = provider.get_block_receipts(block.number.unwrap()).await?;
-
-            let tx_with_receipt = block
-                .transactions
-                .clone()
-                .into_iter()
-                .map(|tx| {
-                    let tx_hash = tx.hash();
-                    let r = receipts
-                        .iter()
-                        .find(|r| r.transaction_hash == tx_hash)
-                        .expect("RPC sending invalid data");
-                    // TODO remove cloning
-                    TxAndReceipt(tx, r.clone())
-                })
-                .collect::<Vec<_>>();
-
-            // check transaction root
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut tx_trie = EthTrie::new(Arc::clone(&memdb));
-            for tr in tx_with_receipt.iter() {
-                tx_trie
-                    .insert(&tr.receipt().transaction_index.rlp_bytes(), &tr.tx().rlp())
-                    .expect("can't insert tx");
-            }
-
-            // check receipt root
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut receipts_trie = EthTrie::new(Arc::clone(&memdb));
-            for tr in tx_with_receipt.iter() {
-                if tr.tx().transaction_index.unwrap() == U64::from(0) {
-                    println!(
-                        "Ethers: Index {} -> {:?}",
-                        tr.tx().transaction_index.unwrap(),
-                        tr.receipt_rlp().to_vec()
-                    );
-                }
-                receipts_trie
-                    .insert(
-                        &tr.receipt().transaction_index.rlp_bytes(),
-                        // TODO: make getter value for rlp encoding
-                        &tr.receipt_rlp(),
-                    )
-                    .expect("can't insert tx");
-            }
-            let computed = tx_trie.root_hash().expect("root hash problem");
-            let expected = block.transactions_root;
-            assert_eq!(expected, computed);
-
-            let computed = receipts_trie.root_hash().expect("root hash problem");
-            let expected = block.receipts_root;
-            assert_eq!(expected, computed);
-
-            Ok(BlockData {
-                block,
-                tx_trie,
-                receipts_trie,
-                txs: tx_with_receipt,
-            })
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     #[cfg(feature = "ci")]
@@ -948,7 +817,6 @@ mod test {
         rlp::Decodable,
         sol,
     };
-    use alloy_multicall::Multicall;
 
     use eth_trie::Nibbles;
     use ethereum_types::U64;
@@ -978,11 +846,12 @@ mod test {
         // check if we compute the RLP correctly now
         block.check()?;
         let mut be = tryethers::BlockData::fetch(bn, url).await?;
+        be.check()?;
         let er = be.receipts_trie.root_hash()?;
         let ar = block.receipts_trie.root_hash()?;
         assert_eq!(er, ar);
         // dissect one receipt entry in the trie
-        let tx_receipt = block.txs.first().clone().unwrap();
+        let tx_receipt = block.txs.first().unwrap();
         // https://sepolia.etherscan.io/tx/0x9bef12fafd3962b0e0d66b738445d6ea2c1f3daabe10c889bd1916acc75d698b#eventlog
         println!(
             "Looking at tx hash on sepolia: {}",
@@ -1051,7 +920,7 @@ mod test {
         // final is tokenid - not in topic
         let expected_data = "000000000000000000000000000000000000000000115eec47f6cf7e35000000";
         let log_data: Vec<u8> = log_state.val_at(2).context("can't decode log data")?;
-        let found_data = hex::encode(&left_pad32(
+        let found_data = hex::encode(left_pad32(
             &log_data.into_iter().take(32).collect::<Vec<_>>(),
         ));
         assert_eq!(expected_data, found_data);
@@ -1128,13 +997,6 @@ mod test {
         // Deploy the contract using anvil
         let contract = EventEmitter::deploy(rpc.clone()).await?;
 
-        // (0..10).for_each(|j| {
-        //     match i % 2 {
-        //         0 => multicall.add_call(),
-        //         1 => contract.twoEmits().into_transaction_request(),
-        //         _ => unreachable!(),
-        //     }
-        // });
         let tx_reqs = (0..10)
             .map(|i| match i % 2 {
                 0 => contract.testEmit().into_transaction_request(),
@@ -1190,7 +1052,7 @@ mod test {
             .ok_or(anyhow!("Could not get block test"))?;
         let receipt_hash = block.header().receipts_root;
         let proofs = receipt_query
-            .query_receipt_proofs(&rpc.root(), BlockNumberOrTag::Number(block_number))
+            .query_receipt_proofs(rpc.root(), BlockNumberOrTag::Number(block_number))
             .await?;
 
         // Now for each transaction we fetch the block, then get the MPT Trie proof that the receipt is included and verify it
@@ -1527,6 +1389,166 @@ mod test {
     pub(crate) fn rlp_opt<T: rlp::Encodable>(rlp: &mut rlp::RlpStream, opt: &Option<T>) {
         if let Some(inner) = opt {
             rlp.append(inner);
+        }
+    }
+    // for compatibility check with alloy
+    mod tryethers {
+
+        use std::sync::Arc;
+
+        use anyhow::Result;
+        use eth_trie::{EthTrie, MemoryDB, Trie};
+        use ethers::{
+            providers::{Http, Middleware, Provider},
+            types::{BlockId, Bytes, Transaction, TransactionReceipt, U64},
+        };
+        use rlp::{Encodable, RlpStream};
+
+        /// A wrapper around a transaction and its receipt. The receipt is used to filter
+        /// bad transactions, so we only compute over valid transactions.
+        pub struct TxAndReceipt(Transaction, TransactionReceipt);
+
+        impl TxAndReceipt {
+            pub fn tx(&self) -> &Transaction {
+                &self.0
+            }
+            pub fn receipt(&self) -> &TransactionReceipt {
+                &self.1
+            }
+            pub fn tx_rlp(&self) -> Bytes {
+                self.0.rlp()
+            }
+            // TODO: this should be upstreamed to ethers-rs
+            pub fn receipt_rlp(&self) -> Bytes {
+                let tx_type = self.tx().transaction_type;
+                let mut rlp = RlpStream::new();
+                rlp.begin_unbounded_list();
+                match &self.1.status {
+                    Some(s) if s.as_u32() == 1 => rlp.append(s),
+                    _ => rlp.append_empty_data(),
+                };
+                rlp.append(&self.1.cumulative_gas_used)
+                    .append(&self.1.logs_bloom)
+                    .append_list(&self.1.logs);
+
+                rlp.finalize_unbounded_list();
+                let rlp_bytes: Bytes = rlp.out().freeze().into();
+                let mut encoded = vec![];
+                match tx_type {
+                    // EIP-2930 (0x01)
+                    Some(x) if x == U64::from(0x1) => {
+                        encoded.extend_from_slice(&[0x1]);
+                        encoded.extend_from_slice(rlp_bytes.as_ref());
+                        encoded.into()
+                    }
+                    // EIP-1559 (0x02)
+                    Some(x) if x == U64::from(0x2) => {
+                        encoded.extend_from_slice(&[0x2]);
+                        encoded.extend_from_slice(rlp_bytes.as_ref());
+                        encoded.into()
+                    }
+                    _ => rlp_bytes,
+                }
+            }
+        }
+        /// Structure containing the block header and its transactions / receipts. Amongst other things,
+        /// it is used to create a proof of inclusion for any transaction inside this block.
+        pub struct BlockData {
+            pub block: ethers::types::Block<Transaction>,
+            // TODO: add generics later - this may be re-used amongst different workers
+            pub tx_trie: EthTrie<MemoryDB>,
+            pub receipts_trie: EthTrie<MemoryDB>,
+        }
+
+        impl BlockData {
+            pub async fn fetch<T: Into<BlockId> + Send + Sync>(
+                blockid: T,
+                url: String,
+            ) -> Result<Self> {
+                let provider =
+                    Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+                Self::fetch_from(&provider, blockid).await
+            }
+            pub async fn fetch_from<T: Into<BlockId> + Send + Sync>(
+                provider: &Provider<Http>,
+                blockid: T,
+            ) -> Result<Self> {
+                let block = provider
+                    .get_block_with_txs(blockid)
+                    .await?
+                    .expect("should have been a block");
+                let receipts = provider.get_block_receipts(block.number.unwrap()).await?;
+
+                let tx_with_receipt = block
+                    .transactions
+                    .clone()
+                    .into_iter()
+                    .map(|tx| {
+                        let tx_hash = tx.hash();
+                        let r = receipts
+                            .iter()
+                            .find(|r| r.transaction_hash == tx_hash)
+                            .expect("RPC sending invalid data");
+                        // TODO remove cloning
+                        TxAndReceipt(tx, r.clone())
+                    })
+                    .collect::<Vec<_>>();
+
+                // check transaction root
+                let memdb = Arc::new(MemoryDB::new(true));
+                let mut tx_trie = EthTrie::new(Arc::clone(&memdb));
+                for tr in tx_with_receipt.iter() {
+                    tx_trie
+                        .insert(&tr.receipt().transaction_index.rlp_bytes(), &tr.tx_rlp())
+                        .expect("can't insert tx");
+                }
+
+                // check receipt root
+                let memdb = Arc::new(MemoryDB::new(true));
+                let mut receipts_trie = EthTrie::new(Arc::clone(&memdb));
+                for tr in tx_with_receipt.iter() {
+                    if tr.tx().transaction_index.unwrap() == U64::from(0) {
+                        println!(
+                            "Ethers: Index {} -> {:?}",
+                            tr.tx().transaction_index.unwrap(),
+                            tr.receipt_rlp().to_vec()
+                        );
+                    }
+                    receipts_trie
+                        .insert(
+                            &tr.receipt().transaction_index.rlp_bytes(),
+                            // TODO: make getter value for rlp encoding
+                            &tr.receipt_rlp(),
+                        )
+                        .expect("can't insert tx");
+                }
+                let computed = tx_trie.root_hash().expect("root hash problem");
+                let expected = block.transactions_root;
+                assert_eq!(expected, computed);
+
+                let computed = receipts_trie.root_hash().expect("root hash problem");
+                let expected = block.receipts_root;
+                assert_eq!(expected, computed);
+
+                Ok(BlockData {
+                    block,
+                    tx_trie,
+                    receipts_trie,
+                })
+            }
+
+            // recompute the receipts trie by first converting all receipts form RPC type to consensus type
+            // since in Alloy these are two different types and RLP functions are only implemented for
+            // consensus ones.
+            pub fn check(&mut self) -> Result<()> {
+                let computed = self.receipts_trie.root_hash()?;
+                let tx_computed = self.tx_trie.root_hash()?;
+                let expected = self.block.receipts_root;
+                let tx_expected = self.block.transactions_root;
+                assert_eq!(expected.0, computed.0);
+                assert_eq!(tx_expected.0, tx_computed.0);
+                Ok(())
+            }
         }
     }
 }
