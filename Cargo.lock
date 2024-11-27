@@ -3843,6 +3843,7 @@ dependencies = [
  "testfile",
  "tokio",
  "tokio-postgres",
+ "tracing",
  "verifiable-db",
 ]
 

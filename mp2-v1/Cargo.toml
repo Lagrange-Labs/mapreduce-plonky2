@@ -25,6 +25,7 @@ rlp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio-postgres.workspace = true
+tracing.workspace = true
 
 mp2_common = { path = "../mp2-common" }
 recursion_framework = { path = "../recursion-framework" }
