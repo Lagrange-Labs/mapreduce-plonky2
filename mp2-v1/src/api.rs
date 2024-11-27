@@ -79,7 +79,9 @@ impl PublicParameters {
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
-pub fn build_circuits_params() -> PublicParameters {
+pub fn build_circuits_params(
+    extraction_type: block_extraction::ExtractionType,
+) -> PublicParameters {
     log::info!("Building contract_extraction parameters...");
     let contract_extraction = contract_extraction::build_circuits_params();
     log::info!("Building length_extraction parameters...");
@@ -87,7 +89,7 @@ pub fn build_circuits_params() -> PublicParameters {
     log::info!("Building values_extraction parameters...");
     let values_extraction = values_extraction::build_circuits_params();
     log::info!("Building block_extraction parameters...");
-    let block_extraction = block_extraction::build_circuits_params();
+    let block_extraction = block_extraction::build_circuits_params(extraction_type);
     log::info!("Building final_extraction parameters...");
     let final_extraction = final_extraction::PublicParameters::build(
         block_extraction.circuit_data().verifier_data(),
@@ -141,6 +143,9 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                         length_circuit_set,
                     )
                 }
+                final_extraction::CircuitInput::Receipt(input) => params
+                    .final_extraction
+                    .generate_receipt_proof(input, value_circuit_set),
             }
         }
         CircuitInput::CellsTree(input) => verifiable_db::api::generate_proof(

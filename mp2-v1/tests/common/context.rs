@@ -12,7 +12,10 @@ use anyhow::{Context, Result};
 use envconfig::Envconfig;
 use log::info;
 use mp2_common::eth::ProofQuery;
-use mp2_v1::api::{build_circuits_params, PublicParameters};
+use mp2_v1::{
+    api::{build_circuits_params, PublicParameters},
+    block_extraction::ExtractionType,
+};
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
@@ -90,14 +93,14 @@ pub async fn new_local_chain(storage: ProofKV) -> TestContext {
 }
 
 pub enum ParamsType {
-    Indexing,
+    Indexing(ExtractionType),
     Query,
 }
 
 impl ParamsType {
     pub fn full_path(&self, mut pre: PathBuf) -> PathBuf {
         match self {
-            ParamsType::Indexing => pre.push("index.params"),
+            ParamsType::Indexing(_) => pre.push("index.params"),
             ParamsType::Query => pre.push("query.params"),
         };
         pre
@@ -113,7 +116,7 @@ impl ParamsType {
                 .context("while parsing MP2 parameters")?;
                 ctx.query_params = Some(params);
             }
-            ParamsType::Indexing => {
+            ParamsType::Indexing(_) => {
                 info!("parsing the indexing mp2-v1 parameters");
                 let params = bincode::deserialize_from(BufReader::new(
                     File::open(&path).with_context(|| format!("while opening {path:?}"))?,
@@ -145,9 +148,9 @@ impl ParamsType {
                 ctx.query_params = Some(params);
                 Ok(())
             }
-            ParamsType::Indexing => {
+            ParamsType::Indexing(et) => {
                 info!("building the mp2 indexing parameters");
-                let mp2 = build_circuits_params();
+                let mp2 = build_circuits_params(*et);
                 ctx.params = Some(mp2);
                 info!("writing the mp2-v1 indexing parameters");
                 Ok(())
@@ -170,7 +173,7 @@ impl ParamsType {
                 )?;
                 Ok(())
             }
-            ParamsType::Indexing => {
+            ParamsType::Indexing(_) => {
                 bincode::serialize_into(
                     BufWriter::new(
                         File::create(&path).with_context(|| format!("while creating {path:?}"))?,
