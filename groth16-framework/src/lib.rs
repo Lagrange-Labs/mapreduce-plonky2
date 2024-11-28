@@ -6,7 +6,7 @@
 //! 1. Generate the asset files.
 //!
 //!    The asset files are `circuit.bin`, `r1cs.bin`, `pk.bin`, `vk.bin` and
-//!    `verifier.sol`. User could call the `compile_and_generate_assets`
+//!    `Verifier.sol`. User could call the `compile_and_generate_assets`
 //!    function to generate these files as below.
 //!
 //!    ``
@@ -76,7 +76,7 @@ pub mod utils;
 mod verifier;
 
 // The function is used to generate the asset files of `circuit.bin`,
-// `r1cs.bin`, `pk.bin`, `vk.bin` and `verifier.sol`. It's only necessary to be
+// `r1cs.bin`, `pk.bin`, `vk.bin` and `Verifier.sol`. It's only necessary to be
 // called for re-generating these asset files when the circuit code changes.
 pub use compiler::compile_and_generate_assets;
 

@@ -5,7 +5,7 @@ use anyhow::Result;
 use std::ffi::CString;
 
 /// Compile the circuit data and generate the asset files of `r1cs.bin`,
-/// `pk.bin`, `vk.bin` and `verifier.sol`.
+/// `pk.bin`, `vk.bin` and `Verifier.sol`.
 pub fn compile_and_generate_assets(
     common_circuit_data: &str,
     verifier_only_circuit_data: &str,
