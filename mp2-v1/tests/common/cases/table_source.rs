@@ -16,8 +16,10 @@ use log::{debug, info};
 use mp2_common::{
     digest::{Digest, TableDimension},
     eth::{ProofQuery, StorageSlot},
+    group_hashing::map_to_curve_point,
     proof::ProofWithVK,
     types::HashOutput,
+    utils::ToFields,
 };
 use mp2_v1::{
     api::{
@@ -35,9 +37,7 @@ use mp2_v1::{
         identifier_for_mapping_value_column, identifier_single_var_column, merge_table_row_digests,
     },
 };
-use plonky2::field::types::Sample;
-use plonky2_ecgfp5::curve::curve::Point;
-use rand::{thread_rng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
@@ -205,6 +205,14 @@ pub(crate) enum TableSource {
 }
 
 impl TableSource {
+    pub fn is_merge_case(&self) -> bool {
+        match self {
+            TableSource::SingleValues(_) | TableSource::Mapping(_) => false,
+            TableSource::Merge(_) => true,
+            TableSource::NoProvable(NoProvableExtractionArgs { inner }) => inner.is_merge_case(),
+        }
+    }
+
     pub async fn compute_row_digest(&self, ctx: &TestContext, contract: &Contract) -> Digest {
         match self {
             TableSource::SingleValues(args) => args.compute_row_digest(ctx, contract).await,
@@ -962,7 +970,7 @@ impl MergeSource {
         let single_digest = self.single.compute_row_digest(ctx, contract).await;
         let mapping_digest = self.mapping.compute_row_digest(ctx, contract).await;
 
-        merge_table_row_digests(&[single_digest], &[mapping_digest])
+        merge_table_row_digests(&[mapping_digest], &[single_digest])
     }
 
     pub async fn init_contract_data(
@@ -1315,11 +1323,18 @@ impl NoProvableExtractionArgs {
         let [block_hash, prev_block_hash] =
             [block.header.hash, block.header.parent_hash].map(|b| HashOutput(b.0));
 
-        // We don't care the metadata digest in integration test.
-        // Since in circuit, we add a prefix `DUMMY_EXTRACTION` to
-        // generate a new digest and don't prove it.
-        let rng = &mut thread_rng();
-        let metadata_digest = Point::sample(rng);
+        let is_merge = self.inner.is_merge_case();
+
+        // TRICKY: The metadata digest could be set to any digest which is used to identify this
+        // table of no provable extraction. We convert the metadata hash of the original extraction
+        // for convenience, actually it could be set to any digest by the caller. In the dummy
+        // circuit of final extraction, we add a prefix `DUMMY_EXTRACTION` to generate a new digest
+        // and don't prove this metadata digest.
+        let inputs = self.inner.metadata_hash(contract).to_fields();
+        let metadata_digest = map_to_curve_point(&inputs);
+
+        // The expected metadata hash is computed by the metadata digest and will check in the IVC
+        // circuits.
         let metadata_hash = no_provable_metadata_hash(&metadata_digest);
 
         // Compute the row digest.
@@ -1327,7 +1342,7 @@ impl NoProvableExtractionArgs {
 
         Ok((
             ExtractionProofInput::NoProvable(NoProvableExtractionProof {
-                is_merge: false,
+                is_merge,
                 block_hash,
                 prev_block_hash,
                 block_number,

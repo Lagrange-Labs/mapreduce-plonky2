@@ -5,10 +5,11 @@ use super::{
     table::TableID,
 };
 use anyhow::Result;
+use futures::executor::block_on;
 use mp2_common::{proof::ProofWithVK, types::HashOutput, F};
 use mp2_v1::{api, indexing::block::BlockPrimaryIndex};
 use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
-use verifiable_db::ivc::PublicInputs;
+use verifiable_db::{block_tree, ivc::PublicInputs};
 
 impl TestContext {
     pub async fn prove_ivc(
@@ -34,6 +35,24 @@ impl TestContext {
         let previous_ivc_key = ProofKey::IVC(bn - 1);
         let input = match self.storage.get_proof_exact(&previous_ivc_key) {
             Ok(previous_proof) => {
+                // Check the input proofs.
+                {
+                    let [prev_proof, block_proof] = [&previous_proof, &root_proof]
+                        .map(|proof| ProofWithVK::deserialize(proof).unwrap());
+                    let prev_pi = PublicInputs::from_slice(&prev_proof.proof.public_inputs);
+                    let block_pi =
+                        block_tree::PublicInputs::from_slice(&block_proof.proof.public_inputs);
+                    assert_eq!(
+                        prev_pi.block_hash_fields(),
+                        block_pi.prev_block_hash_fields(),
+                    );
+                    assert_eq!(
+                        prev_pi.merkle_root_hash_fields(),
+                        block_pi.old_merkle_hash_field(),
+                    );
+                    assert_eq!(prev_pi.z0_u256(), block_pi.min_block_number().unwrap());
+                    assert_eq!(prev_pi.metadata_hash(), block_pi.metadata_hash());
+                }
                 verifiable_db::ivc::CircuitInput::new_subsequent_input(root_proof, previous_proof)
             }
             Err(_) => verifiable_db::ivc::CircuitInput::new_first_input(root_proof),

@@ -69,11 +69,12 @@ pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
 
 impl TableIndexing {
     /// Create a wrapping test case from the original one for testing no provable extraction.
-    pub(crate) fn to_no_provable_test_case(mut self) -> Self {
+    pub(crate) fn no_provable_test_case(mut original: Self) -> Self {
         // Wrap the original table source to a source of no provable extraction type.
-        self.source = TableSource::NoProvable(NoProvableExtractionArgs::new(Box::new(self.source)));
+        original.source =
+            TableSource::NoProvable(NoProvableExtractionArgs::new(Box::new(original.source)));
 
-        self
+        original
     }
 
     pub(crate) async fn merge_table_test_case(

@@ -29,7 +29,7 @@ use common::{
     context::{self, ParamsType, TestContextConfig},
     proof_storage::{ProofKV, DEFAULT_PROOF_STORE_FOLDER},
     table::Table,
-    TableInfo,
+    TableInfo, TestContext,
 };
 use envconfig::Envconfig;
 use log::info;
@@ -71,7 +71,8 @@ const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
 const MERGE_TABLE_INFO_FILE: &str = "merge_column_info.json";
 
 #[test(tokio::test)]
-#[ignore]
+// gupeng
+// #[ignore]
 async fn integrated_indexing() -> Result<()> {
     // Create the test context for mainnet.
     // let ctx = &mut TestContext::new_mainet();
@@ -113,39 +114,12 @@ async fn integrated_indexing() -> Result<()> {
     ];
     merged.run(&mut ctx, genesis, changes).await?;
 
-    // Run a test case for no provable extraction of single value slots.
-    let (mut no_provable, genesis) = {
-        let (single, genesis) = TableIndexing::single_value_test_case(&mut ctx).await?;
-        let no_provable = single.to_no_provable_test_case();
-
-        (no_provable, genesis)
-    };
-    let changes = vec![
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Silent,
-        ChangeType::Update(UpdateType::SecondaryIndex),
-    ];
-    no_provable.run(&mut ctx, genesis, changes).await?;
-
-    // Run a test case for no provable extraction of merge table.
-    let (mut no_provable, genesis) = {
-        let (merge, genesis) = TableIndexing::merge_table_test_case(&mut ctx).await?;
-        let no_provable = merge.to_no_provable_test_case();
-
-        (no_provable, genesis)
-    };
-    let changes = vec![
-        ChangeType::Insertion,
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Silent,
-        ChangeType::Deletion,
-    ];
-    no_provable.run(&mut ctx, genesis, changes).await?;
+    run_no_provable_test_cases(&mut ctx).await?;
 
     // save columns information and table information in JSON so querying test can pick up
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
     write_table_info(MERGE_TABLE_INFO_FILE, merged.table_info())?;
+
     Ok(())
 }
 
@@ -276,4 +250,52 @@ async fn test_andrus_query() -> Result<()> {
     let _proof = ctx.run_query_proof("revelation", GlobalCircuitInput::Revelation(input))?;
     info!("all good");
     Ok(())
+}
+
+async fn run_no_provable_test_cases(ctx: &mut TestContext) -> Result<()> {
+    // Run a test case for no provable extraction of single value slots.
+    let (mut no_provable, genesis) = {
+        let (single, genesis) = TableIndexing::single_value_test_case(ctx).await?;
+        let no_provable = TableIndexing::no_provable_test_case(single);
+
+        (no_provable, genesis)
+    };
+    let changes = vec![
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
+        ChangeType::Update(UpdateType::SecondaryIndex),
+    ];
+    no_provable.run(ctx, genesis, changes).await?;
+
+    // Run a test case for no provable extraction of mapping slot.
+    let (mut no_provable, genesis) = {
+        let (mapping, genesis) = TableIndexing::mapping_test_case(ctx).await?;
+        let no_provable = TableIndexing::no_provable_test_case(mapping);
+
+        (no_provable, genesis)
+    };
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
+        ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
+    ];
+    no_provable.run(ctx, genesis, changes).await?;
+
+    // Run a test case for no provable extraction of merge table.
+    let (mut no_provable, genesis) = {
+        let (merge, genesis) = TableIndexing::merge_table_test_case(ctx).await?;
+        let no_provable = TableIndexing::no_provable_test_case(merge);
+
+        (no_provable, genesis)
+    };
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
+        ChangeType::Deletion,
+    ];
+    no_provable.run(ctx, genesis, changes).await
 }

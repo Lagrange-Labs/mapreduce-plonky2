@@ -142,3 +142,67 @@ impl CircuitLogicWires<F, D, 0> for DummyWires {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use mp2_common::C;
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+
+    impl UserCircuit<F, D> for DummyCircuit {
+        type Wires = DummyWires;
+
+        fn build(cb: &mut CBuilder) -> Self::Wires {
+            DummyCircuit::build(cb)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.assign(pw, wires);
+        }
+    }
+
+    #[test]
+    fn test_final_extraction_dummy_circuit() {
+        /*
+                let mut rng = thread_rng();
+
+                let identifier = rng.gen::<u32>().to_field();
+                let value = U256::from_limbs(rng.gen::<[u64; 4]>());
+                let value_fields = value.to_fields();
+
+                let test_circuit: LeafCircuit = Cell {
+                    identifier,
+                    value,
+                    is_multiplier,
+                }
+                .into();
+
+                let proof = run_circuit::<F, D, C, _>(test_circuit);
+                let pi = PublicInputs::from_slice(&proof.public_inputs);
+                // Check the node Poseidon hash
+                {
+                    let empty_hash = empty_poseidon_hash();
+                    let inputs: Vec<_> = empty_hash
+                        .elements
+                        .iter()
+                        .cloned()
+                        .chain(empty_hash.elements)
+                        .chain(iter::once(identifier))
+                        .chain(value_fields.clone())
+                        .collect();
+                    let exp_hash = H::hash_no_pad(&inputs);
+
+                    assert_eq!(pi.h, exp_hash.elements);
+                }
+                // Check the cells digest
+                {
+                    let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
+                    let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
+                    match is_multiplier {
+                        true => assert_eq!(pi.multiplier_digest_point(), exp_digest),
+                        false => assert_eq!(pi.individual_digest_point(), exp_digest),
+                    }
+                }
+        */
+    }
+}
