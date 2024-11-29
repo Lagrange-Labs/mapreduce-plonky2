@@ -139,7 +139,7 @@ where
         let primary_index = b.add_virtual_target();
         let ops = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
         let [min_query_primary, max_query_primary] = b.add_virtual_u256_arr_unsafe(); // unsafe is ok
-                                                                          // since they are exposed as public inputs
+                                                                                      // since they are exposed as public inputs
         let index_path = MerklePathWithNeighborsGadget::build(
             b,
             index_node_value.clone(),
@@ -573,8 +573,7 @@ mod tests {
 
         // we try to prove also with node_b
         let path_b = vec![(node_a.clone(), ChildPosition::Left)];
-        let merkle_path_b =
-            TreePathInputs::new(node_b, path_b, [Some(node_d.clone()), None]);
+        let merkle_path_b = TreePathInputs::new(node_b, path_b, [Some(node_d.clone()), None]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_b,
@@ -617,11 +616,8 @@ mod tests {
         .unwrap();
         // try generate prove with node_a
         let path_a = vec![];
-        let merkle_path_a = TreePathInputs::new(
-            node_a,
-            path_a,
-            [Some(node_b.clone()), Some(node_c.clone())],
-        );
+        let merkle_path_a =
+            TreePathInputs::new(node_a, path_a, [Some(node_b.clone()), Some(node_c.clone())]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_a,
@@ -656,8 +652,7 @@ mod tests {
 
         // try generate prove with node_c
         let path_c = vec![(node_a.clone(), ChildPosition::Right)];
-        let merkle_path_c =
-            TreePathInputs::new(node_c, path_c, [None, Some(node_g.clone())]);
+        let merkle_path_c = TreePathInputs::new(node_c, path_c, [None, Some(node_g.clone())]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_c,
@@ -679,11 +674,8 @@ mod tests {
             (node_b.clone(), ChildPosition::Left),
             (node_a.clone(), ChildPosition::Left),
         ];
-        let merkle_path_d = TreePathInputs::new(
-            node_d,
-            path_d,
-            [Some(node_e.clone()), Some(node_f.clone())],
-        );
+        let merkle_path_d =
+            TreePathInputs::new(node_d, path_d, [Some(node_e.clone()), Some(node_f.clone())]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_d,

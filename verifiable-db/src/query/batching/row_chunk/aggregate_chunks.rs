@@ -12,7 +12,7 @@ use crate::query::universal_circuit::universal_query_gadget::{
 use super::{consecutive_rows::are_consecutive_rows, BoundaryRowDataTarget, RowChunkDataTarget};
 
 /// This method aggregates the 2 chunks `first` and `second`, also checking
-/// that they are consecutive. The returned aggregated chunk will 
+/// that they are consecutive. The returned aggregated chunk will
 /// correspond to first if `is_second_dummy` flag is true
 pub(crate) fn aggregate_chunks<const MAX_NUM_RESULTS: usize>(
     b: &mut CBuilder,
@@ -392,8 +392,14 @@ mod tests {
             self.first.assign(pw, &wires.first);
             self.second.assign(pw, &wires.second);
             [
-                (&wires.min_query_primary, self.min_query_primary.unwrap_or(U256::ZERO)),
-                (&wires.max_query_primary, self.max_query_primary.unwrap_or(U256::MAX)),
+                (
+                    &wires.min_query_primary,
+                    self.min_query_primary.unwrap_or(U256::ZERO),
+                ),
+                (
+                    &wires.max_query_primary,
+                    self.max_query_primary.unwrap_or(U256::MAX),
+                ),
                 (
                     &wires.min_query_secondary,
                     self.min_query_secondary.unwrap_or(U256::ZERO),

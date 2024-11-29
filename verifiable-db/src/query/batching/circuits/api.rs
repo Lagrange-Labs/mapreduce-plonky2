@@ -58,13 +58,16 @@ impl TreePathInputs {
         path: Vec<(NodeInfo, ChildPosition)>,
         children: [Option<NodeInfo>; 2],
     ) -> Self {
-        let siblings = path.iter().map(|(node, child_pos)| {
-            let sibling_index = match child_pos {
-                &ChildPosition::Left => 1,
-                &ChildPosition::Right => 0,
-            };
-            Some(HashOutput::try_from(node.child_hashes[sibling_index]).unwrap())        
-        }).collect_vec();
+        let siblings = path
+            .iter()
+            .map(|(node, child_pos)| {
+                let sibling_index = match child_pos {
+                    &ChildPosition::Left => 1,
+                    &ChildPosition::Right => 0,
+                };
+                Some(HashOutput::try_from(node.child_hashes[sibling_index]).unwrap())
+            })
+            .collect_vec();
         Self {
             node_info,
             path,
@@ -103,26 +106,15 @@ impl RowPath {
         index_tree_path: Vec<(NodeInfo, ChildPosition)>,
         index_node_children: [Option<NodeInfo>; 2],
     ) -> Self {
-        let row_path = TreePathInputs::new(
-            row_node_info,
-            row_tree_path,
-            row_node_children,
-        );
-        let index_path = TreePathInputs::new(
-            index_node_info,
-            index_tree_path,
-            index_node_children,
-        );
+        let row_path = TreePathInputs::new(row_node_info, row_tree_path, row_node_children);
+        let index_path = TreePathInputs::new(index_node_info, index_tree_path, index_node_children);
         Self {
             row_tree_path: row_path,
             index_tree_path: index_path,
         }
     }
 
-    pub fn new_from_paths(
-        row_path: TreePathInputs,
-        index_path: TreePathInputs,
-    ) -> Self {
+    pub fn new_from_paths(row_path: TreePathInputs, index_path: TreePathInputs) -> Self {
         Self {
             row_tree_path: row_path,
             index_tree_path: index_path,
@@ -723,7 +715,7 @@ mod tests {
             .try_into()
             .unwrap();
         let path_1a = vec![];
-        
+
         let path_1 = vec![];
         let node_1_children = [Some(node_0.node.clone()), Some(node_2.node.clone())];
 
@@ -783,7 +775,7 @@ mod tests {
             (node_2b.clone(), ChildPosition::Right),
             (node_2a.clone(), ChildPosition::Left),
         ];
-        
+
         let path_2 = vec![(node_1.node.clone(), ChildPosition::Right)];
         let node_0_hash =
             HashOutput::try_from(node_0.node.compute_node_hash(primary_index)).unwrap();

@@ -259,9 +259,10 @@ impl ColumnIDs {
     }
 
     pub fn non_indexed_columns(&self) -> Vec<u64> {
-        self.rest.iter().map(|id|
-            id.to_canonical_u64()
-        ).collect_vec()
+        self.rest
+            .iter()
+            .map(|id| id.to_canonical_u64())
+            .collect_vec()
     }
 
     pub(crate) fn to_vec(&self) -> Vec<F> {

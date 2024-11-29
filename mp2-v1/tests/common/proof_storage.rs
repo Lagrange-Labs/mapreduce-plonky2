@@ -3,12 +3,20 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{context::TestContextConfig, mkdir_all, table::TableID};
+use super::{
+    cases::query::{NUM_CHUNKS, NUM_ROWS},
+    context::TestContextConfig,
+    mkdir_all,
+    table::TableID,
+};
 use alloy::primitives::{Address, U256};
 use anyhow::{bail, Context, Result};
 use envconfig::Envconfig;
 use mp2_test::cells_tree::CellTree;
-use mp2_v1::indexing::{block::BlockPrimaryIndex, row::RowTreeKey};
+use mp2_v1::{
+    indexing::{block::BlockPrimaryIndex, row::RowTreeKey},
+    query::batching_planner::UpdateTreeKey,
+};
 use ryhope::tree::TreeTopology;
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +78,7 @@ pub enum ProofKey {
     QueryUniversal((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
     QueryAggregateRow((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
     QueryAggregateIndex((QueryID, PlaceholderValues, BlockPrimaryIndex)),
+    QueryAggregate((QueryID, PlaceholderValues, UpdateTreeKey<NUM_CHUNKS>)),
 }
 
 impl ProofKey {
@@ -129,6 +138,10 @@ impl Hash for ProofKey {
             }
             ProofKey::QueryAggregateIndex(n) => {
                 "query_aggregate_index".hash(state);
+                n.hash(state);
+            }
+            ProofKey::QueryAggregate(n) => {
+                "query_aggregate".hash(state);
                 n.hash(state);
             }
         }

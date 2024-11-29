@@ -687,10 +687,10 @@ mod tests {
         .unwrap();
         let proof = params
             .generate_proof(
-                input, 
-                query_circuits.get_recursive_circuit_set(), // unused in this test, so we provide a dummy one 
+                input,
+                query_circuits.get_recursive_circuit_set(), // unused in this test, so we provide a dummy one
                 query_circuits.get_recursive_circuit_set(),
-                None
+                None,
             )
             .unwrap();
         let (proof, _) = ProofWithVK::deserialize(&proof).unwrap().into();

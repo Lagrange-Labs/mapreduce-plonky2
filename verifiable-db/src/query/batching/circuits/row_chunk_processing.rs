@@ -197,7 +197,7 @@ where
     > {
         let query_input_wires = UniversalQueryHashInputs::build(b);
         let [min_query_primary, max_query_primary] = b.add_virtual_u256_arr_unsafe(); // unsafe should be ok since
-                                                                          // we are exposing these values as public inputs
+                                                                                      // we are exposing these values as public inputs
         let first_row_wires = RowProcessingGadgetInputs::build(
             b,
             &query_input_wires.input_wires,

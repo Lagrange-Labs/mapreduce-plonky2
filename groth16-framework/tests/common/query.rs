@@ -59,10 +59,10 @@ impl TestContext {
         let revelation_proof = self
             .revelation_params
             .generate_proof(
-                input, 
-                self.query_circuits.get_recursive_circuit_set(), 
-                self.query_circuits.get_recursive_circuit_set(), 
-                None
+                input,
+                self.query_circuits.get_recursive_circuit_set(),
+                self.query_circuits.get_recursive_circuit_set(),
+                None,
             )
             .unwrap();
         let revelation_proof = ProofWithVK::deserialize(&revelation_proof).unwrap();
