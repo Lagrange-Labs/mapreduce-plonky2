@@ -173,11 +173,13 @@ async fn generate_chunks<'a, const CHUNK_SIZE: usize, C: ContextProvider>(
 ///
 /// E   F   G       H   I    
 /// The nodes in this tree will be identified by the following keys:
+/// ```text
 ///                             (0,0)
 ///
 ///        (1,0)                (1,1)               (1,2)
 ///
-/// (2,0)  (2,1)  (2,2)         (2,3)  (2,4)      
+/// (2,0)  (2,1)  (2,2)         (2,3)  (2,4)
+/// ```      
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Default)]
 pub struct UpdateTreeKey<const ARITY: usize>((usize, usize));
 
