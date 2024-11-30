@@ -1,5 +1,5 @@
 //! Test the Groth16 proving process for the query circuits.
-
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
 mod common;
@@ -35,8 +35,8 @@ fn test_local_groth16_proof() {
 
     // Verify the query in the Solidity function.
     // The editing Solidity code is saved in `test_data/TestGroth16Verifier.sol`.
-    // TODO: In practice, the separate `Groth16VerifierExtensions.sol` and
-    // `verifier.sol` should be used, but the `revm` (Rust EVM) cannot support
+    // TODO: In practice, the separate `Groth16VerifierExtension.sol` and
+    // `Verifier.sol` should be used, but the `revm` (Rust EVM) cannot support
     // compilated contract deployment (as inheritance) for now.
     verify_query_in_solidity(ASSET_DIR);
 }
@@ -64,8 +64,8 @@ fn test_groth16_proving_for_query() {
 
     // Verify the query in the Solidity function.
     // The editing Solidity code is saved in `test_data/TestGroth16Verifier.sol`.
-    // TODO: In practice, the separate `Groth16VerifierExtensions.sol` and
-    // `verifier.sol` should be used, but the `revm` (Rust EVM) cannot support
+    // TODO: In practice, the separate `Groth16VerifierExtension.sol` and
+    // `Verifier.sol` should be used, but the `revm` (Rust EVM) cannot support
     // compilated contract deployment (as inheritance) for now.
     verify_query_in_solidity(ASSET_DIR);
 }

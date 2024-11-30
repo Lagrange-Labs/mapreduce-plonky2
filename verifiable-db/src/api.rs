@@ -4,9 +4,9 @@ use crate::{
     block_tree, cells_tree,
     extraction::{ExtractionPI, ExtractionPIWrap},
     ivc,
-    query::{self, api::Parameters as QueryParams, PI_LEN as QUERY_PI_LEN},
+    query::{self, api::Parameters as QueryParams, pi_len as query_pi_len},
     revelation::{
-        self, api::Parameters as RevelationParams, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
+        self, api::Parameters as RevelationParams, num_query_io, pi_len as revelation_pi_len,
     },
     row_tree::{self},
 };
@@ -145,7 +145,7 @@ impl<
         const MAX_NUM_PLACEHOLDERS: usize,
     > WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
 where
-    [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
+    [(); revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     pub fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
@@ -155,13 +155,14 @@ where
             C,
             D,
             {
-                REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
+                revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>(
+                )
             },
         >::new(default_config(), revelation_circuit_set);
         let query_verifier_wires = verifier_gadget.verify_proof_in_circuit_set(&mut builder);
         // expose public inputs of verifier proof as public inputs
         let verified_proof_pi = query_verifier_wires.get_public_input_targets::<F, {
-            REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
+            revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()
         }>();
         builder.register_public_inputs(verified_proof_pi);
         let circuit_data = builder.build();
@@ -203,7 +204,7 @@ pub struct QueryParameters<
 > where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
@@ -230,6 +231,7 @@ pub struct QueryParameters<
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum QueryCircuitInput<
     const ROW_TREE_MAX_DEPTH: usize,
     const INDEX_TREE_MAX_DEPTH: usize,
@@ -290,13 +292,13 @@ impl<
 where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
-    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
-    [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
+    [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
+    [(); revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()]:,
 {
     /// Build `QueryParameters` from serialized `ParamsInfo` of `PublicParamaters`
     pub fn build_params(preprocessing_params_info: &[u8]) -> Result<Self> {

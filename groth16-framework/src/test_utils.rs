@@ -66,7 +66,7 @@ fn groth16_verify(asset_dir: &str, proof: &Groth16Proof) {
 /// Test the Solidity verification.
 fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
     let solidity_file_path = Path::new(asset_dir)
-        .join("verifier.sol")
+        .join("Verifier.sol")
         .to_string_lossy()
         .to_string();
 

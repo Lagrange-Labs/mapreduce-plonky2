@@ -4,22 +4,15 @@ use alloy::primitives::U256;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
-    poseidon::{empty_poseidon_hash, HashPermutation},
-    proof::ProofWithVK,
-    serialization::{deserialize_long_array, serialize_long_array},
-    types::{CBuilder, HashOutput},
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{Fieldable, ToFields, ToTargets},
-    CHasher, F,
+    poseidon::{empty_poseidon_hash, HashPermutation}, proof::ProofWithVK, serialization::{deserialize_long_array, serialize_long_array}, types::{CBuilder, HashOutput}, u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256}, utils::{Fieldable, ToFields, ToTargets}, CHasher, F
 };
 use plonky2::{
-    field::types::Field,
     hash::{
         hash_types::{HashOut, HashOutTarget},
         hashing::hash_n_to_hash_no_pad,
     },
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::config::GenericHashOut,
@@ -245,6 +238,7 @@ pub(crate) struct NodeInfoTarget {
 }
 
 impl NodeInfoTarget {
+    #[allow(dead_code)]
     pub(crate) fn build(b: &mut CBuilder) -> Self {
         let [value, min, max] = b.add_virtual_u256_arr();
         let [left_child_hash, right_child_hash, embedded_tree_hash] =
@@ -310,7 +304,7 @@ pub enum ChildPosition {
 
 impl ChildPosition {
     // convert `self` to a flag specifying whether a node is the left child of another node or not
-    pub(crate) fn to_flag(&self) -> bool {
+    pub(crate) fn to_flag(self) -> bool {
         match self {
             ChildPosition::Left => true,
             ChildPosition::Right => false,

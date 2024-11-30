@@ -308,16 +308,16 @@ func SaveVerifierSolidity(assetDir string, vk groth16.VerifyingKey) error {
 	}
 	content := buf.String()
 
-	contractFile, err := os.Create(assetDir + "/verifier.sol")
+	contractFile, err := os.Create(assetDir + "/Verifier.sol")
 	if err != nil {
-		return errors.Wrap(err, "create verifier.sol file")
+		return errors.Wrap(err, "create Verifier.sol file")
 	}
 	defer contractFile.Close()
 
 	w := bufio.NewWriter(contractFile)
 	// write the new content to the writer
 	if _, err = w.Write([]byte(content)); err != nil {
-		return errors.Wrap(err, "write to verifier.sol")
+		return errors.Wrap(err, "write to Verifier.sol")
 	}
 
 	return nil

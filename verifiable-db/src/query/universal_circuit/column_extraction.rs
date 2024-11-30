@@ -1,13 +1,12 @@
 use super::{cells::build_cells_tree, ComputationalHashTarget, MembershipHashTarget};
 use crate::query::computational_hash_ids::{Extraction, Identifiers};
-use alloy::primitives::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    u256::{CircuitBuilderU256, UInt256Target},
     utils::SelectHashBuilder,
     F,
 };
@@ -49,6 +48,7 @@ pub(crate) struct ColumnExtractionHashWires<const MAX_NUM_COLUMNS: usize> {
 }
 
 /// Input + output wires for the column extraction component
+#[cfg(test)] // used only in test for now
 pub(crate) struct ColumnExtractionWires<const MAX_NUM_COLUMNS: usize> {
     pub(crate) value_wires: ColumnExtractionValueWires<MAX_NUM_COLUMNS>,
     pub(crate) hash_wires: ColumnExtractionHashWires<MAX_NUM_COLUMNS>,
@@ -99,6 +99,7 @@ impl<const MAX_NUM_COLUMNS: usize> ColumnExtractionInputs<MAX_NUM_COLUMNS> {
         }
     }
 
+    #[cfg(test)] // used only in test for now
     pub(crate) fn build(
         b: &mut CBuilder,
         column_values: &[UInt256Target; MAX_NUM_COLUMNS],
@@ -151,7 +152,8 @@ mod tests {
     use crate::query::universal_circuit::{ComputationalHash, MembershipHash};
 
     use super::*;
-    use mp2_common::{C, D};
+    use alloy::primitives::U256;
+    use mp2_common::{u256::WitnessWriteU256, C, D};
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
         circuit::{run_circuit, UserCircuit},

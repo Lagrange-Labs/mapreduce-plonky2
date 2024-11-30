@@ -1,4 +1,5 @@
 // #![warn(missing_docs)]
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
 //! This crate provides a framework to build circuits that needs to recursively verify proofs

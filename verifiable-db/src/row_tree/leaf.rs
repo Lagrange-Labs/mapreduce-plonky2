@@ -131,12 +131,7 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 mod test {
 
     use alloy::primitives::U256;
-    use mp2_common::{
-        group_hashing::{cond_field_hashed_scalar_mul, map_to_curve_point},
-        poseidon::empty_poseidon_hash,
-        utils::ToFields,
-        CHasher, C, D, F,
-    };
+    use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Sample,

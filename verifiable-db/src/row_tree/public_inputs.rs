@@ -38,7 +38,7 @@ pub struct PublicInputs<'a, T> {
     pub(crate) merge: &'a [T],
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, DR_RANGE, MIN_RANGE, MAX_RANGE, MERGE_RANGE];
 
