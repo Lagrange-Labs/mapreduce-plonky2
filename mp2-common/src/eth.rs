@@ -3,8 +3,9 @@
 use alloy::{
     consensus::{ReceiptEnvelope as CRE, ReceiptWithBloom, TxEnvelope},
     eips::BlockNumberOrTag,
-    network::{eip2718::Encodable2718, TransactionResponse},
-    primitives::{Address, B256},
+    json_abi::Event,
+    network::{eip2718::Encodable2718, BlockResponse},
+    primitives::{Address, Log, LogData, B256},
     providers::{Provider, RootProvider},
     rlp::{Decodable, Encodable as AlloyEncodable},
     rpc::types::{
@@ -740,10 +741,7 @@ impl BlockUtil {
                     _ => panic!("aie"),
                 };
 
-                let transaction_primitive = match TxEnvelope::try_from(transaction.clone()) {
-                    Ok(t) => t,
-                    _ => panic!("Couldn't get transaction envelope"),
-                };
+                let transaction_primitive = TxEnvelope::from(transaction.clone());
 
                 let body_rlp = receipt_primitive.encoded_2718();
 
@@ -810,7 +808,7 @@ mod test {
     use std::str::FromStr;
 
     use alloy::{
-        network::TransactionBuilder,
+        network::{TransactionBuilder, TransactionResponse},
         node_bindings::Anvil,
         primitives::{Bytes, Log, U256},
         providers::{ext::AnvilApi, Provider, ProviderBuilder},
