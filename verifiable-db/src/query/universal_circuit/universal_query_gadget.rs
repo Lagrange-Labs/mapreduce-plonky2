@@ -9,10 +9,7 @@ use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     poseidon::{empty_poseidon_hash, H},
-    serialization::{
-        deserialize, deserialize_long_array, serialize,
-        serialize_long_array,
-    },
+    serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{FromFields, ToFields, ToTargets},
@@ -398,7 +395,7 @@ pub trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
     type HashWires: OutputComponentHashWires;
 
     fn new(selector: &[F], ids: &[F], num_outputs: usize) -> Result<Self>;
-    
+
     #[cfg(test)] // used only in test for now
     fn build<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
@@ -407,7 +404,8 @@ pub trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
         predicate_value: &BoolTarget,
         predicate_hash: &ComputationalHashTarget,
     ) -> OutputComponentWires<Self::ValueWires, Self::HashWires> {
-        let hash_wires: <Self as OutputComponent<MAX_NUM_RESULTS>>::HashWires = Self::build_hash(b, possible_output_hash, predicate_hash);
+        let hash_wires: <Self as OutputComponent<MAX_NUM_RESULTS>>::HashWires =
+            Self::build_hash(b, possible_output_hash, predicate_hash);
         let value_wires = Self::build_values(
             b,
             possible_output_values,

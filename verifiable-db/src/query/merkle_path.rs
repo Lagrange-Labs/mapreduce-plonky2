@@ -285,8 +285,7 @@ where
             siblings
                 .get(i)
                 .and_then(|sibling| {
-                    sibling
-                        .map(|node_hash| HashOut::from_bytes((&node_hash).into()))
+                    sibling.map(|node_hash| HashOut::from_bytes((&node_hash).into()))
                 })
                 .unwrap_or(*empty_poseidon_hash())
         });
@@ -541,7 +540,7 @@ where
             };
             (predecessor_info, successor_info)
         };
-        
+
         #[allow(clippy::needless_range_loop)]
         for i in 0..MAX_DEPTH - 1 {
             // we need to look for the predecessor
@@ -704,7 +703,6 @@ mod tests {
         }
     }
 
-
     impl NeighborInfoTarget {
         const NUM_ELEMENTS: usize = 2 + NUM_LIMBS + NUM_HASH_OUT_ELTS;
     }
@@ -794,8 +792,7 @@ mod tests {
         // closure to generate a random node of the tree from the 2 children, if any
         let mut random_node =
             |left_child: Option<&NodeInfo>, right_child: Option<&NodeInfo>| -> NodeInfo {
-                let embedded_tree_hash =
-                    HashOutput::from(gen_random_field_hash::<F>());
+                let embedded_tree_hash = HashOutput::from(gen_random_field_hash::<F>());
                 let node_value = gen_random_u256(rng);
                 let node_min = if let Some(node) = &left_child {
                     node.min
@@ -807,12 +804,10 @@ mod tests {
                 } else {
                     node_value
                 };
-                let left_child = left_child.map(|node| {
-                    HashOutput::from(node.compute_node_hash(index_id))
-                });
-                let right_child = right_child.map(|node| {
-                    HashOutput::from(node.compute_node_hash(index_id))
-                });
+                let left_child =
+                    left_child.map(|node| HashOutput::from(node.compute_node_hash(index_id)));
+                let right_child =
+                    right_child.map(|node| HashOutput::from(node.compute_node_hash(index_id)));
                 NodeInfo::new(
                     &embedded_tree_hash,
                     left_child.as_ref(),
@@ -880,10 +875,7 @@ mod tests {
         assert_eq!(proof.public_inputs, root.to_vec());
 
         // Verify Merkle-path related to node D
-        let path = vec![
-            (node_b, ChildPosition::Left),
-            (node_a, ChildPosition::Left),
-        ];
+        let path = vec![(node_b, ChildPosition::Left), (node_a, ChildPosition::Left)];
         let siblings = vec![None, Some(node_c_hash)];
         let merkle_path_inputs = MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings).unwrap();
         let circuit = TestMerklePathGadget::<MAX_DEPTH> {
@@ -1025,10 +1017,7 @@ mod tests {
         check_public_inputs(proof, &node_e, "node E", predecessor_info, successor_info);
 
         // verify Merkle-path related to node D
-        let path = vec![
-            (node_b, ChildPosition::Left),
-            (node_a, ChildPosition::Left),
-        ];
+        let path = vec![(node_b, ChildPosition::Left), (node_a, ChildPosition::Left)];
         let siblings = vec![None, Some(node_c_hash)];
         let merkle_path_inputs = MerklePathWithNeighborsGadget::<MAX_DEPTH>::new(
             &path,
@@ -1104,10 +1093,7 @@ mod tests {
             (node_c, ChildPosition::Right),
             (node_a, ChildPosition::Right),
         ];
-        let siblings = vec![
-            None,
-            Some(HashOutput::from(node_b_hash)),
-        ];
+        let siblings = vec![None, Some(HashOutput::from(node_b_hash))];
         let merkle_path_inputs = MerklePathWithNeighborsGadget::<MAX_DEPTH>::new(
             &path,
             &siblings,

@@ -11,7 +11,9 @@ use mp2_common::{
     u256::is_less_than_or_equal_to_u256_arr,
     C, D, F,
 };
-use plonky2::plonk::{circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs};
+use plonky2::plonk::{
+    circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs,
+};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{

@@ -1,7 +1,8 @@
 use std::iter::once;
 
 use crate::query::{
-    aggregation::QueryBounds, computational_hash_ids::PlaceholderIdentifier, pi_len, public_inputs::PublicInputs
+    aggregation::QueryBounds, computational_hash_ids::PlaceholderIdentifier, pi_len,
+    public_inputs::PublicInputs,
 };
 use anyhow::Result;
 use itertools::Itertools;

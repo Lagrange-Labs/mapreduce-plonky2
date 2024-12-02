@@ -4,7 +4,13 @@ use alloy::primitives::U256;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
-    poseidon::{empty_poseidon_hash, HashPermutation}, proof::ProofWithVK, serialization::{deserialize_long_array, serialize_long_array}, types::{CBuilder, HashOutput}, u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256}, utils::{Fieldable, ToFields, ToTargets}, CHasher, F
+    poseidon::{empty_poseidon_hash, HashPermutation},
+    proof::ProofWithVK,
+    serialization::{deserialize_long_array, serialize_long_array},
+    types::{CBuilder, HashOutput},
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    utils::{Fieldable, ToFields, ToTargets},
+    CHasher, F,
 };
 use plonky2::{
     hash::{

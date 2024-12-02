@@ -73,9 +73,9 @@ use verifiable_db::{
 };
 
 use super::{
-    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput,
-    MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
-    MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
+    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, MAX_NUM_COLUMNS,
+    MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
+    MAX_NUM_RESULT_OPS,
 };
 
 pub type RevelationPublicInputs<'a> =
