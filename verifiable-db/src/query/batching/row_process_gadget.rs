@@ -17,7 +17,7 @@ use crate::query::{
 };
 
 use super::{
-    circuits::api::{RowPath, RowWithPath},
+    circuits::api::{NodePath, RowInput},
     row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget},
 };
 
@@ -284,7 +284,7 @@ impl<
         const MAX_NUM_PREDICATE_OPS: usize,
         const MAX_NUM_RESULT_OPS: usize,
         const MAX_NUM_RESULTS: usize,
-    > TryFrom<&'a RowWithPath>
+    > TryFrom<&'a RowInput>
     for RowProcessingGadgetInputs<
         ROW_TREE_MAX_DEPTH,
         INDEX_TREE_MAX_DEPTH,
@@ -299,7 +299,7 @@ where
     [(); MAX_NUM_RESULTS - 1]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
-    fn try_from(value: &RowWithPath) -> Result<Self> {
+    fn try_from(value: &RowInput) -> Result<Self> {
         let index_path = MerklePathWithNeighborsGadget::new(
             &value.path.index_tree_path.path,
             &value.path.index_tree_path.siblings,

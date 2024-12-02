@@ -139,7 +139,7 @@ where
         let primary_index = b.add_virtual_target();
         let ops = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
         let [min_query_primary, max_query_primary] = b.add_virtual_u256_arr_unsafe(); // unsafe is ok
-                                                                          // since they are exposed as public inputs
+                                                                                      // since they are exposed as public inputs
         let index_path = MerklePathWithNeighborsGadget::build(
             b,
             index_node_value.clone(),

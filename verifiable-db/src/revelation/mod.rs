@@ -7,9 +7,9 @@ use crate::{
 use mp2_common::F;
 
 pub mod api;
+mod batching;
 pub(crate) mod placeholders_check;
 mod public_inputs;
-mod revelation_batching;
 mod revelation_unproven_offset;
 mod revelation_without_results_tree;
 

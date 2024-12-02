@@ -9,7 +9,7 @@ use plonky2::{field::types::Field, iop::target::BoolTarget};
 use super::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget};
 
 /// This methods checks whether two nodes `first` and `second` are consecutive, according
-/// to the definition found in the docs 
+/// to the definition found in the docs
 /// (https://www.notion.so/lagrangelabs/Aggregating-Query-Results-with-Individual-Merkle-Paths-10628d1c65a880b1b151d4ac017fa445?pvs=4#10d28d1c65a8804fb11ed5d14fa70ea3)
 /// The query bounds provided as inputs refer to either the secondary or primary index,
 /// depending on whether the nodes are in a rows tree or in the index tree.
@@ -159,7 +159,7 @@ fn are_consecutive_nodes(
 }
 
 /// This methods checks whether two rows `first` and `second` are consecutive, according
-/// to the definition found in the docs 
+/// to the definition found in the docs
 /// (https://www.notion.so/lagrangelabs/Aggregating-Query-Results-with-Individual-Merkle-Paths-10628d1c65a880b1b151d4ac017fa445?pvs=4#10d28d1c65a8804fb11ed5d14fa70ea3)
 pub(crate) fn are_consecutive_rows(
     b: &mut CBuilder,

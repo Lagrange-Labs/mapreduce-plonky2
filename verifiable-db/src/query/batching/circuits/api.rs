@@ -70,14 +70,14 @@ impl TreePathInputs {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 /// Data structure containing the information about the paths in both the rows tree
-/// and the index tree for a generic row of our tables
-pub struct RowPath {
+/// and the index tree for a node in a rows tree
+pub struct NodePath {
     pub(crate) row_tree_path: TreePathInputs,
     /// Info about the node of the index tree storing the rows tree containing the row
     pub(crate) index_tree_path: TreePathInputs,
 }
 
-impl RowPath {
+impl NodePath {
     /// Instantiate a new instance of `RowPath` for a given proven row from the following input data:
     /// - `row_node_info`: data about the node of the row tree storing the row
     /// - `row_tree_path`: data about the nodes in the path of the rows tree for the node storing the row;
@@ -118,13 +118,17 @@ impl RowPath {
     }
 }
 
-pub struct RowWithPath {
+/// Data structure containing the inputs necessary to prove a query for a row
+/// of the DB table.
+pub struct RowInput {
     pub(crate) cells: RowCells,
-    pub(crate) path: RowPath,
+    pub(crate) path: NodePath,
 }
 
-impl RowWithPath {
-    pub fn new(cells: &RowCells, path: &RowPath) -> Self {
+impl RowInput {
+    /// Initialize `RowInput` from the set of cells of the given row and the path
+    /// in the tree of the node of the rows tree associated to the given row
+    pub fn new(cells: &RowCells, path: &NodePath) -> Self {
         Self {
             cells: cells.clone(),
             path: path.clone(),
@@ -188,15 +192,30 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
-    pub(crate) fn new_row_chunks_input(
-        rows: &[RowWithPath],
+    /// Construct the input necessary to prove a query over a chunk of rows provided as input.
+    /// It requires to provide at least 1 row; in case there are no rows to be proven, then
+    /// `Self::new_non_existence_input` should be used instead
+    pub fn new_row_chunks_input(
+        rows: &[RowInput],
         predicate_operations: &[BasicOperation],
         placeholders: &Placeholders,
         query_bounds: &QueryBounds,
         results: &ResultStructure,
     ) -> Result<Self> {
         ensure!(rows.len() >= 1, "there must be at least 1 row to be proven");
+        ensure!(
+            rows.len() <= NUM_ROWS,
+            format!(
+                "Found {} rows provided as input, maximum allowed is {NUM_ROWS}",
+                rows.len()
+            )
+        );
         let column_ids = &rows[0].cells.column_ids();
+        ensure!(
+            rows.iter()
+                .all(|row| row.cells.column_ids().to_vec() == column_ids.to_vec()),
+            "Rows provided as input don't have the same column ids",
+        );
         let row_inputs = rows
             .into_iter()
             .map(|row| RowProcessingGadgetInputs::try_from(row))
@@ -214,10 +233,12 @@ where
         ))
     }
 
-    pub(crate) fn new_chunk_aggregation_input(chunks_proofs: &[Vec<u8>]) -> Result<Self> {
+    /// Construct the input necessary to aggregate 2 or more row chunks already proven.
+    /// It requires at least 2 chunks to be aggregated
+    pub fn new_chunk_aggregation_input(chunks_proofs: &[Vec<u8>]) -> Result<Self> {
         ensure!(
-            chunks_proofs.len() >= 1,
-            "At least one chunk proof must be provided"
+            chunks_proofs.len() >= 2,
+            "At least 2 chunk proofs must be provided"
         );
         // deserialize `chunk_proofs`` and pad to NUM_CHUNKS proofs by replicating the last proof in `chunk_proofs`
         let last_proof = chunks_proofs.last().unwrap();
@@ -230,6 +251,11 @@ where
 
         let num_proofs = chunks_proofs.len();
 
+        ensure!(
+            num_proofs <= NUM_CHUNKS,
+            format!("Found {num_proofs} proofs provided as input, maximum allowed is {NUM_CHUNKS}")
+        );
+
         Ok(Self::ChunkAggregation(ChunkAggregationInputs {
             chunk_proofs: proofs.try_into().unwrap(),
             circuit: ChunkAggregationCircuit {
@@ -238,7 +264,11 @@ where
         }))
     }
 
-    pub(crate) fn new_non_existence_input(
+    /// Construct the input to prove a query in case there are no rows with a primary index value
+    /// in the primary query range. The circuit employed to prove the non-existence of such a row
+    /// requires to provide a specific node of the index tree, as described in the docs
+    /// https://www.notion.so/lagrangelabs/Batching-Query-10628d1c65a880b1b151d4ac017fa445?pvs=4#10e28d1c65a880498f41cd1cad0c61c3
+    pub fn new_non_existence_input(
         index_node_path: TreePathInputs,
         column_ids: &ColumnIDs,
         predicate_operations: &[BasicOperation],
@@ -483,7 +513,7 @@ mod tests {
         },
         batching::{
             circuits::{
-                api::{CircuitInput, RowPath, RowWithPath, TreePathInputs, NUM_IO},
+                api::{CircuitInput, NodePath, RowInput, TreePathInputs, NUM_IO},
                 tests::{build_test_tree, compute_output_values_for_row},
             },
             public_inputs::PublicInputs,
@@ -708,7 +738,7 @@ mod tests {
         let siblings_1 = vec![];
         let node_1_children = [Some(node_0.node.clone()), Some(node_2.node.clone())];
 
-        let row_path_1a = RowPath::new(
+        let row_path_1a = NodePath::new(
             node_1a,
             path_1a,
             siblings_1a,
@@ -720,13 +750,13 @@ mod tests {
         );
 
         let row_cells_1a = to_row_cells(&node_1.rows_tree[0].values);
-        let row_1a = RowWithPath::new(&row_cells_1a, &row_path_1a);
+        let row_1a = RowInput::new(&row_cells_1a, &row_path_1a);
 
         let path_1c = vec![(node_1a.clone(), ChildPosition::Right)];
         let node_1b_hash =
             HashOutput::try_from(node_1b.compute_node_hash(secondary_index)).unwrap();
         let siblings_1c = vec![Some(node_1b_hash.clone())];
-        let row_path_1c = RowPath::new(
+        let row_path_1c = NodePath::new(
             node_1c,
             path_1c,
             siblings_1c,
@@ -738,7 +768,7 @@ mod tests {
         );
 
         let row_cells_1c = to_row_cells(&node_1.rows_tree[2].values);
-        let row_1c = RowWithPath::new(&row_cells_1c, &row_path_1c);
+        let row_1c = RowInput::new(&row_cells_1c, &row_path_1c);
 
         let row_chunk_inputs = CircuitInput::new_row_chunks_input(
             &[row_1a, row_1c],
@@ -780,7 +810,7 @@ mod tests {
             HashOutput::try_from(node_0.node.compute_node_hash(primary_index)).unwrap();
         let siblings_2 = vec![Some(node_0_hash)];
         let node_2_children = [None, None];
-        let row_path_2d = RowPath::new(
+        let row_path_2d = NodePath::new(
             node_2d,
             path_2d,
             siblings_2d,
@@ -793,11 +823,11 @@ mod tests {
 
         let row_cells_2d = to_row_cells(&node_2.rows_tree[3].values);
 
-        let row_2d = RowWithPath::new(&row_cells_2d, &row_path_2d);
+        let row_2d = RowInput::new(&row_cells_2d, &row_path_2d);
 
         let path_2b = vec![(node_2a.clone(), ChildPosition::Left)];
         let siblings_2b = vec![None];
-        let row_path_2b = RowPath::new(
+        let row_path_2b = NodePath::new(
             node_2b,
             path_2b,
             siblings_2b,
@@ -810,11 +840,11 @@ mod tests {
 
         let row_cells_2b = to_row_cells(&node_2.rows_tree[1].values);
 
-        let row_2b = RowWithPath::new(&row_cells_2b, &row_path_2b);
+        let row_2b = RowInput::new(&row_cells_2b, &row_path_2b);
 
         let path_2a = vec![];
         let siblings_2a = vec![];
-        let row_path_2a = RowPath::new(
+        let row_path_2a = NodePath::new(
             node_2a,
             path_2a,
             siblings_2a,
@@ -827,7 +857,7 @@ mod tests {
 
         let row_cells_2a = to_row_cells(&node_2.rows_tree[0].values);
 
-        let row_2a = RowWithPath::new(&row_cells_2a, &row_path_2a);
+        let row_2a = RowInput::new(&row_cells_2a, &row_path_2a);
 
         let second_chunk_inputs = CircuitInput::new_row_chunks_input(
             &[row_2b, row_2d, row_2a],

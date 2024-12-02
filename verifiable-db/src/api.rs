@@ -198,16 +198,21 @@ where
 
 #[derive(Serialize, Deserialize)]
 pub struct QueryParameters<
-    const NUM_CHUNKS: usize,
-    const NUM_ROWS: usize,
-    const ROW_TREE_MAX_DEPTH: usize,
-    const INDEX_TREE_MAX_DEPTH: usize,
-    const MAX_NUM_COLUMNS: usize,
-    const MAX_NUM_PREDICATE_OPS: usize,
-    const MAX_NUM_RESULT_OPS: usize,
-    const MAX_NUM_OUTPUTS: usize,
-    const MAX_NUM_ITEMS_PER_OUTPUT: usize,
-    const MAX_NUM_PLACEHOLDERS: usize,
+    const NUM_CHUNKS: usize, // Maximum number of chunks that can be aggregated in a single proof
+    const NUM_ROWS: usize,   // Maximum number of rows that can be proven in a single proof
+    const ROW_TREE_MAX_DEPTH: usize, // Maximum depth of rows tree supported in circuits
+    const INDEX_TREE_MAX_DEPTH: usize, // Maximum depth of index tree supported in circuits
+    const MAX_NUM_COLUMNS: usize, // Maximum number of columns for a table supported in circuits
+    const MAX_NUM_PREDICATE_OPS: usize, // Maximum number of operations that can be employed in a query
+    // to evaluate the filtering predicate (i.e, the operations in `WHERE` clause of the query)
+    const MAX_NUM_RESULT_OPS: usize, // Maximum number of operations that can be employed in a query
+    // to compute the results of the query in each row (i.e, the operations in the `SELECT` clause of the query)
+    const MAX_NUM_OUTPUTS: usize, // Maximum number of outputs that can be returned for a query with a single
+    // proof. It basically corresponds to the maximum value that can be used for `LIMIT` keyword
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize, // Maximum number of items that can be returned for each output row of the
+    // query (i.e., the maximum number of items that can be specified in the `SELECT` clause of the query)
+    const MAX_NUM_PLACEHOLDERS: usize, // Maximum number of placeholders (including the special block range
+                                       // placeholders) that can be employed in a query
 > where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
