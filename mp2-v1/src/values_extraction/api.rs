@@ -540,7 +540,10 @@ mod tests {
         mpt_sequential::utils::bytes_to_nibbles,
         types::MAPPING_LEAF_VALUE_LEN,
     };
-    use mp2_test::{mpt_sequential::generate_random_storage_mpt, utils::random_vector};
+    use mp2_test::{
+        mpt_sequential::{generate_random_storage_mpt, generate_receipt_proofs},
+        utils::random_vector,
+    };
     use plonky2::field::types::Field;
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
@@ -897,7 +900,77 @@ mod tests {
         let input = CircuitInput::new_branch(node, leaf_proofs);
         generate_proof(params, input).unwrap()
     }
+    #[test]
+    fn test_receipt_api() {
+        let receipt_proof_infos = generate_receipt_proofs();
 
+        // We check that we have enough receipts and then take the second and third info
+        // (the MPT proof for the first node is different).
+        // Then check that the node above both is a branch.
+        assert!(receipt_proof_infos.len() > 3);
+        let second_info = &receipt_proof_infos[1];
+        let third_info = &receipt_proof_infos[2];
+
+        let proof_length_1 = second_info.mpt_proof.len();
+        let proof_length_2 = third_info.mpt_proof.len();
+
+        let list_one = rlp::decode_list::<Vec<u8>>(&second_info.mpt_proof[proof_length_1 - 2]);
+        let list_two = rlp::decode_list::<Vec<u8>>(&third_info.mpt_proof[proof_length_2 - 2]);
+
+        assert!(list_one == list_two);
+        assert!(list_one.len() == 17);
+
+        println!("Generating params...");
+        let params = build_circuits_params();
+
+        println!("Proving leaf 1...");
+        let leaf_input_1 = CircuitInput::new_receipt_leaf(second_info.clone());
+        let now = std::time::Instant::now();
+        let leaf_proof1 = generate_proof(&params, leaf_input_1).unwrap();
+        {
+            let lp = ProofWithVK::deserialize(&leaf_proof1).unwrap();
+            let pub1 = PublicInputs::new(&lp.proof.public_inputs);
+            let (_, ptr) = pub1.mpt_key_info();
+            println!("pointer: {}", ptr);
+        }
+        println!(
+            "Proof for leaf 1 generated in {} ms",
+            now.elapsed().as_millis()
+        );
+
+        println!("Proving leaf 2...");
+        let leaf_input_2 = CircuitInput::new_receipt_leaf(third_info.clone());
+        let now = std::time::Instant::now();
+        let leaf_proof2 = generate_proof(&params, leaf_input_2).unwrap();
+        println!(
+            "Proof for leaf 2 generated in {} ms",
+            now.elapsed().as_millis()
+        );
+
+        // The branch case for receipts is identical to that of a mapping so we use the same api.
+        println!("Proving branch...");
+        let branch_input = CircuitInput::new_mapping_variable_branch(
+            second_info.mpt_proof[proof_length_1 - 2].clone(),
+            vec![leaf_proof1, leaf_proof2],
+        );
+
+        let now = std::time::Instant::now();
+        generate_proof(&params, branch_input).unwrap();
+        println!(
+            "Proof for branch node generated in {} ms",
+            now.elapsed().as_millis()
+        );
+    }
+
+    fn test_circuits(is_simple_aggregation: bool, num_children: usize) {
+        let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
+        let chain_id = 10;
+        let id = identifier_single_var_column(TEST_SLOT, &contract_address, chain_id, vec![]);
+        let key_id =
+            identifier_for_mapping_key_column(TEST_SLOT, &contract_address, chain_id, vec![]);
+        let value_id =
+            identifier_for_mapping_value_column(TEST_SLOT, &contract_address, chain_id, vec![]);
+    }
     /// Generate a leaf proof.
     fn prove_leaf(params: &PublicParameters, node: Vec<u8>, test_slot: StorageSlotInfo) -> Vec<u8> {
         // RLP(RLP(compact(partial_key_in_nibble)), RLP(value))
