@@ -32,15 +32,15 @@ pub struct PublicParameters {
 }
 
 /// Returns the parameters necessary to prove block extraction circuits
-pub fn build_circuits_params(extraction_type: ExtractionType) -> PublicParameters {
-    PublicParameters::build(extraction_type)
+pub fn build_circuits_params() -> PublicParameters {
+    PublicParameters::build()
 }
 
 impl PublicParameters {
-    pub fn build(extraction_type: ExtractionType) -> Self {
+    pub fn build() -> Self {
         let config = default_config();
         let mut cb = CircuitBuilder::new(config);
-        let wires = circuit::BlockCircuit::build(&mut cb, extraction_type);
+        let wires = circuit::BlockCircuit::build(&mut cb);
         let cd = cb.build();
         Self {
             circuit_data: cd,
@@ -77,13 +77,11 @@ mod test {
     };
     use mp2_test::eth::get_sepolia_url;
 
-    use crate::block_extraction::{
-        circuit::ExtractionType, public_inputs::PublicInputs, PublicParameters,
-    };
+    use crate::block_extraction::{public_inputs::PublicInputs, PublicParameters};
 
     #[tokio::test]
     async fn test_api_storage() -> Result<()> {
-        let params = PublicParameters::build(ExtractionType::Storage);
+        let params = PublicParameters::build();
         let url = get_sepolia_url();
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
         let block_number = BlockNumberOrTag::Latest;
