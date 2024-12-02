@@ -14,12 +14,11 @@ use mp2_common::{
     },
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
-    utils::{Fieldable, FromTargets, HashBuilder, SelectTarget, ToTargets},
+    utils::{FromTargets, HashBuilder, SelectTarget, ToTargets},
     D, F,
 };
 use plonky2::{
-    field::extension::Extendable,
-    hash::hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS},
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -199,6 +198,7 @@ where
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 /// Set of input/output wires built by merkle path with neighbors gadget
 pub struct MerklePathWithNeighborsTarget<const MAX_DEPTH: usize>
 where
@@ -315,9 +315,7 @@ where
             siblings
                 .get(i)
                 .and_then(|sibling| {
-                    sibling
-                        .clone()
-                        .and_then(|node_hash| Some(HashOut::from_bytes((&node_hash).into())))
+                    sibling.map(|node_hash| HashOut::from_bytes((&node_hash).into()))
                 })
                 .unwrap_or(*empty_poseidon_hash())
         });
@@ -346,7 +344,7 @@ where
 
         MerklePathTarget {
             inputs,
-            root: path.last().unwrap().clone(),
+            root: *path.last().unwrap(),
         }
     }
 
@@ -400,7 +398,7 @@ where
         };
 
         // ensure there is always one node in the path even if `MAX_DEPTH=1`
-        if path_nodes.len() == 0 {
+        if path_nodes.is_empty() {
             path_nodes.push(end_node);
         }
 
@@ -575,6 +573,7 @@ where
             (predecessor_info, successor_info)
         };
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..MAX_DEPTH - 1 {
             // we need to look for the predecessor
             let is_right_child = b.not(inputs.is_left_child[i]);
@@ -628,10 +627,10 @@ where
                 path_inputs: inputs,
                 end_node_inputs: end_node_info,
             },
-            root: path.last().unwrap().clone(),
+            root: *path.last().unwrap(),
             end_node_hash,
-            predecessor_info: predecessor_info,
-            successor_info: successor_info,
+            predecessor_info,
+            successor_info,
         }
     }
 
@@ -769,17 +768,6 @@ pub(crate) mod tests {
     }
 
     impl NeighborInfo {
-        pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &NeighborInfoTarget) {
-            [
-                (wires.is_found, self.is_found),
-                (wires.is_in_path, self.is_in_path),
-            ]
-            .into_iter()
-            .for_each(|(target, value)| pw.set_bool_target(target, value));
-            pw.set_u256_target(&wires.value, self.value);
-            pw.set_hash_target(wires.hash, self.hash);
-        }
-
         // Initialize `Self` for the predecessor/successor of a node. `value`
         // must be the value of the predecessor/successor, while `hash` must
         // be its hash. If `hash` is `None`, it is assumed that the
@@ -911,9 +899,9 @@ pub(crate) mod tests {
     ) -> [NodeInfo; 7] {
         let rng = &mut thread_rng();
         // closure to generate a random node of the tree from the 2 children, if any
-        let mut random_node = |left_child: Option<&NodeInfo>,
-                               right_child: Option<&NodeInfo>,
-                               node_value: U256|
+        let random_node = |left_child: Option<&NodeInfo>,
+                           right_child: Option<&NodeInfo>,
+                           node_value: U256|
          -> NodeInfo {
             let embedded_tree_hash =
                 HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap();
@@ -933,38 +921,38 @@ pub(crate) mod tests {
             });
         }
         values.sort();
-        let node_E = random_node(None, None, values[0]); // it's a leaf node, so no children
-        let node_F = random_node(None, None, values[2]);
-        let node_G = random_node(None, None, values[6]);
-        let node_D = random_node(Some(&node_E), Some(&node_F), values[1]);
-        let node_B = random_node(Some(&node_D), None, values[3]);
-        let node_C = random_node(None, Some(&node_G), values[5]);
-        let node_A = random_node(Some(&node_B), Some(&node_C), values[4]);
-        [node_A, node_B, node_C, node_D, node_E, node_F, node_G]
+        let node_e = random_node(None, None, values[0]); // it's a leaf node, so no children
+        let node_f = random_node(None, None, values[2]);
+        let node_g = random_node(None, None, values[6]);
+        let node_d = random_node(Some(&node_e), Some(&node_f), values[1]);
+        let node_b = random_node(Some(&node_d), None, values[3]);
+        let node_c = random_node(None, Some(&node_g), values[5]);
+        let node_a = random_node(Some(&node_b), Some(&node_c), values[4]);
+        [node_a, node_b, node_c, node_d, node_e, node_f, node_g]
     }
 
     #[test]
     fn test_merkle_path() {
         // first, build the Merkle-tree
         let index_id = F::rand();
-        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] =
+        let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] =
             generate_test_tree(index_id, None);
-        let root = node_A.compute_node_hash(index_id);
+        let root = node_a.compute_node_hash(index_id);
         // verify Merkle-path related to leaf F
         const MAX_DEPTH: usize = 10;
         let path = vec![
-            (node_D.clone(), ChildPosition::Right), // we start from the ancestor of the start node of the path
-            (node_B.clone(), ChildPosition::Left),
-            (node_A.clone(), ChildPosition::Left),
+            (node_d, ChildPosition::Right), // we start from the ancestor of the start node of the path
+            (node_b, ChildPosition::Left),
+            (node_a, ChildPosition::Left),
         ];
-        let node_E_hash = HashOutput::try_from(node_E.compute_node_hash(index_id)).unwrap();
-        let node_C_hash = HashOutput::try_from(node_C.compute_node_hash(index_id)).unwrap();
-        let siblings = vec![Some(node_E_hash), None, Some(node_C_hash.clone())];
+        let node_e_hash = HashOutput::from(node_e.compute_node_hash(index_id));
+        let node_c_hash = HashOutput::from(node_c.compute_node_hash(index_id));
+        let siblings = vec![Some(node_e_hash), None, Some(node_c_hash)];
         let merkle_path_inputs = MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings).unwrap();
 
         let circuit = TestMerklePathGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            end_node: node_F.clone(),
+            end_node: node_f,
             index_id,
         };
 
@@ -974,15 +962,15 @@ pub(crate) mod tests {
 
         // verify Merkle-path related to leaf G
         let path = vec![
-            (node_C.clone(), ChildPosition::Right),
-            (node_A.clone(), ChildPosition::Right),
+            (node_c, ChildPosition::Right),
+            (node_a, ChildPosition::Right),
         ];
-        let node_B_hash = HashOutput::try_from(node_B.compute_node_hash(index_id)).unwrap();
-        let siblings = vec![None, Some(node_B_hash)];
+        let node_b_hash = HashOutput::from(node_b.compute_node_hash(index_id));
+        let siblings = vec![None, Some(node_b_hash)];
         let merkle_path_inputs = MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings).unwrap();
         let circuit = TestMerklePathGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            end_node: node_G.clone(),
+            end_node: node_g,
             index_id,
         };
 
@@ -991,15 +979,12 @@ pub(crate) mod tests {
         assert_eq!(proof.public_inputs, root.to_vec());
 
         // Verify Merkle-path related to node D
-        let path = vec![
-            (node_B.clone(), ChildPosition::Left),
-            (node_A.clone(), ChildPosition::Left),
-        ];
-        let siblings = vec![None, Some(node_C_hash)];
+        let path = vec![(node_b, ChildPosition::Left), (node_a, ChildPosition::Left)];
+        let siblings = vec![None, Some(node_c_hash)];
         let merkle_path_inputs = MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings).unwrap();
         let circuit = TestMerklePathGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            end_node: node_D.clone(),
+            end_node: node_d,
             index_id,
         };
 
@@ -1012,30 +997,30 @@ pub(crate) mod tests {
     fn test_merkle_path_with_neighbors() {
         // first, build the Merkle-tree
         let index_id = F::rand();
-        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] =
+        let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] =
             generate_test_tree(index_id, None);
-        let root = node_A.compute_node_hash(index_id);
+        let root = node_a.compute_node_hash(index_id);
         // verify Merkle-path related to leaf F
         const MAX_DEPTH: usize = 10;
         let path = vec![
-            (node_D.clone(), ChildPosition::Right), // we start from the ancestor of the start node of the path
-            (node_B.clone(), ChildPosition::Left),
-            (node_A.clone(), ChildPosition::Left),
+            (node_d, ChildPosition::Right), // we start from the ancestor of the start node of the path
+            (node_b, ChildPosition::Left),
+            (node_a, ChildPosition::Left),
         ];
-        let node_E_hash = HashOutput::try_from(node_E.compute_node_hash(index_id)).unwrap();
-        let node_C_hash = HashOutput::try_from(node_C.compute_node_hash(index_id)).unwrap();
-        let siblings = vec![Some(node_E_hash), None, Some(node_C_hash.clone())];
+        let node_e_hash = HashOutput::from(node_e.compute_node_hash(index_id));
+        let node_c_hash = HashOutput::from(node_c.compute_node_hash(index_id));
+        let siblings = vec![Some(node_e_hash), None, Some(node_c_hash)];
         let merkle_path_inputs = MerklePathWithNeighborsGadget::<MAX_DEPTH>::new(
             &path,
             &siblings,
-            &node_F,
+            &node_f,
             [None, None], // it's a leaf node
         )
         .unwrap();
 
         let circuit = TestMerklePathWithNeighborsGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            end_node: node_F.clone(),
+            end_node: node_f,
             index_id,
         };
 
@@ -1077,32 +1062,32 @@ pub(crate) mod tests {
         };
         // build predecessor and successor info for node_F
         // predecessor should be node_D
-        let node_D_hash = node_D.compute_node_hash(index_id);
-        let predecessor_info = NeighborInfo::new(node_D.value, Some(node_D_hash));
+        let node_d_hash = node_d.compute_node_hash(index_id);
+        let predecessor_info = NeighborInfo::new(node_d.value, Some(node_d_hash));
         // successor should be node_B
-        let node_B_hash = node_B.compute_node_hash(index_id);
-        let successor_info = NeighborInfo::new(node_B.value, Some(node_B_hash));
-        check_public_inputs(proof, &node_F, "node F", predecessor_info, successor_info);
+        let node_b_hash = node_b.compute_node_hash(index_id);
+        let successor_info = NeighborInfo::new(node_b.value, Some(node_b_hash));
+        check_public_inputs(proof, &node_f, "node F", predecessor_info, successor_info);
 
         // verify Merkle-path related to leaf E
         let path = vec![
-            (node_D.clone(), ChildPosition::Left), // we start from the ancestor of the start node of the path
-            (node_B.clone(), ChildPosition::Left),
-            (node_A.clone(), ChildPosition::Left),
+            (node_d, ChildPosition::Left), // we start from the ancestor of the start node of the path
+            (node_b, ChildPosition::Left),
+            (node_a, ChildPosition::Left),
         ];
-        let node_F_hash = HashOutput::try_from(node_F.compute_node_hash(index_id)).unwrap();
-        let siblings = vec![Some(node_F_hash), None, Some(node_C_hash.clone())];
+        let node_f_hash = HashOutput::from(node_f.compute_node_hash(index_id));
+        let siblings = vec![Some(node_f_hash), None, Some(node_c_hash)];
         let merkle_path_inputs = MerklePathWithNeighborsGadget::<MAX_DEPTH>::new(
             &path,
             &siblings,
-            &node_E,
+            &node_e,
             [None, None], // it's a leaf node
         )
         .unwrap();
 
         let circuit = TestMerklePathWithNeighborsGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            end_node: node_E.clone(),
+            end_node: node_e,
             index_id,
         };
 
@@ -1112,26 +1097,23 @@ pub(crate) mod tests {
         // There should be no predecessor
         let predecessor_info = NeighborInfo::new_dummy_predecessor();
         // successor should be node_D
-        let successor_info = NeighborInfo::new(node_D.value, Some(node_D_hash));
-        check_public_inputs(proof, &node_E, "node E", predecessor_info, successor_info);
+        let successor_info = NeighborInfo::new(node_d.value, Some(node_d_hash));
+        check_public_inputs(proof, &node_e, "node E", predecessor_info, successor_info);
 
         // verify Merkle-path related to node D
-        let path = vec![
-            (node_B.clone(), ChildPosition::Left),
-            (node_A.clone(), ChildPosition::Left),
-        ];
-        let siblings = vec![None, Some(node_C_hash.clone())];
+        let path = vec![(node_b, ChildPosition::Left), (node_a, ChildPosition::Left)];
+        let siblings = vec![None, Some(node_c_hash)];
         let merkle_path_inputs = MerklePathWithNeighborsGadget::<MAX_DEPTH>::new(
             &path,
             &siblings,
-            &node_D,
-            [Some(node_E.clone()), Some(node_F.clone())],
+            &node_d,
+            [Some(node_e), Some(node_f)],
         )
         .unwrap();
 
         let circuit = TestMerklePathWithNeighborsGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            end_node: node_D.clone(),
+            end_node: node_d,
             index_id,
         };
 
@@ -1139,25 +1121,25 @@ pub(crate) mod tests {
 
         // build predecessor and successor info for node_D
         // predecessor should be node_E, but it's not in the path
-        let predecessor_info = NeighborInfo::new(node_E.value, None);
+        let predecessor_info = NeighborInfo::new(node_e.value, None);
         // successor should be node_F, but it's not in the path
-        let successor_info = NeighborInfo::new(node_F.value, None);
-        check_public_inputs(proof, &node_D, "node D", predecessor_info, successor_info);
+        let successor_info = NeighborInfo::new(node_f.value, None);
+        check_public_inputs(proof, &node_d, "node D", predecessor_info, successor_info);
 
         // verify Merkle-path related to node B
-        let path = vec![(node_A.clone(), ChildPosition::Left)];
-        let siblings = vec![Some(node_C_hash.clone())];
+        let path = vec![(node_a, ChildPosition::Left)];
+        let siblings = vec![Some(node_c_hash)];
         let merkle_path_inputs = MerklePathWithNeighborsGadget::<MAX_DEPTH>::new(
             &path,
             &siblings,
-            &node_B,
-            [Some(node_D.clone()), None], // Node D is the left child
+            &node_b,
+            [Some(node_d), None], // Node D is the left child
         )
         .unwrap();
 
         let circuit = TestMerklePathWithNeighborsGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            end_node: node_B.clone(),
+            end_node: node_b,
             index_id,
         };
 
@@ -1165,31 +1147,28 @@ pub(crate) mod tests {
 
         // build predecessor and successor info for node_B
         // predecessor should be node_F, but it's not in the path
-        let predecessor_info = NeighborInfo::new(node_F.value, None);
+        let predecessor_info = NeighborInfo::new(node_f.value, None);
         // successor should be node_A
-        let successor_info = NeighborInfo::new(node_A.value, Some(root));
-        check_public_inputs(proof, &node_B, "node B", predecessor_info, successor_info);
+        let successor_info = NeighborInfo::new(node_a.value, Some(root));
+        check_public_inputs(proof, &node_b, "node B", predecessor_info, successor_info);
 
         // verify Merkle-path related to leaf G
         let path = vec![
-            (node_C.clone(), ChildPosition::Right),
-            (node_A.clone(), ChildPosition::Right),
+            (node_c, ChildPosition::Right),
+            (node_a, ChildPosition::Right),
         ];
-        let siblings = vec![
-            None,
-            Some(HashOutput::try_from(node_B_hash.to_bytes()).unwrap()),
-        ];
+        let siblings = vec![None, Some(HashOutput::from(node_b_hash))];
         let merkle_path_inputs = MerklePathWithNeighborsGadget::<MAX_DEPTH>::new(
             &path,
             &siblings,
-            &node_G,
+            &node_g,
             [None, None], // it's a leaf node
         )
         .unwrap();
 
         let circuit = TestMerklePathWithNeighborsGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            end_node: node_G.clone(),
+            end_node: node_g,
             index_id,
         };
 
@@ -1198,12 +1177,12 @@ pub(crate) mod tests {
         // build predecessor and successor info for node_G
         // predecessor should be node_C
         let predecessor_info = NeighborInfo::new(
-            node_C.value,
-            Some(HashOut::from_bytes((&node_C_hash).into())),
+            node_c.value,
+            Some(HashOut::from_bytes((&node_c_hash).into())),
         );
         // There should be no successor
         let successor_info = NeighborInfo::new_dummy_successor();
-        check_public_inputs(proof, &node_G, "node G", predecessor_info, successor_info);
+        check_public_inputs(proof, &node_g, "node G", predecessor_info, successor_info);
 
         // verify Merkle-path related to root node A
         let path = vec![];
@@ -1211,14 +1190,14 @@ pub(crate) mod tests {
         let merkle_path_inputs = MerklePathWithNeighborsGadget::<MAX_DEPTH>::new(
             &path,
             &siblings,
-            &node_A,
-            [Some(node_B), Some(node_C)], // it's a leaf node
+            &node_a,
+            [Some(node_b), Some(node_c)], // it's a leaf node
         )
         .unwrap();
 
         let circuit = TestMerklePathWithNeighborsGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            end_node: node_A.clone(),
+            end_node: node_a,
             index_id,
         };
 
@@ -1226,9 +1205,9 @@ pub(crate) mod tests {
 
         // build predecessor and successor info for node_A
         // predecessor should be node_B, but it's not in the path
-        let predecessor_info = NeighborInfo::new(node_B.value, None);
+        let predecessor_info = NeighborInfo::new(node_b.value, None);
         // successor should be node_C, but it's not in the path
-        let successor_info = NeighborInfo::new(node_C.value, None);
-        check_public_inputs(proof, &node_A, "node A", predecessor_info, successor_info);
+        let successor_info = NeighborInfo::new(node_c.value, None);
+        check_public_inputs(proof, &node_a, "node A", predecessor_info, successor_info);
     }
 }

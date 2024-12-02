@@ -9,15 +9,11 @@ use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     poseidon::{empty_poseidon_hash, H},
-    public_inputs::PublicInputCommon,
-    serialization::{
-        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
-        serialize_long_array,
-    },
+    serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
     types::{CBuilder, CURVE_TARGET_LEN},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
-    utils::{FromFields, FromTargets, HashBuilder, ToFields, ToTargets},
-    CHasher, D, F,
+    utils::{FromFields, FromTargets, ToFields, ToTargets},
+    CHasher, F,
 };
 use plonky2::{
     field::types::Field,
@@ -26,15 +22,10 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        config::{GenericHashOut, Hasher},
-        proof::ProofWithPublicInputsTarget,
-    },
+    plonk::config::{GenericHashOut, Hasher},
 };
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
-use recursion_framework::circuit_builder::CircuitLogicWires;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::query::{
     aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
@@ -42,12 +33,10 @@ use crate::query::{
         ColumnIDs, ComputationalHashCache, HashPermutation, Operation, Output,
         PlaceholderIdentifier,
     },
-    public_inputs::PublicInputs,
     universal_circuit::{
         basic_operation::BasicOperationInputs, column_extraction::ColumnExtractionValueWires,
         universal_circuit_inputs::OutputItem,
     },
-    PI_LEN,
 };
 
 use super::{
@@ -56,8 +45,6 @@ use super::{
         BasicOperationWires,
     },
     column_extraction::{ColumnExtractionInputWires, ColumnExtractionInputs},
-    output_no_aggregation::Circuit as NoAggOutputCircuit,
-    output_with_aggregation::{Circuit as AggOutputCircuit, ValueWires},
     universal_circuit_inputs::{
         BasicOperation, InputOperand, Placeholder, PlaceholderId, Placeholders, ResultStructure,
         RowCells,
@@ -159,7 +146,7 @@ impl QueryBoundTarget {
 
 impl QueryBoundTargetInputs {
     pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, bound: &QueryBound) {
-        bound.operation.assign(pw, &self);
+        bound.operation.assign(pw, self);
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -381,8 +368,8 @@ impl QueryBound {
         max_query: &QueryBoundSource,
         computational_hash: &ComputationalHash,
     ) -> Result<ComputationalHash> {
-        let min_query_op = Self::get_basic_operation(&min_query)?;
-        let max_query_op = Self::get_basic_operation(&max_query)?;
+        let min_query_op = Self::get_basic_operation(min_query)?;
+        let max_query_op = Self::get_basic_operation(max_query)?;
         // initialize computational hash cache with the empty hash associated to the only input value (hardcoded to 0
         // in the circuit) of the basic operation components employed for query bounds
         let mut cache = ComputationalHashCache::new_from_column_hash(
@@ -403,12 +390,13 @@ impl QueryBound {
 
 /// Trait for the 2 different variants of output components we currently support
 /// in query circuits
-pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
+pub trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
     type ValueWires: OutputComponentValueWires;
     type HashWires: OutputComponentHashWires;
 
     fn new(selector: &[F], ids: &[F], num_outputs: usize) -> Result<Self>;
 
+    #[cfg(test)] // used only in test for now
     fn build<const NUM_OUTPUT_VALUES: usize>(
         b: &mut CBuilder,
         possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
@@ -416,7 +404,8 @@ pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
         predicate_value: &BoolTarget,
         predicate_hash: &ComputationalHashTarget,
     ) -> OutputComponentWires<Self::ValueWires, Self::HashWires> {
-        let hash_wires = Self::build_hash(b, possible_output_hash, predicate_hash);
+        let hash_wires: <Self as OutputComponent<MAX_NUM_RESULTS>>::HashWires =
+            Self::build_hash(b, possible_output_hash, predicate_hash);
         let value_wires = Self::build_values(
             b,
             possible_output_values,
@@ -454,7 +443,7 @@ pub(crate) trait OutputComponent<const MAX_NUM_RESULTS: usize>: Clone {
 }
 /// Trait representing the wires related to the output values computed
 /// by an output component implementation
-pub(crate) trait OutputComponentValueWires: Clone + Debug {
+pub trait OutputComponentValueWires: Clone + Debug {
     /// Associated type specifying the type of the first output value computed by this output
     /// component; this type varies depending on the particular component:
     /// - It is a `CurveTarget` in the output component for queries without aggregation operations
@@ -471,7 +460,7 @@ pub(crate) trait OutputComponentValueWires: Clone + Debug {
 
 /// Trait representing the input/output wires related to the computational hash
 /// computed by an output component implementation
-pub(crate) trait OutputComponentHashWires: Clone + Debug + Eq + PartialEq {
+pub trait OutputComponentHashWires: Clone + Debug + Eq + PartialEq {
     /// Input wires of the output component
     type InputWires: Serialize + for<'a> Deserialize<'a> + Clone + Debug + Eq + PartialEq;
 
@@ -485,7 +474,8 @@ pub(crate) trait OutputComponentHashWires: Clone + Debug + Eq + PartialEq {
 }
 
 /// Wires representing an output component
-pub(crate) struct OutputComponentWires<
+#[cfg(test)] // used only in test for now
+pub struct OutputComponentWires<
     ValueWires: OutputComponentValueWires,
     HashWires: OutputComponentHashWires,
 > {
@@ -660,13 +650,13 @@ where
             T::new(&selectors, &results.output_ids, results.output_ids.len())?;
 
         let min_query = QueryBound::new_secondary_index_bound(
-            &placeholders,
-            &query_bounds.min_query_secondary(),
+            placeholders,
+            query_bounds.min_query_secondary(),
         )?;
 
         let max_query = QueryBound::new_secondary_index_bound(
-            &placeholders,
-            &query_bounds.max_query_secondary(),
+            placeholders,
+            query_bounds.max_query_secondary(),
         )?;
 
         Ok(Self {
@@ -953,7 +943,7 @@ pub(crate) struct CurveOrU256<T>([T; CURVE_TARGET_LEN]);
 impl<T: Clone + Debug> CurveOrU256<T> {
     pub(crate) fn from_slice(t: &[T]) -> Self {
         Self(
-            t.into_iter()
+            t.iter()
                 .cloned()
                 .chain(repeat(t[0].clone()))
                 .take(CURVE_TARGET_LEN)
@@ -1019,6 +1009,7 @@ where
         }
     }
 
+    #[cfg(test)] // used only in test for now
     pub(crate) fn build(b: &mut CBuilder) -> Self {
         let first_output = CurveOrU256(b.add_virtual_target_arr());
         let other_outputs = b.add_virtual_u256_arr();
@@ -1029,6 +1020,7 @@ where
         }
     }
 
+    #[cfg(test)] // used only in test for now
     pub(crate) fn set_target(
         &self,
         pw: &mut PartialWitness<F>,
@@ -1064,7 +1056,7 @@ where
         let first_output = CurveOrU256Target::from_targets(&t[..CurveTarget::NUM_TARGETS]);
         let other_outputs = t[CurveTarget::NUM_TARGETS..]
             .chunks(UInt256Target::NUM_TARGETS)
-            .map(|chunk| UInt256Target::from_targets(chunk))
+            .map(UInt256Target::from_targets)
             .take(MAX_NUM_RESULTS - 1)
             .collect_vec()
             .try_into()
@@ -1116,7 +1108,7 @@ where
         let first_output = CurveOrU256::from_slice(&t[..CURVE_TARGET_LEN]);
         let other_outputs = t[CURVE_TARGET_LEN..]
             .chunks(NUM_LIMBS)
-            .map(|chunk| U256::from_fields(chunk))
+            .map(U256::from_fields)
             .take(MAX_NUM_RESULTS - 1)
             .collect_vec()
             .try_into()
@@ -1252,7 +1244,7 @@ where
             .collect_vec();
         Ok(Self {
             column_values: padded_column_values.try_into().unwrap(),
-            is_dummy_row: is_dummy_row,
+            is_dummy_row,
         })
     }
 
@@ -1427,12 +1419,4 @@ fn dummy_placeholder(placeholders: &Placeholders) -> Placeholder {
         value: placeholders.get(&dummy_placeholder_id()).unwrap(), // cannot fail since default placeholder is always associated to a value
         id: dummy_placeholder_id(),
     }
-}
-
-fn dummy_placeholder_from_query_bounds(query_bounds: &QueryBounds) -> Placeholder {
-    let placeholders = Placeholders::new_empty(
-        query_bounds.min_query_primary(),
-        query_bounds.max_query_primary(),
-    );
-    dummy_placeholder(&placeholders)
 }

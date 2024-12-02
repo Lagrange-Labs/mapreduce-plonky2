@@ -209,30 +209,17 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use mp2_common::{utils::ToFields, F};
-    use plonky2::{
-        field::types::Field,
-        hash::hash_types::{HashOut, RichField},
-        iop::witness::{PartialWitness, WitnessWrite},
-    };
+    use plonky2::{field::types::Field, hash::hash_types::HashOut};
 
     use crate::query::{
         merkle_path::tests::NeighborInfo, universal_circuit::universal_query_gadget::OutputValues,
     };
 
-    use super::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget};
     #[derive(Clone, Debug)]
     pub(crate) struct BoundaryRowNodeInfo {
         pub(crate) end_node_hash: HashOut<F>,
         pub(crate) predecessor_info: NeighborInfo,
         pub(crate) successor_info: NeighborInfo,
-    }
-
-    impl BoundaryRowNodeInfo {
-        pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &BoundaryRowNodeInfoTarget) {
-            pw.set_hash_target(wires.end_node_hash, self.end_node_hash);
-            self.predecessor_info.assign(pw, &wires.predecessor_info);
-            self.successor_info.assign(pw, &wires.successor_info);
-        }
     }
 
     impl ToFields<F> for BoundaryRowNodeInfo {
@@ -261,12 +248,6 @@ pub(crate) mod tests {
         }
     }
 
-    impl BoundaryRowData {
-        pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &BoundaryRowDataTarget) {
-            self.row_node_info.assign(pw, &wires.row_node_info);
-            self.index_node_info.assign(pw, &wires.index_node_info);
-        }
-    }
     #[derive(Clone, Debug)]
     pub(crate) struct RowChunkData<const MAX_NUM_RESULTS: usize>
     where
@@ -296,27 +277,6 @@ pub(crate) mod tests {
                     F::from_canonical_u64(self.num_overflows),
                 ])
                 .collect()
-        }
-    }
-
-    impl<const MAX_NUM_RESULTS: usize> RowChunkData<MAX_NUM_RESULTS>
-    where
-        [(); MAX_NUM_RESULTS - 1]:,
-    {
-        pub(crate) fn assign(
-            &self,
-            pw: &mut PartialWitness<F>,
-            wires: &RowChunkDataTarget<MAX_NUM_RESULTS>,
-        ) {
-            self.left_boundary_row.assign(pw, &wires.left_boundary_row);
-            self.right_boundary_row
-                .assign(pw, &wires.right_boundary_row);
-            pw.set_hash_target(wires.chunk_outputs.tree_hash, self.chunk_tree_hash);
-            pw.set_target(
-                wires.chunk_outputs.num_overflows,
-                F::from_canonical_u64(self.num_overflows),
-            );
-            pw.set_target(wires.chunk_outputs.count, F::from_canonical_u64(self.count));
         }
     }
 }

@@ -82,6 +82,11 @@ impl Placeholders {
         self.0.len()
     }
 
+    /// Returns whether `self` is empty or not
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     /// Return set of placeholders ids, in the order expected in the public inputs of the final
     /// proof
     pub fn ids(&self) -> Vec<PlaceholderIdentifier> {
@@ -345,7 +350,7 @@ impl ResultStructure {
     /// `column_values` as the operands for the operations having `InputOperand::Column`
     /// operands, and the provided `placeholders` for the operations having `InputOperand::Placeholder`
     /// operands.
-    pub(crate) fn compute_output_values(
+    pub fn compute_output_values(
         &self,
         column_values: &[U256],
         placeholders: &Placeholders,

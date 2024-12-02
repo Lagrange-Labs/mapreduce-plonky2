@@ -32,6 +32,7 @@ pub(crate) struct RowProcessingGadgetInputWires<
     input_values: UniversalQueryValueInputWires<MAX_NUM_COLUMNS>,
 }
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // only in this PR
 pub(crate) struct RowProcessingGadgetWires<
     const ROW_TREE_MAX_DEPTH: usize,
     const INDEX_TREE_MAX_DEPTH: usize,
@@ -50,6 +51,7 @@ pub(crate) struct RowProcessingGadgetWires<
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // only in this PR
 pub(crate) struct RowProcessingGadgetInputs<
     const ROW_TREE_MAX_DEPTH: usize,
     const INDEX_TREE_MAX_DEPTH: usize,
@@ -93,6 +95,7 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_RESULTS - 1]:,
 {
+    #[allow(dead_code)] // only in this PR
     pub(crate) fn new(
         row_path: MerklePathWithNeighborsGadget<ROW_TREE_MAX_DEPTH>,
         index_path: MerklePathWithNeighborsGadget<INDEX_TREE_MAX_DEPTH>,
@@ -106,6 +109,7 @@ where
         })
     }
 
+    #[allow(dead_code)] // only in this PR
     pub(crate) fn build<T: OutputComponent<MAX_NUM_RESULTS>>(
         b: &mut CBuilder,
         hash_input_wires: &UniversalQueryHashInputWires<
@@ -168,6 +172,7 @@ where
         }
     }
 
+    #[allow(dead_code)] // only in this PR
     pub(crate) fn assign(
         &self,
         pw: &mut PartialWitness<F>,

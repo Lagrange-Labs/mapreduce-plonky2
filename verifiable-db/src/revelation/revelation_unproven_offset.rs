@@ -55,19 +55,20 @@ use crate::{
         api::CircuitInput as QueryCircuitInput,
         computational_hash_ids::{AggregationOperation, ColumnIDs, ResultIdentifier},
         merkle_path::{MerklePathGadget, MerklePathTargetInputs},
+        pi_len,
         public_inputs::PublicInputs as QueryProofPublicInputs,
         universal_circuit::{
             build_cells_tree,
             universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure},
         },
-        PI_LEN,
     },
 };
 
 use super::{
+    num_query_io, pi_len as revelation_pi_len,
     placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
     revelation_without_results_tree::CircuitBuilderParams,
-    PublicInputs, NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
+    PublicInputs, NUM_PREPROCESSING_IO,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -314,7 +315,7 @@ where
             format!("number of results per row is bigger than {}", S)
         );
         let padded_ids = item_ids
-            .into_iter()
+            .iter()
             .chain(repeat(&F::default()))
             .take(S)
             .cloned()
@@ -323,7 +324,7 @@ where
             .iter()
             .flat_map(|res| {
                 assert!(res.len() >= num_actual_items_per_row);
-                res.into_iter()
+                res.iter()
                     .cloned()
                     .take(num_actual_items_per_row)
                     .chain(repeat(U256::default()))
@@ -383,118 +384,114 @@ where
         // Flag employed to enforce that the matching rows are all placed in the initial slots;
         // this is a requirement to ensure that the check for DISTINCT is sound
         let mut only_matching_rows = _true;
-        row_proofs
-            .into_iter()
-            .enumerate()
-            .for_each(|(i, row_proof)| {
-                let index_ids = row_proof.index_ids_target();
-                let is_matching_row = b.is_equal(row_proof.num_matching_rows_target(), one);
-                // ensure that once `is_matching_row = false`, then it will be false for all
-                // subsequent iterations
-                only_matching_rows = b.and(only_matching_rows, is_matching_row);
-                b.connect(only_matching_rows.target, is_matching_row.target);
-                let row_node_hash = {
-                    // if the node storing the current row is a leaf node in rows tree, then
-                    // the hash of such node is already computed by `row_proof`; otherwise,
-                    // we need to compute it
-                    let inputs = row_node_info[i]
-                        .child_hashes
-                        .into_iter()
-                        .flat_map(|hash| hash.to_targets())
-                        .chain(row_node_info[i].node_min.to_targets())
-                        .chain(row_node_info[i].node_max.to_targets())
-                        .chain(once(index_ids[1]))
-                        .chain(row_proof.min_value_target().to_targets())
-                        .chain(row_proof.tree_hash_target().to_targets())
-                        .collect_vec();
-                    let row_node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
-                    b.select_hash(
-                        is_row_node_leaf[i],
-                        &row_proof.tree_hash_target(),
-                        &row_node_hash,
-                    )
-                };
-                let row_path_wires = MerklePathGadget::build(b, row_node_hash, index_ids[1]);
-                let row_tree_root = row_path_wires.root;
-                // compute hash of the index node storing the rows tree containing the current row
-                let index_node_hash = {
-                    let inputs = index_node_info[i]
-                        .child_hashes
-                        .into_iter()
-                        .flat_map(|hash| hash.to_targets())
-                        .chain(index_node_info[i].node_min.to_targets())
-                        .chain(index_node_info[i].node_max.to_targets())
-                        .chain(once(index_ids[0]))
-                        .chain(row_proof.index_value_target().to_targets())
-                        .chain(row_tree_root.to_targets())
-                        .collect_vec();
-                    b.hash_n_to_hash_no_pad::<H>(inputs)
-                };
-                let index_path_wires = MerklePathGadget::build(b, index_node_hash, index_ids[0]);
-                // if the current row is valid, check that the root is the same of the original tree, completing
-                // membership proof for the current row; otherwise, we don't care
-                let root = b.select_hash(is_matching_row, &index_path_wires.root, &tree_hash);
-                b.connect_hashes(tree_hash, root);
+        row_proofs.iter().enumerate().for_each(|(i, row_proof)| {
+            let index_ids = row_proof.index_ids_target();
+            let is_matching_row = b.is_equal(row_proof.num_matching_rows_target(), one);
+            // ensure that once `is_matching_row = false`, then it will be false for all
+            // subsequent iterations
+            only_matching_rows = b.and(only_matching_rows, is_matching_row);
+            b.connect(only_matching_rows.target, is_matching_row.target);
+            let row_node_hash = {
+                // if the node storing the current row is a leaf node in rows tree, then
+                // the hash of such node is already computed by `row_proof`; otherwise,
+                // we need to compute it
+                let inputs = row_node_info[i]
+                    .child_hashes
+                    .into_iter()
+                    .flat_map(|hash| hash.to_targets())
+                    .chain(row_node_info[i].node_min.to_targets())
+                    .chain(row_node_info[i].node_max.to_targets())
+                    .chain(once(index_ids[1]))
+                    .chain(row_proof.min_value_target().to_targets())
+                    .chain(row_proof.tree_hash_target().to_targets())
+                    .collect_vec();
+                let row_node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
+                b.select_hash(
+                    is_row_node_leaf[i],
+                    &row_proof.tree_hash_target(),
+                    &row_node_hash,
+                )
+            };
+            let row_path_wires = MerklePathGadget::build(b, row_node_hash, index_ids[1]);
+            let row_tree_root = row_path_wires.root;
+            // compute hash of the index node storing the rows tree containing the current row
+            let index_node_hash = {
+                let inputs = index_node_info[i]
+                    .child_hashes
+                    .into_iter()
+                    .flat_map(|hash| hash.to_targets())
+                    .chain(index_node_info[i].node_min.to_targets())
+                    .chain(index_node_info[i].node_max.to_targets())
+                    .chain(once(index_ids[0]))
+                    .chain(row_proof.index_value_target().to_targets())
+                    .chain(row_tree_root.to_targets())
+                    .collect_vec();
+                b.hash_n_to_hash_no_pad::<H>(inputs)
+            };
+            let index_path_wires = MerklePathGadget::build(b, index_node_hash, index_ids[0]);
+            // if the current row is valid, check that the root is the same of the original tree, completing
+            // membership proof for the current row; otherwise, we don't care
+            let root = b.select_hash(is_matching_row, &index_path_wires.root, &tree_hash);
+            b.connect_hashes(tree_hash, root);
 
-                row_paths.push(row_path_wires.inputs);
-                index_paths.push(index_path_wires.inputs);
-                // check that the primary index value for the current row is within the query
-                // bounds (only if the row is valid)
-                let index_value = row_proof.index_value_target();
-                let greater_than_min = b.is_less_or_equal_than_u256(&min_query, &index_value);
-                let smaller_than_max = b.is_less_or_equal_than_u256(&index_value, &max_query);
-                let in_range = b.and(greater_than_min, smaller_than_max);
-                let in_range = b.and(is_matching_row, in_range);
-                b.connect(in_range.target, is_matching_row.target);
+            row_paths.push(row_path_wires.inputs);
+            index_paths.push(index_path_wires.inputs);
+            // check that the primary index value for the current row is within the query
+            // bounds (only if the row is valid)
+            let index_value = row_proof.index_value_target();
+            let greater_than_min = b.is_less_or_equal_than_u256(&min_query, &index_value);
+            let smaller_than_max = b.is_less_or_equal_than_u256(&index_value, &max_query);
+            let in_range = b.and(greater_than_min, smaller_than_max);
+            let in_range = b.and(is_matching_row, in_range);
+            b.connect(in_range.target, is_matching_row.target);
 
-                // enforce DISTINCT only for actual results: we enforce the i-th actual result is strictly smaller
-                // than the (i+1)-th actual result
-                max_result = if let Some(res) = &max_result {
-                    let current_result: [UInt256Target; S] =
-                        get_result(i).to_vec().try_into().unwrap();
-                    let is_smaller = b.is_less_than_or_equal_to_u256_arr(res, &current_result).0;
-                    // flag specifying whether we must enforce DISTINCT for the current result or not
-                    let must_be_enforced = b.and(is_matching_row, distinct);
-                    let is_smaller = b.and(must_be_enforced, is_smaller);
-                    b.connect(is_smaller.target, must_be_enforced.target);
-                    Some(current_result)
-                } else {
-                    Some(get_result(i).to_vec().try_into().unwrap())
-                };
+            // enforce DISTINCT only for actual results: we enforce the i-th actual result is strictly smaller
+            // than the (i+1)-th actual result
+            max_result = if let Some(res) = &max_result {
+                let current_result: [UInt256Target; S] = get_result(i).to_vec().try_into().unwrap();
+                let is_smaller = b.is_less_than_or_equal_to_u256_arr(res, &current_result).0;
+                // flag specifying whether we must enforce DISTINCT for the current result or not
+                let must_be_enforced = b.and(is_matching_row, distinct);
+                let is_smaller = b.and(must_be_enforced, is_smaller);
+                b.connect(is_smaller.target, must_be_enforced.target);
+                Some(current_result)
+            } else {
+                Some(get_result(i).to_vec().try_into().unwrap())
+            };
 
-                // Expose results for this row.
-                // First, we compute the digest of the results corresponding to this row, as computed in the universal
-                // query circuit, to check that the results correspond to the one computed by that circuit.
-                // To recompute the digest of the results, we first need to build the cells tree that is constructed
-                // in the universal query circuit to store the results computed for each row. Note that the
-                // universal query circuit stores results in a cells tree since to prove some queries a results tree
-                // needs to be built
-                let cells_tree_hash =
-                    build_cells_tree(b, &get_result(i)[2..], &ids[2..], &is_item_included[2..]);
-                let second_item = b.select_u256(is_item_included[1], &get_result(i)[1], &zero_u256);
-                // digest = D(ids[0]||result[0]||ids[1]||second_item||cells_tree_hash)
-                let digest = {
-                    let inputs = once(ids[0])
-                        .chain(get_result(i)[0].to_targets())
-                        .chain(once(ids[1]))
-                        .chain(second_item.to_targets())
-                        .chain(cells_tree_hash.to_targets())
-                        .collect_vec();
-                    b.map_to_curve_point(&inputs)
-                };
-                // we need to check that the digests are equal only if the current row is valid
-                let digest_equal = b.curve_eq(digest, row_proof.first_value_as_curve_target());
-                let digest_equal = b.and(digest_equal, is_matching_row);
-                b.connect(is_matching_row.target, digest_equal.target);
-                num_results = b.add(num_results, is_matching_row.target);
+            // Expose results for this row.
+            // First, we compute the digest of the results corresponding to this row, as computed in the universal
+            // query circuit, to check that the results correspond to the one computed by that circuit.
+            // To recompute the digest of the results, we first need to build the cells tree that is constructed
+            // in the universal query circuit to store the results computed for each row. Note that the
+            // universal query circuit stores results in a cells tree since to prove some queries a results tree
+            // needs to be built
+            let cells_tree_hash =
+                build_cells_tree(b, &get_result(i)[2..], &ids[2..], &is_item_included[2..]);
+            let second_item = b.select_u256(is_item_included[1], &get_result(i)[1], &zero_u256);
+            // digest = D(ids[0]||result[0]||ids[1]||second_item||cells_tree_hash)
+            let digest = {
+                let inputs = once(ids[0])
+                    .chain(get_result(i)[0].to_targets())
+                    .chain(once(ids[1]))
+                    .chain(second_item.to_targets())
+                    .chain(cells_tree_hash.to_targets())
+                    .collect_vec();
+                b.map_to_curve_point(&inputs)
+            };
+            // we need to check that the digests are equal only if the current row is valid
+            let digest_equal = b.curve_eq(digest, row_proof.first_value_as_curve_target());
+            let digest_equal = b.and(digest_equal, is_matching_row);
+            b.connect(is_matching_row.target, digest_equal.target);
+            num_results = b.add(num_results, is_matching_row.target);
 
-                // check that placeholder hash and computational hash are the same for all
-                // the proofs
-                b.connect_hashes(row_proof.computational_hash_target(), computational_hash);
-                b.connect_hashes(row_proof.placeholder_hash_target(), placeholder_hash);
+            // check that placeholder hash and computational hash are the same for all
+            // the proofs
+            b.connect_hashes(row_proof.computational_hash_target(), computational_hash);
+            b.connect_hashes(row_proof.placeholder_hash_target(), placeholder_hash);
 
-                overflow = b.or(overflow, row_proof.overflow_flag_target());
-            });
+            overflow = b.or(overflow, row_proof.overflow_flag_target());
+        });
 
         // finally, check placeholders
         // First, compute the final placeholder hash, adding the primary index query bounds
@@ -651,7 +648,7 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     // we generate a dummy proof for a dummy node of the index tree with an index value out of range
@@ -761,21 +758,21 @@ where
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); S * L]:,
-    [(); NUM_QUERY_IO::<S>]:,
+    [(); num_query_io::<S>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     type CircuitBuilderParams = CircuitBuilderParams;
 
     type Inputs = RecursiveCircuitInputs<ROW_TREE_MAX_DEPTH, INDEX_TREE_MAX_DEPTH, L, S, PH, PP>;
 
-    const NUM_PUBLIC_INPUTS: usize = REVELATION_PI_LEN::<L, S, PH>;
+    const NUM_PUBLIC_INPUTS: usize = revelation_pi_len::<L, S, PH>();
 
     fn circuit_logic(
         builder: &mut CBuilder,
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let row_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, { NUM_QUERY_IO::<S> }>::new(
+        let row_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, { num_query_io::<S>() }>::new(
             default_config(),
             &builder_parameters.query_circuit_set,
         );
@@ -793,7 +790,7 @@ where
             .iter()
             .map(|verifier| {
                 QueryProofPublicInputs::from_slice(
-                    verifier.get_public_input_targets::<F, { NUM_QUERY_IO::<S> }>(),
+                    verifier.get_public_input_targets::<F, { num_query_io::<S>() }>(),
                 )
             })
             .collect_vec();
@@ -841,7 +838,7 @@ mod tests {
         utils::{gen_random_field_hash, gen_random_u256},
     };
     use plonky2::{
-        field::types::{Field, PrimeField64, Sample},
+        field::types::{Field, Sample},
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
@@ -860,8 +857,8 @@ mod tests {
             public_inputs::{PublicInputs as QueryProofPublicInputs, QueryPublicInputs},
         },
         revelation::{
-            revelation_unproven_offset::RowPath, tests::TestPlaceholders, NUM_PREPROCESSING_IO,
-            NUM_QUERY_IO,
+            num_query_io, revelation_unproven_offset::RowPath, tests::TestPlaceholders,
+            NUM_PREPROCESSING_IO,
         },
         test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
@@ -889,7 +886,6 @@ mod tests {
     }
 
     impl<
-            'a,
             const ROW_TREE_MAX_DEPTH: usize,
             const INDEX_TREE_MAX_DEPTH: usize,
             const L: usize,
@@ -897,7 +893,7 @@ mod tests {
             const PH: usize,
             const PP: usize,
         > UserCircuit<F, D>
-        for TestRevelationCircuit<'a, ROW_TREE_MAX_DEPTH, INDEX_TREE_MAX_DEPTH, L, S, PH, PP>
+        for TestRevelationCircuit<'_, ROW_TREE_MAX_DEPTH, INDEX_TREE_MAX_DEPTH, L, S, PH, PP>
     where
         [(); ROW_TREE_MAX_DEPTH - 1]:,
         [(); INDEX_TREE_MAX_DEPTH - 1]:,
@@ -911,14 +907,14 @@ mod tests {
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let row_pis_raw: [Vec<Target>; L] = (0..L)
-                .map(|_| c.add_virtual_targets(NUM_QUERY_IO::<S>))
+                .map(|_| c.add_virtual_targets(num_query_io::<S>()))
                 .collect_vec()
                 .try_into()
                 .unwrap();
             let original_pis_raw = c.add_virtual_targets(NUM_PREPROCESSING_IO);
             let row_pis = row_pis_raw
                 .iter()
-                .map(|pis| QueryProofPublicInputs::from_slice(&pis))
+                .map(|pis| QueryProofPublicInputs::from_slice(pis))
                 .collect_vec()
                 .try_into()
                 .unwrap();
@@ -939,7 +935,7 @@ mod tests {
 
     // test function for this revelation circuit. If `distinct` is true, then the
     // results are enforced to be distinct
-    async fn test_revelation_unproven_offset_circuit(distinct: bool) {
+    async fn test_revelation_unproven_offset_circuit() {
         const ROW_TREE_MAX_DEPTH: usize = 10;
         const INDEX_TREE_MAX_DEPTH: usize = 10;
         const L: usize = 5;
@@ -1100,7 +1096,7 @@ mod tests {
                 node_5.max,
             )
         };
-        let node_B = {
+        let node_b = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[2]);
             let embedded_tree_hash =
                 HashOutput::try_from(node_2.compute_node_hash(index_ids[1]).to_bytes()).unwrap();
@@ -1115,7 +1111,7 @@ mod tests {
                 node_value,
             )
         };
-        let node_C = {
+        let node_c = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[4]);
             let embedded_tree_hash =
                 HashOutput::try_from(node_3.compute_node_hash(index_ids[1]).to_bytes()).unwrap();
@@ -1132,11 +1128,11 @@ mod tests {
                 node_value,
             )
         };
-        let node_B_hash =
-            HashOutput::try_from(node_B.compute_node_hash(index_ids[0]).to_bytes()).unwrap();
-        let node_C_hash =
-            HashOutput::try_from(node_C.compute_node_hash(index_ids[0]).to_bytes()).unwrap();
-        let node_A = {
+        let node_b_hash =
+            HashOutput::try_from(node_b.compute_node_hash(index_ids[0]).to_bytes()).unwrap();
+        let node_c_hash =
+            HashOutput::try_from(node_c.compute_node_hash(index_ids[0]).to_bytes()).unwrap();
+        let node_a = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[0]);
             let embedded_tree_hash =
                 HashOutput::try_from(node_0.compute_node_hash(index_ids[1]).to_bytes()).unwrap();
@@ -1146,15 +1142,15 @@ mod tests {
             row_pis[1][index_value_range].copy_from_slice(&node_value.to_fields());
             NodeInfo::new(
                 &embedded_tree_hash,
-                Some(&node_B_hash), // left child is node B
-                Some(&node_C_hash), // right child is node C
+                Some(&node_b_hash), // left child is node B
+                Some(&node_c_hash), // right child is node C
                 node_value,
-                node_B.min,
-                node_C.max,
+                node_b.min,
+                node_c.max,
             )
         };
         // set original tree PI to the root of the tree
-        let root = node_A.compute_node_hash(index_ids[0]);
+        let root = node_a.compute_node_hash(index_ids[0]);
         original_tree_pis[ORIGINAL_TREE_H_RANGE].copy_from_slice(&root.to_fields());
 
         // sample final results and set order-agnostic digests in row_pis proofs accordingly
@@ -1215,9 +1211,9 @@ mod tests {
         // prepare RowPath inputs for each row
         let row_path_1 = RowPath {
             row_node_info: node_1,
-            row_tree_path: vec![(node_0.clone(), ChildPosition::Left)],
+            row_tree_path: vec![(node_0, ChildPosition::Left)],
             row_path_siblings: vec![None],
-            index_node_info: node_A.clone(),
+            index_node_info: node_a,
             index_tree_path: vec![],
             index_path_siblings: vec![],
         };
@@ -1225,7 +1221,7 @@ mod tests {
             row_node_info: node_0,
             row_tree_path: vec![],
             row_path_siblings: vec![],
-            index_node_info: node_A.clone(),
+            index_node_info: node_a,
             index_tree_path: vec![],
             index_path_siblings: vec![],
         };
@@ -1233,25 +1229,25 @@ mod tests {
             row_node_info: node_2,
             row_tree_path: vec![],
             row_path_siblings: vec![],
-            index_node_info: node_B.clone(),
-            index_tree_path: vec![(node_A.clone(), ChildPosition::Left)],
-            index_path_siblings: vec![Some(node_C_hash)],
+            index_node_info: node_b,
+            index_tree_path: vec![(node_a, ChildPosition::Left)],
+            index_path_siblings: vec![Some(node_c_hash)],
         };
         let row_path_4 = RowPath {
             row_node_info: node_4,
-            row_tree_path: vec![(node_3.clone(), ChildPosition::Left)],
+            row_tree_path: vec![(node_3, ChildPosition::Left)],
             row_path_siblings: vec![Some(node_5_hash)],
-            index_node_info: node_C.clone(),
-            index_tree_path: vec![(node_A.clone(), ChildPosition::Right)],
-            index_path_siblings: vec![Some(node_B_hash.clone())],
+            index_node_info: node_c,
+            index_tree_path: vec![(node_a, ChildPosition::Right)],
+            index_path_siblings: vec![Some(node_b_hash)],
         };
         let row_path_3 = RowPath {
             row_node_info: node_3,
             row_tree_path: vec![],
             row_path_siblings: vec![],
-            index_node_info: node_C.clone(),
-            index_tree_path: vec![(node_A.clone(), ChildPosition::Right)],
-            index_path_siblings: vec![Some(node_B_hash)],
+            index_node_info: node_c,
+            index_tree_path: vec![(node_a, ChildPosition::Right)],
+            index_path_siblings: vec![Some(node_b_hash)],
         };
 
         let circuit =
@@ -1270,16 +1266,16 @@ mod tests {
                 original_tree_pis: &original_tree_pis,
             };
 
-        let proof = run_circuit::<F, D, C, _>(circuit);
+        let _ = run_circuit::<F, D, C, _>(circuit);
     }
 
     #[tokio::test]
     async fn test_revelation_unproven_offset_circuit_no_distinct() {
-        test_revelation_unproven_offset_circuit(false).await
+        test_revelation_unproven_offset_circuit().await
     }
 
     #[tokio::test]
     async fn test_revelation_unproven_offset_circuit_distinct() {
-        test_revelation_unproven_offset_circuit(true).await
+        test_revelation_unproven_offset_circuit().await
     }
 }

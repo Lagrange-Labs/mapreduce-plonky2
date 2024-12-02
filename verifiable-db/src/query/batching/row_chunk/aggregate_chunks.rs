@@ -12,22 +12,23 @@ use crate::query::universal_circuit::universal_query_gadget::{
 use super::{consecutive_rows::are_consecutive_rows, BoundaryRowDataTarget, RowChunkDataTarget};
 
 /// This method aggregates the 2 chunks `first` and `second`, also checking
-/// that they are consecutive. The returned aggregated chunk will 
+/// that they are consecutive. The returned aggregated chunk will
 /// correspond to first if `is_second_dummy` flag is true
+#[allow(dead_code)] // only in this PR
 pub(crate) fn aggregate_chunks<const MAX_NUM_RESULTS: usize>(
     b: &mut CBuilder,
     first: &RowChunkDataTarget<MAX_NUM_RESULTS>,
     second: &RowChunkDataTarget<MAX_NUM_RESULTS>,
-    min_query_primary: &UInt256Target,
-    max_query_primary: &UInt256Target,
-    min_query_secondary: &UInt256Target,
-    max_query_secondary: &UInt256Target,
+    primary_query_bounds: (&UInt256Target, &UInt256Target),
+    secondary_query_bounds: (&UInt256Target, &UInt256Target),
     ops: &[Target; MAX_NUM_RESULTS],
     is_second_dummy: &BoolTarget,
 ) -> RowChunkDataTarget<MAX_NUM_RESULTS>
 where
     [(); MAX_NUM_RESULTS - 1]:,
 {
+    let (min_query_primary, max_query_primary) = primary_query_bounds;
+    let (min_query_secondary, max_query_secondary) = secondary_query_bounds;
     let _true = b._true();
     // check that right boundary row of chunk1 and left boundary row of chunk2
     // are consecutive
@@ -66,8 +67,8 @@ where
         first.chunk_outputs.num_overflows,
         second.chunk_outputs.num_overflows,
     );
-    for i in 0..MAX_NUM_RESULTS {
-        let (output, overflows) = OutputValuesTarget::aggregate_outputs(b, &values, ops[i], i);
+    for (i, op) in ops.iter().enumerate() {
+        let (output, overflows) = OutputValuesTarget::aggregate_outputs(b, &values, *op, i);
         output_values.extend_from_slice(&output);
         num_overflows = b.add(num_overflows, overflows);
     }
@@ -108,7 +109,7 @@ mod tests {
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::{gen_random_field_hash, gen_random_u256},
+        utils::gen_random_u256,
     };
     use plonky2::{
         field::types::{Field, PrimeField64, Sample},
@@ -364,10 +365,8 @@ mod tests {
                 c,
                 &first_chunk_data,
                 &second_chunk_data,
-                &min_primary,
-                &max_primary,
-                &min_secondary,
-                &max_secondary,
+                (&min_primary, &max_primary),
+                (&min_secondary, &max_secondary),
                 &ops,
                 &is_second_dummy,
             );
@@ -392,8 +391,14 @@ mod tests {
             self.first.assign(pw, &wires.first);
             self.second.assign(pw, &wires.second);
             [
-                (&wires.min_query_primary, self.min_query_primary.unwrap_or(U256::ZERO)),
-                (&wires.max_query_primary, self.max_query_primary.unwrap_or(U256::MAX)),
+                (
+                    &wires.min_query_primary,
+                    self.min_query_primary.unwrap_or(U256::ZERO),
+                ),
+                (
+                    &wires.max_query_primary,
+                    self.max_query_primary.unwrap_or(U256::MAX),
+                ),
                 (
                     &wires.min_query_secondary,
                     self.min_query_secondary.unwrap_or(U256::ZERO),
@@ -425,17 +430,16 @@ mod tests {
         //          B       C
         //      D               G
         //   E      F
-        let [node_A, node_B, node_C, node_D, node_E, node_F, node_G] =
+        let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] =
             generate_test_tree(secondary_index_id, None);
-        let rows_tree_root =
-            HashOutput::try_from(node_A.compute_node_hash(secondary_index_id)).unwrap();
+        let rows_tree_root = HashOutput::from(node_a.compute_node_hash(secondary_index_id));
         // build the node of the index tree that stores the rows tree being generated
         let rng = &mut thread_rng();
         let index_node = build_node(
             None,
             None,
             gen_random_u256(rng),
-            rows_tree_root.clone(),
+            rows_tree_root,
             primary_index_id,
         );
         let root = index_node.compute_node_hash(primary_index_id);
@@ -459,31 +463,29 @@ mod tests {
 
         // the first row chunk for this test is given by nodes `B`, `D`, `E` and `F`. So left boundary row is `E` and
         // right boundary row is `B`
-        let path_E = vec![
-            (node_D.clone(), ChildPosition::Left),
-            (node_B.clone(), ChildPosition::Left),
-            (node_A.clone(), ChildPosition::Left),
+        let path_e = vec![
+            (node_d, ChildPosition::Left),
+            (node_b, ChildPosition::Left),
+            (node_a, ChildPosition::Left),
         ];
-        let node_F_hash =
-            HashOutput::try_from(node_F.compute_node_hash(secondary_index_id)).unwrap();
-        let node_C_hash =
-            HashOutput::try_from(node_C.compute_node_hash(secondary_index_id)).unwrap();
-        let siblings_E = vec![Some(node_F_hash), None, Some(node_C_hash.clone())];
-        let merkle_path_inputs_E = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
-            &path_E,
-            &siblings_E,
-            &node_E,
+        let node_f_hash = HashOutput::from(node_f.compute_node_hash(secondary_index_id));
+        let node_c_hash = HashOutput::from(node_c.compute_node_hash(secondary_index_id));
+        let siblings_e = vec![Some(node_f_hash), None, Some(node_c_hash)];
+        let merkle_path_inputs_e = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_e,
+            &siblings_e,
+            &node_e,
             [None, None], // it's a leaf node
         )
         .unwrap();
 
-        let path_B = vec![(node_A.clone(), ChildPosition::Left)];
-        let siblings_B = vec![Some(node_C_hash.clone())];
-        let merkle_path_inputs_B = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
-            &path_B,
-            &siblings_B,
-            &node_B,
-            [Some(node_D.clone()), None],
+        let path_b = vec![(node_a, ChildPosition::Left)];
+        let siblings_b = vec![Some(node_c_hash)];
+        let merkle_path_inputs_b = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_b,
+            &siblings_b,
+            &node_b,
+            [Some(node_d), None],
         )
         .unwrap();
 
@@ -497,14 +499,14 @@ mod tests {
         )
         .unwrap();
         let first_chunk = RowChunkDataInput {
-            left_boundary_row_path: merkle_path_inputs_E,
-            left_boundary_row_node: node_E.clone(),
+            left_boundary_row_path: merkle_path_inputs_e,
+            left_boundary_row_node: node_e,
             left_boundary_index_path: index_node_merkle_path,
-            left_boundary_index_node: index_node.clone(),
-            right_boundary_row_path: merkle_path_inputs_B,
-            right_boundary_row_node: node_B.clone(),
+            left_boundary_index_node: index_node,
+            right_boundary_row_path: merkle_path_inputs_b,
+            right_boundary_row_node: node_b,
             right_boundary_index_path: index_node_merkle_path,
-            right_boundary_index_node: index_node.clone(),
+            right_boundary_index_node: index_node,
             chunk_count: first_chunk_count,
             chunk_num_overflows: fist_chunk_num_overflows,
             chunk_output_values: first_chunk_outputs.clone(),
@@ -512,40 +514,39 @@ mod tests {
 
         // the second row chunk for this test is given by nodes `A`, `C`, and `G`. So left boundary row is `A` and
         // right boundary row is `G`
-        let path_A = vec![];
-        let siblings_A = vec![];
-        let merkle_path_inputs_A = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
-            &path_A,
-            &siblings_A,
-            &node_A,
-            [Some(node_B.clone()), Some(node_C.clone())],
+        let path_a = vec![];
+        let siblings_a = vec![];
+        let merkle_path_inputs_a = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_a,
+            &siblings_a,
+            &node_a,
+            [Some(node_b), Some(node_c)],
         )
         .unwrap();
 
-        let path_G = vec![
-            (node_C.clone(), ChildPosition::Right),
-            (node_A.clone(), ChildPosition::Right),
+        let path_g = vec![
+            (node_c, ChildPosition::Right),
+            (node_a, ChildPosition::Right),
         ];
-        let node_B_hash =
-            HashOutput::try_from(node_B.compute_node_hash(secondary_index_id)).unwrap();
-        let siblings_G = vec![None, Some(node_B_hash.clone())];
-        let merkle_path_inputs_G = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
-            &path_G,
-            &siblings_G,
-            &node_G,
+        let node_b_hash = HashOutput::from(node_b.compute_node_hash(secondary_index_id));
+        let siblings_g = vec![None, Some(node_b_hash)];
+        let merkle_path_inputs_g = MerklePathWithNeighborsGadget::<ROW_TREE_MAX_DEPTH>::new(
+            &path_g,
+            &siblings_g,
+            &node_g,
             [None, None],
         )
         .unwrap();
 
         let second_chunk = RowChunkDataInput {
-            left_boundary_row_path: merkle_path_inputs_A,
-            left_boundary_row_node: node_A.clone(),
+            left_boundary_row_path: merkle_path_inputs_a,
+            left_boundary_row_node: node_a,
             left_boundary_index_path: index_node_merkle_path,
-            left_boundary_index_node: index_node.clone(),
-            right_boundary_row_path: merkle_path_inputs_G,
-            right_boundary_row_node: node_G.clone(),
+            left_boundary_index_node: index_node,
+            right_boundary_row_path: merkle_path_inputs_g,
+            right_boundary_row_node: node_g,
             right_boundary_index_path: index_node_merkle_path,
-            right_boundary_index_node: index_node.clone(),
+            right_boundary_index_node: index_node,
             chunk_count: second_chunk_count,
             chunk_num_overflows: second_chunk_num_overflows,
             chunk_output_values: second_chunk_outputs.clone(),
@@ -566,12 +567,12 @@ mod tests {
 
         let proof = run_circuit::<F, D, C, _>(circuit);
         // compute expected aggregated chunk
-        let node_E_info = BoundaryRowNodeInfo {
-            end_node_hash: node_E.compute_node_hash(secondary_index_id),
+        let node_e_info = BoundaryRowNodeInfo {
+            end_node_hash: node_e.compute_node_hash(secondary_index_id),
             predecessor_info: NeighborInfo::new_dummy_predecessor(),
             successor_info: NeighborInfo::new(
-                node_D.value,
-                Some(node_D.compute_node_hash(secondary_index_id)),
+                node_d.value,
+                Some(node_d.compute_node_hash(secondary_index_id)),
             ),
         };
         let index_node_info = BoundaryRowNodeInfo {
@@ -579,11 +580,11 @@ mod tests {
             predecessor_info: NeighborInfo::new_dummy_predecessor(),
             successor_info: NeighborInfo::new_dummy_successor(),
         };
-        let node_G_info = BoundaryRowNodeInfo {
-            end_node_hash: node_G.compute_node_hash(secondary_index_id),
+        let node_g_info = BoundaryRowNodeInfo {
+            end_node_hash: node_g.compute_node_hash(secondary_index_id),
             predecessor_info: NeighborInfo::new(
-                node_C.value,
-                Some(HashOut::from_bytes((&node_C_hash).into())),
+                node_c.value,
+                Some(HashOut::from_bytes((&node_c_hash).into())),
             ),
             successor_info: NeighborInfo::new_dummy_successor(),
         };
@@ -608,11 +609,11 @@ mod tests {
 
         let expected_chunk = RowChunkData::<MAX_NUM_RESULTS> {
             left_boundary_row: BoundaryRowData {
-                row_node_info: node_E_info.clone(),
+                row_node_info: node_e_info.clone(),
                 index_node_info: index_node_info.clone(),
             },
             right_boundary_row: BoundaryRowData {
-                row_node_info: node_G_info,
+                row_node_info: node_g_info,
                 index_node_info: index_node_info.clone(),
             },
             chunk_tree_hash: root,
@@ -626,14 +627,14 @@ mod tests {
         // test with second chunk being dummy; we use a non-consecutive chunk as the dummy one: the row chunk
         // given by node_G only
         let second_chunk = RowChunkDataInput {
-            left_boundary_row_path: merkle_path_inputs_G,
-            left_boundary_row_node: node_G.clone(),
+            left_boundary_row_path: merkle_path_inputs_g,
+            left_boundary_row_node: node_g,
             left_boundary_index_path: index_node_merkle_path,
-            left_boundary_index_node: index_node.clone(),
-            right_boundary_row_path: merkle_path_inputs_G.clone(),
-            right_boundary_row_node: node_G.clone(),
+            left_boundary_index_node: index_node,
+            right_boundary_row_path: merkle_path_inputs_g,
+            right_boundary_row_node: node_g,
             right_boundary_index_path: index_node_merkle_path,
-            right_boundary_index_node: index_node.clone(),
+            right_boundary_index_node: index_node,
             chunk_count: second_chunk_count,
             chunk_num_overflows: second_chunk_num_overflows,
             chunk_output_values: second_chunk_outputs.clone(),
@@ -655,21 +656,21 @@ mod tests {
         // compute expected aggregated chunk
         // since we aggregate with a dummy chunk, we expect right boundary row to be the same as the
         // first chunk, that is node_B
-        let node_B_info = BoundaryRowNodeInfo {
-            end_node_hash: HashOut::from_bytes((&node_B_hash).into()),
-            predecessor_info: NeighborInfo::new(node_F.value, None),
+        let node_b_info = BoundaryRowNodeInfo {
+            end_node_hash: HashOut::from_bytes((&node_b_hash).into()),
+            predecessor_info: NeighborInfo::new(node_f.value, None),
             successor_info: NeighborInfo::new(
-                node_A.value,
+                node_a.value,
                 Some(HashOut::from_bytes((&rows_tree_root).into())),
             ),
         };
         let expected_chunk = RowChunkData::<MAX_NUM_RESULTS> {
             left_boundary_row: BoundaryRowData {
-                row_node_info: node_E_info,
+                row_node_info: node_e_info,
                 index_node_info: index_node_info.clone(),
             },
             right_boundary_row: BoundaryRowData {
-                row_node_info: node_B_info,
+                row_node_info: node_b_info,
                 index_node_info: index_node_info.clone(),
             },
             chunk_tree_hash: root,
@@ -707,23 +708,22 @@ mod tests {
             rows_tree_root,
             primary_index_id,
         );
-        println!("{:?}", fake_node.compute_node_hash(primary_index_id));
         let fake_node_merkle_path = MerklePathWithNeighborsGadget::<INDEX_TREE_MAX_DEPTH>::new(
-            &vec![],
-            &vec![],
+            &[],
+            &[],
             &fake_node,
             [None, None],
         )
         .unwrap();
         let second_chunk = RowChunkDataInput {
-            left_boundary_row_path: merkle_path_inputs_A,
-            left_boundary_row_node: node_A.clone(),
+            left_boundary_row_path: merkle_path_inputs_a,
+            left_boundary_row_node: node_a,
             left_boundary_index_path: fake_node_merkle_path,
-            left_boundary_index_node: fake_node.clone(),
-            right_boundary_row_path: merkle_path_inputs_G,
-            right_boundary_row_node: node_G.clone(),
+            left_boundary_index_node: fake_node,
+            right_boundary_row_path: merkle_path_inputs_g,
+            right_boundary_row_node: node_g,
             right_boundary_index_path: fake_node_merkle_path,
-            right_boundary_index_node: fake_node.clone(),
+            right_boundary_index_node: fake_node,
             chunk_count: second_chunk_count,
             chunk_num_overflows: second_chunk_num_overflows,
             chunk_output_values: second_chunk_outputs.clone(),
