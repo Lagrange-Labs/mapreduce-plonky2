@@ -11,7 +11,6 @@ use eth_trie::{EthTrie, MemoryDB, Trie};
 use mp2_common::eth::{ReceiptProofInfo, ReceiptQuery};
 use rand::{thread_rng, Rng};
 use std::sync::Arc;
-use tokio::task::JoinSet;
 
 /// Simply the maximum number of nibbles a key can have.
 const MAX_KEY_NIBBLE_LEN: usize = 64;
@@ -112,50 +111,56 @@ pub fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
     rt.block_on(async {
         // Spin up a local node.
 
-        let rpc = ProviderBuilder::new().on_anvil_with_config(|anvil| Anvil::block_time(anvil, 1));
+        let rpc = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .on_anvil_with_config(|anvil| Anvil::arg(anvil, "--no-mining"));
+
+        // Turn on auto mining to deploy the contracts
+        rpc.anvil_set_auto_mine(true).await.unwrap();
 
         // Deploy the contract using anvil
-        let event_contract = EventEmitter::deploy(rpc.clone()).await.unwrap();
+        let event_contract = EventEmitter::deploy(rpc.root()).await.unwrap();
 
         // Deploy the contract using anvil
-        let other_contract = OtherEmitter::deploy(rpc.clone()).await.unwrap();
+        let other_contract = OtherEmitter::deploy(rpc.root()).await.unwrap();
 
-        let tx_reqs = (0..25)
-            .map(|i| match i % 4 {
+        // Disable auto mining so we can ensure that all the transaction appear in the same block
+        rpc.anvil_set_auto_mine(false).await.unwrap();
+
+        // Send a bunch of transactions, some of which are related to the event we are testing for.
+        let mut pending_tx_builders = vec![];
+        for i in 0..25 {
+            let tx_req = match i % 4 {
                 0 => event_contract.testEmit().into_transaction_request(),
                 1 => event_contract.twoEmits().into_transaction_request(),
                 2 => other_contract.otherEmit().into_transaction_request(),
                 3 => other_contract.twoEmits().into_transaction_request(),
                 _ => unreachable!(),
-            })
-            .collect::<Vec<_>>();
-        let mut join_set = JoinSet::new();
-        tx_reqs.into_iter().for_each(|tx_req| {
-            let rpc_clone = rpc.clone();
-            join_set.spawn(async move {
-                let sender_address = Address::random();
-                let funding = U256::from(1e18 as u64);
-                rpc_clone
-                    .anvil_set_balance(sender_address, funding)
-                    .await
-                    .unwrap();
-                rpc_clone
-                    .anvil_auto_impersonate_account(true)
-                    .await
-                    .unwrap();
-                rpc_clone
-                    .send_transaction(tx_req.with_from(sender_address))
-                    .await
-                    .unwrap()
-                    .watch()
-                    .await
-                    .unwrap()
-            });
-        });
+            };
 
-        let hashes = join_set.join_all().await;
+            let sender_address = Address::random();
+            let funding = U256::from(1e18 as u64);
+            rpc.anvil_set_balance(sender_address, funding)
+                .await
+                .unwrap();
+            rpc.anvil_auto_impersonate_account(true).await.unwrap();
+            let new_req = tx_req.with_from(sender_address);
+            let tx_req_final = rpc
+                .fill(new_req)
+                .await
+                .unwrap()
+                .as_builder()
+                .unwrap()
+                .clone();
+            pending_tx_builders.push(rpc.send_transaction(tx_req_final).await.unwrap());
+        }
+
+        // Mine a block, it should include all the transactions created above.
+        rpc.anvil_mine(Some(U256::from(1u8)), None).await.unwrap();
+
         let mut transactions = Vec::new();
-        for hash in hashes.into_iter() {
+        for pending in pending_tx_builders.into_iter() {
+            let hash = pending.watch().await.unwrap();
             transactions.push(rpc.get_transaction_by_hash(hash).await.unwrap().unwrap());
         }
 
