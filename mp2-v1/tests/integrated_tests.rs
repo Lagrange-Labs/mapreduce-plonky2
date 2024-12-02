@@ -33,7 +33,7 @@ use common::{
 };
 use envconfig::Envconfig;
 use log::info;
-use mp2_v1::block_extraction::ExtractionType;
+
 use parsil::{
     assembler::DynamicCircuitPis,
     parse_and_validate,
@@ -84,8 +84,7 @@ async fn integrated_indexing() -> Result<()> {
     let mut ctx = context::new_local_chain(storage).await;
     info!("Initial Anvil block: {}", ctx.block_number().await);
     info!("Building indexing params");
-    ctx.build_params(ParamsType::Indexing(ExtractionType::Storage))
-        .unwrap();
+    ctx.build_params(ParamsType::Indexing).unwrap();
 
     info!("Params built");
     // NOTE: to comment to avoid very long tests...
