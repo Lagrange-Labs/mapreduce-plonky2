@@ -11,7 +11,7 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, HashPermutation},
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    utils::{SelectHashBuilder, ToFields, ToTargets},
+    utils::{HashBuilder, ToFields, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{
@@ -124,7 +124,7 @@ where
             results,
         )?;
 
-        let value_gadget_inputs = UniversalQueryValueInputs::new(row_cells, true)?;
+        let value_gadget_inputs = UniversalQueryValueInputs::new(row_cells, false)?;
 
         Ok(Self {
             is_leaf,
@@ -184,12 +184,7 @@ where
         // compute overflow flag
         let overflow = b.is_not_equal(value_wires.output_wires.num_overflows, zero);
 
-        let output_values_targets = value_wires
-            .output_wires
-            .values
-            .into_iter()
-            .flatten()
-            .collect_vec();
+        let output_values_targets = value_wires.output_wires.values.to_targets();
 
         PublicInputs::<Target, MAX_NUM_RESULTS>::new(
             &tree_hash.to_targets(),

@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
+use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS};
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -19,26 +19,25 @@ use sha3::Keccak256;
 
 use crate::array::Targetable;
 use crate::poseidon::{HashableField, H};
+use crate::serialization::circuit_data_serialization::SerializableRichField;
 use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
-use crate::{D, F};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
 
-#[allow(dead_code)]
-trait ConnectSlice {
-    fn connect_slice(&mut self, a: &[Target], b: &[Target]);
+// check that the closure $f actually panics, printing $msg as error message if the function
+// did not panic; this macro is employed in tests in place of #[should_panic] to ensure that a
+// panic occurred in the expected function rather than in other parts of the test
+#[macro_export]
+macro_rules! check_panic {
+    ($f: expr, $msg: expr) => {{
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe($f));
+        assert!(result.is_err(), $msg);
+    }};
 }
 
-impl ConnectSlice for CircuitBuilder<F, D> {
-    fn connect_slice(&mut self, a: &[Target], b: &[Target]) {
-        assert_eq!(a.len(), b.len());
-        for (ai, bi) in a.iter().zip(b) {
-            self.connect(*ai, *bi);
-        }
-    }
-}
+pub use check_panic;
 
 pub fn verify_proof_tuple<
     F: RichField + Extendable<D>,
@@ -326,7 +325,7 @@ pub fn pack_and_compute_poseidon_target<F: HashableField + Extendable<D>, const 
     b.hash_n_to_hash_no_pad::<H>(packed)
 }
 
-pub trait SelectHashBuilder {
+pub trait HashBuilder {
     /// Select `first_hash` or `second_hash` as output depending on the Boolean `cond`
     fn select_hash(
         &mut self,
@@ -334,9 +333,12 @@ pub trait SelectHashBuilder {
         first_hash: &HashOutTarget,
         second_hash: &HashOutTarget,
     ) -> HashOutTarget;
+
+    /// Determine whether `first_hash == second_hash`
+    fn hash_eq(&mut self, first_hash: &HashOutTarget, second_hash: &HashOutTarget) -> BoolTarget;
 }
 
-impl<F: RichField + Extendable<D>, const D: usize> SelectHashBuilder for CircuitBuilder<F, D> {
+impl<F: RichField + Extendable<D>, const D: usize> HashBuilder for CircuitBuilder<F, D> {
     fn select_hash(
         &mut self,
         cond: BoolTarget,
@@ -352,6 +354,28 @@ impl<F: RichField + Extendable<D>, const D: usize> SelectHashBuilder for Circuit
                 .collect_vec(),
         )
     }
+
+    fn hash_eq(&mut self, first_hash: &HashOutTarget, second_hash: &HashOutTarget) -> BoolTarget {
+        let _true = self._true();
+        first_hash
+            .elements
+            .iter()
+            .zip(second_hash.elements.iter())
+            .fold(_true, |acc, (first, second)| {
+                let is_eq = self.is_equal(*first, *second);
+                self.and(acc, is_eq)
+            })
+    }
+}
+
+pub trait SelectTarget {
+    /// Return `first` if `cond` is true, `second` otherwise
+    fn select<F: SerializableRichField<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        cond: &BoolTarget,
+        first: &Self,
+        second: &Self,
+    ) -> Self;
 }
 
 pub trait ToFields<F: RichField> {
@@ -414,10 +438,16 @@ impl<F: RichField> Fieldable<F> for u64 {
 }
 
 pub trait FromTargets {
+    /// Number of targets necessary to instantiate `Self`
+    const NUM_TARGETS: usize;
+
+    /// Number of targets in `t` must be at least `Self::NUM_TARGETS`
     fn from_targets(t: &[Target]) -> Self;
 }
 
 impl FromTargets for HashOutTarget {
+    const NUM_TARGETS: usize = NUM_HASH_OUT_ELTS;
+
     fn from_targets(t: &[Target]) -> Self {
         HashOutTarget {
             elements: create_array(|i| t[i]),

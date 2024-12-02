@@ -4,7 +4,7 @@ use mp2_common::{
     poseidon::empty_poseidon_hash,
     types::CBuilder,
     u256::UInt256Target,
-    utils::{SelectHashBuilder, ToTargets},
+    utils::{HashBuilder, ToTargets},
     CHasher,
 };
 use plonky2::{

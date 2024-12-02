@@ -13,7 +13,7 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     types::{CBuilder, HashOutput},
     u256::UInt256Target,
-    utils::{Fieldable, FromFields, SelectHashBuilder, ToFields, ToTargets},
+    utils::{Fieldable, FromFields, HashBuilder, ToFields, ToTargets},
     CHasher, F,
 };
 use plonky2::{

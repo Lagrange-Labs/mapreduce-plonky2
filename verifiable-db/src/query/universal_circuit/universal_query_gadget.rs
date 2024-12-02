@@ -10,20 +10,21 @@ use mp2_common::{
     array::ToField,
     poseidon::{empty_poseidon_hash, H},
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
-    types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{FromFields, ToFields, ToTargets},
+    types::{CBuilder, CURVE_TARGET_LEN},
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
+    utils::{FromFields, FromTargets, ToFields, ToTargets},
     CHasher, F,
 };
 use plonky2::{
     field::types::Field,
-    hash::hashing::hash_n_to_hash_no_pad,
+    hash::{hash_types::NUM_HASH_OUT_ELTS, hashing::hash_n_to_hash_no_pad},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::config::{GenericHashOut, Hasher},
 };
+use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
@@ -32,7 +33,6 @@ use crate::query::{
         ColumnIDs, ComputationalHashCache, HashPermutation, Operation, Output,
         PlaceholderIdentifier,
     },
-    public_inputs::PublicInputs,
     universal_circuit::{
         basic_operation::BasicOperationInputs, column_extraction::ColumnExtractionValueWires,
         universal_circuit_inputs::OutputItem,
@@ -516,6 +516,7 @@ pub(crate) struct UniversalQueryHashInputWires<
     output_component_wires: <T::HashWires as OutputComponentHashWires>::InputWires,
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct UniversalQueryHashWires<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
@@ -936,6 +937,202 @@ where
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct CurveOrU256<T>([T; CURVE_TARGET_LEN]);
+
+impl<T: Clone + Debug> CurveOrU256<T> {
+    pub(crate) fn from_slice(t: &[T]) -> Self {
+        Self(
+            t.iter()
+                .cloned()
+                .chain(repeat(t[0].clone()))
+                .take(CURVE_TARGET_LEN)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    fn to_u256_raw(&self) -> &[T] {
+        &self.0[..NUM_LIMBS]
+    }
+
+    pub(crate) fn to_vec(&self) -> Vec<T> {
+        self.0.to_vec()
+    }
+}
+
+pub(crate) type CurveOrU256Target = CurveOrU256<Target>;
+
+impl CurveOrU256Target {
+    pub(crate) fn as_curve_target(&self) -> CurveTarget {
+        CurveTarget::from_targets(self.0.as_slice())
+    }
+
+    pub(crate) fn as_u256_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_u256_raw())
+    }
+}
+
+impl FromTargets for CurveOrU256Target {
+    const NUM_TARGETS: usize = CurveTarget::NUM_TARGETS;
+
+    fn from_targets(t: &[Target]) -> Self {
+        Self::from_slice(t)
+    }
+}
+
+impl ToTargets for CurveOrU256Target {
+    fn to_targets(&self) -> Vec<Target> {
+        self.0.to_vec()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OutputValuesTarget<const MAX_NUM_RESULTS: usize>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    pub(crate) first_output: CurveOrU256Target,
+    pub(crate) other_outputs: [UInt256Target; MAX_NUM_RESULTS - 1],
+}
+
+impl<const MAX_NUM_RESULTS: usize> OutputValuesTarget<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    pub(crate) fn value_target_at_index(&self, i: usize) -> UInt256Target {
+        if i == 0 {
+            self.first_output.as_u256_target()
+        } else {
+            self.other_outputs[i - 1].clone()
+        }
+    }
+
+    #[cfg(test)] // used only in test for now
+    pub(crate) fn build(b: &mut CBuilder) -> Self {
+        let first_output = CurveOrU256(b.add_virtual_target_arr());
+        let other_outputs = b.add_virtual_u256_arr();
+
+        Self {
+            first_output,
+            other_outputs,
+        }
+    }
+
+    #[cfg(test)] // used only in test for now
+    pub(crate) fn set_target(
+        &self,
+        pw: &mut PartialWitness<F>,
+        inputs: &OutputValues<MAX_NUM_RESULTS>,
+    ) {
+        pw.set_target_arr(&self.first_output.0, &inputs.first_output.0);
+        pw.set_u256_target_arr(&self.other_outputs, &inputs.other_outputs);
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> ToTargets for OutputValuesTarget<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    fn to_targets(&self) -> Vec<Target> {
+        self.first_output
+            .to_targets()
+            .into_iter()
+            .chain(self.other_outputs.iter().flat_map(|out| out.to_targets()))
+            .collect()
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> FromTargets for OutputValuesTarget<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    const NUM_TARGETS: usize =
+        CurveTarget::NUM_TARGETS + (MAX_NUM_RESULTS - 1) * UInt256Target::NUM_TARGETS;
+
+    fn from_targets(t: &[Target]) -> Self {
+        assert!(t.len() >= Self::NUM_TARGETS);
+        let first_output = CurveOrU256Target::from_targets(&t[..CurveTarget::NUM_TARGETS]);
+        let other_outputs = t[CurveTarget::NUM_TARGETS..]
+            .chunks(UInt256Target::NUM_TARGETS)
+            .map(UInt256Target::from_targets)
+            .take(MAX_NUM_RESULTS - 1)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+
+        Self {
+            first_output,
+            other_outputs,
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub(crate) struct OutputValues<const MAX_NUM_RESULTS: usize>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    pub(crate) first_output: CurveOrU256<F>,
+    pub(crate) other_outputs: [U256; MAX_NUM_RESULTS - 1],
+}
+
+impl<const MAX_NUM_RESULTS: usize> OutputValues<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    pub(crate) fn first_value_as_curve_point(&self) -> WeierstrassPoint {
+        WeierstrassPoint::from_fields(&self.first_output.0)
+    }
+
+    pub(crate) fn first_value_as_u256(&self) -> U256 {
+        let fields = self.first_output.to_u256_raw();
+        U256::from_fields(fields)
+    }
+
+    /// Return the value as a UInt256 at the specified index
+    pub(crate) fn value_at_index(&self, i: usize) -> U256 {
+        if i == 0 {
+            self.first_value_as_u256()
+        } else {
+            self.other_outputs[i - 1]
+        }
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> FromFields<F> for OutputValues<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    fn from_fields(t: &[F]) -> Self {
+        let first_output = CurveOrU256::from_slice(&t[..CURVE_TARGET_LEN]);
+        let other_outputs = t[CURVE_TARGET_LEN..]
+            .chunks(NUM_LIMBS)
+            .map(U256::from_fields)
+            .take(MAX_NUM_RESULTS - 1)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+
+        Self {
+            first_output,
+            other_outputs,
+        }
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> ToFields<F> for OutputValues<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    fn to_fields(&self) -> Vec<F> {
+        self.first_output
+            .to_vec()
+            .into_iter()
+            .chain(self.other_outputs.iter().flat_map(|out| out.to_fields()))
+            .collect()
+    }
+}
 /// Input wires for the universal query value gadget
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub(crate) struct UniversalQueryValueInputWires<const MAX_NUM_COLUMNS: usize> {
@@ -949,17 +1146,54 @@ pub(crate) struct UniversalQueryValueInputWires<const MAX_NUM_COLUMNS: usize> {
     pub(crate) is_non_dummy_row: BoolTarget,
 }
 
-pub(crate) struct UniversalQueryOutputWires<const MAX_NUM_RESULTS: usize> {
+#[derive(Clone, Debug)]
+pub(crate) struct UniversalQueryOutputWires<const MAX_NUM_RESULTS: usize>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
     pub(crate) tree_hash: MembershipHashTarget,
-    pub(crate) values: [Vec<Target>; MAX_NUM_RESULTS],
+    pub(crate) values: OutputValuesTarget<MAX_NUM_RESULTS>,
     pub(crate) count: Target,
     pub(crate) num_overflows: Target,
 }
 
+impl<const MAX_NUM_RESULTS: usize> FromTargets for UniversalQueryOutputWires<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    const NUM_TARGETS: usize = NUM_HASH_OUT_ELTS + 2 + OutputValuesTarget::NUM_TARGETS;
+    fn from_targets(t: &[Target]) -> Self {
+        assert!(t.len() >= Self::NUM_TARGETS);
+        Self {
+            tree_hash: MembershipHashTarget::from_vec(t[..NUM_HASH_OUT_ELTS].to_vec()),
+            values: OutputValuesTarget::from_targets(&t[NUM_HASH_OUT_ELTS..]),
+            count: t[Self::NUM_TARGETS - 2],
+            num_overflows: t[Self::NUM_TARGETS - 1],
+        }
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> ToTargets for UniversalQueryOutputWires<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    fn to_targets(&self) -> Vec<Target> {
+        self.tree_hash
+            .to_targets()
+            .into_iter()
+            .chain(self.values.to_targets())
+            .chain([self.count, self.num_overflows])
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct UniversalQueryValueWires<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_RESULTS: usize,
-> {
+> where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
     pub(crate) input_wires: UniversalQueryValueInputWires<MAX_NUM_COLUMNS>,
     pub(crate) output_wires: UniversalQueryOutputWires<MAX_NUM_RESULTS>,
 }
@@ -976,7 +1210,7 @@ pub(crate) struct UniversalQueryValueInputs<
         deserialize_with = "deserialize_long_array"
     )]
     column_values: [U256; MAX_NUM_COLUMNS],
-    is_non_dummy_row: bool,
+    is_dummy_row: bool,
 }
 
 impl<
@@ -993,8 +1227,9 @@ impl<
     >
 where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); MAX_NUM_RESULTS - 1]:,
 {
-    pub(crate) fn new(row_cells: &RowCells, is_non_dummy_row: bool) -> Result<Self> {
+    pub(crate) fn new(row_cells: &RowCells, is_dummy_row: bool) -> Result<Self> {
         let num_columns = row_cells.num_columns();
         ensure!(
             num_columns <= MAX_NUM_COLUMNS,
@@ -1009,7 +1244,7 @@ where
             .collect_vec();
         Ok(Self {
             column_values: padded_column_values.try_into().unwrap(),
-            is_non_dummy_row,
+            is_dummy_row,
         })
     }
 
@@ -1134,22 +1369,21 @@ where
             &hash_input_wires.output_component_wires,
         );
 
-        // compute output_values to be exposed; we call `pad_slice_to_curve_len` to ensure that the
-        // first output value is always padded to the size of a `CurveTarget`
-        let first_output_value = PublicInputs::<_, MAX_NUM_RESULTS>::pad_slice_to_curve_len(
+        // compute output_values to be exposed; we build the first output value as a `CurveOrU256Target`
+        let first_output = CurveOrU256Target::from_targets(
             &output_component_value_wires
                 .first_output_value()
                 .to_targets(),
         );
         // Append the other `MAX_NUM_RESULTS-1` output values
-        let output_values = once(first_output_value)
-            .chain(
-                output_component_value_wires
-                    .other_output_values()
-                    .iter()
-                    .map(|t| t.to_targets()),
-            )
-            .collect_vec();
+        let output_values = OutputValuesTarget {
+            first_output,
+            other_outputs: output_component_value_wires
+                .other_output_values()
+                .to_vec()
+                .try_into()
+                .unwrap(),
+        };
 
         // ensure that `num_overflows` is always 0 in case of dummy rows
         let num_overflows = b.mul(num_overflows, is_non_dummy_row.target);
@@ -1161,7 +1395,7 @@ where
             },
             output_wires: UniversalQueryOutputWires {
                 tree_hash,
-                values: output_values.try_into().unwrap(),
+                values: output_values,
                 count: predicate_value.target,
                 num_overflows,
             },
@@ -1174,7 +1408,7 @@ where
         wires: &UniversalQueryValueInputWires<MAX_NUM_COLUMNS>,
     ) {
         pw.set_u256_target_arr(&wires.column_values, &self.column_values);
-        pw.set_bool_target(wires.is_non_dummy_row, self.is_non_dummy_row);
+        pw.set_bool_target(wires.is_non_dummy_row, !self.is_dummy_row);
     }
 }
 

@@ -3,6 +3,7 @@ use public_inputs::PublicInputs;
 
 pub mod aggregation;
 pub mod api;
+pub mod batching;
 pub mod computational_hash_ids;
 pub mod merkle_path;
 pub mod public_inputs;

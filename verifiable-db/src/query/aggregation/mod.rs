@@ -6,7 +6,10 @@ use itertools::Itertools;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, HashPermutation},
     proof::ProofWithVK,
-    serialization::{deserialize_long_array, serialize_long_array},
+    serialization::{
+        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
+        serialize_long_array,
+    },
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{Fieldable, ToFields, ToTargets},
@@ -224,13 +227,18 @@ impl NodeInfo {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct NodeInfoTarget {
     /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
     /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) embedded_tree_hash: HashOutTarget,
     /// Hashes of the children of the current node, first left child and then right child hash. The hash of left/right child
     /// is the empty hash (i.e., H("")) if there is no corresponding left/right child for the current node
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
     pub(crate) child_hashes: [HashOutTarget; 2],
     /// value stored in the node. It can be a primary index value if the node is a node in the index tree,
     /// a secondary index value if the node is a node in a rows tree
@@ -532,22 +540,29 @@ pub(crate) mod tests {
     use crate::query::{
         computational_hash_ids::{AggregationOperation, Identifiers},
         public_inputs::PublicInputs,
+        universal_circuit::universal_query_gadget::{CurveOrU256, OutputValues},
     };
     use alloy::primitives::U256;
-    use mp2_common::{array::ToField, group_hashing::add_curve_point, utils::ToFields, F};
+    use itertools::Itertools;
+    use mp2_common::{
+        array::ToField,
+        group_hashing::add_curve_point,
+        utils::{FromFields, ToFields},
+        F,
+    };
     use plonky2_ecgfp5::curve::curve::Point;
 
-    /// Compute the output values and the overflow number at the specified index by
-    /// the proofs. It's the test function corresponding to `compute_output_item`.
-    pub(crate) fn compute_output_item_value<const S: usize>(
+    /// Aggregate the i-th output values found in `outputs` according to the aggregation operation
+    /// with identifier `op`. It's the test function corresponding to `OutputValuesTarget::aggregate_outputs`
+    pub(crate) fn aggregate_output_values<const S: usize>(
         i: usize,
-        proofs: &[&PublicInputs<F, S>],
+        outputs: &[OutputValues<S>],
+        op: F,
     ) -> (Vec<F>, u32)
     where
         [(); S - 1]:,
     {
-        let proof0 = &proofs[0];
-        let op = proof0.operation_ids()[i];
+        let out0 = &outputs[0];
 
         let [op_id, op_min, op_max, op_sum, op_avg] = [
             AggregationOperation::IdOp,
@@ -564,22 +579,17 @@ pub(crate) mod tests {
         let is_op_sum = op == op_sum;
         let is_op_avg = op == op_avg;
 
-        // Check that the all proofs are employing the same aggregation operation.
-        proofs[1..]
-            .iter()
-            .for_each(|p| assert_eq!(p.operation_ids()[i], op));
-
         // Compute the SUM, MIN or MAX value.
         let mut sum_overflow = 0;
-        let mut output = proof0.value_at_index(i);
+        let mut output = out0.value_at_index(i);
         if i == 0 && is_op_id {
             // If it's the first proof and the operation is ID,
             // the value is a curve point not a Uint256.
             output = U256::ZERO;
         }
-        for p in proofs[1..].iter() {
+        for out in outputs[1..].iter() {
             // Get the current proof value.
-            let mut value = p.value_at_index(i);
+            let mut value = out.value_at_index(i);
             if i == 0 && is_op_id {
                 // If it's the first proof and the operation is ID,
                 // the value is a curve point not a Uint256.
@@ -605,14 +615,14 @@ pub(crate) mod tests {
         if i == 0 {
             // We always accumulate order-agnostic digest of the proofs for the first item.
             output = if is_op_id {
-                let points: Vec<_> = proofs
+                let points: Vec<_> = outputs
                     .iter()
-                    .map(|p| Point::decode(p.first_value_as_curve_point().encode()).unwrap())
+                    .map(|out| Point::decode(out.first_value_as_curve_point().encode()).unwrap())
                     .collect();
                 add_curve_point(&points).to_fields()
             } else {
                 // Pad the current output to ``CURVE_TARGET_LEN` for the first item.
-                PublicInputs::<_, S>::pad_slice_to_curve_len(&output)
+                CurveOrU256::from_slice(&output).to_vec()
             };
         }
 
@@ -625,5 +635,30 @@ pub(crate) mod tests {
         };
 
         (output, overflow)
+    }
+
+    /// Compute the output values and the overflow number at the specified index by
+    /// the proofs. It's the test function corresponding to `compute_output_item`.
+    pub(crate) fn compute_output_item_value<const S: usize>(
+        i: usize,
+        proofs: &[&PublicInputs<F, S>],
+    ) -> (Vec<F>, u32)
+    where
+        [(); S - 1]:,
+    {
+        let proof0 = &proofs[0];
+        let op = proof0.operation_ids()[i];
+
+        // Check that the all proofs are employing the same aggregation operation.
+        proofs[1..]
+            .iter()
+            .for_each(|p| assert_eq!(p.operation_ids()[i], op));
+
+        let outputs = proofs
+            .iter()
+            .map(|p| OutputValues::from_fields(p.to_values_raw()))
+            .collect_vec();
+
+        aggregate_output_values(i, &outputs, op)
     }
 }
