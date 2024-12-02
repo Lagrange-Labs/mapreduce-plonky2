@@ -41,9 +41,10 @@ use super::{
             BasicOperation, PlaceholderId, Placeholders, ResultStructure, RowCells,
         },
         universal_query_circuit::{
-            placeholder_hash, QueryBound, UniversalCircuitInput, UniversalQueryCircuitInputs,
+            placeholder_hash, UniversalCircuitInput, UniversalQueryCircuitInputs,
             UniversalQueryCircuitWires,
         },
+        universal_query_gadget::QueryBound,
     },
 };
 use alloy::primitives::U256;

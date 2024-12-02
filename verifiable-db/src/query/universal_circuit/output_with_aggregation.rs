@@ -21,7 +21,9 @@ use serde::{Deserialize, Serialize};
 use crate::query::computational_hash_ids::{AggregationOperation, Output};
 
 use super::{
-    universal_query_circuit::{OutputComponent, OutputComponentWires},
+    universal_query_gadget::{
+        OutputComponent, OutputComponentHashWires, OutputComponentValueWires,
+    },
     ComputationalHashTarget,
 };
 
@@ -52,16 +54,19 @@ pub struct InputWires<const MAX_NUM_RESULTS: usize> {
     )]
     is_output_valid: [BoolTarget; MAX_NUM_RESULTS],
 }
-
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// Input + output wires for output component for queries with result aggregation
-pub struct Wires<const MAX_NUM_RESULTS: usize> {
+pub struct HashWires<const MAX_NUM_RESULTS: usize> {
     input_wires: InputWires<MAX_NUM_RESULTS>,
-    /// Output values computed by this component
-    output_values: [UInt256Target; MAX_NUM_RESULTS],
     /// Computational hash representing all the computation done in the query circuit
     output_hash: ComputationalHashTarget,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValueWires<const MAX_NUM_RESULTS: usize> {
+    /// Output values computed by this component
+    output_values: [UInt256Target; MAX_NUM_RESULTS],
+}
+
 /// Input witness values for output component for queries with result aggregation
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Circuit<const MAX_NUM_RESULTS: usize> {
@@ -78,14 +83,8 @@ pub struct Circuit<const MAX_NUM_RESULTS: usize> {
     num_valid_outputs: usize,
 }
 
-impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULTS> {
+impl<const MAX_NUM_RESULTS: usize> OutputComponentValueWires for ValueWires<MAX_NUM_RESULTS> {
     type FirstT = UInt256Target;
-
-    type InputWires = InputWires<MAX_NUM_RESULTS>;
-
-    fn ops_ids(&self) -> &[Target] {
-        self.input_wires.agg_ops.as_slice()
-    }
 
     fn first_output_value(&self) -> Self::FirstT {
         self.output_values[0].clone()
@@ -93,6 +92,14 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
 
     fn other_output_values(&self) -> &[UInt256Target] {
         &self.output_values[1..]
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> OutputComponentHashWires for HashWires<MAX_NUM_RESULTS> {
+    type InputWires = InputWires<MAX_NUM_RESULTS>;
+
+    fn ops_ids(&self) -> &[Target] {
+        self.input_wires.agg_ops.as_slice()
     }
 
     fn computational_hash(&self) -> ComputationalHashTarget {
@@ -105,58 +112,8 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
 }
 
 impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<MAX_NUM_RESULTS> {
-    type Wires = Wires<MAX_NUM_RESULTS>;
-
-    fn build<const NUM_OUTPUT_VALUES: usize>(
-        b: &mut CBuilder,
-        possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
-        possible_output_hash: [ComputationalHashTarget; NUM_OUTPUT_VALUES],
-        predicate_value: &BoolTarget,
-        predicate_hash: &ComputationalHashTarget,
-    ) -> Self::Wires {
-        let selector = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
-        let agg_ops = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
-        let is_output_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
-        let u256_max = b.constant_u256(U256::MAX);
-        let zero = b.zero_u256();
-        let min_op_identifier = b.constant(AggregationOperation::MinOp.to_field());
-
-        let mut output_values = vec![];
-
-        for i in 0..MAX_NUM_RESULTS {
-            // TODO: random accesses over different iterations can be done with a single operation if we introduce an ad-hoc gate
-            let output_value = b.random_access_u256(selector[i], &possible_output_values);
-
-            // If `predicate_value` is true, then expose the value to be aggregated;
-            // Otherwise use the identity for the aggregation operation.
-            // The identity is 0 except for "MIN", where the identity is the biggest
-            // possible value in the domain, i.e. 2^256-1.
-            let is_agg_ops_min = b.is_equal(agg_ops[i], min_op_identifier);
-            let identity_value = b.select_u256(is_agg_ops_min, &u256_max, &zero);
-            let actual_output_value =
-                b.select_u256(*predicate_value, &output_value, &identity_value);
-            output_values.push(actual_output_value);
-        }
-
-        let output_hash = Self::output_variant().output_hash_circuit(
-            b,
-            predicate_hash,
-            &possible_output_hash,
-            &selector,
-            &agg_ops,
-            &is_output_valid,
-        );
-
-        Wires {
-            input_wires: InputWires {
-                selector,
-                agg_ops,
-                is_output_valid,
-            },
-            output_values: output_values.try_into().unwrap(),
-            output_hash,
-        }
-    }
+    type HashWires = HashWires<MAX_NUM_RESULTS>;
+    type ValueWires = ValueWires<MAX_NUM_RESULTS>;
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &InputWires<MAX_NUM_RESULTS>) {
         pw.set_target_arr(wires.selector.as_slice(), self.selector.as_slice());
@@ -195,6 +152,68 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
     fn output_variant() -> Output {
         Output::Aggregation
     }
+
+    fn build_values<const NUM_OUTPUT_VALUES: usize>(
+        b: &mut CBuilder,
+        possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
+        predicate_value: &BoolTarget,
+        input_wires: &<Self::HashWires as OutputComponentHashWires>::InputWires,
+    ) -> Self::ValueWires {
+        let u256_max = b.constant_u256(U256::MAX);
+        let zero = b.zero_u256();
+        let min_op_identifier = b.constant(AggregationOperation::MinOp.to_field());
+
+        let mut output_values = vec![];
+
+        for i in 0..MAX_NUM_RESULTS {
+            // TODO: random accesses over different iterations can be done with a single operation if we introduce an ad-hoc gate
+            let output_value =
+                b.random_access_u256(input_wires.selector[i], &possible_output_values);
+
+            // If `predicate_value` is true, then expose the value to be aggregated;
+            // Otherwise use the identity for the aggregation operation.
+            // The identity is 0 except for "MIN", where the identity is the biggest
+            // possible value in the domain, i.e. 2^256-1.
+            let is_agg_ops_min = b.is_equal(input_wires.agg_ops[i], min_op_identifier);
+            let identity_value = b.select_u256(is_agg_ops_min, &u256_max, &zero);
+            let actual_output_value =
+                b.select_u256(*predicate_value, &output_value, &identity_value);
+            output_values.push(actual_output_value);
+        }
+
+        ValueWires {
+            output_values: output_values.try_into().unwrap(),
+        }
+    }
+
+    fn build_hash<const NUM_OUTPUT_VALUES: usize>(
+        b: &mut CBuilder,
+        possible_output_hash: [ComputationalHashTarget; NUM_OUTPUT_VALUES],
+        predicate_hash: &ComputationalHashTarget,
+    ) -> Self::HashWires {
+        let selector = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
+        let agg_ops = b.add_virtual_target_arr::<MAX_NUM_RESULTS>();
+        let is_output_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
+        let input_wires = InputWires {
+            selector,
+            agg_ops,
+            is_output_valid,
+        };
+
+        let output_hash = Self::output_variant().output_hash_circuit(
+            b,
+            predicate_hash,
+            &possible_output_hash,
+            &input_wires.selector,
+            &input_wires.agg_ops,
+            &input_wires.is_output_valid,
+        );
+
+        HashWires {
+            input_wires,
+            output_hash,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -226,7 +245,7 @@ mod tests {
         computational_hash_ids::{AggregationOperation, ComputationalHashCache},
         universal_circuit::{
             universal_circuit_inputs::OutputItem,
-            universal_query_circuit::{OutputComponent, OutputComponentWires},
+            universal_query_gadget::{OutputComponent, OutputComponentHashWires},
             ComputationalHash, ComputationalHashTarget,
         },
     };
@@ -311,14 +330,14 @@ mod tests {
 
             expected_output_values
                 .iter()
-                .zip(wires.output_values.iter())
+                .zip(wires.value_wires.output_values.iter())
                 .for_each(|(expected, actual)| c.enforce_equal_u256(expected, actual));
 
             expected_ops_ids
                 .iter()
-                .zip(wires.ops_ids().iter())
+                .zip(wires.hash_wires.ops_ids().iter())
                 .for_each(|(expected, actual)| c.connect(*expected, *actual));
-            c.connect_hashes(expected_output_hash, wires.output_hash);
+            c.connect_hashes(expected_output_hash, wires.hash_wires.output_hash);
 
             Self::Wires {
                 column_values,
@@ -327,7 +346,7 @@ mod tests {
                 item_hash: item_hash.try_into().unwrap(),
                 predicate_value,
                 predicate_hash,
-                component: wires.input_wires,
+                component: wires.hash_wires.input_wires,
                 expected_output_values,
                 expected_ops_ids,
                 expected_output_hash,

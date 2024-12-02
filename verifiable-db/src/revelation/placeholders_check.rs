@@ -6,7 +6,7 @@ use crate::query::{
     computational_hash_ids::PlaceholderIdentifier,
     universal_circuit::{
         universal_circuit_inputs::{PlaceholderId, Placeholders},
-        universal_query_circuit::QueryBound,
+        universal_query_gadget::QueryBound,
     },
 };
 use alloy::primitives::U256;
@@ -206,7 +206,7 @@ impl<const PH: usize, const PP: usize> CheckPlaceholderGadget<PH, PP> {
         };
         let to_be_checked_placeholders = placeholder_hash_ids
             .into_iter()
-            .map(&compute_checked_placeholder_for_id)
+            .map(compute_checked_placeholder_for_id)
             .collect::<Result<Vec<_>>>()?;
         // compute placeholders data to be hashed for secondary query bounds
         let min_query_secondary =
@@ -301,6 +301,11 @@ impl<const PH: usize, const PP: usize> CheckPlaceholderGadget<PH, PP> {
             .iter()
             .zip(&self.secondary_query_bound_placeholders)
             .for_each(|(t, v)| v.assign(pw, t));
+    }
+    // Return the query bounds on the primary index, taken from the placeholder values
+    #[cfg(test)] // used only in test for now
+    pub(crate) fn primary_query_bounds(&self) -> (U256, U256) {
+        (self.placeholder_values[0], self.placeholder_values[1])
     }
 }
 

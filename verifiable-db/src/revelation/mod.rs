@@ -144,10 +144,7 @@ pub(crate) mod tests {
             // Re-compute the placeholder hash from placeholder_pairs and minmum,
             // maximum query bounds. Then check it should be same with the specified
             // final placeholder hash.
-            let (min_i1, max_i1) = (
-                check_placeholder_inputs.placeholder_values[0],
-                check_placeholder_inputs.placeholder_values[1],
-            );
+            let (min_i1, max_i1) = check_placeholder_inputs.primary_query_bounds();
             let placeholder_hash = H::hash_no_pad(&placeholder_hash_payload);
             // query_placeholder_hash = H(placeholder_hash || min_i2 || max_i2)
             let inputs = placeholder_hash
