@@ -140,6 +140,26 @@ pub struct NeighborInfoTarget {
     pub(crate) hash: HashOutTarget,
 }
 
+impl NeighborInfoTarget {
+    pub(crate) fn new_dummy_predecessor(b: &mut CircuitBuilder<F, D>) -> Self {
+        Self {
+            is_found: b._false(),
+            is_in_path: b._true(), // the circuit still looks at the predecessor in the path
+            value: b.zero_u256(),
+            hash: b.constant_hash(*empty_poseidon_hash()),
+        }
+    }
+
+    pub(crate) fn new_dummy_successor(b: &mut CircuitBuilder<F, D>) -> Self {
+        Self {
+            is_found: b._false(),
+            is_in_path: b._true(), // the circuit still looks at the predecessor in the path
+            value: b.constant_u256(U256::MAX),
+            hash: b.constant_hash(*empty_poseidon_hash()),
+        }
+    }
+}
+
 impl ToTargets for NeighborInfoTarget {
     fn to_targets(&self) -> Vec<Target> {
         once(self.is_found.target)
@@ -695,7 +715,7 @@ pub(crate) mod tests {
             circuit_builder::CircuitBuilder, config::GenericHashOut, proof::ProofWithPublicInputs,
         },
     };
-    use rand::thread_rng;
+    use rand::{thread_rng, Rng};
 
     use crate::query::aggregation::{ChildPosition, NodeInfo};
 
@@ -739,10 +759,10 @@ pub(crate) mod tests {
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub(crate) struct NeighborInfo {
-        is_found: bool,
-        is_in_path: bool,
-        value: U256,
-        hash: HashOut<F>,
+        pub(crate) is_found: bool,
+        pub(crate) is_in_path: bool,
+        pub(crate) value: U256,
+        pub(crate) hash: HashOut<F>,
     }
 
     impl FromFields<F> for NeighborInfo {
@@ -795,9 +815,25 @@ pub(crate) mod tests {
         pub(crate) fn new_dummy_successor() -> Self {
             Self {
                 is_found: false,
-                is_in_path: true, // the circuit still looks at the predecessor in the path
+                is_in_path: true, // the circuit still looks at the successor in the path
                 value: U256::MAX,
                 hash: *empty_poseidon_hash(),
+            }
+        }
+
+        /// Generate at random data about the successor/predecessor of a node. The generated
+        /// predecessor/successor must have the `value` provided as input;
+        /// the existence of the generated predecessor/successor depends on the `is_found` input:
+        /// - if `is_found` is `None`, then the existence of the generated predecessor/successor
+        ///   is chosen at random
+        /// - otherwise, the generated predecessor/successor will be marked as found if and only if
+        ///   the flag wrapped by `is_found` is `true`
+        pub(crate) fn sample<R: Rng>(rng: &mut R, value: U256, is_found: Option<bool>) -> Self {
+            NeighborInfo {
+                is_found: is_found.unwrap_or(rng.gen()),
+                is_in_path: rng.gen(),
+                value,
+                hash: gen_random_field_hash(),
             }
         }
     }
@@ -887,12 +923,12 @@ pub(crate) mod tests {
         )
     }
 
-    // Build the following Merkle-tree to be employed in tests, using
-    // the `index_id` provided as input to compute the hash of the nodes
-    //              A
-    //          B       C
-    //      D               G
-    //   E      F
+    /// Build the following Merkle-tree to be employed in tests, using
+    /// the `index_id` provided as input to compute the hash of the nodes
+    ///              A
+    ///          B       C
+    ///      D               G
+    ///   E      F
     pub(crate) fn generate_test_tree(
         index_id: F,
         value_range: Option<(U256, U256)>,

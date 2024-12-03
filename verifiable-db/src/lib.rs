@@ -4,6 +4,7 @@
 // Add this to allow generic const items, e.g. `const IO_LEN<const MAX_NUM: usize>`
 #![feature(generic_const_items)]
 #![feature(variant_count)]
+#![feature(async_closure)]
 pub mod api;
 pub mod block_tree;
 pub mod cells_tree;

@@ -953,7 +953,7 @@ impl<T: Clone + Debug> CurveOrU256<T> {
         )
     }
 
-    fn to_u256_raw(&self) -> &[T] {
+    pub(crate) fn to_u256_raw(&self) -> &[T] {
         &self.0[..NUM_LIMBS]
     }
 
@@ -1081,6 +1081,31 @@ impl<const MAX_NUM_RESULTS: usize> OutputValues<MAX_NUM_RESULTS>
 where
     [(); MAX_NUM_RESULTS - 1]:,
 {
+    #[cfg(test)] // used only in test for now
+    pub(crate) fn new_aggregation_outputs(values: &[U256]) -> Self {
+        let first_output = CurveOrU256::<F>::from_slice(&values[0].to_fields());
+        let other_outputs = values[1..]
+            .iter()
+            .copied()
+            .chain(repeat(U256::ZERO))
+            .take(MAX_NUM_RESULTS - 1)
+            .collect_vec();
+
+        Self {
+            first_output,
+            other_outputs: other_outputs.try_into().unwrap(),
+        }
+    }
+
+    #[cfg(test)] // used only in test for now
+    pub(crate) fn new_outputs_no_aggregation(point: &plonky2_ecgfp5::curve::curve::Point) -> Self {
+        let first_output = CurveOrU256::<F>::from_slice(&point.to_fields());
+        Self {
+            first_output,
+            other_outputs: [U256::ZERO; MAX_NUM_RESULTS - 1],
+        }
+    }
+
     pub(crate) fn first_value_as_curve_point(&self) -> WeierstrassPoint {
         WeierstrassPoint::from_fields(&self.first_output.0)
     }
@@ -1209,8 +1234,8 @@ pub(crate) struct UniversalQueryValueInputs<
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    column_values: [U256; MAX_NUM_COLUMNS],
-    is_dummy_row: bool,
+    pub(crate) column_values: [U256; MAX_NUM_COLUMNS],
+    pub(crate) is_dummy_row: bool,
 }
 
 impl<

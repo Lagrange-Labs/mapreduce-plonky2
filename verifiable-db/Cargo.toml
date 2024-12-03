@@ -31,3 +31,4 @@ mp2_test = { path = "../mp2-test" }
 
 [features]
 original_poseidon = ["mp2_common/original_poseidon"]
+batching_circuits = []

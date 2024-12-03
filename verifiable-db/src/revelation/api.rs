@@ -43,7 +43,7 @@ use crate::{
 };
 
 use super::{
-    num_query_io, pi_len,
+    num_query_io, num_query_io_no_results_tree, pi_len,
     revelation_unproven_offset::{
         RecursiveCircuitInputs as RecursiveCircuitInputsUnporvenOffset,
         RevelationCircuit as RevelationCircuitUnprovenOffset, RowPath,
@@ -151,6 +151,7 @@ pub struct Parameters<
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
+    [(); num_query_io_no_results_tree::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
 {
     revelation_no_results_tree: CircuitWithUniversalVerifier<
         F,
@@ -444,6 +445,7 @@ where
     [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()]:,
+    [(); num_query_io_no_results_tree::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
 {
     pub fn build(
         query_circuit_set: &RecursiveCircuits<F, C, D>,
@@ -593,13 +595,18 @@ mod tests {
         revelation::{
             api::{CircuitInput, Parameters},
             num_query_io,
-            tests::compute_results_from_query_proof,
+            tests::compute_results_from_query_proof_outputs,
             PublicInputs, NUM_PREPROCESSING_IO,
         },
     };
 
+    #[cfg(not(feature = "batching_circuits"))]
     #[test]
     fn test_api() {
+        use mp2_common::utils::FromFields;
+
+        use crate::query::universal_circuit::universal_query_gadget::OutputValues;
+
         init_logging();
 
         const ROW_TREE_MAX_DEPTH: usize = 10;
@@ -683,10 +690,14 @@ mod tests {
         // check entry count
         assert_eq!(query_pi.num_matching_rows(), pi.entry_count(),);
         // check results and overflow
-        let (result, overflow) = compute_results_from_query_proof(&query_pi);
+        let result = compute_results_from_query_proof_outputs(
+            query_pi.num_matching_rows(),
+            OutputValues::<MAX_NUM_ITEMS_PER_OUTPUT>::from_fields(query_pi.to_values_raw()),
+            &query_pi.operation_ids(),
+        );
         assert_eq!(pi.num_results().to_canonical_u64(), 1,);
         assert_eq!(pi.result_values()[0], result,);
-        assert_eq!(pi.overflow_flag(), overflow,);
+        assert_eq!(pi.overflow_flag(), query_pi.overflow_flag(),);
         // check computational hash
         // first, compute the final computational hash
         let metadata_hash = HashOut::<F>::from_partial(preprocessing_pi.metadata_hash());
