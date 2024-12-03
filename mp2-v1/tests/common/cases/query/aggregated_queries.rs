@@ -46,7 +46,7 @@ use mp2_v1::{
     },
     query::{
         batching_planner::{
-            generate_chunks_and_update_tree, UpdateTreeForChunkProofs, UpdateTreeKey,
+            generate_chunks_and_update_tree, UTForChunkProofs, UTKey,
         },
         planner::{
             execute_row_query, proving_plan_for_non_existence, NonExistenceInput, TreeFetcher,
@@ -180,7 +180,7 @@ pub(crate) async fn prove_query_batching(
         let proof_key = ProofKey::QueryAggregate((
             query.query.clone(),
             query.placeholders.placeholder_values(),
-            UpdateTreeKey::default(),
+            UTKey::default(),
         ));
         ctx.storage.store_proof(proof_key.clone(), query_proof)?;
         proof_key

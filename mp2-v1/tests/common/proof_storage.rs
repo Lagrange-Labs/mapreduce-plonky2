@@ -15,7 +15,7 @@ use envconfig::Envconfig;
 use mp2_test::cells_tree::CellTree;
 use mp2_v1::{
     indexing::{block::BlockPrimaryIndex, row::RowTreeKey},
-    query::batching_planner::UpdateTreeKey,
+    query::batching_planner::UTKey,
 };
 use ryhope::tree::TreeTopology;
 use serde::{Deserialize, Serialize};
@@ -78,7 +78,7 @@ pub enum ProofKey {
     QueryUniversal((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
     QueryAggregateRow((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
     QueryAggregateIndex((QueryID, PlaceholderValues, BlockPrimaryIndex)),
-    QueryAggregate((QueryID, PlaceholderValues, UpdateTreeKey<NUM_CHUNKS>)),
+    QueryAggregate((QueryID, PlaceholderValues, UTKey<NUM_CHUNKS>)),
 }
 
 impl ProofKey {

@@ -24,7 +24,6 @@ use crate::{
         block::{BlockPrimaryIndex, BlockTreeKey},
         index::IndexNode,
         row::{RowPayload, RowTreeKey},
-        LagrangeNode,
     },
     query::planner::TreeFetcher,
 };
@@ -67,6 +66,26 @@ async fn compute_input_for_row<T: TreeFetcher<RowTreeKey, RowPayload<BlockPrimar
     RowWithPath::new(&row_cells, &path)
 }
 
+/// Given the subtree built from the rows satisyfing the query ranges on primary and
+/// secondary indexes, this method splits the rows in chunks of `CHUNK_SIZE` consecutive 
+/// rows, with all the rows in the same chunk being proven all together in the same 
+/// circuit. The method also builds the `UpdateTree` that specifies how to recursively
+/// aggregate all these chunks, using the chunk aggregation circuit. The `NUM_CHUNKS`
+/// constant corresponds to the maximum number of chunks that can be aggregated by such
+/// circuit, and will thus correspond to the arity of the constructed `UpdateTree`.
+/// The method requires the following inputs:
+/// - `row_cache` : Wide lineage of rows tree nodes in the subtree build from the rows 
+///     satisfying the the query ranges on primary and secondary indexes
+/// - `index_cache` : Wide lineage of index tree nodes in the subtree build from the rows 
+///     satisfying the the query ranges on primary and secondary indexes
+/// - `column_ids` : Identifiers of the columns of the table, including primary and
+///     secondary indexes columns
+/// - `non_existence_inputs` : This set of data is employed to find the proper row to be 
+///     proven for a rows tree that contains no rows with a secondary index value lying
+///     in the query range over secondary index, which still needs to be proven for
+///     completeness (i.e., proving that we are not skipping potentially matching rows
+///     for the query); this data structure can be instantiated with its own `new` method
+/// - `epoch` : Last epoch inserted in the index tree
 pub async fn generate_chunks_and_update_tree<
     'a,
     const CHUNK_SIZE: usize,
@@ -79,13 +98,13 @@ pub async fn generate_chunks_and_update_tree<
     non_existence_inputs: NonExistenceInput<'a, C>,
     epoch: Epoch,
 ) -> Result<(
-    HashMap<UpdateTreeKey<NUM_CHUNKS>, Vec<RowWithPath>>,
-    UpdateTreeForChunks<NUM_CHUNKS>,
+    HashMap<UTKey<NUM_CHUNKS>, Vec<RowWithPath>>,
+    UTForChunks<NUM_CHUNKS>,
 )> {
     let chunks =
         generate_chunks::<CHUNK_SIZE, C>(row_cache, index_cache, column_ids, non_existence_inputs)
             .await?;
-    Ok(UpdateTreeForChunksBuilder { chunks }.build_update_tree_with_base_chunks(epoch))
+    Ok(UTForChunksBuilder { chunks }.build_update_tree_with_base_chunks(epoch))
 }
 
 async fn generate_chunks<'a, const CHUNK_SIZE: usize, C: ContextProvider>(
@@ -129,7 +148,6 @@ async fn generate_chunks<'a, const CHUNK_SIZE: usize, C: ContextProvider>(
                     .collect::<Vec<RowWithPath>>()
                     .await
             } else {
-                //ToDO: find non-existence rows
                 let proven_node = non_existence_inputs
                     .find_row_node_for_non_existence(index_value)
                     .await
@@ -156,7 +174,7 @@ async fn generate_chunks<'a, const CHUNK_SIZE: usize, C: ContextProvider>(
         .collect_vec())
 }
 
-/// Key for nodes of the `UpdateTreeForChunks<NUM_CHUNKS>` employed to
+/// Key for nodes of the `UTForChunks<NUM_CHUNKS>` employed to
 /// prove chunks of rows.
 /// The key is composed by 2 integers:
 /// - The `level` of the node in the `UpdateTree`, that is the number of
@@ -181,9 +199,9 @@ async fn generate_chunks<'a, const CHUNK_SIZE: usize, C: ContextProvider>(
 /// (2,0)  (2,1)  (2,2)         (2,3)  (2,4)
 /// ```      
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Default)]
-pub struct UpdateTreeKey<const ARITY: usize>((usize, usize));
+pub struct UTKey<const ARITY: usize>((usize, usize));
 
-impl<const ARITY: usize> UpdateTreeKey<ARITY> {
+impl<const ARITY: usize> UTKey<ARITY> {
     /// Compute the key of the child node of `self` that has `num_left_siblings`
     /// left siblings
     fn children_key(&self, num_left_siblings: usize) -> Self {
@@ -195,17 +213,17 @@ impl<const ARITY: usize> UpdateTreeKey<ARITY> {
 /// `UpdateTree` employed to prove chunks and aggregate chunks of rows
 /// into a single proof. The tree is built employing a `ProvingTree<NUM_CHUNKS>`
 /// as the skeleton tree, which determines the structure of the tree.
-pub type UpdateTreeForChunks<const NUM_CHUNKS: usize> = UpdateTree<UpdateTreeKey<NUM_CHUNKS>>;
+pub type UTForChunks<const NUM_CHUNKS: usize> = UpdateTree<UTKey<NUM_CHUNKS>>;
 
 /// Data atructure employed to build the `UpdateTreeForChunks` for the set of chunks
 #[derive(Clone, Debug)]
-struct UpdateTreeForChunksBuilder<const NUM_CHUNKS: usize> {
+struct UTForChunksBuilder<const NUM_CHUNKS: usize> {
     chunks: Vec<Vec<RowWithPath>>,
 }
 
 /// Convenience trait, used just to implement the public methods to be exposed
 /// for the `UpdateTreeForChunks` type alias
-pub trait UpdateTreeForChunkProofs<const NUM_CHUNKS: usize> {
+pub trait UTForChunkProofs<const NUM_CHUNKS: usize> {
     type K: Clone + Debug + Eq + PartialEq + Hash;
 
     /// Get the keys of the children nodes in the update tree
@@ -213,10 +231,10 @@ pub trait UpdateTreeForChunkProofs<const NUM_CHUNKS: usize> {
     fn get_children_keys(&self, node_key: &Self::K) -> Vec<Self::K>;
 }
 
-impl<const NUM_CHUNKS: usize> UpdateTreeForChunkProofs<NUM_CHUNKS>
-    for UpdateTreeForChunks<NUM_CHUNKS>
+impl<const NUM_CHUNKS: usize> UTForChunkProofs<NUM_CHUNKS>
+    for UTForChunks<NUM_CHUNKS>
 {
-    type K = UpdateTreeKey<NUM_CHUNKS>;
+    type K = UTKey<NUM_CHUNKS>;
 
     fn get_children_keys(&self, node_key: &Self::K) -> Vec<Self::K> {
         (0..NUM_CHUNKS)
@@ -230,7 +248,7 @@ impl<const NUM_CHUNKS: usize> UpdateTreeForChunkProofs<NUM_CHUNKS>
     }
 }
 
-/// Tree employed as a skeleton to build the `UpdateTreeForChunks`, which is
+/// Tree employed as a skeleton to build the `UTForChunks`, which is
 /// employed to prove and aggregate rows chunks. Each node in the tree corresponds
 /// to a proof being generated:
 /// - Leaf nodes are associated to the proving of a single row chunk
@@ -243,31 +261,33 @@ impl<const NUM_CHUNKS: usize> UpdateTreeForChunkProofs<NUM_CHUNKS>
 /// - Place as many leaves as possible in `full` subtrees. A full subtree is defined as
 ///   a subtree containing `ARITY^exp` leaves, for an `exp >= 0`. In particular, it is
 ///   always possible to build at least one full subtree with `exp = ceil(log_{ARITY}(n))-1`.
-///   Not that it might be posible to build from one up to `ARITY` full subtress, each
-///   containing this number of leaves
-/// - If there are leaves that cannot be placed inside a full subtree, they are placed as
-///   direct children of the root, as soon as there are enough children spots avaialable;
-///   if there are still some leaves to be placed, they are placed in a subtree, built
-///   recursively using the same logic, which is rooted in a further child of the root
+///   Note that, depending on `n`, it might be possible to build from one up to `ARITY` full 
+///   subtrees, each containing `ARITY^exp` number of leaves
+/// - If there are leaves that cannot be placed inside a full subtree, then by construction
+///   at most `ARITY-1` full subtrees have been built and placed as child nodes of the root, 
+///   and so there are still `m >= 1` spots available among the children of the root. 
+///   So, up to `m-1` remaining leaves are placed as direct children of the root; if there
+///   are more than `m-1` remaining leaves, they are placed in a subtree, built
+///   recursively using the same logic, which is placed as a further child of the root
 /// More details on the algorithm to construct a tree can be found in the `build_subtree`
 /// method
 #[derive(Clone, Debug)]
 struct ProvingTree<const ARITY: usize> {
     // all the nodes of the tree, indexed by the key of the node
-    nodes: HashMap<UpdateTreeKey<ARITY>, ProvingTreeNode<ARITY>>,
+    nodes: HashMap<UTKey<ARITY>, ProvingTreeNode<ARITY>>,
     // leaves of the tree, identified by their key. The leaves are inserted in
     // this vector in order (i.e, from left to right in the tree) when building
     // the tree. The position of a leaf in this vector is referred to as
     // `leaf_index`
-    leaves: Vec<UpdateTreeKey<ARITY>>,
+    leaves: Vec<UTKey<ARITY>>,
 }
 
 /// Node of the proving tree, containing the keys of the parent node and
 /// of the children
 #[derive(Clone, Debug)]
 struct ProvingTreeNode<const ARITY: usize> {
-    parent_key: Option<UpdateTreeKey<ARITY>>,
-    children_keys: Vec<UpdateTreeKey<ARITY>>,
+    parent_key: Option<UTKey<ARITY>>,
+    children_keys: Vec<UTKey<ARITY>>,
 }
 
 impl<const ARITY: usize> ProvingTree<ARITY> {
@@ -285,12 +305,12 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
         tree
     }
 
-    /// Insert a node as a child nore of the node with key `parent_node_key`.
+    /// Insert a node as a child node of the node with key `parent_node_key`.
     /// The node is inserted as root if `parent_node_key` is `None`
     fn insert_as_child_of(
         &mut self,
-        parent_node_key: Option<&UpdateTreeKey<ARITY>>,
-    ) -> UpdateTreeKey<ARITY> {
+        parent_node_key: Option<&UTKey<ARITY>>,
+    ) -> UTKey<ARITY> {
         if let Some(parent_key) = parent_node_key {
             // get parent node
             let parent_node = self.nodes.get_mut(parent_key).expect(
@@ -324,7 +344,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
                 parent_key: None,
                 children_keys: vec![],
             };
-            let root_key = UpdateTreeKey((0, 0));
+            let root_key = UTKey((0, 0));
             assert!(
                 self.nodes.insert(root_key.clone(), root).is_none(),
                 "Error: root node inserted multiple times"
@@ -336,7 +356,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
     /// Build a full subtree containing `num_leaves` leaf nodes. The subtree
     /// is full since `num_leaves` is expected to be `ARITY^exp`, for `exp >= 0`.
     /// `parent_node_key` is the key of the parent node of the root of the subtree
-    fn build_full_subtree(&mut self, num_leaves: usize, parent_node_key: &UpdateTreeKey<ARITY>) {
+    fn build_full_subtree(&mut self, num_leaves: usize, parent_node_key: &UTKey<ARITY>) {
         let root_key = self.insert_as_child_of(Some(&parent_node_key));
         if num_leaves > 1 {
             for _ in 0..ARITY {
@@ -350,7 +370,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
 
     /// Build a subtree containing `num_leaves` leaf nodes.
     /// `parent_node_key` is the key of the parent node of the root of the subtree, if any
-    fn build_subtree(&mut self, num_leaves: usize, parent_node_key: Option<&UpdateTreeKey<ARITY>>) {
+    fn build_subtree(&mut self, num_leaves: usize, parent_node_key: Option<&UTKey<ARITY>>) {
         let root_key = self.insert_as_child_of(parent_node_key);
         if num_leaves == 1 {
             // we are done, we just add the root node as a leaf
@@ -392,7 +412,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
 
     /// Compute the path, from root to leaf, for the leaf with index `leaf_index`
     /// in `self` tree
-    fn compute_path_for_leaf(&self, leaf_index: usize) -> Vec<UpdateTreeKey<ARITY>> {
+    fn compute_path_for_leaf(&self, leaf_index: usize) -> Vec<UTKey<ARITY>> {
         let leaf_key = &self.leaves[leaf_index];
         let mut path = vec![];
         let mut node_key = Some(leaf_key);
@@ -414,16 +434,17 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
     }
 }
 
-impl<const NUM_CHUNKS: usize> UpdateTreeForChunksBuilder<NUM_CHUNKS> {
+impl<const NUM_CHUNKS: usize> UTForChunksBuilder<NUM_CHUNKS> {
     /// This method builds an `UpdateTree` to prove and aggregate the set of chunks
-    /// provided as input. It also returns the set of chunks indexed by the key of the
-    /// node corresponding to the proof of a given chunk in the tree
+    /// provided as input. It also returns the set of chunks to be proven, with each 
+    /// chunk being associated to the key of the node in the `UpdateTree` corresponding 
+    /// to the proving task for that chunk
     fn build_update_tree_with_base_chunks(
         self,
         epoch: Epoch,
     ) -> (
-        HashMap<UpdateTreeKey<NUM_CHUNKS>, Vec<RowWithPath>>,
-        UpdateTreeForChunks<NUM_CHUNKS>,
+        HashMap<UTKey<NUM_CHUNKS>, Vec<RowWithPath>>,
+        UTForChunks<NUM_CHUNKS>,
     ) {
         let num_chunks = self.chunks.len();
         let tree = ProvingTree::<NUM_CHUNKS>::new(num_chunks);
