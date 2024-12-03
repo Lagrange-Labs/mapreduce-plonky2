@@ -141,6 +141,9 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                         length_circuit_set,
                     )
                 }
+                final_extraction::CircuitInput::Receipt(input) => params
+                    .final_extraction
+                    .generate_receipt_proof(input, value_circuit_set),
             }
         }
         CircuitInput::CellsTree(input) => verifiable_db::api::generate_proof(

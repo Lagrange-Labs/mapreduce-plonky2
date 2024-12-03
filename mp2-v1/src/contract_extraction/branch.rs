@@ -5,7 +5,7 @@ use anyhow::Result;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, PACKED_HASH_LEN},
-    mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
+    mpt_sequential::{advance_key_branch, PAD_LEN},
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
     types::{CBuilder, GFp},
@@ -54,12 +54,14 @@ where
         // validity of the hash exposed by the proofs.
         let headers = decode_fixed_list::<_, D, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
 
-        let (new_mpt_key, hash, is_valid, _) = MPTCircuit::<1, NODE_LEN>::advance_key_branch(
-            b,
-            &node.arr,
-            &child_proof.mpt_key(),
-            &headers,
-        );
+        let (new_mpt_key, hash, is_valid, _) =
+            // MPTCircuit::<1, NODE_LEN, MAX_KEY_NIBBLE_LEN>
+            advance_key_branch(
+                b,
+                &node.arr,
+                &child_proof.mpt_key(),
+                &headers,
+            );
 
         // We always enforce it's a branch node, i.e. that it has 17 entries.
         b.connect(is_valid.target, ttrue.target);
@@ -111,7 +113,7 @@ where
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
         let inputs = PublicInputs::from_slice(&verified_proofs[0].public_inputs);
-        BranchCircuit::build(builder, inputs)
+        BranchCircuit::<_>::build(builder, inputs)
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<GFp>) -> Result<()> {

@@ -441,6 +441,8 @@ pub(crate) mod test {
             );
 
             let h = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
+            let th = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
+            let rh = &random_vector::<u32>(PACKED_HASH_LEN).to_fields();
             let contract_dm = Point::rand();
             let key = &random_vector::<u8>(MAX_KEY_NIBBLE_LEN).to_fields();
             let ptr = &F::NEG_ONE; // simulating end of MPT recursion
@@ -467,6 +469,8 @@ pub(crate) mod test {
                 prev_bh: &parent_block_hash,
                 bn: &block_number,
                 sh: h,
+                th,
+                rh,
             }
             .to_vec();
             ProofsPi {
