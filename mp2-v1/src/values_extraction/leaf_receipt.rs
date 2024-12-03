@@ -2,18 +2,27 @@
 
 use crate::MAX_RECEIPT_LEAF_NODE_LEN;
 
-use super::public_inputs::{PublicInputs, PublicInputsArgs};
+use super::{
+    public_inputs::{PublicInputs, PublicInputsArgs},
+    DATA_PREFIX, GAS_USED_PREFIX, LOG_NUMBER_PREFIX, TOPIC_PREFIX, TX_INDEX_PREFIX,
+};
 
+use alloy::{
+    primitives::{Address, Log, B256},
+    rlp::Decodable,
+};
+use anyhow::{anyhow, Result};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
-    eth::{EventLogInfo, LogDataInfo, ReceiptProofInfo},
+    eth::{EventLogInfo, ReceiptProofInfo, ReceiptQuery},
     group_hashing::CircuitBuilderGroupHashing,
-    keccak::{InputData, KeccakCircuit, KeccakWires},
+    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, MPTReceiptLeafNode, PAD_LEN},
+    poseidon::H,
     public_inputs::PublicInputCommon,
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp},
-    utils::{less_than, less_than_or_equal_to, Endianness, PackerTarget},
+    utils::{less_than, less_than_or_equal_to_unsafe, Endianness, PackerTarget, ToTargets},
     D, F,
 };
 use plonky2::{
@@ -22,7 +31,7 @@ use plonky2::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::circuit_builder::CircuitBuilder,
+    plonk::{circuit_builder::CircuitBuilder, config::Hasher},
 };
 
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
@@ -33,6 +42,19 @@ use serde::{Deserialize, Serialize};
 use std::{array::from_fn, iter};
 /// Maximum number of logs per transaction we can process
 const MAX_LOGS_PER_TX: usize = 2;
+
+/// The number of bytes that `gas_used` could take up in the receipt.
+/// We set a max of 3 here because this would be over half the gas in the block for Ethereum.
+const MAX_GAS_SIZE: u64 = 3;
+
+/// The size of a topic in bytes in the rlp encoded receipt
+const TOPICS_SIZE: usize = 32;
+
+/// The maximum number of topics that aren't the event signature.
+const MAX_TOPICS: usize = 3;
+
+/// The maximum number of additional pieces of data we allow in an event (each being 32 bytes long).
+const MAX_ADDITIONAL_DATA: usize = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ReceiptLeafWires<const NODE_LEN: usize>
@@ -47,12 +69,16 @@ where
     pub root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     /// The index of this receipt in the block
     pub index: Target,
-    /// The offset of the status of the transaction in the RLP encoded receipt node.
-    pub status_offset: Target,
     /// The offsets of the relevant logs inside the node
     pub relevant_logs_offset: VectorWire<Target, MAX_LOGS_PER_TX>,
     /// The key in the MPT Trie
     pub mpt_key: MPTKeyWire,
+    /// The column ID for the transaction index
+    pub tx_index_column_id: Target,
+    /// The column ID for the log number in the receipt
+    pub log_number_column_id: Target,
+    /// The gas used column ID
+    pub gas_used_column_id: Target,
 }
 
 /// Contains all the information for an [`Event`] in rlp form
@@ -65,13 +91,13 @@ pub struct EventWires {
     /// Byte offset for the address from the beginning of a Log
     add_rel_offset: Target,
     /// Packed event signature,
-    event_signature: Array<Target, 32>,
+    event_signature: Array<Target, HASH_LEN>,
     /// Byte offset from the start of the log to event signature
     sig_rel_offset: Target,
     /// The topics for this Log
-    topics: [LogColumn; 3],
+    topics: [LogColumn; MAX_TOPICS],
     /// The extra data stored by this Log
-    data: [LogColumn; 2],
+    data: [LogColumn; MAX_ADDITIONAL_DATA],
 }
 
 /// Contains all the information for a [`Log`] in rlp form
@@ -85,59 +111,47 @@ pub struct LogColumn {
 }
 
 impl LogColumn {
-    /// Convert to an array for metadata digest
-    pub fn to_array(self) -> [Target; 3] {
-        [self.column_id, self.rel_byte_offset, self.len]
-    }
-
     /// Assigns a log colum from a [`LogDataInfo`]
-    pub fn assign(&self, pw: &mut PartialWitness<GFp>, data: LogDataInfo) {
-        pw.set_target(self.column_id, F::from_canonical_usize(data.column_id));
+    pub fn assign(&self, pw: &mut PartialWitness<GFp>, info: &LogDataInfo) {
+        pw.set_target(self.column_id, info.column_id);
         pw.set_target(
             self.rel_byte_offset,
-            F::from_canonical_usize(data.rel_byte_offset),
+            F::from_canonical_usize(info.rel_byte_offset),
         );
-        pw.set_target(self.len, F::from_canonical_usize(data.len));
+        pw.set_target(self.len, F::from_canonical_usize(info.len));
     }
 }
 
 impl EventWires {
     /// Convert to an array  for metadata digest
     pub fn to_vec(&self) -> Vec<Target> {
-        let topics_flat = self
-            .topics
-            .iter()
-            .flat_map(|t| t.to_array())
-            .collect::<Vec<Target>>();
-        let data_flat = self
-            .data
-            .iter()
-            .flat_map(|t| t.to_array())
-            .collect::<Vec<Target>>();
         let mut out = Vec::new();
         out.push(self.size);
         out.extend_from_slice(&self.address.arr);
         out.push(self.add_rel_offset);
         out.extend_from_slice(&self.event_signature.arr);
         out.push(self.sig_rel_offset);
-        out.extend_from_slice(&topics_flat);
-        out.extend_from_slice(&data_flat);
 
         out
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_logs_and_extract_values<const NODE_LEN: usize>(
         &self,
         b: &mut CBuilder,
         value: &VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
         relevant_logs_offsets: &VectorWire<Target, MAX_LOGS_PER_TX>,
+        tx_index: Target,
+        tx_index_column_id: Target,
+        log_number_column_id: Target,
+        gas_used_column_id: Target,
     ) -> (Target, CurveTarget) {
         let t = b._true();
         let one = b.one();
         let two = b.two();
         let zero = b.zero();
         let curve_zero = b.curve_zero();
-        let mut points = Vec::new();
+        let mut row_points = Vec::new();
 
         // Extract the gas used in the transaction, since the position of this can vary because it is after the key
         // we have to prove we extracted from the correct location.
@@ -175,13 +189,13 @@ impl EventWires {
 
         let combiner = b.constant(F::from_canonical_u64(1 << 8));
 
-        let gas_used = (0..3u64).fold(zero, |acc, i| {
+        let gas_used = (0..MAX_GAS_SIZE).fold(zero, |acc, i| {
             let access_index = b.add_const(initial_gas_index, F::from_canonical_u64(i));
             let array_value = value.arr.random_access_large_array(b, access_index);
 
             // If we have extracted a value from an index in the desired range (so lte final_gas_index) we want to add it.
             // If access_index was strictly less than final_gas_index we need to multiply by 1 << 8 after (since the encoding is big endian)
-            let valid = less_than_or_equal_to(b, access_index, final_gas_index, 12);
+            let valid = less_than_or_equal_to_unsafe(b, access_index, final_gas_index, 12);
             let need_scalar = less_than(b, access_index, final_gas_index, 12);
 
             let to_add = b.select(valid, array_value, zero);
@@ -192,11 +206,14 @@ impl EventWires {
         });
 
         // Map the gas used to a curve point for the value digest, gas used is the first column so use one as its column id.
-        let gas_digest = b.map_to_curve_point(&[zero, gas_used]);
+        let gas_digest = b.map_to_curve_point(&[gas_used_column_id, gas_used]);
+        let tx_index_digest = b.map_to_curve_point(&[tx_index_column_id, tx_index]);
 
+        let initial_row_digest = b.add_curve_point(&[gas_digest, tx_index_digest]);
         // We also keep track of the number of real logs we process as each log forms a row in our table
         let mut n = zero;
         for (index, log_offset) in relevant_logs_offsets.arr.arr.into_iter().enumerate() {
+            let mut points = Vec::new();
             // Extract the address bytes
             let address_start = b.add(log_offset, self.add_rel_offset);
 
@@ -236,46 +253,204 @@ impl EventWires {
                 let dummy_column = b.is_equal(log_column.column_id, zero);
 
                 let selected_point = b.select_curve_point(dummy_column, curve_zero, data_digest);
-                let selected_point = b.select_curve_point(dummy, curve_zero, selected_point);
 
                 points.push(selected_point);
             }
             // If this is a real row we record the gas used in the transaction
-            let gas_select = b.select_curve_point(dummy, curve_zero, gas_digest);
-            points.push(gas_select);
+            points.push(initial_row_digest);
 
             // We also keep track of which log this is in the receipt to avoid having identical rows in the table in the case
             // that the event we are tracking can be emitted multiple times in the same transaction but has no topics or data.
             let log_number = b.constant(F::from_canonical_usize(index + 1));
-            let log_no_digest = b.map_to_curve_point(&[one, log_number]);
-            let log_no_select = b.select_curve_point(dummy, curve_zero, log_no_digest);
-            points.push(log_no_select);
+            let log_no_digest = b.map_to_curve_point(&[log_number_column_id, log_number]);
+            points.push(log_no_digest);
 
             let increment = b.select(dummy, zero, one);
             n = b.add(n, increment);
+            let row_point_sum = b.add_curve_point(&points);
+            let sum_digest = b.map_to_curve_point(&row_point_sum.to_targets());
+            let point_to_add = b.select_curve_point(dummy, curve_zero, sum_digest);
+            row_points.push(point_to_add);
         }
 
-        (n, b.add_curve_point(&points))
+        (n, b.add_curve_point(&row_points))
     }
 }
 
-/// Circuit to prove the correct derivation of the MPT key from a simple slot
+/// Circuit to prove a transaction receipt contains logs relating to a specific event.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReceiptLeafCircuit<const NODE_LEN: usize> {
-    pub(crate) info: ReceiptProofInfo,
+    /// This is the RLP encoded leaf node in the Receipt Trie.
+    pub node: Vec<u8>,
+    /// The transaction index, telling us where the receipt is in the block. The RLP encoding of the index
+    /// is also the key used in the Receipt Trie.
+    pub tx_index: u64,
+    /// The size of the node in bytes
+    pub size: usize,
+    /// The address of the contract that emits the log
+    pub address: Address,
+    /// The offset of the address in the rlp encoded log
+    pub rel_add_offset: usize,
+    /// The event signature hash
+    pub event_signature: [u8; HASH_LEN],
+    /// The offset of the event signatur ein the rlp encoded log
+    pub sig_rel_offset: usize,
+    /// The other topics information
+    pub topics: [LogDataInfo; MAX_TOPICS],
+    /// Any additional data that we will extract from the log
+    pub data: [LogDataInfo; MAX_ADDITIONAL_DATA],
+    /// This is the offsets in the node to the start of the logs that relate to `event_info`
+    pub relevant_logs_offset: Vec<usize>,
+}
+
+/// Contains all the information for data contained in an [`Event`]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct LogDataInfo {
+    /// The column id of this piece of info
+    pub column_id: GFp,
+    /// The byte offset from the beggining of the log to this target
+    pub rel_byte_offset: usize,
+    /// The length of this piece of data
+    pub len: usize,
 }
 
 impl<const NODE_LEN: usize> ReceiptLeafCircuit<NODE_LEN>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
+    /// Create a new [`ReceiptLeafCircuit`] from a [`ReceiptProofInfo`] and a [`ReceiptQuery`]
+    pub fn new<const NO_TOPICS: usize, const MAX_DATA: usize>(
+        proof_info: &ReceiptProofInfo,
+        query: &ReceiptQuery<NO_TOPICS, MAX_DATA>,
+    ) -> Result<Self> {
+        // Since the compact encoding of the key is stored first plus an additional list header and
+        // then the first element in the receipt body is the transaction type we calculate the offset to that point
+
+        let last_node = proof_info
+            .mpt_proof
+            .last()
+            .ok_or(anyhow!("Could not get last node in receipt trie proof"))?;
+
+        // Convert to Rlp form so we can use provided methods.
+        let node_rlp = rlp::Rlp::new(last_node);
+
+        // The actual receipt data is item 1 in the list
+        let (receipt_rlp, receipt_off) = node_rlp.at_with_offset(1)?;
+        // The rlp encoded Receipt is not a list but a string that is formed of the `tx_type` followed by the remaining receipt
+        // data rlp encoded as a list. We retrieve the payload info so that we can work out relevant offsets later.
+        let receipt_str_payload = receipt_rlp.payload_info()?;
+
+        // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
+        let receipt_list = rlp::Rlp::new(&receipt_rlp.data()?[1..]);
+
+        // The logs themselves start are the item at index 3 in this list
+        let (logs_rlp, logs_off) = receipt_list.at_with_offset(3)?;
+
+        // We calculate the offset the that the logs are at from the start of the node
+        let logs_offset = receipt_off + receipt_str_payload.header_len + 1 + logs_off;
+
+        // Now we produce an iterator over the logs with each logs offset.
+        let relevant_logs_offset = iter::successors(Some(0usize), |i| Some(i + 1))
+            .map_while(|i| logs_rlp.at_with_offset(i).ok())
+            .filter_map(|(log_rlp, log_off)| {
+                let mut bytes = log_rlp.as_raw();
+                let log = Log::decode(&mut bytes).ok()?;
+
+                if log.address == query.contract
+                    && log
+                        .data
+                        .topics()
+                        .contains(&B256::from(query.event.event_signature))
+                {
+                    println!("relevant offset: {}", logs_offset + log_off);
+                    Some(logs_offset + log_off)
+                } else {
+                    Some(0usize)
+                }
+            })
+            .take(MAX_LOGS_PER_TX)
+            .collect::<Vec<usize>>();
+
+        let EventLogInfo::<NO_TOPICS, MAX_DATA> {
+            size,
+            address,
+            add_rel_offset,
+            event_signature,
+            sig_rel_offset,
+            topics,
+            data,
+        } = query.event;
+
+        // We need a fixed number of topics for the circuit so we use dummies to pad to the correct length.
+        let mut final_topics = [LogDataInfo::default(); MAX_TOPICS];
+
+        final_topics.iter_mut().enumerate().for_each(|(j, topic)| {
+            if j < NO_TOPICS {
+                let input = [
+                    address.as_slice(),
+                    event_signature.as_slice(),
+                    TOPIC_PREFIX,
+                    &[j as u8 + 1],
+                ]
+                .concat()
+                .into_iter()
+                .map(GFp::from_canonical_u8)
+                .collect::<Vec<GFp>>();
+                let column_id = H::hash_no_pad(&input).elements[0];
+                *topic = LogDataInfo {
+                    column_id,
+                    rel_byte_offset: topics[j],
+                    len: TOPICS_SIZE,
+                };
+            }
+        });
+
+        // We need a fixed number of pieces of data for the circuit so we use dummies to pad to the correct length.
+        let mut final_data = [LogDataInfo::default(); MAX_ADDITIONAL_DATA];
+        final_data.iter_mut().enumerate().for_each(|(j, d)| {
+            if j < MAX_DATA {
+                let input = [
+                    address.as_slice(),
+                    event_signature.as_slice(),
+                    DATA_PREFIX,
+                    &[j as u8 + 1],
+                ]
+                .concat()
+                .into_iter()
+                .map(GFp::from_canonical_u8)
+                .collect::<Vec<GFp>>();
+                let column_id = H::hash_no_pad(&input).elements[0];
+                *d = LogDataInfo {
+                    column_id,
+                    rel_byte_offset: data[j],
+                    len: TOPICS_SIZE,
+                };
+            };
+        });
+
+        Ok(Self {
+            node: last_node.clone(),
+            tx_index: proof_info.tx_index,
+            size,
+            address,
+            rel_add_offset: add_rel_offset,
+            event_signature,
+            sig_rel_offset,
+            topics: final_topics,
+            data: final_data,
+            relevant_logs_offset,
+        })
+    }
+
     pub fn build(b: &mut CBuilder) -> ReceiptLeafWires<NODE_LEN> {
         // Build the event wires
         let event_wires = Self::build_event_wires(b);
 
+        let zero = b.zero();
+        let curve_zero = b.curve_zero();
         // Add targets for the data specific to this receipt
         let index = b.add_virtual_target();
-        let status_offset = b.add_virtual_target();
+
         let relevant_logs_offset = VectorWire::<Target, MAX_LOGS_PER_TX>::new(b);
 
         let mpt_key = MPTKeyWire::new(b);
@@ -285,16 +460,46 @@ where
 
         let node = wires.node;
         let root = wires.root;
+        // Add targets for the column ids for tx index, log number and gas used
+        let tx_index_column_id = b.add_virtual_target();
+        let log_number_column_id = b.add_virtual_target();
+        let gas_used_column_id = b.add_virtual_target();
 
         // For each relevant log in the transaction we have to verify it lines up with the event we are monitoring for
-        let (n, mut dv) =
-            event_wires.verify_logs_and_extract_values::<NODE_LEN>(b, &node, &relevant_logs_offset);
+        let (n, dv) = event_wires.verify_logs_and_extract_values::<NODE_LEN>(
+            b,
+            &node,
+            &relevant_logs_offset,
+            index,
+            tx_index_column_id,
+            log_number_column_id,
+            gas_used_column_id,
+        );
 
-        let value_id = b.map_to_curve_point(&[index]);
+        let mut core_metadata = event_wires.to_vec();
+        core_metadata.push(tx_index_column_id);
+        core_metadata.push(log_number_column_id);
+        core_metadata.push(gas_used_column_id);
 
-        dv = b.add_curve_point(&[value_id, dv]);
+        let initial_dm = b.map_to_curve_point(&core_metadata);
 
-        let dm = b.map_to_curve_point(&event_wires.to_vec());
+        let mut meta_data_points = vec![initial_dm];
+
+        for topic in event_wires.topics.iter() {
+            let is_id_zero = b.is_equal(topic.column_id, zero);
+            let column_id_digest = b.map_one_to_curve_point(topic.column_id);
+            let selected = b.select_curve_point(is_id_zero, curve_zero, column_id_digest);
+            meta_data_points.push(selected);
+        }
+
+        for data in event_wires.data.iter() {
+            let is_id_zero = b.is_equal(data.column_id, zero);
+            let column_id_digest = b.map_one_to_curve_point(data.column_id);
+            let selected = b.select_curve_point(is_id_zero, curve_zero, column_id_digest);
+            meta_data_points.push(selected);
+        }
+
+        let dm = b.add_curve_point(&meta_data_points);
 
         // Register the public inputs
         PublicInputsArgs {
@@ -311,9 +516,11 @@ where
             node,
             root,
             index,
-            status_offset,
             relevant_logs_offset,
             mpt_key,
+            tx_index_column_id,
+            log_number_column_id,
+            gas_used_column_id,
         }
     }
 
@@ -364,84 +571,103 @@ where
     pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &ReceiptLeafWires<NODE_LEN>) {
         self.assign_event_wires(pw, &wires.event);
 
-        let node = self
-            .info
-            .mpt_proof
-            .last()
-            .expect("Receipt MPT proof had no nodes");
         let pad_node =
-            Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(node).expect("invalid node given");
+            Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(&self.node).expect("invalid node given");
         wires.node.assign(pw, &pad_node);
         KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
             pw,
             &wires.root,
             &InputData::Assigned(&pad_node),
         );
-        pw.set_target(wires.index, GFp::from_canonical_u64(self.info.tx_index));
-        pw.set_target(
-            wires.status_offset,
-            GFp::from_canonical_usize(self.info.status_offset),
-        );
+        pw.set_target(wires.index, GFp::from_canonical_u64(self.tx_index));
 
         let relevant_logs_vector =
-            Vector::<usize, MAX_LOGS_PER_TX>::from_vec(&self.info.relevant_logs_offset)
+            Vector::<usize, MAX_LOGS_PER_TX>::from_vec(&self.relevant_logs_offset)
                 .expect("Could not assign relevant logs offsets");
         wires.relevant_logs_offset.assign(pw, &relevant_logs_vector);
 
-        let key_encoded = self.info.tx_index.rlp_bytes();
+        let key_encoded = self.tx_index.rlp_bytes();
         let key_nibbles: [u8; MAX_KEY_NIBBLE_LEN] = key_encoded
             .iter()
             .flat_map(|byte| [byte / 16, byte % 16])
             .chain(iter::repeat(0u8))
-            .take(64)
+            .take(MAX_KEY_NIBBLE_LEN)
             .collect::<Vec<u8>>()
             .try_into()
             .expect("Couldn't create mpt key with correct length");
 
-        wires.mpt_key.assign(pw, &key_nibbles, self.info.index_size);
+        wires.mpt_key.assign(pw, &key_nibbles, key_encoded.len());
+
+        // Work out the column ids for tx_index, log_number and gas_used
+        let tx_index_input = [
+            self.address.as_slice(),
+            self.event_signature.as_slice(),
+            TX_INDEX_PREFIX,
+        ]
+        .concat()
+        .into_iter()
+        .map(GFp::from_canonical_u8)
+        .collect::<Vec<GFp>>();
+        let tx_index_column_id = H::hash_no_pad(&tx_index_input).elements[0];
+
+        let log_number_input = [
+            self.address.as_slice(),
+            self.event_signature.as_slice(),
+            LOG_NUMBER_PREFIX,
+        ]
+        .concat()
+        .into_iter()
+        .map(GFp::from_canonical_u8)
+        .collect::<Vec<GFp>>();
+        let log_number_column_id = H::hash_no_pad(&log_number_input).elements[0];
+
+        let gas_used_input = [
+            self.address.as_slice(),
+            self.event_signature.as_slice(),
+            GAS_USED_PREFIX,
+        ]
+        .concat()
+        .into_iter()
+        .map(GFp::from_canonical_u8)
+        .collect::<Vec<GFp>>();
+        let gas_used_column_id = H::hash_no_pad(&gas_used_input).elements[0];
+
+        pw.set_target(wires.tx_index_column_id, tx_index_column_id);
+        pw.set_target(wires.log_number_column_id, log_number_column_id);
+        pw.set_target(wires.gas_used_column_id, gas_used_column_id);
     }
 
     pub fn assign_event_wires(&self, pw: &mut PartialWitness<GFp>, wires: &EventWires) {
-        let EventLogInfo {
-            size,
-            address,
-            add_rel_offset,
-            event_signature,
-            sig_rel_offset,
-            topics,
-            data,
-        } = self.info.event_log_info;
-
-        pw.set_target(wires.size, F::from_canonical_usize(size));
+        pw.set_target(wires.size, F::from_canonical_usize(self.size));
 
         wires
             .address
-            .assign(pw, &address.0.map(GFp::from_canonical_u8));
+            .assign(pw, &self.address.0.map(GFp::from_canonical_u8));
 
         pw.set_target(
             wires.add_rel_offset,
-            F::from_canonical_usize(add_rel_offset),
+            F::from_canonical_usize(self.rel_add_offset),
         );
 
         wires
             .event_signature
-            .assign(pw, &event_signature.map(GFp::from_canonical_u8));
+            .assign(pw, &self.event_signature.map(GFp::from_canonical_u8));
 
         pw.set_target(
             wires.sig_rel_offset,
-            F::from_canonical_usize(sig_rel_offset),
+            F::from_canonical_usize(self.sig_rel_offset),
         );
 
         wires
             .topics
             .iter()
-            .zip(topics)
-            .for_each(|(topic_wire, topic)| topic_wire.assign(pw, topic));
+            .zip(self.topics.iter())
+            .for_each(|(topic_wire, topic_info)| topic_wire.assign(pw, topic_info));
         wires
             .data
             .iter()
-            .zip(data)
-            .for_each(|(data_wire, data)| data_wire.assign(pw, data));
+            .zip(self.data.iter())
+            .for_each(|(data_wire, data_info)| data_wire.assign(pw, data_info));
     }
 }
 
@@ -473,8 +699,12 @@ impl CircuitLogicWires<GFp, D, 0> for ReceiptLeafWires<MAX_RECEIPT_LEAF_NODE_LEN
 
 #[cfg(test)]
 mod tests {
+    use crate::values_extraction::{
+        compute_receipt_leaf_metadata_digest, compute_receipt_leaf_value_digest,
+    };
+
     use super::{
-        super::{compute_receipt_leaf_metadata_digest, compute_receipt_leaf_value_digest},
+        //super::{compute_receipt_leaf_metadata_digest, compute_receipt_leaf_value_digest},
         *,
     };
 
@@ -484,7 +714,7 @@ mod tests {
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        mpt_sequential::generate_receipt_proofs,
+        mpt_sequential::generate_receipt_test_info,
     };
     #[derive(Clone, Debug)]
     struct TestReceiptLeafCircuit<const NODE_LEN: usize> {
@@ -510,10 +740,12 @@ mod tests {
     fn test_leaf_circuit() {
         const NODE_LEN: usize = 512;
 
-        let receipt_proof_infos = generate_receipt_proofs();
-        let info = receipt_proof_infos.first().unwrap().clone();
+        let receipt_proof_infos = generate_receipt_test_info();
+        let proofs = receipt_proof_infos.proofs();
+        let info = proofs.first().unwrap();
+        let query = receipt_proof_infos.query();
 
-        let c = ReceiptLeafCircuit::<NODE_LEN> { info: info.clone() };
+        let c = ReceiptLeafCircuit::<NODE_LEN>::new(info, query).unwrap();
         let test_circuit = TestReceiptLeafCircuit { c };
 
         let node = info.mpt_proof.last().unwrap().clone();
@@ -529,13 +761,13 @@ mod tests {
 
         // Check value digest
         {
-            let exp_digest = compute_receipt_leaf_value_digest(&info);
+            let exp_digest = compute_receipt_leaf_value_digest(&proofs[0], &query.event);
             assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
         }
 
         // Check metadata digest
         {
-            let exp_digest = compute_receipt_leaf_metadata_digest(&info.event_log_info);
+            let exp_digest = compute_receipt_leaf_metadata_digest(&query.event);
             assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
         }
     }

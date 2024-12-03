@@ -1,11 +1,10 @@
 //! Module containing several structure definitions for Ethereum related operations
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use alloy::{
-    consensus::{ReceiptEnvelope as CRE, ReceiptWithBloom, TxEnvelope},
+    consensus::{ReceiptEnvelope as CRE, ReceiptWithBloom},
     eips::BlockNumberOrTag,
-    json_abi::Event,
     network::{eip2718::Encodable2718, BlockResponse},
-    primitives::{Address, Log, LogData, B256},
+    primitives::{Address, B256},
     providers::{Provider, RootProvider},
     rlp::{Decodable, Encodable as AlloyEncodable},
     rpc::types::{
@@ -19,14 +18,31 @@ use ethereum_types::H256;
 use itertools::Itertools;
 use log::debug;
 use log::warn;
+
 use rlp::{Encodable, Rlp};
 use serde::{Deserialize, Serialize};
-use std::{array::from_fn as create_array, sync::Arc};
+use std::{
+    array::from_fn as create_array,
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
-use crate::{mpt_sequential::utils::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, utils::keccak256};
+use crate::{
+    keccak::HASH_LEN,
+    mpt_sequential::utils::bytes_to_nibbles,
+    rlp::MAX_KEY_NIBBLE_LEN,
+    serialization::{deserialize_long_array, serialize_long_array},
+    utils::keccak256,
+};
 
 /// Retry number for the RPC request
 const RETRY_NUM: usize = 3;
+
+/// The maximum size an additional piece of data can be in bytes.
+const MAX_DATA_SIZE: usize = 32;
+
+/// The size of an event topic rlp encoded.
+const ENCODED_TOPIC_SIZE: usize = 33;
 
 pub trait Rlpable {
     fn block_hash(&self) -> Vec<u8> {
@@ -119,15 +135,17 @@ pub struct ProofQuery {
 }
 
 /// Struct used for storing relevant data to query blocks as they come in.
+/// The constant `NO_TOPICS` is the number of indexed items in the event (excluding the event signature) and
+/// `MAX_DATA` is the number of 32 byte words of data we expect in addition to the topics.
 #[derive(Debug, Clone)]
-pub struct ReceiptQuery {
+pub struct ReceiptQuery<const NO_TOPICS: usize, const MAX_DATA: usize> {
     /// The contract that emits the event we care about
     pub contract: Address,
-    /// The event we wish to monitor for,
-    pub event: Event,
+    /// The signature of the event we wish to monitor for
+    pub event: EventLogInfo<NO_TOPICS, MAX_DATA>,
 }
 
-/// Struct used to store all the information needed for proving a leaf in the Receipt Trie is one we care about.
+/// Struct used to store all the information needed for proving a leaf is in the Receipt Trie.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiptProofInfo {
     /// The MPT proof that this Receipt is in the tree
@@ -136,21 +154,11 @@ pub struct ReceiptProofInfo {
     pub mpt_root: H256,
     /// The index of this transaction in the block
     pub tx_index: u64,
-    /// The size of the index in bytes
-    pub index_size: usize,
-    /// The offset in the leaf (in RLP form) to status
-    pub status_offset: usize,
-    /// The offset in the leaf (in RLP form) to the start of logs
-    pub logs_offset: usize,
-    /// Data about the type of log we are proving the existence of
-    pub event_log_info: EventLogInfo,
-    /// The offsets for the relevant logs
-    pub relevant_logs_offset: Vec<usize>,
 }
 
 /// Contains all the information for an [`Event`] in rlp form
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct EventLogInfo {
+pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA: usize> {
     /// Size in bytes of the whole log rlp encoded
     pub size: usize,
     /// Packed contract address to check
@@ -158,134 +166,70 @@ pub struct EventLogInfo {
     /// Byte offset for the address from the beginning of a Log
     pub add_rel_offset: usize,
     /// Packed event signature,
-    pub event_signature: [u8; 32],
+    pub event_signature: [u8; HASH_LEN],
     /// Byte offset from the start of the log to event signature
     pub sig_rel_offset: usize,
-    /// The topics for this Log
-    pub topics: [LogDataInfo; 3],
-    /// The extra data stored by this Log
-    pub data: [LogDataInfo; 2],
+    /// The the offsets to the other topics for this Log
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    pub topics: [usize; NO_TOPICS],
+    /// The offsets to the start of the extra data stored by this Log
+    #[serde(
+        serialize_with = "serialize_long_array",
+        deserialize_with = "deserialize_long_array"
+    )]
+    pub data: [usize; MAX_DATA],
 }
 
-/// Contains all the information for data contained in an [`Event`]
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct LogDataInfo {
-    pub column_id: usize,
-    /// The byte offset from the beggining of the log to this target
-    pub rel_byte_offset: usize,
-    /// The length of this topic/data
-    pub len: usize,
-}
+impl<const NO_TOPICS: usize, const MAX_DATA: usize> EventLogInfo<NO_TOPICS, MAX_DATA> {
+    /// Create a new instance from a contract [`Address`] and a [`str`] that is the event signature
+    pub fn new(contract: Address, event_signature: &str) -> Self {
+        // To calculate the total size of the log rlp encoded we use the fact that the address takes 21 bytes to encode, topics
+        // take 33 bytes each to incode and form a list that has length between 33 bytes and 132 bytes and data is a string that has 32 * MAX_DATA length
 
-impl TryFrom<&Log<LogData>> for EventLogInfo {
-    type Error = anyhow::Error;
+        // If we have more than one topic that is not the event signature the rlp encoding is a list that is over 55 bytes whose total length can be encoded in one byte, so the header length is 2
+        // Otherwise its still a list but the header is a single byte.
+        let topics_header_len = alloy::rlp::length_of_length((1 + NO_TOPICS) * ENCODED_TOPIC_SIZE);
 
-    fn try_from(log: &Log<LogData>) -> std::result::Result<Self, Self::Error> {
-        // First we encode the log in rlp form
-        let mut buf = Vec::<u8>::new();
-        log.encode(&mut buf);
+        // If the we have more than one piece of data it is rlp encoded as a string with length greater than 55 bytes
+        let data_header_len = alloy::rlp::length_of_length(MAX_DATA * MAX_DATA_SIZE);
 
-        let rlp_log = rlp::Rlp::new(&buf);
-        // Extract the header
-        let log_header = rlp_log.payload_info()?;
-        let next_data = &buf[log_header.header_len..log_header.header_len + log_header.value_len];
-        let rlp_log_no_header = rlp::Rlp::new(next_data);
-        // Find the address offset (skipping its header)
-        let address_header = rlp_log_no_header.payload_info()?;
-        let rel_address_offset = log_header.header_len + address_header.header_len;
-        // Find the signature offset (skipping its header)
-        let topics_data = &buf[rel_address_offset + address_header.value_len
-            ..log_header.header_len + log_header.value_len];
-        let topics_rlp = rlp::Rlp::new(topics_data);
-        let topics_header = topics_rlp.payload_info()?;
-        let topic_0_data =
-            &buf[rel_address_offset + address_header.value_len + topics_header.header_len
-                ..log_header.header_len
-                    + address_header.header_len
-                    + address_header.value_len
-                    + topics_header.header_len
-                    + topics_header.value_len];
-        let topic_0_rlp = rlp::Rlp::new(topic_0_data);
-        let topic_0_header = topic_0_rlp.payload_info()?;
-        let rel_sig_offset = log_header.header_len
-            + address_header.header_len
-            + address_header.value_len
-            + topics_header.header_len
-            + topic_0_header.header_len;
-        let event_signature: [u8; 32] = buf[rel_sig_offset..rel_sig_offset + 32].try_into()?;
-        // Each topic takes 33 bytes to encode so we divide this length by 33 to get the number of topics remaining
-        let remaining_topics = buf[rel_sig_offset + topic_0_header.value_len
-            ..log_header.header_len
-                + address_header.header_len
-                + address_header.value_len
-                + topics_header.header_len
-                + topics_header.value_len]
-            .len()
-            / 33;
+        let address_size = 21;
+        let topics_size = (1 + NO_TOPICS) * ENCODED_TOPIC_SIZE + topics_header_len;
+        let data_size = MAX_DATA * MAX_DATA_SIZE + data_header_len;
 
-        let mut topics = [LogDataInfo::default(); 3];
-        let mut current_topic_offset = rel_sig_offset + topic_0_header.value_len + 1;
-        topics
-            .iter_mut()
-            .enumerate()
-            .take(remaining_topics)
-            .for_each(|(j, info)| {
-                *info = LogDataInfo {
-                    column_id: j + 2,
-                    rel_byte_offset: current_topic_offset,
-                    len: 32,
-                };
-                current_topic_offset += 33;
-            });
+        let payload_size = address_size + topics_size + data_size;
+        let header_size = alloy::rlp::length_of_length(payload_size);
 
-        // Deal with any remaining data
-        let mut data = [LogDataInfo::default(); 2];
+        let size = header_size + payload_size;
 
-        let data_vec = if current_topic_offset < buf.len() {
-            buf.iter()
-                .skip(current_topic_offset - 1)
-                .copied()
-                .collect::<Vec<u8>>()
-        } else {
-            vec![]
-        };
+        // The address itself starts after the header plus one byte for the address header.
+        let add_rel_offset = header_size + 1;
 
-        if !data_vec.is_empty() {
-            let data_rlp = rlp::Rlp::new(&data_vec);
-            let data_header = data_rlp.payload_info()?;
-            // Since we can deal with at most two words of additional data we only need to take 66 bytes from this list
-            let mut additional_offset = data_header.header_len;
-            data_vec[data_header.header_len..]
-                .chunks(33)
-                .enumerate()
-                .take(2)
-                .try_for_each(|(j, chunk)| {
-                    let chunk_rlp = rlp::Rlp::new(chunk);
-                    let chunk_header = chunk_rlp.payload_info()?;
-                    if chunk_header.value_len <= 32 {
-                        data[j] = LogDataInfo {
-                            column_id: remaining_topics + 2 + j,
-                            rel_byte_offset: current_topic_offset
-                                + additional_offset
-                                + chunk_header.header_len,
-                            len: chunk_header.value_len,
-                        };
-                        additional_offset += chunk_header.header_len + chunk_header.value_len;
-                    } else {
-                        return Ok(());
-                    }
-                    Result::<(), anyhow::Error>::Ok(())
-                })?;
-        }
-        Ok(EventLogInfo {
-            size: log_header.header_len + log_header.value_len,
-            address: log.address,
-            add_rel_offset: rel_address_offset,
-            event_signature,
-            sig_rel_offset: rel_sig_offset,
+        // The event signature offset is after the header, the address and the topics list header.
+        let sig_rel_offset = header_size + address_size + topics_header_len + 1;
+
+        let topics: [usize; NO_TOPICS] = create_array(|i| {
+            header_size + address_size + topics_header_len + (i + 1) * ENCODED_TOPIC_SIZE + 1
+        });
+
+        let data: [usize; MAX_DATA] = create_array(|i| {
+            header_size + address_size + topics_size + data_header_len + (i * MAX_DATA_SIZE)
+        });
+
+        let event_sig = alloy::primitives::keccak256(event_signature.as_bytes());
+
+        Self {
+            size,
+            address: contract,
+            add_rel_offset,
+            event_signature: event_sig.0,
+            sig_rel_offset,
             topics,
             data,
-        })
+        }
     }
 }
 
@@ -551,9 +495,13 @@ impl ReceiptProofInfo {
     }
 }
 
-impl ReceiptQuery {
-    pub fn new(contract: Address, event: Event) -> Self {
-        Self { contract, event }
+impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptQuery<NO_TOPICS, MAX_DATA> {
+    /// Construct a new [`ReceiptQuery`] from the contract [`Address`] and the event's name as a [`str`].
+    pub fn new(contract: Address, event_name: &str) -> Self {
+        Self {
+            contract,
+            event: EventLogInfo::<NO_TOPICS, MAX_DATA>::new(contract, event_name),
+        }
     }
 
     /// Function that returns the MPT Trie inclusion proofs for all receipts in a block whose logs contain
@@ -563,102 +511,29 @@ impl ReceiptQuery {
         provider: &RootProvider<T>,
         block: BlockNumberOrTag,
     ) -> Result<Vec<ReceiptProofInfo>> {
-        let expected_topic_0 = B256::from_slice(&keccak256(self.event.signature().as_bytes()));
         let filter = Filter::new()
             .select(block)
             .address(self.contract)
-            .event(&self.event.signature());
+            .event_signature(B256::from(self.event.event_signature));
         let logs = provider.get_logs(&filter).await?;
-        // Find the length of the RLP encoded log
-        let event_log_info: EventLogInfo = (&logs
-            .first()
-            .ok_or(anyhow!("No relevant logs in this block"))?
-            .inner)
-            .try_into()?;
 
         // For each of the logs return the transacion its included in, then sort and remove duplicates.
-        let mut tx_indices = logs
-            .iter()
-            .map(|log| log.transaction_index)
-            .collect::<Option<Vec<u64>>>()
-            .ok_or(anyhow!("One of the logs did not have a transaction index"))?;
-        tx_indices.sort();
-        tx_indices.dedup();
+        let tx_indices = BTreeSet::from_iter(logs.iter().map_while(|log| log.transaction_index));
 
         // Construct the Receipt Trie for this block so we can retrieve MPT proofs.
         let mut block_util = BlockUtil::fetch(provider, block).await?;
         let mpt_root = block_util.receipts_trie.root_hash()?;
         let proofs = tx_indices
             .into_iter()
-            .map(|index| {
-                let key = index.rlp_bytes();
-
-                let index_size = key.len();
+            .map(|tx_index| {
+                let key = tx_index.rlp_bytes();
 
                 let proof = block_util.receipts_trie.get_proof(&key[..])?;
-
-                // Since the compact encoding of the key is stored first plus an additional list header and
-                // then the first element in the receipt body is the transaction type we calculate the offset to that point
-
-                let last_node = proof.last().ok_or(eth_trie::TrieError::DB(
-                    "Could not get last node in proof".to_string(),
-                ))?;
-
-                let list_length_hint = last_node[0] as usize - 247;
-                let key_length = if last_node[1 + list_length_hint] > 128 {
-                    last_node[1 + list_length_hint] as usize - 128
-                } else {
-                    0
-                };
-                let body_length_hint = last_node[2 + list_length_hint + key_length] as usize - 183;
-                let body_offset = 4 + list_length_hint + key_length + body_length_hint;
-
-                let receipt = block_util.txs[index as usize].receipt();
-
-                let body_length_hint = last_node[body_offset] as usize - 247;
-                let length_hint = body_offset + body_length_hint;
-
-                let status_offset = 1 + length_hint;
-                let gas_hint = last_node[2 + length_hint] as usize - 128;
-                // Logs bloom is always 256 bytes long and comes after the gas used the first byte is 185 then 1 then 0 then the bloom so the
-                // log data starts at 4 + length_hint + gas_hint + 259
-                let log_offset = 3 + length_hint + gas_hint + 259;
-
-                let log_hint = if last_node[log_offset] < 247 {
-                    last_node[log_offset] as usize - 192
-                } else {
-                    last_node[log_offset] as usize - 247
-                };
-                // We iterate through the logs and store the offsets we care about.
-                let mut current_log_offset = log_offset + 1 + log_hint;
-
-                let relevant_logs = receipt
-                    .logs()
-                    .iter()
-                    .filter_map(|log| {
-                        let length = log.length();
-                        if log.address == self.contract
-                            && log.data.topics().contains(&expected_topic_0)
-                        {
-                            let out = current_log_offset;
-                            current_log_offset += length;
-                            Some(out)
-                        } else {
-                            current_log_offset += length;
-                            None
-                        }
-                    })
-                    .collect::<Vec<usize>>();
 
                 Ok(ReceiptProofInfo {
                     mpt_proof: proof,
                     mpt_root,
-                    tx_index: index,
-                    index_size,
-                    status_offset,
-                    logs_offset: log_offset,
-                    event_log_info,
-                    relevant_logs_offset: relevant_logs,
+                    tx_index,
                 })
             })
             .collect::<Result<Vec<ReceiptProofInfo>, eth_trie::TrieError>>()?;
@@ -723,14 +598,21 @@ impl BlockUtil {
             bail!("can't see full transactions");
         };
         // check receipt root
+        let all_tx_map = HashMap::<u64, &Transaction>::from_iter(
+            all_tx
+                .iter()
+                .map_while(|tx| tx.transaction_index.map(|tx_index| (tx_index, tx))),
+        );
         let memdb = Arc::new(MemoryDB::new(true));
         let mut receipts_trie = EthTrie::new(memdb.clone());
         let mut transactions_trie = EthTrie::new(memdb.clone());
         let consensus_receipts = receipts
             .into_iter()
-            .zip(all_tx.iter())
-            .map(|(receipt, transaction)| {
-                let tx_index = receipt.transaction_index.unwrap().rlp_bytes();
+            .map(|receipt| {
+                let tx_index_u64 = receipt.transaction_index.unwrap();
+                // If the HashMap doesn't have an entry for this tx_index then the recceipts and transactions aren't from the same block.
+                let transaction = all_tx_map.get(&tx_index_u64).cloned().unwrap();
+                let tx_index = tx_index_u64.rlp_bytes();
 
                 let receipt_primitive = match receipt.inner {
                     CRE::Legacy(ref r) => CRE::Legacy(from_rpc_logs_to_consensus(r)),
@@ -741,11 +623,9 @@ impl BlockUtil {
                     _ => panic!("aie"),
                 };
 
-                let transaction_primitive = TxEnvelope::from(transaction.clone());
-
                 let body_rlp = receipt_primitive.encoded_2718();
 
-                let tx_body_rlp = transaction_primitive.encoded_2718();
+                let tx_body_rlp = transaction.inner.encoded_2718();
 
                 receipts_trie
                     .insert(&tx_index, &body_rlp)
@@ -808,12 +688,10 @@ mod test {
     use std::str::FromStr;
 
     use alloy::{
-        network::{TransactionBuilder, TransactionResponse},
-        node_bindings::Anvil,
-        primitives::{Bytes, Log, U256},
-        providers::{ext::AnvilApi, Provider, ProviderBuilder},
+        network::TransactionResponse,
+        primitives::{Bytes, Log},
+        providers::{Provider, ProviderBuilder},
         rlp::Decodable,
-        sol,
     };
 
     use eth_trie::Nibbles;
@@ -828,7 +706,10 @@ mod test {
         mpt_sequential::utils::nibbles_to_bytes,
         utils::{Endianness, Packer},
     };
-    use mp2_test::eth::{get_mainnet_url, get_sepolia_url};
+    use mp2_test::{
+        eth::{get_mainnet_url, get_sepolia_url},
+        mpt_sequential::generate_receipt_test_info,
+    };
 
     use super::*;
 
@@ -960,137 +841,12 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_receipt_query() -> Result<()> {
-        // Make a contract that emits events so we can pick up on them
-        sol! {
-            #[allow(missing_docs)]
-        // solc v0.8.26; solc Counter.sol --via-ir --optimize --bin
-        #[sol(rpc, abi, bytecode="6080604052348015600e575f80fd5b506102288061001c5f395ff3fe608060405234801561000f575f80fd5b506004361061004a575f3560e01c8063488814e01461004e5780638381f58a14610058578063d09de08a14610076578063db73227914610080575b5f80fd5b61005661008a565b005b6100606100f8565b60405161006d9190610165565b60405180910390f35b61007e6100fd565b005b610088610115565b005b5f547fdcd9c7fa0342f01013bd0bf2bec103a81936162dcebd1f0c38b1d4164c17e0fc60405160405180910390a26100c06100fd565b5f547fdcd9c7fa0342f01013bd0bf2bec103a81936162dcebd1f0c38b1d4164c17e0fc60405160405180910390a26100f66100fd565b565b5f5481565b5f8081548092919061010e906101ab565b9190505550565b5f547fdcd9c7fa0342f01013bd0bf2bec103a81936162dcebd1f0c38b1d4164c17e0fc60405160405180910390a261014b6100fd565b565b5f819050919050565b61015f8161014d565b82525050565b5f6020820190506101785f830184610156565b92915050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f6101b58261014d565b91507fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff82036101e7576101e661017e565b5b60018201905091905056fea26469706673582212202787ca0f2ea71e118bc4d1bf239cde5ec4730aeb35a404c44e6c9d587316418564736f6c634300081a0033")]
-        contract EventEmitter {
-            uint256 public number;
-            event testEvent(uint256 indexed num);
-
-            function testEmit() public {
-                emit testEvent(number);
-                increment();
-            }
-
-            function twoEmits() public {
-                emit testEvent(number);
-                increment();
-                emit testEvent(number);
-                increment();
-            }
-
-            function increment() public {
-                number++;
-            }
-        }
-        }
-
-        sol! {
-            #[allow(missing_docs)]
-            // solc v0.8.26; solc Counter.sol --via-ir --optimize --bin
-            #[sol(rpc, abi, bytecode="6080604052348015600e575f80fd5b506102288061001c5f395ff3fe608060405234801561000f575f80fd5b506004361061004a575f3560e01c8063488814e01461004e5780637229db15146100585780638381f58a14610062578063d09de08a14610080575b5f80fd5b61005661008a565b005b6100606100f8565b005b61006a610130565b6040516100779190610165565b60405180910390f35b610088610135565b005b5f547fbe3cbcfa5d4a62a595b4a15f51de63c11797bbef2ff687873efb0bb2852ee20f60405160405180910390a26100c0610135565b5f547fbe3cbcfa5d4a62a595b4a15f51de63c11797bbef2ff687873efb0bb2852ee20f60405160405180910390a26100f6610135565b565b5f547fbe3cbcfa5d4a62a595b4a15f51de63c11797bbef2ff687873efb0bb2852ee20f60405160405180910390a261012e610135565b565b5f5481565b5f80815480929190610146906101ab565b9190505550565b5f819050919050565b61015f8161014d565b82525050565b5f6020820190506101785f830184610156565b92915050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f6101b58261014d565b91507fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff82036101e7576101e661017e565b5b60018201905091905056fea26469706673582212203b7602644bfff2df89c2fe9498cd533326876859a0df7b96ac10be1fdc09c3a064736f6c634300081a0033")]
-
-           contract OtherEmitter {
-            uint256 public number;
-            event otherEvent(uint256 indexed num);
-
-            function otherEmit() public {
-                emit otherEvent(number);
-                increment();
-            }
-
-            function twoEmits() public {
-                emit otherEvent(number);
-                increment();
-                emit otherEvent(number);
-                increment();
-            }
-
-            function increment() public {
-                number++;
-            }
-        }
-        }
-
-        // Spin up a local node.
-
-        let rpc = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .on_anvil_with_config(|anvil| Anvil::arg(anvil, "--no-mining"));
-
-        // Turn on auto mining to deploy the contracts
-        rpc.anvil_set_auto_mine(true).await.unwrap();
-
-        // Deploy the contract using anvil
-        let event_contract = EventEmitter::deploy(rpc.root()).await.unwrap();
-
-        // Deploy the contract using anvil
-        let other_contract = OtherEmitter::deploy(rpc.root()).await.unwrap();
-
-        // Disable auto mining so we can ensure that all the transaction appear in the same block
-        rpc.anvil_set_auto_mine(false).await.unwrap();
-
-        let mut pending_tx_builders = vec![];
-        for i in 0..25 {
-            let tx_req = match i % 4 {
-                0 => event_contract.testEmit().into_transaction_request(),
-                1 => event_contract.twoEmits().into_transaction_request(),
-                2 => other_contract.otherEmit().into_transaction_request(),
-                3 => other_contract.twoEmits().into_transaction_request(),
-                _ => unreachable!(),
-            };
-
-            let sender_address = Address::random();
-            let funding = U256::from(1e18 as u64);
-            rpc.anvil_set_balance(sender_address, funding)
-                .await
-                .unwrap();
-            rpc.anvil_auto_impersonate_account(true).await.unwrap();
-            let new_req = tx_req.with_from(sender_address);
-            let tx_req_final = rpc
-                .fill(new_req)
-                .await
-                .unwrap()
-                .as_builder()
-                .unwrap()
-                .clone();
-            pending_tx_builders.push(rpc.send_transaction(tx_req_final).await.unwrap());
-        }
-
-        rpc.anvil_mine(Some(U256::from(1u8)), None).await.unwrap();
-
-        let mut transactions = Vec::new();
-        for pending in pending_tx_builders.into_iter() {
-            let hash = pending.watch().await.unwrap();
-            transactions.push(rpc.get_transaction_by_hash(hash).await.unwrap().unwrap());
-        }
-
-        let block_number = transactions.first().unwrap().block_number.unwrap();
-        println!("block number: {block_number}");
-        // We want to get the event signature so we can make a ReceiptQuery
-        let all_events = EventEmitter::abi::events();
-
-        let events = all_events.get("testEvent").unwrap();
-        let receipt_query = ReceiptQuery::new(*event_contract.address(), events[0].clone());
-
-        let block = rpc
-            .get_block(
-                BlockNumberOrTag::Number(block_number).into(),
-                alloy::rpc::types::BlockTransactionsKind::Full,
-            )
-            .await?
-            .ok_or(anyhow!("Could not get block test"))?;
-        let receipt_hash = block.header().receipts_root;
-        let proofs = receipt_query
-            .query_receipt_proofs(rpc.root(), BlockNumberOrTag::Number(block_number))
-            .await?;
-
+    #[test]
+    fn test_receipt_query() -> Result<()> {
         // Now for each transaction we fetch the block, then get the MPT Trie proof that the receipt is included and verify it
-
+        let test_info = generate_receipt_test_info();
+        let proofs = test_info.proofs();
+        let query = test_info.query();
         for proof in proofs.iter() {
             let memdb = Arc::new(MemoryDB::new(true));
             let tx_trie = EthTrie::new(Arc::clone(&memdb));
@@ -1098,33 +854,66 @@ mod test {
             let mpt_key = proof.tx_index.rlp_bytes();
 
             let _ = tx_trie
-                .verify_proof(receipt_hash.0.into(), &mpt_key, proof.mpt_proof.clone())?
+                .verify_proof(proof.mpt_root, &mpt_key, proof.mpt_proof.clone())?
                 .ok_or(anyhow!("No proof found when verifying"))?;
 
             let last_node = proof
                 .mpt_proof
                 .last()
                 .ok_or(anyhow!("Couldn't get first node in proof"))?;
-            let expected_sig: [u8; 32] = keccak256(receipt_query.event.signature().as_bytes())
-                .try_into()
-                .unwrap();
+            let expected_sig: [u8; 32] = query.event.event_signature;
 
-            for log_offset in proof.relevant_logs_offset.iter() {
-                let mut buf = &last_node[*log_offset..*log_offset + proof.event_log_info.size];
+            // Convert to Rlp form so we can use provided methods.
+            let node_rlp = rlp::Rlp::new(last_node);
+
+            // The actual receipt data is item 1 in the list
+            let (receipt_rlp, receipt_off) = node_rlp.at_with_offset(1)?;
+            // The rlp encoded Receipt is not a list but a string that is formed of the `tx_type` followed by the remaining receipt
+            // data rlp encoded as a list. We retrieve the payload info so that we can work out relevant offsets later.
+            let receipt_str_payload = receipt_rlp.payload_info()?;
+
+            // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
+            let receipt_list = rlp::Rlp::new(&receipt_rlp.data()?[1..]);
+
+            // The logs themselves start are the item at index 3 in this list
+            let (logs_rlp, logs_off) = receipt_list.at_with_offset(3)?;
+
+            // We calculate the offset the that the logs are at from the start of the node
+            let logs_offset = receipt_off + receipt_str_payload.header_len + 1 + logs_off;
+
+            // Now we produce an iterator over the logs with each logs offset.
+            let relevant_logs_offset = std::iter::successors(Some(0usize), |i| Some(i + 1))
+                .map_while(|i| logs_rlp.at_with_offset(i).ok())
+                .filter_map(|(log_rlp, log_off)| {
+                    let mut bytes = log_rlp.data().ok()?;
+                    let log = Log::decode(&mut bytes).ok()?;
+                    if log.address == query.contract
+                        && log
+                            .data
+                            .topics()
+                            .contains(&B256::from(query.event.event_signature))
+                    {
+                        Some(logs_offset + log_off)
+                    } else {
+                        Some(0usize)
+                    }
+                })
+                .collect::<Vec<usize>>();
+
+            for log_offset in relevant_logs_offset.iter() {
+                let mut buf = &last_node[*log_offset..*log_offset + query.event.size];
                 let decoded_log = Log::decode(&mut buf)?;
-                let raw_bytes: [u8; 20] = last_node[*log_offset
-                    + proof.event_log_info.add_rel_offset
-                    ..*log_offset + proof.event_log_info.add_rel_offset + 20]
+                let raw_bytes: [u8; 20] = last_node[*log_offset + query.event.add_rel_offset
+                    ..*log_offset + query.event.add_rel_offset + 20]
                     .to_vec()
                     .try_into()
                     .unwrap();
-                assert_eq!(decoded_log.address, receipt_query.contract);
-                assert_eq!(raw_bytes, receipt_query.contract);
+                assert_eq!(decoded_log.address, query.contract);
+                assert_eq!(raw_bytes, query.contract);
                 let topics = decoded_log.topics();
                 assert_eq!(topics[0].0, expected_sig);
-                let raw_bytes: [u8; 32] = last_node[*log_offset
-                    + proof.event_log_info.sig_rel_offset
-                    ..*log_offset + proof.event_log_info.sig_rel_offset + 32]
+                let raw_bytes: [u8; 32] = last_node[*log_offset + query.event.sig_rel_offset
+                    ..*log_offset + query.event.sig_rel_offset + 32]
                     .to_vec()
                     .try_into()
                     .unwrap();
@@ -1249,10 +1038,10 @@ mod test {
     #[tokio::test]
     async fn test_pidgy_pinguin_mapping_slot() -> Result<()> {
         // first pinguin holder https://dune.com/queries/2450476/4027653
-        // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
+        // holder: 0x29469395eaf6f95920e59f858042f0e28d98a20b
         // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
         let mapping_value =
-            Address::from_str("0x29469395eAf6f95920E59F858042f0e28D98a20B").unwrap();
+            Address::from_str("0x29469395eaf6f95920e59f858042f0e28d98a20b").unwrap();
         let nft_id: u32 = 1116;
         let mapping_key = left_pad32(&nft_id.to_be_bytes());
         let url = get_mainnet_url();
