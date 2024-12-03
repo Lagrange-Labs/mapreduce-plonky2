@@ -1,13 +1,10 @@
 //! Module including the revelation circuits for query
 
-use crate::{
-    ivc::NUM_IO,
-    query::pi_len as query_pi_len,
-};
+use crate::{ivc::NUM_IO, query::pi_len as query_pi_len};
 use mp2_common::F;
 
 #[cfg(feature = "batching_circuits")]
-use crate::query::batching::circuits::api::num_io as num_batching_io; 
+use crate::query::batching::circuits::api::num_io as num_batching_io;
 
 pub mod api;
 #[cfg(feature = "batching_circuits")]

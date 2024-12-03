@@ -22,11 +22,9 @@ use plonky2::{
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
-use crate::query::
-    batching::{
-        public_inputs::PublicInputs,
-        row_chunk::aggregate_chunks::aggregate_chunks,
-    };
+use crate::query::batching::{
+    public_inputs::PublicInputs, row_chunk::aggregate_chunks::aggregate_chunks,
+};
 
 use super::api::num_io;
 

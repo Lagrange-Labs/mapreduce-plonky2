@@ -95,35 +95,39 @@ impl<
         const INDEX_TREE_MAX_DEPTH: usize,
         const MAX_NUM_COLUMNS: usize,
         const MAX_NUM_RESULTS: usize,
-    > From<RowProcessingGadgetWires<
-        ROW_TREE_MAX_DEPTH,
-        INDEX_TREE_MAX_DEPTH,
-        MAX_NUM_COLUMNS,
-        MAX_NUM_RESULTS,
-        >>
-    for RowChunkDataTarget<MAX_NUM_RESULTS>
+    >
+    From<
+        RowProcessingGadgetWires<
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
+            MAX_NUM_COLUMNS,
+            MAX_NUM_RESULTS,
+        >,
+    > for RowChunkDataTarget<MAX_NUM_RESULTS>
 where
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_RESULTS - 1]:,
-{   
-    fn from(value: RowProcessingGadgetWires<
-        ROW_TREE_MAX_DEPTH,
-        INDEX_TREE_MAX_DEPTH,
-        MAX_NUM_COLUMNS,
-        MAX_NUM_RESULTS,
-        >) -> Self {
-            RowChunkDataTarget {
-                left_boundary_row: BoundaryRowDataTarget {
-                    row_node_info: value.row_node_data.clone(),
-                    index_node_info: value.index_node_data.clone(),
-                },
-                right_boundary_row: BoundaryRowDataTarget {
-                    row_node_info: value.row_node_data,
-                    index_node_info: value.index_node_data,
-                },
-                chunk_outputs: value.value_wires.output_wires,
-            }
+{
+    fn from(
+        value: RowProcessingGadgetWires<
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
+            MAX_NUM_COLUMNS,
+            MAX_NUM_RESULTS,
+        >,
+    ) -> Self {
+        RowChunkDataTarget {
+            left_boundary_row: BoundaryRowDataTarget {
+                row_node_info: value.row_node_data.clone(),
+                index_node_info: value.index_node_data.clone(),
+            },
+            right_boundary_row: BoundaryRowDataTarget {
+                row_node_info: value.row_node_data,
+                index_node_info: value.index_node_data,
+            },
+            chunk_outputs: value.value_wires.output_wires,
+        }
     }
 }
 

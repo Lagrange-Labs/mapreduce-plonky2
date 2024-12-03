@@ -8,10 +8,7 @@ use crate::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
         },
         pi_len,
-        public_inputs::{
-            PublicInputs as QueryPI, PublicInputs,
-            QueryPublicInputs,
-        },
+        public_inputs::{PublicInputs as QueryPI, PublicInputs, QueryPublicInputs},
         universal_circuit::universal_circuit_inputs::{
             BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders, ResultStructure,
         },

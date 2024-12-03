@@ -426,7 +426,6 @@ pub(crate) mod tests {
     }
 
     impl BoundaryRowData {
-
         /// Generate a random instance of `Self`, given the `query_bounds` provided as inputs.
         /// It is employed to generate test data without the need to build an actual test tree
         pub(crate) fn sample<R: Rng>(rng: &mut R, query_bounds: &QueryBounds) -> Self {

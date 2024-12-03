@@ -43,7 +43,7 @@ use crate::{
 };
 
 use super::{
-    num_query_io, pi_len,
+    num_query_io, num_query_io_no_results_tree, pi_len,
     revelation_unproven_offset::{
         RecursiveCircuitInputs as RecursiveCircuitInputsUnporvenOffset,
         RevelationCircuit as RevelationCircuitUnprovenOffset, RowPath,
@@ -52,7 +52,6 @@ use super::{
         CircuitBuilderParams, RecursiveCircuitInputs, RecursiveCircuitWires,
         RevelationWithoutResultsTreeCircuit,
     },
-    num_query_io_no_results_tree
 };
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 /// Data structure employed to provide input data related to a matching row

@@ -47,7 +47,9 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    num_query_io, num_query_io_no_results_tree, pi_len as revelation_pi_len, placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires}, NUM_PREPROCESSING_IO
+    num_query_io, num_query_io_no_results_tree, pi_len as revelation_pi_len,
+    placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
+    NUM_PREPROCESSING_IO,
 };
 
 #[cfg(feature = "batching_circuits")]

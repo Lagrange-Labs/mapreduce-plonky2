@@ -33,9 +33,7 @@ use mp2_common::{
     D, F,
 };
 
-use self::row_chunk::{
-    aggregate_chunks::aggregate_chunks, RowChunkDataTarget,
-};
+use self::row_chunk::{aggregate_chunks::aggregate_chunks, RowChunkDataTarget};
 
 use anyhow::{ensure, Result};
 
@@ -235,7 +233,10 @@ where
                 &chunk,
                 &current_chunk,
                 (&min_query_primary, &max_query_primary),
-                (&query_input_wires.min_secondary, &query_input_wires.max_secondary),
+                (
+                    &query_input_wires.min_secondary,
+                    &query_input_wires.max_secondary,
+                ),
                 &query_input_wires.agg_ops_ids,
                 &is_second_non_dummy,
             )
@@ -307,8 +308,9 @@ where
     /// in the same order, so that those ids can be provided as input to other circuits that need
     /// to recompute this hash
     #[cfg(test)] // only used in test for now
-    pub(crate) fn ids_for_placeholder_hash(&self) 
-    -> Vec<crate::query::universal_circuit::universal_circuit_inputs::PlaceholderId> {
+    pub(crate) fn ids_for_placeholder_hash(
+        &self,
+    ) -> Vec<crate::query::universal_circuit::universal_circuit_inputs::PlaceholderId> {
         self.universal_query_inputs.ids_for_placeholder_hash()
     }
 }
@@ -370,10 +372,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        array,
-        iter::once,
-    };
+    use std::{array, iter::once};
 
     use alloy::primitives::U256;
     use itertools::Itertools;
@@ -413,10 +412,7 @@ mod tests {
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
         },
-        merkle_path::{
-            tests::NeighborInfo,
-            MerklePathWithNeighborsGadget,
-        },
+        merkle_path::{tests::NeighborInfo, MerklePathWithNeighborsGadget},
         universal_circuit::{
             output_no_aggregation::Circuit as NoAggOutputCircuit,
             output_with_aggregation::Circuit as AggOutputCircuit,
@@ -708,8 +704,7 @@ mod tests {
             .try_into()
             .unwrap();
         let path_1c = vec![(node_1a, ChildPosition::Right)];
-        let node_1b_hash =
-            HashOutput::from(node_1b.compute_node_hash(secondary_index));
+        let node_1b_hash = HashOutput::from(node_1b.compute_node_hash(secondary_index));
         let siblings_1c = vec![Some(node_1b_hash)];
         let merkle_path_1c = MerklePathWithNeighborsGadget::new(
             &path_1c,
@@ -743,15 +738,13 @@ mod tests {
             (node_2b, ChildPosition::Right),
             (node_2a, ChildPosition::Left),
         ];
-        let node_2c_hash =
-            HashOutput::from(node_2c.compute_node_hash(secondary_index));
+        let node_2c_hash = HashOutput::from(node_2c.compute_node_hash(secondary_index));
         let siblings_2d = vec![Some(node_2c_hash), None];
         let merkle_path_2d =
             MerklePathWithNeighborsGadget::new(&path_2d, &siblings_2d, &node_2d, [None, None])
                 .unwrap();
         let path_2 = vec![(node_1.node, ChildPosition::Right)];
-        let node_0_hash =
-            HashOutput::from(node_0.node.compute_node_hash(primary_index));
+        let node_0_hash = HashOutput::from(node_0.node.compute_node_hash(primary_index));
         let siblings_2 = vec![Some(node_0_hash)];
         let merkle_path_index_2 =
             MerklePathWithNeighborsGadget::new(&path_2, &siblings_2, &node_2.node, [None, None])
@@ -959,8 +952,7 @@ mod tests {
             (node_2b, ChildPosition::Left),
             (node_2a, ChildPosition::Left),
         ];
-        let node_2d_hash =
-            HashOutput::from(node_2d.compute_node_hash(secondary_index));
+        let node_2d_hash = HashOutput::from(node_2d.compute_node_hash(secondary_index));
         let siblings_2c = vec![Some(node_2d_hash), None];
         let merkle_path_2c =
             MerklePathWithNeighborsGadget::new(&path_2c, &siblings_2c, &node_2c, [None, None])
@@ -1261,8 +1253,7 @@ mod tests {
                 .unwrap();
 
         let path_1c = vec![(node_1a, ChildPosition::Right)];
-        let node_1b_hash =
-            HashOutput::from(node_1b.compute_node_hash(secondary_index));
+        let node_1b_hash = HashOutput::from(node_1b.compute_node_hash(secondary_index));
         let siblings_1c = vec![Some(node_1b_hash)];
         let merkle_path_1c = MerklePathWithNeighborsGadget::new(
             &path_1c,
@@ -1288,15 +1279,13 @@ mod tests {
             (node_2b, ChildPosition::Right),
             (node_2a, ChildPosition::Left),
         ];
-        let node_2c_hash =
-            HashOutput::from(node_2c.compute_node_hash(secondary_index));
+        let node_2c_hash = HashOutput::from(node_2c.compute_node_hash(secondary_index));
         let siblings_2d = vec![Some(node_2c_hash), None];
         let merkle_path_2d =
             MerklePathWithNeighborsGadget::new(&path_2d, &siblings_2d, &node_2d, [None, None])
                 .unwrap();
         let path_2 = vec![(node_1.node, ChildPosition::Right)];
-        let node_0_hash =
-            HashOutput::from(node_0.node.compute_node_hash(primary_index));
+        let node_0_hash = HashOutput::from(node_0.node.compute_node_hash(primary_index));
         let siblings_2 = vec![Some(node_0_hash)];
         let merkle_path_index_2 =
             MerklePathWithNeighborsGadget::new(&path_2, &siblings_2, &node_2.node, [None, None])
@@ -1557,8 +1546,7 @@ mod tests {
         )
         .unwrap();
         let path_0 = vec![(node_1.node, ChildPosition::Left)];
-        let node_2_hash =
-            HashOutput::from(node_2.node.compute_node_hash(primary_index));
+        let node_2_hash = HashOutput::from(node_2.node.compute_node_hash(primary_index));
         let siblings_0 = vec![Some(node_2_hash)];
         let merkle_path_index_2 =
             MerklePathWithNeighborsGadget::new(&path_0, &siblings_0, &node_0.node, [None, None])

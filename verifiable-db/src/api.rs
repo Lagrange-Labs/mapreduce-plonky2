@@ -11,7 +11,8 @@ use crate::{
         pi_len as query_pi_len,
     },
     revelation::{
-        self, api::Parameters as RevelationParams, num_query_io, num_query_io_no_results_tree, pi_len as revelation_pi_len
+        self, api::Parameters as RevelationParams, num_query_io, num_query_io_no_results_tree,
+        pi_len as revelation_pi_len,
     },
     row_tree::{self},
 };

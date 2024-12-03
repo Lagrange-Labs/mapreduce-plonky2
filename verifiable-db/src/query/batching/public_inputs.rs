@@ -13,10 +13,7 @@ use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
     iop::target::{BoolTarget, Target},
 };
-use plonky2_ecgfp5::{
-    curve::curve::WeierstrassPoint,
-    gadgets::curve::CurveTarget,
-};
+use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 
 use crate::query::{
     aggregation::output_computation::compute_dummy_output_targets,
@@ -500,11 +497,11 @@ pub(crate) mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-            aggregation::{QueryBoundSource, QueryBounds},
-            batching::{public_inputs::QueryPublicInputs, row_chunk::tests::BoundaryRowData},
-            computational_hash_ids::{AggregationOperation, Identifiers},
-            universal_circuit::universal_circuit_inputs::Placeholders,
-        };
+        aggregation::{QueryBoundSource, QueryBounds},
+        batching::{public_inputs::QueryPublicInputs, row_chunk::tests::BoundaryRowData},
+        computational_hash_ids::{AggregationOperation, Identifiers},
+        universal_circuit::universal_circuit_inputs::Placeholders,
+    };
 
     use super::{OutputValues, PublicInputs};
 

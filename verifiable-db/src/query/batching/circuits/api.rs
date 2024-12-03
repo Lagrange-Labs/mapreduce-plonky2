@@ -3,15 +3,12 @@ use std::iter::{repeat, repeat_with};
 use anyhow::{ensure, Result};
 
 use itertools::Itertools;
-use mp2_common::{
-    array::ToField, proof::ProofWithVK, types::HashOutput, C, D, F,
-};
+use mp2_common::{array::ToField, proof::ProofWithVK, types::HashOutput, C, D, F};
 use plonky2::iop::target::Target;
 use recursion_framework::{
-    circuit_builder::CircuitWithUniversalVerifier,
-    framework::RecursiveCircuits,
+    circuit_builder::CircuitWithUniversalVerifier, framework::RecursiveCircuits,
 };
-use serde::{Deserialize, Serialize}; 
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "batching_circuits")]
 use mp2_common::{default_config, poseidon::H};
@@ -19,8 +16,8 @@ use mp2_common::{default_config, poseidon::H};
 use plonky2::plonk::config::Hasher;
 #[cfg(feature = "batching_circuits")]
 use recursion_framework::{
-        circuit_builder::CircuitWithUniversalVerifierBuilder,
-        framework::prepare_recursive_circuit_for_circuit_set,
+    circuit_builder::CircuitWithUniversalVerifierBuilder,
+    framework::prepare_recursive_circuit_for_circuit_set,
 };
 
 use crate::query::{
@@ -92,10 +89,7 @@ impl NodePath {
     /// - `row_path`: path from the node to the root of the rows tree storing the node
     /// - `index_path` : path from the index tree node storing the rows tree containing the node, up to the
     ///     root of the index tree
-    pub fn new(
-        row_path: TreePathInputs,
-        index_path: TreePathInputs,
-    ) -> Self {
+    pub fn new(row_path: TreePathInputs, index_path: TreePathInputs) -> Self {
         Self {
             row_tree_path: row_path,
             index_tree_path: index_path,
@@ -188,7 +182,10 @@ where
         query_bounds: &QueryBounds,
         results: &ResultStructure,
     ) -> Result<Self> {
-        ensure!(!rows.is_empty(), "there must be at least 1 row to be proven");
+        ensure!(
+            !rows.is_empty(),
+            "there must be at least 1 row to be proven"
+        );
         ensure!(
             rows.len() <= NUM_ROWS,
             format!(
@@ -741,8 +738,7 @@ mod tests {
         let row_1a = RowInput::new(&row_cells_1a, &row_path_1a);
 
         let path_1c = vec![(node_1a, ChildPosition::Right)];
-        let node_1b_hash =
-            HashOutput::from(node_1b.compute_node_hash(secondary_index));
+        let node_1b_hash = HashOutput::from(node_1b.compute_node_hash(secondary_index));
         let siblings_1c = vec![Some(node_1b_hash)];
         let row_path_1c = NodePath::new(
             node_1c,
@@ -789,13 +785,11 @@ mod tests {
             (node_2b, ChildPosition::Right),
             (node_2a, ChildPosition::Left),
         ];
-        let node_2c_hash =
-            HashOutput::from(node_2c.compute_node_hash(secondary_index));
+        let node_2c_hash = HashOutput::from(node_2c.compute_node_hash(secondary_index));
         let siblings_2d = vec![Some(node_2c_hash), None];
 
         let path_2 = vec![(node_1.node, ChildPosition::Right)];
-        let node_0_hash =
-            HashOutput::from(node_0.node.compute_node_hash(primary_index));
+        let node_0_hash = HashOutput::from(node_0.node.compute_node_hash(primary_index));
         let siblings_2 = vec![Some(node_0_hash)];
         let node_2_children = [None, None];
         let row_path_2d = NodePath::new(

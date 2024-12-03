@@ -332,7 +332,9 @@ impl BasicOperation {
             .iter()
             .find_position(|current_op| *current_op == op)
             .map(|(pos, _)| pos)
-            .ok_or(anyhow::Error::msg("operation {} not found in set of previous ops"))
+            .ok_or(anyhow::Error::msg(
+                "operation {} not found in set of previous ops",
+            ))
     }
 }
 

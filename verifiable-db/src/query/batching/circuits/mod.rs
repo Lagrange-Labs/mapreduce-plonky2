@@ -297,12 +297,9 @@ mod tests {
             .into_iter()
             .map(|cell| cell.value)
             .collect_vec();
-        let (res, predicate_err) = BasicOperation::compute_operations(
-            predicate_operations,
-            &column_values,
-            placeholders,
-        )
-        .unwrap();
+        let (res, predicate_err) =
+            BasicOperation::compute_operations(predicate_operations, &column_values, placeholders)
+                .unwrap();
         let predicate_value = res.last().unwrap().try_into_bool().unwrap();
 
         let (res, result_err) = results
