@@ -636,7 +636,7 @@ where
         let arrays: Vec<Array<T, RANDOM_ACCESS_SIZE>> = (0..padded_size)
             .map(|i| Array {
                 arr: create_array(|j| {
-                    let index = 64 * i + j;
+                    let index = RANDOM_ACCESS_SIZE * i + j;
                     if index < self.arr.len() {
                         self.arr[index]
                     } else {
@@ -652,7 +652,7 @@ where
         let less_than_check = less_than_unsafe(b, at, array_size, 12);
         let true_target = b._true();
         b.connect(less_than_check.target, true_target.target);
-        b.range_check(at, 12);
+
         let (low_bits, high_bits) = b.split_low_high(at, 6, 12);
 
         // Search each of the smaller arrays for the target at `low_bits`
@@ -1298,7 +1298,10 @@ mod test {
         };
         run_circuit::<F, D, C, _>(circuit);
 
-        arr2[0] += 1; // ensure arr2 is different from arr
+        arr2[0] = match arr2[0].checked_add(1) {
+            Some(num) => num,
+            None => arr2[0] - 1,
+        };
         let res = panic::catch_unwind(|| {
             let circuit = TestSliceEqual {
                 arr,
