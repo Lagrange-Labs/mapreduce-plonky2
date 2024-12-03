@@ -16,7 +16,7 @@ use anyhow::{bail, ensure, Result};
 use log::debug;
 use mp2_common::{
     default_config,
-    eth::ReceiptProofInfo,
+    eth::{ReceiptProofInfo, ReceiptQuery},
     mpt_sequential::PAD_LEN,
     poseidon::H,
     proof::{ProofInputSerialized, ProofWithVK},
@@ -139,8 +139,13 @@ where
     }
 
     /// Create a circuit input for proving a leaf MPT node of a transaction receipt.
-    pub fn new_receipt_leaf(info: ReceiptProofInfo) -> Self {
-        CircuitInput::LeafReceipt(ReceiptLeafCircuit { info })
+    pub fn new_receipt_leaf<const NO_TOPICS: usize, const MAX_DATA: usize>(
+        info: &ReceiptProofInfo,
+        query: &ReceiptQuery<NO_TOPICS, MAX_DATA>,
+    ) -> Self {
+        CircuitInput::LeafReceipt(
+            ReceiptLeafCircuit::new(info, query).expect("Could not construct Receipt Leaf Circuit"),
+        )
     }
 
     /// Create a circuit input for proving an extension MPT node.
@@ -541,7 +546,7 @@ mod tests {
         types::MAPPING_LEAF_VALUE_LEN,
     };
     use mp2_test::{
-        mpt_sequential::{generate_random_storage_mpt, generate_receipt_proofs},
+        mpt_sequential::{generate_random_storage_mpt, generate_receipt_test_info},
         utils::random_vector,
     };
     use plonky2::field::types::Field;
@@ -902,14 +907,15 @@ mod tests {
     }
     #[test]
     fn test_receipt_api() {
-        let receipt_proof_infos = generate_receipt_proofs();
-
+        let receipt_proof_infos = generate_receipt_test_info();
+        let receipt_proofs = receipt_proof_infos.proofs();
+        let query = receipt_proof_infos.query();
         // We check that we have enough receipts and then take the second and third info
         // (the MPT proof for the first node is different).
         // Then check that the node above both is a branch.
-        assert!(receipt_proof_infos.len() > 3);
-        let second_info = &receipt_proof_infos[1];
-        let third_info = &receipt_proof_infos[2];
+        assert!(receipt_proofs.len() > 3);
+        let second_info = &receipt_proofs[1];
+        let third_info = &receipt_proofs[2];
 
         let proof_length_1 = second_info.mpt_proof.len();
         let proof_length_2 = third_info.mpt_proof.len();
@@ -924,7 +930,7 @@ mod tests {
         let params = build_circuits_params();
 
         println!("Proving leaf 1...");
-        let leaf_input_1 = CircuitInput::new_receipt_leaf(second_info.clone());
+        let leaf_input_1 = CircuitInput::new_receipt_leaf(second_info, query);
         let now = std::time::Instant::now();
         let leaf_proof1 = generate_proof(&params, leaf_input_1).unwrap();
         {
@@ -939,7 +945,7 @@ mod tests {
         );
 
         println!("Proving leaf 2...");
-        let leaf_input_2 = CircuitInput::new_receipt_leaf(third_info.clone());
+        let leaf_input_2 = CircuitInput::new_receipt_leaf(third_info, query);
         let now = std::time::Instant::now();
         let leaf_proof2 = generate_proof(&params, leaf_input_2).unwrap();
         println!(

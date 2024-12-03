@@ -261,6 +261,7 @@ mod tests {
         final_extraction::{
             base_circuit::{test::ProofsPi, CONTRACT_SET_NUM_IO, VALUE_SET_NUM_IO},
             lengthed_circuit::LENGTH_SET_NUM_IO,
+            receipt_circuit::test::ReceiptsProofsPi,
         },
         length_extraction,
     };
@@ -284,6 +285,7 @@ mod tests {
         );
 
         let proof_pis = ProofsPi::random();
+        let receipt_proof_pis = ReceiptsProofsPi::generate_from_proof_pi_value(&proof_pis);
         let length_pis = proof_pis.length_inputs();
         let len_dm = length_extraction::PublicInputs::<F>::from_slice(&length_pis).metadata_point();
         let block_proof = block_circuit
@@ -297,6 +299,13 @@ mod tests {
             .unwrap()[0];
         let length_proof = &length_params
             .generate_input_proofs::<1>([length_pis.try_into().unwrap()])
+            .unwrap()[0];
+        let receipt_proof = &values_params
+            .generate_input_proofs::<1>([receipt_proof_pis
+                .value_inputs()
+                .proof_inputs
+                .try_into()
+                .unwrap()])
             .unwrap()[0];
 
         let contract_proof: ProofWithVK = (
@@ -359,5 +368,31 @@ mod tests {
         )
         .unwrap();
         proof_pis.check_proof_public_inputs(proof.proof(), Some(len_dm));
+
+        let receipt_proof: ProofWithVK = (
+            receipt_proof.clone(),
+            values_params.verifier_data_for_input_proofs::<1>()[0].clone(),
+        )
+            .into();
+
+        let circuit_input = CircuitInput::new_receipt_input(
+            serialize_proof(&block_proof).unwrap(),
+            receipt_proof.serialize().unwrap(),
+        )
+        .unwrap();
+        let proof = ProofWithVK::deserialize(
+            &params
+                .generate_receipt_proof(
+                    match circuit_input {
+                        CircuitInput::Receipt(input) => input,
+                        _ => unreachable!(),
+                    },
+                    values_params.get_recursive_circuit_set(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+
+        receipt_proof_pis.check_proof_public_inputs(proof.proof());
     }
 }

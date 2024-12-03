@@ -50,9 +50,27 @@ pub fn generate_random_storage_mpt<const DEPTH: usize, const VALUE_LEN: usize>(
     (trie, keys[right_key_idx].to_vec())
 }
 
+#[derive(Debug, Clone)]
+pub struct ReceiptTestInfo<const NO_TOPICS: usize, const MAX_DATA: usize> {
+    /// The query which we have returned proofs for
+    pub query: ReceiptQuery<NO_TOPICS, MAX_DATA>,
+    /// The proofs for receipts relating to `self.query`
+    pub proofs: Vec<ReceiptProofInfo>,
+}
+
+impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptTestInfo<NO_TOPICS, MAX_DATA> {
+    /// Getter for the proofs
+    pub fn proofs(&self) -> Vec<ReceiptProofInfo> {
+        self.proofs.clone()
+    }
+    /// Getter for the query
+    pub fn query(&self) -> &ReceiptQuery<NO_TOPICS, MAX_DATA> {
+        &self.query
+    }
+}
 /// This function is used so that we can generate a Receipt Trie for a blog with varying transactions
 /// (i.e. some we are interested in and some we are not).
-pub fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
+pub fn generate_receipt_test_info() -> ReceiptTestInfo<1, 0> {
     // Make a contract that emits events so we can pick up on them
     sol! {
         #[allow(missing_docs)]
@@ -78,11 +96,7 @@ pub fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
             number++;
         }
     }
-    }
 
-    sol! {
-        #[allow(missing_docs)]
-        // solc v0.8.26; solc Counter.sol --via-ir --optimize --bin
         #[sol(rpc, abi, bytecode="6080604052348015600e575f80fd5b506102288061001c5f395ff3fe608060405234801561000f575f80fd5b506004361061004a575f3560e01c8063488814e01461004e5780637229db15146100585780638381f58a14610062578063d09de08a14610080575b5f80fd5b61005661008a565b005b6100606100f8565b005b61006a610130565b6040516100779190610165565b60405180910390f35b610088610135565b005b5f547fbe3cbcfa5d4a62a595b4a15f51de63c11797bbef2ff687873efb0bb2852ee20f60405160405180910390a26100c0610135565b5f547fbe3cbcfa5d4a62a595b4a15f51de63c11797bbef2ff687873efb0bb2852ee20f60405160405180910390a26100f6610135565b565b5f547fbe3cbcfa5d4a62a595b4a15f51de63c11797bbef2ff687873efb0bb2852ee20f60405160405180910390a261012e610135565b565b5f5481565b5f80815480929190610146906101ab565b9190505550565b5f819050919050565b61015f8161014d565b82525050565b5f6020820190506101785f830184610156565b92915050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f6101b58261014d565b91507fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff82036101e7576101e661017e565b5b60018201905091905056fea26469706673582212203b7602644bfff2df89c2fe9498cd533326876859a0df7b96ac10be1fdc09c3a064736f6c634300081a0033")]
 
        contract OtherEmitter {
@@ -170,11 +184,18 @@ pub fn generate_receipt_proofs() -> Vec<ReceiptProofInfo> {
         let all_events = EventEmitter::abi::events();
 
         let events = all_events.get("testEvent").unwrap();
-        let receipt_query = ReceiptQuery::new(*event_contract.address(), events[0].clone());
 
-        receipt_query
+        let receipt_query =
+            ReceiptQuery::<1, 0>::new(*event_contract.address(), &events[0].signature());
+
+        let proofs = receipt_query
             .query_receipt_proofs(rpc.root(), BlockNumberOrTag::Number(block_number))
             .await
-            .unwrap()
+            .unwrap();
+
+        ReceiptTestInfo {
+            query: receipt_query,
+            proofs,
+        }
     })
 }
