@@ -21,7 +21,7 @@ where
     fn from(value: &'a QueryProofPublicInputs<Target, S>) -> Self {
         Self {
             tree_hash: value.tree_hash_target(),
-            results: OutputValuesTarget::from_targets(&value.to_values_raw()),
+            results: OutputValuesTarget::from_targets(value.to_values_raw()),
             entry_count: value.num_matching_rows_target(),
             overflow: value.overflow_flag_target().target,
             placeholder_hash: value.placeholder_hash_target(),
@@ -185,7 +185,6 @@ mod tests {
     use crate::{
         ivc::PublicInputs as OriginalTreePublicInputs,
         query::{
-            self,
             aggregation::{QueryBoundSource, QueryBounds},
             batching::{
                 public_inputs::{
@@ -232,7 +231,7 @@ mod tests {
         original_tree_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestRevelationBatchingCircuit<'a> {
+    impl UserCircuit<F, D> for TestRevelationBatchingCircuit<'_> {
         // Circuit wires + query proof + original tree proof (IVC proof)
         type Wires = (
             RevelationWithoutResultsTreeWires<L, S, PH, PP>,

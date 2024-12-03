@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::array;
 
 use mp2_common::{types::CBuilder, u256::UInt256Target, F};
-use plonky2::iop::{target::Target, witness::PartialWitness};
+use plonky2::iop::witness::PartialWitness;
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
@@ -17,7 +17,7 @@ use crate::query::{
 };
 
 use super::{
-    circuits::api::{NodePath, RowInput},
+    circuits::api::RowInput,
     row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget},
 };
 
@@ -72,6 +72,7 @@ where
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // only in this PR
 pub(crate) struct RowProcessingGadgetWires<
     const ROW_TREE_MAX_DEPTH: usize,
     const INDEX_TREE_MAX_DEPTH: usize,
@@ -94,30 +95,35 @@ impl<
         const INDEX_TREE_MAX_DEPTH: usize,
         const MAX_NUM_COLUMNS: usize,
         const MAX_NUM_RESULTS: usize,
-    > Into<RowChunkDataTarget<MAX_NUM_RESULTS>>
-    for RowProcessingGadgetWires<
+    > From<RowProcessingGadgetWires<
         ROW_TREE_MAX_DEPTH,
         INDEX_TREE_MAX_DEPTH,
         MAX_NUM_COLUMNS,
         MAX_NUM_RESULTS,
-    >
+        >>
+    for RowChunkDataTarget<MAX_NUM_RESULTS>
 where
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_RESULTS - 1]:,
-{
-    fn into(self) -> RowChunkDataTarget<MAX_NUM_RESULTS> {
-        RowChunkDataTarget {
-            left_boundary_row: BoundaryRowDataTarget {
-                row_node_info: self.row_node_data.clone(),
-                index_node_info: self.index_node_data.clone(),
-            },
-            right_boundary_row: BoundaryRowDataTarget {
-                row_node_info: self.row_node_data,
-                index_node_info: self.index_node_data,
-            },
-            chunk_outputs: self.value_wires.output_wires,
-        }
+{   
+    fn from(value: RowProcessingGadgetWires<
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
+        MAX_NUM_COLUMNS,
+        MAX_NUM_RESULTS,
+        >) -> Self {
+            RowChunkDataTarget {
+                left_boundary_row: BoundaryRowDataTarget {
+                    row_node_info: value.row_node_data.clone(),
+                    index_node_info: value.index_node_data.clone(),
+                },
+                right_boundary_row: BoundaryRowDataTarget {
+                    row_node_info: value.row_node_data,
+                    index_node_info: value.index_node_data,
+                },
+                chunk_outputs: value.value_wires.output_wires,
+            }
     }
 }
 
@@ -177,6 +183,7 @@ where
         })
     }
 
+    #[allow(dead_code)] // unused for now, but could be a useful method
     pub(crate) fn new_dummy_row(
         row_path: MerklePathWithNeighborsGadget<ROW_TREE_MAX_DEPTH>,
         index_path: MerklePathWithNeighborsGadget<INDEX_TREE_MAX_DEPTH>,
@@ -193,8 +200,8 @@ where
         let mut input_values = self.input_values.clone();
         input_values.is_dummy_row = true;
         Self {
-            row_path: self.row_path.clone(),
-            index_path: self.index_path.clone(),
+            row_path: self.row_path,
+            index_path: self.index_path,
             input_values,
         }
     }
@@ -261,6 +268,7 @@ where
         }
     }
 
+    #[allow(dead_code)] // only in this PR
     pub(crate) fn assign(
         &self,
         pw: &mut PartialWitness<F>,
@@ -277,14 +285,13 @@ where
 }
 
 impl<
-        'a,
         const ROW_TREE_MAX_DEPTH: usize,
         const INDEX_TREE_MAX_DEPTH: usize,
         const MAX_NUM_COLUMNS: usize,
         const MAX_NUM_PREDICATE_OPS: usize,
         const MAX_NUM_RESULT_OPS: usize,
         const MAX_NUM_RESULTS: usize,
-    > TryFrom<&'a RowInput>
+    > TryFrom<&RowInput>
     for RowProcessingGadgetInputs<
         ROW_TREE_MAX_DEPTH,
         INDEX_TREE_MAX_DEPTH,

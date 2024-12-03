@@ -11,9 +11,8 @@ use mp2_common::{
     u256::is_less_than_or_equal_to_u256_arr,
     C, D, F,
 };
-use plonky2::{
-    field::types::PrimeField64,
-    plonk::{circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs},
+use plonky2::plonk::{
+    circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs,
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -28,11 +27,11 @@ use crate::{
         self,
         aggregation::QueryBounds,
         api::{CircuitInput as QueryCircuitInput, Parameters as QueryParams},
-        computational_hash_ids::{ColumnIDs, PlaceholderIdentifier},
+        computational_hash_ids::ColumnIDs,
+        pi_len as query_pi_len,
         universal_circuit::universal_circuit_inputs::{
-            BasicOperation, PlaceholderId, Placeholders, ResultStructure,
+            BasicOperation, Placeholders, ResultStructure,
         },
-        PI_LEN as QUERY_PI_LEN,
     },
     revelation::{
         placeholders_check::CheckPlaceholderGadget,
@@ -44,6 +43,7 @@ use crate::{
 };
 
 use super::{
+    num_query_io, pi_len,
     revelation_unproven_offset::{
         RecursiveCircuitInputs as RecursiveCircuitInputsUnporvenOffset,
         RevelationCircuit as RevelationCircuitUnprovenOffset, RowPath,
@@ -52,7 +52,7 @@ use super::{
         CircuitBuilderParams, RecursiveCircuitInputs, RecursiveCircuitWires,
         RevelationWithoutResultsTreeCircuit,
     },
-    NUM_QUERY_IO_NO_RESULTS_TREE, PI_LEN,
+    num_query_io_no_results_tree
 };
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 /// Data structure employed to provide input data related to a matching row
@@ -147,12 +147,12 @@ pub struct Parameters<
     const MAX_NUM_PLACEHOLDERS: usize,
 > where
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
-    [(); NUM_QUERY_IO_NO_RESULTS_TREE::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
+    [(); num_query_io_no_results_tree::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
 {
     revelation_no_results_tree: CircuitWithUniversalVerifier<
         F,
@@ -196,6 +196,7 @@ pub struct Parameters<
 ///     upper bound on the number of items being found in `SELECT` statement of the query
 /// - `MAX_NUM_PLACEHOLDERS`: upper bound on the number of placeholders we allow in a query
 /// - `NUM_PLACEHOLDERS_HASHED`: number of placeholders being hashed in the placeholder hash
+#[allow(clippy::large_enum_variant)]
 pub enum CircuitInput<
     const ROW_TREE_MAX_DEPTH: usize,
     const INDEX_TREE_MAX_DEPTH: usize,
@@ -268,7 +269,7 @@ where
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
@@ -332,6 +333,7 @@ where
     /// - `results_structure`: Data about the operations and items returned in the `SELECT` clause of the query
     /// - `limit, offset`: limit and offset values specified in the query
     /// - `distinct`: Flag specifying whether the DISTINCT keyword was specified in the query
+    #[allow(clippy::too_many_arguments)]
     pub fn new_revelation_tabular(
         preprocessing_proof: Vec<u8>,
         matching_rows: Vec<MatchingRow>,
@@ -392,6 +394,7 @@ where
         )?;
         let placeholder_inputs =
             CheckPlaceholderGadget::new(query_bounds, placeholders, placeholder_hash_ids)?;
+
         let revelation_circuit = RevelationCircuitUnprovenOffset::new(
             row_paths,
             &results_structure.output_ids,
@@ -434,15 +437,16 @@ impl<
     >
 where
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
-    [(); NUM_QUERY_IO_NO_RESULTS_TREE::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
-    [(); PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+    [(); pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()]:,
+    [(); num_query_io_no_results_tree::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
 {
     pub fn build(
         query_circuit_set: &RecursiveCircuits<F, C, D>,
@@ -452,7 +456,7 @@ where
         let builder = CircuitWithUniversalVerifierBuilder::<
             F,
             D,
-            { PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS> },
+            { pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>() },
         >::new::<C>(default_config(), REVELATION_CIRCUIT_SET_SIZE);
         let build_parameters = CircuitBuilderParams {
             query_circuit_set: query_circuit_set.clone(),
@@ -586,13 +590,12 @@ mod tests {
     use crate::{
         ivc::PublicInputs as PreprocessingPI,
         query::{
-            api::CircuitInput as QueryInput,
             computational_hash_ids::{ColumnIDs, Identifiers},
             public_inputs::PublicInputs as QueryPI,
-            PI_LEN as QUERY_PI_LEN,
         },
         revelation::{
             api::{CircuitInput, Parameters},
+            num_query_io,
             tests::compute_results_from_query_proof_outputs,
             PublicInputs, NUM_PREPROCESSING_IO,
         },
@@ -614,7 +617,7 @@ mod tests {
             F,
             C,
             D,
-            { QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT> },
+            { num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>() },
         >::default();
         let preprocessing_circuits =
             TestingRecursiveCircuits::<F, C, D, NUM_PREPROCESSING_IO>::default();

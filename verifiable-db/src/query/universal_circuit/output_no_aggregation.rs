@@ -26,7 +26,7 @@ use std::{
 use super::{
     cells::build_cells_tree,
     universal_query_gadget::{
-        OutputComponent, OutputComponentHashWires, OutputComponentValueWires, OutputComponentWires,
+        OutputComponent, OutputComponentHashWires, OutputComponentValueWires,
     },
     ComputationalHashTarget,
 };
@@ -59,7 +59,7 @@ pub struct InputWires<const MAX_NUM_RESULTS: usize> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct HashWires<const MAX_NUM_RESULTS: usize> {
+pub struct HashWires<const MAX_NUM_RESULTS: usize> {
     /// input wires of the component
     input_wires: InputWires<MAX_NUM_RESULTS>,
 
@@ -70,7 +70,7 @@ pub(crate) struct HashWires<const MAX_NUM_RESULTS: usize> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ValueWires<const MAX_NUM_RESULTS: usize> {
+pub struct ValueWires<const MAX_NUM_RESULTS: usize> {
     /// The first output value computed by this component; it is a `CurveTarget` since
     /// it corresponds to the accumulator of all the results of the query
     first_output_value: CurveTarget,
@@ -98,7 +98,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentValueWires for ValueWires<MAX_
     type FirstT = CurveTarget;
 
     fn first_output_value(&self) -> Self::FirstT {
-        self.first_output_value.clone()
+        self.first_output_value
     }
 
     fn other_output_values(&self) -> &[UInt256Target] {

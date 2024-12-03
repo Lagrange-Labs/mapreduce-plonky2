@@ -2,15 +2,13 @@ use anyhow::*;
 use log::*;
 use sqlparser::{
     ast::{Query, Statement},
-    dialect::AnsiDialect,
+    dialect::GenericDialect,
     parser::Parser,
 };
 
-use crate::{symbols::ContextProvider, utils::ParsilSettings};
+const DIALECT: GenericDialect = GenericDialect {};
 
-const DIALECT: AnsiDialect = AnsiDialect {};
-
-pub fn parse<C: ContextProvider>(_settings: &ParsilSettings<C>, req: &str) -> Result<Query> {
+pub fn parse(req: &str) -> Result<Query> {
     debug!("Parsing `{req}`");
     let mut parsed =
         Parser::parse_sql(&DIALECT, req).with_context(|| format!("trying to parse `{req}`"))?;
@@ -25,5 +23,16 @@ pub fn parse<C: ContextProvider>(_settings: &ParsilSettings<C>, req: &str) -> Re
         Ok(*query.clone())
     } else {
         bail!("expected query, found `{}`", parsed[0])
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::parse;
+
+    #[test]
+    fn test_parsing_query_underscore() {
+        let req = "SELECT AVG(value / _totalSupply) FROM myTable;";
+        parse(req).unwrap();
     }
 }

@@ -7,12 +7,11 @@ use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     ivc,
     query::{
-        self, api::Parameters as QueryParams, batching::circuits::api::NUM_IO as BATCHING_NUM_IO,
-        PI_LEN as QUERY_PI_LEN,
+        self, api::Parameters as QueryParams, batching::circuits::api::num_io as batching_num_io,
+        pi_len as query_pi_len,
     },
     revelation::{
-        self, api::Parameters as RevelationParams, NUM_QUERY_IO_NO_RESULTS_TREE,
-        PI_LEN as REVELATION_PI_LEN,
+        self, api::Parameters as RevelationParams, num_query_io, num_query_io_no_results_tree, pi_len as revelation_pi_len
     },
     row_tree::{self},
 };
@@ -151,7 +150,7 @@ impl<
         const MAX_NUM_PLACEHOLDERS: usize,
     > WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
 where
-    [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
+    [(); revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     pub fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
@@ -161,13 +160,14 @@ where
             C,
             D,
             {
-                REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
+                revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>(
+                )
             },
         >::new(default_config(), revelation_circuit_set);
         let query_verifier_wires = verifier_gadget.verify_proof_in_circuit_set(&mut builder);
         // expose public inputs of verifier proof as public inputs
         let verified_proof_pi = query_verifier_wires.get_public_input_targets::<F, {
-            REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
+            revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()
         }>();
         builder.register_public_inputs(verified_proof_pi);
         let circuit_data = builder.build();
@@ -216,12 +216,13 @@ pub struct QueryParameters<
 > where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
-    [(); NUM_QUERY_IO_NO_RESULTS_TREE::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
+    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
+    [(); num_query_io_no_results_tree::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
 {
     #[cfg(feature = "batching_circuits")]
     batching_query_params: BatchingQueryParams<
@@ -255,6 +256,7 @@ pub struct QueryParameters<
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum QueryCircuitInput<
     const NUM_CHUNKS: usize,
     const NUM_ROWS: usize,
@@ -334,14 +336,15 @@ impl<
 where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
-    [(); NUM_QUERY_IO_NO_RESULTS_TREE::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); num_query_io_no_results_tree::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
-    [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
-    [(); BATCHING_NUM_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); batching_num_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
+    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
+    [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
+    [(); revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()]:,
 {
     /// Build `QueryParameters` from serialized `ParamsInfo` of `PublicParamaters`
     pub fn build_params(preprocessing_params_info: &[u8]) -> Result<Self> {

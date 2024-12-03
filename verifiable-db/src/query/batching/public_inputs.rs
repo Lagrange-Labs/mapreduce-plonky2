@@ -3,25 +3,23 @@ use std::iter::once;
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
-    array::ToField,
     public_inputs::{PublicInputCommon, PublicInputRange},
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target},
-    utils::{FromFields, FromTargets, ToTargets, TryIntoBool},
+    u256::UInt256Target,
+    utils::{FromFields, FromTargets, TryIntoBool},
     F,
 };
 use plonky2::{
-    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+    hash::hash_types::{HashOut, HashOutTarget},
     iop::target::{BoolTarget, Target},
 };
 use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
-    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
+    gadgets::curve::CurveTarget,
 };
 
 use crate::query::{
     aggregation::output_computation::compute_dummy_output_targets,
-    computational_hash_ids::{AggregationOperation, Identifiers},
     universal_circuit::universal_query_gadget::{
         CurveOrU256Target, OutputValues, OutputValuesTarget, UniversalQueryOutputWires,
     },
@@ -160,11 +158,11 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
     }
 
     pub(crate) fn to_left_row_raw(&self) -> &[T] {
-        &self.left_row
+        self.left_row
     }
 
     pub(crate) fn to_right_row_raw(&self) -> &[T] {
-        &self.right_row
+        self.right_row
     }
 
     pub(crate) fn to_min_primary_raw(&self) -> &[T] {
@@ -271,7 +269,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputCommon for PublicInputs<'a, Target, S> {
+impl<const S: usize> PublicInputCommon for PublicInputs<'_, Target, S> {
     const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -291,7 +289,7 @@ impl<'a, const S: usize> PublicInputCommon for PublicInputs<'a, Target, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputs<'a, Target, S> {
+impl<const S: usize> PublicInputs<'_, Target, S> {
     pub fn tree_hash_target(&self) -> HashOutTarget {
         HashOutTarget::try_from(self.to_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
     }
@@ -375,12 +373,12 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
         }
     }
 
-    pub fn left_boundary_row_target(&self) -> BoundaryRowDataTarget {
-        BoundaryRowDataTarget::from_targets(&self.to_left_row_raw())
+    pub(crate) fn left_boundary_row_target(&self) -> BoundaryRowDataTarget {
+        BoundaryRowDataTarget::from_targets(self.to_left_row_raw())
     }
 
-    pub fn right_boundary_row_target(&self) -> BoundaryRowDataTarget {
-        BoundaryRowDataTarget::from_targets(&self.to_right_row_raw())
+    pub(crate) fn right_boundary_row_target(&self) -> BoundaryRowDataTarget {
+        BoundaryRowDataTarget::from_targets(self.to_right_row_raw())
     }
 
     pub fn min_primary_target(&self) -> UInt256Target {
@@ -412,7 +410,7 @@ impl<'a, const S: usize> PublicInputs<'a, Target, S> {
     }
 }
 
-impl<'a, const S: usize> PublicInputs<'a, F, S>
+impl<const S: usize> PublicInputs<'_, F, S>
 where
     [(); S - 1]:,
 {
@@ -421,15 +419,15 @@ where
     }
 
     pub fn first_value_as_curve_point(&self) -> WeierstrassPoint {
-        OutputValues::<S>::from_fields(&self.to_values_raw()).first_value_as_curve_point()
+        OutputValues::<S>::from_fields(self.to_values_raw()).first_value_as_curve_point()
     }
 
     pub fn first_value_as_u256(&self) -> U256 {
-        OutputValues::<S>::from_fields(&self.to_values_raw()).first_value_as_u256()
+        OutputValues::<S>::from_fields(self.to_values_raw()).first_value_as_u256()
     }
 
     pub fn values(&self) -> [U256; S - 1] {
-        OutputValues::<S>::from_fields(&self.to_values_raw()).other_outputs
+        OutputValues::<S>::from_fields(self.to_values_raw()).other_outputs
     }
 
     /// Return the value as a UInt256 at the specified index
@@ -437,7 +435,7 @@ where
     where
         [(); S - 1]:,
     {
-        OutputValues::<S>::from_fields(&self.to_values_raw()).value_at_index(i)
+        OutputValues::<S>::from_fields(self.to_values_raw()).value_at_index(i)
     }
 
     pub fn num_matching_rows(&self) -> F {
@@ -501,15 +499,12 @@ pub(crate) mod tests {
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
 
-    use crate::{
-        query::{
+    use crate::query::{
             aggregation::{QueryBoundSource, QueryBounds},
             batching::{public_inputs::QueryPublicInputs, row_chunk::tests::BoundaryRowData},
             computational_hash_ids::{AggregationOperation, Identifiers},
             universal_circuit::universal_circuit_inputs::Placeholders,
-        },
-        test_utils::random_aggregation_operations,
-    };
+        };
 
     use super::{OutputValues, PublicInputs};
 
@@ -533,7 +528,7 @@ pub(crate) mod tests {
         })
     }
 
-    impl<'a, const S: usize> PublicInputs<'a, F, S> {
+    impl<const S: usize> PublicInputs<'_, F, S> {
         pub(crate) fn sample_from_ops<const NUM_INPUTS: usize>(ops: &[F; S]) -> [Vec<F>; NUM_INPUTS]
         where
             [(); S - 1]:,
@@ -623,7 +618,7 @@ pub(crate) mod tests {
         pis: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPublicInputs<'a> {
+    impl UserCircuit<F, D> for TestPublicInputs<'_> {
         type Wires = Vec<Target>;
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {

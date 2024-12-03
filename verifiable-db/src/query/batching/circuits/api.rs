@@ -4,14 +4,24 @@ use anyhow::{ensure, Result};
 
 use itertools::Itertools;
 use mp2_common::{
-    array::ToField, default_config, poseidon::H, proof::ProofWithVK, types::HashOutput, C, D, F,
+    array::ToField, proof::ProofWithVK, types::HashOutput, C, D, F,
 };
-use plonky2::{iop::target::Target, plonk::config::Hasher};
+use plonky2::iop::target::Target;
 use recursion_framework::{
-    circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
-    framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
+    circuit_builder::CircuitWithUniversalVerifier,
+    framework::RecursiveCircuits,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize}; 
+
+#[cfg(feature = "batching_circuits")]
+use mp2_common::{default_config, poseidon::H};
+#[cfg(feature = "batching_circuits")]
+use plonky2::plonk::config::Hasher;
+#[cfg(feature = "batching_circuits")]
+use recursion_framework::{
+        circuit_builder::CircuitWithUniversalVerifierBuilder,
+        framework::prepare_recursive_circuit_for_circuit_set,
+};
 
 use crate::query::{
     aggregation::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
@@ -78,39 +88,14 @@ pub struct NodePath {
 }
 
 impl NodePath {
-    /// Instantiate a new instance of `RowPath` for a given proven row from the following input data:
-    /// - `row_node_info`: data about the node of the row tree storing the row
-    /// - `row_tree_path`: data about the nodes in the path of the rows tree for the node storing the row;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
-    /// - `row_path_siblings`: hash of the siblings of the node in the rows tree path (except for the root)
-    /// - `row_node_children`: data about the children of the node of the row tree storing the row
-    /// - `index_node_info`: data about the node of the index tree storing the rows tree containing the row
-    /// - `index_tree_path`: data about the nodes in the path of the index tree for the index_node;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
-    /// - `index_path_siblings`: hash of the siblings of the nodes in the index tree path (except for the root)
-    /// - `index_node_children`: data about the children of the index_node
+    /// Instantiate a new instance of `NodePath` for a given proven row from the following input data:
+    /// - `row_path`: path from the node to the root of the rows tree storing the node
+    /// - `index_path` : path from the index tree node storing the rows tree containing the node, up to the
+    ///     root of the index tree
     pub fn new(
-        row_node_info: NodeInfo,
-        row_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        row_path_siblings: Vec<Option<HashOutput>>,
-        row_node_children: [Option<NodeInfo>; 2],
-        index_node_info: NodeInfo,
-        index_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        index_path_siblings: Vec<Option<HashOutput>>,
-        index_node_children: [Option<NodeInfo>; 2],
+        row_path: TreePathInputs,
+        index_path: TreePathInputs,
     ) -> Self {
-        let row_path = TreePathInputs::new(
-            row_node_info,
-            row_tree_path,
-            row_path_siblings,
-            row_node_children,
-        );
-        let index_path = TreePathInputs::new(
-            index_node_info,
-            index_tree_path,
-            index_path_siblings,
-            index_node_children,
-        );
         Self {
             row_tree_path: row_path,
             index_tree_path: index_path,
@@ -136,7 +121,8 @@ impl RowInput {
     }
 }
 #[derive(Serialize, Deserialize)]
-pub(crate) enum CircuitInput<
+#[allow(clippy::large_enum_variant)]
+pub enum CircuitInput<
     const NUM_CHUNKS: usize,
     const NUM_ROWS: usize,
     const ROW_TREE_MAX_DEPTH: usize,
@@ -202,7 +188,7 @@ where
         query_bounds: &QueryBounds,
         results: &ResultStructure,
     ) -> Result<Self> {
-        ensure!(rows.len() >= 1, "there must be at least 1 row to be proven");
+        ensure!(!rows.is_empty(), "there must be at least 1 row to be proven");
         ensure!(
             rows.len() <= NUM_ROWS,
             format!(
@@ -217,8 +203,8 @@ where
             "Rows provided as input don't have the same column ids",
         );
         let row_inputs = rows
-            .into_iter()
-            .map(|row| RowProcessingGadgetInputs::try_from(row))
+            .iter()
+            .map(RowProcessingGadgetInputs::try_from)
             .collect::<Result<Vec<_>>>()?;
 
         Ok(Self::RowChunkWithAggregation(
@@ -243,9 +229,9 @@ where
         // deserialize `chunk_proofs`` and pad to NUM_CHUNKS proofs by replicating the last proof in `chunk_proofs`
         let last_proof = chunks_proofs.last().unwrap();
         let proofs = chunks_proofs
-            .into_iter()
+            .iter()
             .map(|p| ProofWithVK::deserialize(p))
-            .chain(repeat_with(|| ProofWithVK::deserialize(&last_proof)))
+            .chain(repeat_with(|| ProofWithVK::deserialize(last_proof)))
             .take(NUM_CHUNKS)
             .collect::<Result<Vec<_>>>()?;
 
@@ -364,9 +350,11 @@ pub(crate) struct Parameters<
     >,
     circuit_set: RecursiveCircuits<F, C, D>,
 }
-#[rustfmt::skip]
-pub(crate) const NUM_IO<const MAX_NUM_RESULTS: usize>: usize = PublicInputs::<Target, MAX_NUM_RESULTS>::total_len();
 
+pub const fn num_io<const S: usize>() -> usize {
+    PublicInputs::<Target, S>::total_len()
+}
+#[cfg(feature = "batching_circuits")]
 impl<
         const NUM_CHUNKS: usize,
         const NUM_ROWS: usize,
@@ -393,13 +381,13 @@ where
     [(); MAX_NUM_RESULTS - 1]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
-    [(); NUM_IO::<MAX_NUM_RESULTS>]:,
+    [(); num_io::<MAX_NUM_RESULTS>()]:,
 {
     const CIRCUIT_SET_SIZE: usize = 3;
 
     pub(crate) fn build() -> Self {
         let builder =
-            CircuitWithUniversalVerifierBuilder::<F, D, { NUM_IO::<MAX_NUM_RESULTS> }>::new::<C>(
+            CircuitWithUniversalVerifierBuilder::<F, D, { num_io::<MAX_NUM_RESULTS>() }>::new::<C>(
                 default_config(),
                 Self::CIRCUIT_SET_SIZE,
             );
@@ -491,7 +479,7 @@ where
         proof.serialize()
     }
 }
-
+#[cfg(feature = "batching_circuits")]
 #[cfg(test)]
 mod tests {
     use alloy::primitives::U256;
@@ -513,7 +501,7 @@ mod tests {
         },
         batching::{
             circuits::{
-                api::{CircuitInput, NodePath, RowInput, TreePathInputs, NUM_IO},
+                api::{CircuitInput, NodePath, RowInput, TreePathInputs},
                 tests::{build_test_tree, compute_output_values_for_row},
             },
             public_inputs::PublicInputs,
@@ -727,7 +715,7 @@ mod tests {
         let [node_1a, node_1b, node_1c, node_1d] = node_1
             .rows_tree
             .iter()
-            .map(|n| n.node.clone())
+            .map(|n| n.node)
             .collect_vec()
             .try_into()
             .unwrap();
@@ -736,13 +724,13 @@ mod tests {
 
         let path_1 = vec![];
         let siblings_1 = vec![];
-        let node_1_children = [Some(node_0.node.clone()), Some(node_2.node.clone())];
+        let node_1_children = [Some(node_0.node), Some(node_2.node)];
 
         let row_path_1a = NodePath::new(
             node_1a,
             path_1a,
             siblings_1a,
-            [Some(node_1b.clone()), Some(node_1c.clone())],
+            [Some(node_1b), Some(node_1c)],
             node_1.node,
             path_1.clone(),
             siblings_1.clone(),
@@ -752,15 +740,15 @@ mod tests {
         let row_cells_1a = to_row_cells(&node_1.rows_tree[0].values);
         let row_1a = RowInput::new(&row_cells_1a, &row_path_1a);
 
-        let path_1c = vec![(node_1a.clone(), ChildPosition::Right)];
+        let path_1c = vec![(node_1a, ChildPosition::Right)];
         let node_1b_hash =
-            HashOutput::try_from(node_1b.compute_node_hash(secondary_index)).unwrap();
-        let siblings_1c = vec![Some(node_1b_hash.clone())];
+            HashOutput::from(node_1b.compute_node_hash(secondary_index));
+        let siblings_1c = vec![Some(node_1b_hash)];
         let row_path_1c = NodePath::new(
             node_1c,
             path_1c,
             siblings_1c,
-            [None, Some(node_1d.clone())],
+            [None, Some(node_1d)],
             node_1.node,
             path_1,
             siblings_1,
@@ -793,21 +781,21 @@ mod tests {
         let [node_2a, node_2b, node_2c, node_2d] = node_2
             .rows_tree
             .iter()
-            .map(|n| n.node.clone())
+            .map(|n| n.node)
             .collect_vec()
             .try_into()
             .unwrap();
         let path_2d = vec![
-            (node_2b.clone(), ChildPosition::Right),
-            (node_2a.clone(), ChildPosition::Left),
+            (node_2b, ChildPosition::Right),
+            (node_2a, ChildPosition::Left),
         ];
         let node_2c_hash =
-            HashOutput::try_from(node_2c.compute_node_hash(secondary_index)).unwrap();
+            HashOutput::from(node_2c.compute_node_hash(secondary_index));
         let siblings_2d = vec![Some(node_2c_hash), None];
 
-        let path_2 = vec![(node_1.node.clone(), ChildPosition::Right)];
+        let path_2 = vec![(node_1.node, ChildPosition::Right)];
         let node_0_hash =
-            HashOutput::try_from(node_0.node.compute_node_hash(primary_index)).unwrap();
+            HashOutput::from(node_0.node.compute_node_hash(primary_index));
         let siblings_2 = vec![Some(node_0_hash)];
         let node_2_children = [None, None];
         let row_path_2d = NodePath::new(
@@ -825,13 +813,13 @@ mod tests {
 
         let row_2d = RowInput::new(&row_cells_2d, &row_path_2d);
 
-        let path_2b = vec![(node_2a.clone(), ChildPosition::Left)];
+        let path_2b = vec![(node_2a, ChildPosition::Left)];
         let siblings_2b = vec![None];
         let row_path_2b = NodePath::new(
             node_2b,
             path_2b,
             siblings_2b,
-            [Some(node_2c.clone()), Some(node_2d.clone())],
+            [Some(node_2c), Some(node_2d)],
             node_2.node,
             path_2.clone(),
             siblings_2.clone(),
@@ -848,7 +836,7 @@ mod tests {
             node_2a,
             path_2a,
             siblings_2a,
-            [Some(node_2b.clone()), None],
+            [Some(node_2b), None],
             node_2.node,
             path_2,
             siblings_2,
@@ -1026,7 +1014,7 @@ mod tests {
         assert_eq!(pis.placeholder_hash(), expected_placeholder_hash);
 
         // generate an index tree with all nodes out side of primary index range to test non-existence circuit API
-        let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] = generate_test_tree(
+        let [node_a, node_b, node_c, node_d, node_e, node_f, _node_g] = generate_test_tree(
             primary_index,
             Some((max_query_primary + U256::from(1), U256::MAX)),
         );
@@ -1036,8 +1024,8 @@ mod tests {
             (node_b, ChildPosition::Left),
             (node_a, ChildPosition::Left),
         ];
-        let node_f_hash = HashOutput::try_from(node_f.compute_node_hash(primary_index)).unwrap();
-        let node_c_hash = HashOutput::try_from(node_c.compute_node_hash(primary_index)).unwrap();
+        let node_f_hash = HashOutput::from(node_f.compute_node_hash(primary_index));
+        let node_c_hash = HashOutput::from(node_c.compute_node_hash(primary_index));
         let siblings_e = vec![Some(node_f_hash), None, Some(node_c_hash)];
         let merkle_path_e = TreePathInputs::new(node_e, path_e, siblings_e, [None, None]);
 
@@ -1063,7 +1051,7 @@ mod tests {
         let expected_outputs = compute_dummy_output_values(&pis.operation_ids());
         assert_eq!(pis.to_values_raw(), &expected_outputs,);
         assert_eq!(pis.num_matching_rows(), F::ZERO,);
-        assert_eq!(pis.overflow_flag(), false);
+        assert!(!pis.overflow_flag());
         assert_eq!(pis.min_primary(), min_query_primary);
         assert_eq!(pis.max_primary(), max_query_primary);
         assert_eq!(pis.computational_hash(), computational_hash);

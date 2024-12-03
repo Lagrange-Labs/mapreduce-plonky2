@@ -18,7 +18,7 @@ struct Expander<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
 }
 
-impl<'a, C: ContextProvider> AstMutator for Expander<'a, C> {
+impl<C: ContextProvider> AstMutator for Expander<'_, C> {
     type Error = anyhow::Error;
 
     fn pre_expr(&mut self, e: &mut Expr) -> anyhow::Result<()> {

@@ -367,15 +367,15 @@ where
     }
 
     pub fn first_value_as_curve_point(&self) -> WeierstrassPoint {
-        OutputValues::<S>::from_fields(&self.to_values_raw()).first_value_as_curve_point()
+        OutputValues::<S>::from_fields(self.to_values_raw()).first_value_as_curve_point()
     }
 
     pub fn first_value_as_u256(&self) -> U256 {
-        OutputValues::<S>::from_fields(&self.to_values_raw()).first_value_as_u256()
+        OutputValues::<S>::from_fields(self.to_values_raw()).first_value_as_u256()
     }
 
     pub fn values(&self) -> [U256; S - 1] {
-        OutputValues::<S>::from_fields(&self.to_values_raw()).other_outputs
+        OutputValues::<S>::from_fields(self.to_values_raw()).other_outputs
     }
 
     /// Return the value as a UInt256 at the specified index
@@ -383,7 +383,7 @@ where
     where
         [(); S - 1]:,
     {
-        OutputValues::<S>::from_fields(&self.to_values_raw()).value_at_index(i)
+        OutputValues::<S>::from_fields(self.to_values_raw()).value_at_index(i)
     }
 
     pub fn num_matching_rows(&self) -> F {

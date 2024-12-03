@@ -15,16 +15,17 @@ required-features = ["cli"]
 [dependencies]
 alloy.workspace = true
 anyhow.workspace = true
-camelpaste = "0.1.0"
+camelpaste.workspace = true
+clap = { workspace = true, optional = true }
 log.workspace = true
-ryhope = { path = "../ryhope" }
 serde.workspace = true
 serde_json.workspace = true
-sqlparser = "0.49.0"
+sqlparser.workspace = true
+stderrlog = { workspace = true, optional = true }
+thiserror.workspace = true
+
+ryhope = { path = "../ryhope" }
 verifiable-db = { path = "../verifiable-db" }
-clap = { version = "4.5.4", features = ["derive"], optional = true }
-stderrlog = { version = "0.6.0", default-features = false, optional = true }
-thiserror = "1.0.63"
 
 [features]
 cli = ["dep:stderrlog", "dep:clap"]

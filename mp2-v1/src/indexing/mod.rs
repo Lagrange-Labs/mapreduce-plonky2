@@ -25,7 +25,7 @@ impl<T: Eq + Default + std::fmt::Debug + Clone> LagrangeNode for RowPayload<T> {
     }
 
     fn hash(&self) -> HashOutput {
-        self.hash.clone()
+        self.hash
     }
 
     fn min(&self) -> U256 {
@@ -37,7 +37,7 @@ impl<T: Eq + Default + std::fmt::Debug + Clone> LagrangeNode for RowPayload<T> {
     }
 
     fn embedded_hash(&self) -> HashOutput {
-        self.cell_root_hash.clone().unwrap()
+        self.cell_root_hash.unwrap()
     }
 }
 
@@ -47,7 +47,7 @@ impl<T> LagrangeNode for IndexNode<T> {
     }
 
     fn hash(&self) -> HashOutput {
-        self.node_hash.clone()
+        self.node_hash
     }
 
     fn min(&self) -> U256 {
@@ -59,6 +59,6 @@ impl<T> LagrangeNode for IndexNode<T> {
     }
 
     fn embedded_hash(&self) -> HashOutput {
-        self.row_tree_hash.clone()
+        self.row_tree_hash
     }
 }

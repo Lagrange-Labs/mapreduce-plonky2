@@ -1,8 +1,8 @@
 use std::iter::once;
 
 use crate::query::{
-    aggregation::QueryBounds, computational_hash_ids::PlaceholderIdentifier,
-    public_inputs::PublicInputs, PI_LEN,
+    aggregation::QueryBounds, computational_hash_ids::PlaceholderIdentifier, pi_len,
+    public_inputs::PublicInputs,
 };
 use anyhow::Result;
 use itertools::Itertools;
@@ -26,7 +26,6 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{
-    basic_operation::BasicOperationInputs,
     output_no_aggregation::Circuit as NoAggOutputCircuit,
     output_with_aggregation::Circuit as AggOutputCircuit,
     universal_circuit_inputs::{
@@ -233,22 +232,6 @@ where
     pub(crate) fn ids_for_placeholder_hash(&self) -> Vec<PlaceholderId> {
         self.hash_gadget_inputs.ids_for_placeholder_hash()
     }
-
-    /// Utility function to compute the `BasicOperationInputs` corresponding to the set of `operations` specified
-    /// as input. The set of `BasicOperationInputs` is padded to `MAX_NUM_OPS` with dummy operations, which is
-    /// the expected number of operations expected as input by the circuit.
-    fn compute_operation_inputs<const MAX_NUM_OPS: usize>(
-        operations: &[BasicOperation],
-        placeholders: &Placeholders,
-    ) -> Result<[BasicOperationInputs; MAX_NUM_OPS]> {
-        UniversalQueryHashInputs::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-            T,
-        >::compute_operation_inputs(operations, placeholders)
-    }
 }
 
 pub(crate) fn dummy_placeholder_id() -> PlaceholderId {
@@ -322,7 +305,7 @@ where
         T,
     >;
 
-    const NUM_PUBLIC_INPUTS: usize = PI_LEN::<MAX_NUM_RESULTS>;
+    const NUM_PUBLIC_INPUTS: usize = pi_len::<MAX_NUM_RESULTS>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -445,7 +428,7 @@ mod tests {
         utils::gen_random_u256,
     };
     use plonky2::{
-        field::types::{Field, PrimeField64, Sample},
+        field::types::{PrimeField64, Sample},
         hash::hashing::hash_n_to_hash_no_pad,
         iop::witness::PartialWitness,
         plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
@@ -470,8 +453,6 @@ mod tests {
             ComputationalHash,
         },
     };
-
-    use anyhow::{Error, Result};
 
     use super::{
         OutputComponent, UniversalCircuitInput, UniversalQueryCircuitInputs,

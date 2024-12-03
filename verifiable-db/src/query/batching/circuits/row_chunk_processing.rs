@@ -18,7 +18,7 @@ use crate::query::{
     },
     computational_hash_ids::ColumnIDs,
     universal_circuit::{
-        universal_circuit_inputs::{BasicOperation, PlaceholderId, Placeholders, ResultStructure},
+        universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure},
         universal_query_gadget::{
             OutputComponent, UniversalQueryHashInputWires, UniversalQueryHashInputs,
         },
@@ -28,22 +28,21 @@ use crate::query::{
 use mp2_common::{
     public_inputs::PublicInputCommon,
     serialization::{deserialize_long_array, serialize_long_array},
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
     D, F,
 };
 
 use self::row_chunk::{
-    aggregate_chunks::aggregate_chunks, BoundaryRowDataTarget, RowChunkDataTarget,
+    aggregate_chunks::aggregate_chunks, RowChunkDataTarget,
 };
 
 use anyhow::{ensure, Result};
 
-use super::api::NUM_IO;
+use super::api::num_io;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct RowChunkProcessingWires<
+pub struct RowChunkProcessingWires<
     const NUM_ROWS: usize,
     const ROW_TREE_MAX_DEPTH: usize,
     const INDEX_TREE_MAX_DEPTH: usize,
@@ -75,7 +74,7 @@ pub(crate) struct RowChunkProcessingWires<
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct RowChunkProcessingCircuit<
+pub struct RowChunkProcessingCircuit<
     const NUM_ROWS: usize,
     const ROW_TREE_MAX_DEPTH: usize,
     const INDEX_TREE_MAX_DEPTH: usize,
@@ -163,7 +162,7 @@ where
         )?;
 
         ensure!(
-            row_inputs.len() >= 1,
+            !row_inputs.is_empty(),
             "Row chunk circuit input should be at least 1 row"
         );
         // dummy row used to pad `row_inputs` to `num_rows` is just copied from the last
@@ -235,10 +234,8 @@ where
                 b,
                 &chunk,
                 &current_chunk,
-                &min_query_primary,
-                &max_query_primary,
-                &query_input_wires.min_secondary,
-                &query_input_wires.max_secondary,
+                (&min_query_primary, &max_query_primary),
+                (&query_input_wires.min_secondary, &query_input_wires.max_secondary),
                 &query_input_wires.agg_ops_ids,
                 &is_second_non_dummy,
             )
@@ -309,7 +306,9 @@ where
     /// This method returns the ids of the placeholders employed to compute the placeholder hash,
     /// in the same order, so that those ids can be provided as input to other circuits that need
     /// to recompute this hash
-    pub(crate) fn ids_for_placeholder_hash(&self) -> Vec<PlaceholderId> {
+    #[cfg(test)] // only used in test for now
+    pub(crate) fn ids_for_placeholder_hash(&self) 
+    -> Vec<crate::query::universal_circuit::universal_circuit_inputs::PlaceholderId> {
         self.universal_query_inputs.ids_for_placeholder_hash()
     }
 }
@@ -353,7 +352,7 @@ where
         T,
     >;
 
-    const NUM_PUBLIC_INPUTS: usize = NUM_IO::<MAX_NUM_RESULTS>;
+    const NUM_PUBLIC_INPUTS: usize = num_io::<MAX_NUM_RESULTS>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -373,14 +372,14 @@ where
 mod tests {
     use std::{
         array,
-        iter::{once, repeat},
+        iter::once,
     };
 
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
         array::ToField,
-        check_panic, default_config,
+        check_panic,
         group_hashing::map_to_curve_point,
         types::HashOutput,
         utils::{FromFields, ToFields, TryIntoBool},
@@ -400,14 +399,14 @@ mod tests {
 
     use crate::query::{
         aggregation::{
-            tests::aggregate_output_values, ChildPosition, NodeInfo, QueryBoundSource, QueryBounds,
+            tests::aggregate_output_values, ChildPosition, QueryBoundSource, QueryBounds,
         },
         batching::{
             circuits::{
                 row_chunk_processing::RowChunkProcessingCircuit,
                 tests::{build_test_tree, compute_output_values_for_row},
             },
-            public_inputs::{tests::gen_values_in_range, PublicInputs},
+            public_inputs::PublicInputs,
             row_chunk::tests::{BoundaryRowData, BoundaryRowNodeInfo},
             row_process_gadget::RowProcessingGadgetInputs,
         },
@@ -415,7 +414,7 @@ mod tests {
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
         },
         merkle_path::{
-            tests::{build_node, NeighborInfo},
+            tests::NeighborInfo,
             MerklePathWithNeighborsGadget,
         },
         universal_circuit::{
@@ -426,7 +425,7 @@ mod tests {
                 ResultStructure, RowCells,
             },
             universal_query_circuit::placeholder_hash,
-            universal_query_gadget::{CurveOrU256, OutputValues},
+            universal_query_gadget::CurveOrU256,
             ComputationalHash,
         },
     };
@@ -701,22 +700,22 @@ mod tests {
         };
 
         // run circuit over 3 consecutive rows: row 1C, row 2B and row 2D
-        let [node_1A, node_1B, node_1C, node_1D] = node_1
+        let [node_1a, node_1b, node_1c, node_1d] = node_1
             .rows_tree
             .iter()
-            .map(|n| n.node.clone())
+            .map(|n| n.node)
             .collect_vec()
             .try_into()
             .unwrap();
-        let path_1C = vec![(node_1A.clone(), ChildPosition::Right)];
-        let node_1B_hash =
-            HashOutput::try_from(node_1B.compute_node_hash(secondary_index)).unwrap();
-        let siblings_1C = vec![Some(node_1B_hash.clone())];
-        let merkle_path_1C = MerklePathWithNeighborsGadget::new(
-            &path_1C,
-            &siblings_1C,
-            &node_1C,
-            [None, Some(node_1D.clone())],
+        let path_1c = vec![(node_1a, ChildPosition::Right)];
+        let node_1b_hash =
+            HashOutput::from(node_1b.compute_node_hash(secondary_index));
+        let siblings_1c = vec![Some(node_1b_hash)];
+        let merkle_path_1c = MerklePathWithNeighborsGadget::new(
+            &path_1c,
+            &siblings_1c,
+            &node_1c,
+            [None, Some(node_1d)],
         )
         .unwrap();
         let path_1 = vec![];
@@ -725,59 +724,59 @@ mod tests {
             &path_1,
             &siblings_1,
             &node_1.node,
-            [Some(node_0.node.clone()), Some(node_2.node.clone())],
+            [Some(node_0.node), Some(node_2.node)],
         )
         .unwrap();
-        let row_cells_1C = to_row_cells(&node_1.rows_tree[2].values);
-        let row_1C =
-            RowProcessingGadgetInputs::new(merkle_path_1C, merkle_path_index_1, &row_cells_1C)
+        let row_cells_1c = to_row_cells(&node_1.rows_tree[2].values);
+        let row_1c =
+            RowProcessingGadgetInputs::new(merkle_path_1c, merkle_path_index_1, &row_cells_1c)
                 .unwrap();
 
-        let [node_2A, node_2B, node_2C, node_2D] = node_2
+        let [node_2a, node_2b, node_2c, node_2d] = node_2
             .rows_tree
             .iter()
-            .map(|n| n.node.clone())
+            .map(|n| n.node)
             .collect_vec()
             .try_into()
             .unwrap();
-        let path_2D = vec![
-            (node_2B.clone(), ChildPosition::Right),
-            (node_2A.clone(), ChildPosition::Left),
+        let path_2d = vec![
+            (node_2b, ChildPosition::Right),
+            (node_2a, ChildPosition::Left),
         ];
-        let node_2C_hash =
-            HashOutput::try_from(node_2C.compute_node_hash(secondary_index)).unwrap();
-        let siblings_2D = vec![Some(node_2C_hash), None];
-        let merkle_path_2D =
-            MerklePathWithNeighborsGadget::new(&path_2D, &siblings_2D, &node_2D, [None, None])
+        let node_2c_hash =
+            HashOutput::from(node_2c.compute_node_hash(secondary_index));
+        let siblings_2d = vec![Some(node_2c_hash), None];
+        let merkle_path_2d =
+            MerklePathWithNeighborsGadget::new(&path_2d, &siblings_2d, &node_2d, [None, None])
                 .unwrap();
-        let path_2 = vec![(node_1.node.clone(), ChildPosition::Right)];
+        let path_2 = vec![(node_1.node, ChildPosition::Right)];
         let node_0_hash =
-            HashOutput::try_from(node_0.node.compute_node_hash(primary_index)).unwrap();
+            HashOutput::from(node_0.node.compute_node_hash(primary_index));
         let siblings_2 = vec![Some(node_0_hash)];
         let merkle_path_index_2 =
             MerklePathWithNeighborsGadget::new(&path_2, &siblings_2, &node_2.node, [None, None])
                 .unwrap();
 
-        let row_cells_2D = to_row_cells(&node_2.rows_tree[3].values);
+        let row_cells_2d = to_row_cells(&node_2.rows_tree[3].values);
 
-        let row_2D =
-            RowProcessingGadgetInputs::new(merkle_path_2D, merkle_path_index_2, &row_cells_2D)
+        let row_2d =
+            RowProcessingGadgetInputs::new(merkle_path_2d, merkle_path_index_2, &row_cells_2d)
                 .unwrap();
 
-        let path_2B = vec![(node_2A.clone(), ChildPosition::Left)];
-        let siblings_2B = vec![None];
-        let merkle_path_2B = MerklePathWithNeighborsGadget::new(
-            &path_2B,
-            &siblings_2B,
-            &node_2B,
-            [Some(node_2C.clone()), Some(node_2D.clone())],
+        let path_2b = vec![(node_2a, ChildPosition::Left)];
+        let siblings_2b = vec![None];
+        let merkle_path_2b = MerklePathWithNeighborsGadget::new(
+            &path_2b,
+            &siblings_2b,
+            &node_2b,
+            [Some(node_2c), Some(node_2d)],
         )
         .unwrap();
 
-        let row_cells_2B = to_row_cells(&node_2.rows_tree[1].values);
+        let row_cells_2b = to_row_cells(&node_2.rows_tree[1].values);
 
-        let row_2B =
-            RowProcessingGadgetInputs::new(merkle_path_2B, merkle_path_index_2, &row_cells_2B)
+        let row_2b =
+            RowProcessingGadgetInputs::new(merkle_path_2b, merkle_path_index_2, &row_cells_2b)
                 .unwrap();
 
         let circuit = RowChunkProcessingCircuit::<
@@ -790,7 +789,7 @@ mod tests {
             MAX_NUM_RESULTS,
             AggOutputCircuit<MAX_NUM_RESULTS>,
         >::new(
-            vec![row_1C.clone(), row_2B.clone(), row_2D.clone()],
+            vec![row_1c.clone(), row_2b.clone(), row_2d.clone()],
             &column_ids,
             &predicate_operations,
             &placeholders,
@@ -816,23 +815,23 @@ mod tests {
         // Return also a flag sepcifying whether arithmetic errors have occurred during the computation or not
 
         // compute predicate value and output values for each of the 3 rows
-        let (predicate_value_1C, err_1C, out_values_1C) =
+        let (predicate_value_1c, err_1c, out_values_1c) =
             compute_output_values_for_row::<MAX_NUM_RESULTS>(
-                &row_cells_1C,
+                &row_cells_1c,
                 &predicate_operations,
                 &results,
                 &placeholders,
             );
-        let (predicate_value_2B, err_2B, out_values_2B) =
+        let (predicate_value_2b, err_2b, out_values_2b) =
             compute_output_values_for_row::<MAX_NUM_RESULTS>(
-                &row_cells_2B,
+                &row_cells_2b,
                 &predicate_operations,
                 &results,
                 &placeholders,
             );
-        let (predicate_value_2D, err_2D, out_values_2D) =
+        let (predicate_value_2d, err_2d, out_values_2d) =
             compute_output_values_for_row::<MAX_NUM_RESULTS>(
-                &row_cells_2D,
+                &row_cells_2d,
                 &predicate_operations,
                 &results,
                 &placeholders,
@@ -840,7 +839,7 @@ mod tests {
 
         // aggregate out_values of the 3 rows
         let (expected_outputs, expected_err) = {
-            let outputs = [out_values_1C, out_values_2B, out_values_2D];
+            let outputs = [out_values_1c, out_values_2b, out_values_2d];
             let mut num_overflows = 0;
             let outputs = output_ops
                 .into_iter()
@@ -869,16 +868,16 @@ mod tests {
         // compute expected left boundary row of the proven chunk: should correspond to row_1C
         let left_boundary_row = {
             // predecessor is node_1A, and it's in the path
-            let predecessor_info_1C = NeighborInfo::new(
-                node_1A.value,
-                Some(node_1A.compute_node_hash(secondary_index)),
+            let predecessor_info_1c = NeighborInfo::new(
+                node_1a.value,
+                Some(node_1a.compute_node_hash(secondary_index)),
             );
             // successor is node_1D, and it's not in the path
-            let successor_info_1C = NeighborInfo::new(node_1D.value, None);
-            let row_1C_info = BoundaryRowNodeInfo {
-                end_node_hash: node_1C.compute_node_hash(secondary_index),
-                predecessor_info: predecessor_info_1C,
-                successor_info: successor_info_1C,
+            let successor_info_1c = NeighborInfo::new(node_1d.value, None);
+            let row_1c_info = BoundaryRowNodeInfo {
+                end_node_hash: node_1c.compute_node_hash(secondary_index),
+                predecessor_info: predecessor_info_1c,
+                successor_info: successor_info_1c,
             };
             // predecessor is node_0, and it's not in the path
             let predecessor_index_1 = NeighborInfo::new(node_0.node.value, None);
@@ -890,26 +889,26 @@ mod tests {
                 successor_info: successor_index_1,
             };
             BoundaryRowData {
-                row_node_info: row_1C_info,
+                row_node_info: row_1c_info,
                 index_node_info: index_1_info,
             }
         };
         // compute expected right boundary row of the proven chunk: should correspond to row_2D
         let right_boundary_row = {
             // predecessor is node_2B, and it's in the path
-            let predecessor_2D = NeighborInfo::new(
-                node_2B.value,
-                Some(node_2B.compute_node_hash(secondary_index)),
+            let predecessor_2d = NeighborInfo::new(
+                node_2b.value,
+                Some(node_2b.compute_node_hash(secondary_index)),
             );
             // successor is node_2A, and it's in the path
-            let successor_2D = NeighborInfo::new(
-                node_2A.value,
-                Some(node_2A.compute_node_hash(secondary_index)),
+            let successor_2d = NeighborInfo::new(
+                node_2a.value,
+                Some(node_2a.compute_node_hash(secondary_index)),
             );
-            let row_2D_info = BoundaryRowNodeInfo {
-                end_node_hash: node_2D.compute_node_hash(secondary_index),
-                predecessor_info: predecessor_2D,
-                successor_info: successor_2D,
+            let row_2d_info = BoundaryRowNodeInfo {
+                end_node_hash: node_2d.compute_node_hash(secondary_index),
+                predecessor_info: predecessor_2d,
+                successor_info: successor_2d,
             };
 
             // predecessor is node 1, and it's in the path
@@ -926,16 +925,16 @@ mod tests {
             };
 
             BoundaryRowData {
-                row_node_info: row_2D_info,
+                row_node_info: row_2d_info,
                 index_node_info: index_2_info,
             }
         };
 
-        assert_eq!(pis.overflow_flag(), err_1C | err_2B | err_2D | expected_err);
+        assert_eq!(pis.overflow_flag(), err_1c | err_2b | err_2d | expected_err);
         assert_eq!(
             pis.num_matching_rows(),
             F::from_canonical_u8(
-                predicate_value_1C as u8 + predicate_value_2B as u8 + predicate_value_2D as u8
+                predicate_value_1c as u8 + predicate_value_2b as u8 + predicate_value_2d as u8
             ),
         );
         assert_eq!(pis.first_value_as_u256(), expected_outputs[0],);
@@ -956,21 +955,21 @@ mod tests {
 
         // negative test: check that we cannot add an out of range row to the proven rows.
         // We try to add row 2C to the proven rows
-        let path_2C = vec![
-            (node_2B.clone(), ChildPosition::Left),
-            (node_2A.clone(), ChildPosition::Left),
+        let path_2c = vec![
+            (node_2b, ChildPosition::Left),
+            (node_2a, ChildPosition::Left),
         ];
-        let node_2D_hash =
-            HashOutput::try_from(node_2D.compute_node_hash(secondary_index)).unwrap();
-        let siblings_2C = vec![Some(node_2D_hash), None];
-        let merkle_path_2C =
-            MerklePathWithNeighborsGadget::new(&path_2C, &siblings_2C, &node_2C, [None, None])
+        let node_2d_hash =
+            HashOutput::from(node_2d.compute_node_hash(secondary_index));
+        let siblings_2c = vec![Some(node_2d_hash), None];
+        let merkle_path_2c =
+            MerklePathWithNeighborsGadget::new(&path_2c, &siblings_2c, &node_2c, [None, None])
                 .unwrap();
 
-        let row_cells_2C = to_row_cells(&node_2.rows_tree[2].values);
+        let row_cells_2c = to_row_cells(&node_2.rows_tree[2].values);
 
-        let row_2C =
-            RowProcessingGadgetInputs::new(merkle_path_2C, merkle_path_index_2, &row_cells_2C)
+        let row_2c =
+            RowProcessingGadgetInputs::new(merkle_path_2c, merkle_path_index_2, &row_cells_2c)
                 .unwrap();
 
         let circuit = RowChunkProcessingCircuit::<
@@ -983,7 +982,7 @@ mod tests {
             MAX_NUM_RESULTS,
             AggOutputCircuit<MAX_NUM_RESULTS>,
         >::new(
-            vec![row_1C, row_2C, row_2B, row_2D],
+            vec![row_1c, row_2c, row_2b, row_2d],
             &column_ids,
             &predicate_operations,
             &placeholders,
@@ -1230,20 +1229,20 @@ mod tests {
         };
 
         // run circuit over 4 consecutive rows: row 1A, row 1C, row 2B and row 2D
-        let [node_1A, node_1B, node_1C, node_1D] = node_1
+        let [node_1a, node_1b, node_1c, node_1d] = node_1
             .rows_tree
             .iter()
-            .map(|n| n.node.clone())
+            .map(|n| n.node)
             .collect_vec()
             .try_into()
             .unwrap();
-        let path_1A = vec![];
-        let siblings_1A = vec![];
-        let merkle_path_1A = MerklePathWithNeighborsGadget::new(
-            &path_1A,
-            &siblings_1A,
-            &node_1A,
-            [Some(node_1B.clone()), Some(node_1C.clone())],
+        let path_1a = vec![];
+        let siblings_1a = vec![];
+        let merkle_path_1a = MerklePathWithNeighborsGadget::new(
+            &path_1a,
+            &siblings_1a,
+            &node_1a,
+            [Some(node_1b), Some(node_1c)],
         )
         .unwrap();
         let path_1 = vec![];
@@ -1252,77 +1251,77 @@ mod tests {
             &path_1,
             &siblings_1,
             &node_1.node,
-            [Some(node_0.node.clone()), Some(node_2.node.clone())],
+            [Some(node_0.node), Some(node_2.node)],
         )
         .unwrap();
 
-        let row_cells_1A = to_row_cells(&node_1.rows_tree[0].values);
-        let row_1A =
-            RowProcessingGadgetInputs::new(merkle_path_1A, merkle_path_index_1, &row_cells_1A)
+        let row_cells_1a = to_row_cells(&node_1.rows_tree[0].values);
+        let row_1a =
+            RowProcessingGadgetInputs::new(merkle_path_1a, merkle_path_index_1, &row_cells_1a)
                 .unwrap();
 
-        let path_1C = vec![(node_1A.clone(), ChildPosition::Right)];
-        let node_1B_hash =
-            HashOutput::try_from(node_1B.compute_node_hash(secondary_index)).unwrap();
-        let siblings_1C = vec![Some(node_1B_hash.clone())];
-        let merkle_path_1C = MerklePathWithNeighborsGadget::new(
-            &path_1C,
-            &siblings_1C,
-            &node_1C,
-            [None, Some(node_1D.clone())],
+        let path_1c = vec![(node_1a, ChildPosition::Right)];
+        let node_1b_hash =
+            HashOutput::from(node_1b.compute_node_hash(secondary_index));
+        let siblings_1c = vec![Some(node_1b_hash)];
+        let merkle_path_1c = MerklePathWithNeighborsGadget::new(
+            &path_1c,
+            &siblings_1c,
+            &node_1c,
+            [None, Some(node_1d)],
         )
         .unwrap();
 
-        let row_cells_1C = to_row_cells(&node_1.rows_tree[2].values);
-        let row_1C =
-            RowProcessingGadgetInputs::new(merkle_path_1C, merkle_path_index_1, &row_cells_1C)
+        let row_cells_1c = to_row_cells(&node_1.rows_tree[2].values);
+        let row_1c =
+            RowProcessingGadgetInputs::new(merkle_path_1c, merkle_path_index_1, &row_cells_1c)
                 .unwrap();
 
-        let [node_2A, node_2B, node_2C, node_2D] = node_2
+        let [node_2a, node_2b, node_2c, node_2d] = node_2
             .rows_tree
             .iter()
-            .map(|n| n.node.clone())
+            .map(|n| n.node)
             .collect_vec()
             .try_into()
             .unwrap();
-        let path_2D = vec![
-            (node_2B.clone(), ChildPosition::Right),
-            (node_2A.clone(), ChildPosition::Left),
+        let path_2d = vec![
+            (node_2b, ChildPosition::Right),
+            (node_2a, ChildPosition::Left),
         ];
-        let node_2C_hash =
-            HashOutput::try_from(node_2C.compute_node_hash(secondary_index)).unwrap();
-        let siblings_2D = vec![Some(node_2C_hash), None];
-        let merkle_path_2D =
-            MerklePathWithNeighborsGadget::new(&path_2D, &siblings_2D, &node_2D, [None, None])
+        let node_2c_hash =
+            HashOutput::from(node_2c.compute_node_hash(secondary_index));
+        let siblings_2d = vec![Some(node_2c_hash), None];
+        let merkle_path_2d =
+            MerklePathWithNeighborsGadget::new(&path_2d, &siblings_2d, &node_2d, [None, None])
                 .unwrap();
-        let path_2 = vec![(node_1.node.clone(), ChildPosition::Right)];
+        let path_2 = vec![(node_1.node, ChildPosition::Right)];
         let node_0_hash =
-            HashOutput::try_from(node_0.node.compute_node_hash(primary_index)).unwrap();
+            HashOutput::from(node_0.node.compute_node_hash(primary_index));
         let siblings_2 = vec![Some(node_0_hash)];
         let merkle_path_index_2 =
             MerklePathWithNeighborsGadget::new(&path_2, &siblings_2, &node_2.node, [None, None])
                 .unwrap();
 
-        let row_cells_2D = to_row_cells(&node_2.rows_tree[3].values);
+        let row_cells_2d = to_row_cells(&node_2.rows_tree[3].values);
 
-        let row_2D =
-            RowProcessingGadgetInputs::new(merkle_path_2D, merkle_path_index_2, &row_cells_2D)
+        let row_2d =
+            RowProcessingGadgetInputs::new(merkle_path_2d, merkle_path_index_2, &row_cells_2d)
                 .unwrap();
 
-        let path_2B = vec![(node_2A.clone(), ChildPosition::Left)];
-        let siblings_2B = vec![None];
-        let merkle_path_2B = MerklePathWithNeighborsGadget::new(
-            &path_2B,
-            &siblings_2B,
-            &node_2B,
-            [Some(node_2C.clone()), Some(node_2D.clone())],
+        let path_2b = vec![(node_2a, ChildPosition::Left)];
+        let siblings_2b = vec![None];
+        let merkle_path_2b = MerklePathWithNeighborsGadget::new(
+            &path_2b,
+            &siblings_2b,
+            &node_2b,
+            [Some(node_2c), Some(node_2d)],
         )
         .unwrap();
 
-        let row_cells_2B = to_row_cells(&node_2.rows_tree[1].values);
+        let row_cells_2b = to_row_cells(&node_2.rows_tree[1].values);
 
-        let row_2B =
-            RowProcessingGadgetInputs::new(merkle_path_2B, merkle_path_index_2, &row_cells_2B)
+        let row_2b =
+            RowProcessingGadgetInputs::new(merkle_path_2b, merkle_path_index_2, &row_cells_2b)
                 .unwrap();
 
         let circuit = RowChunkProcessingCircuit::<
@@ -1336,10 +1335,10 @@ mod tests {
             NoAggOutputCircuit<MAX_NUM_RESULTS>,
         >::new(
             vec![
-                row_1A.clone(),
-                row_1C.clone(),
-                row_2B.clone(),
-                row_2D.clone(),
+                row_1a.clone(),
+                row_1c.clone(),
+                row_2b.clone(),
+                row_2d.clone(),
             ],
             &column_ids,
             &predicate_operations,
@@ -1432,10 +1431,10 @@ mod tests {
         };
 
         // compute predicate value and accumulator of output values for each of the 4 rows being proven
-        let (predicate_value_1A, err_1A, acc_1A) = compute_output_values(&row_cells_1A).await;
-        let (predicate_value_1C, err_1C, acc_1C) = compute_output_values(&row_cells_1C).await;
-        let (predicate_value_2B, err_2B, acc_2B) = compute_output_values(&row_cells_2B).await;
-        let (predicate_value_2D, err_2D, acc_2D) = compute_output_values(&row_cells_2D).await;
+        let (predicate_value_1a, err_1a, acc_1a) = compute_output_values(&row_cells_1a).await;
+        let (predicate_value_1c, err_1c, acc_1c) = compute_output_values(&row_cells_1c).await;
+        let (predicate_value_2b, err_2b, acc_2b) = compute_output_values(&row_cells_2b).await;
+        let (predicate_value_2d, err_2d, acc_2d) = compute_output_values(&row_cells_2d).await;
 
         let computational_hash = ComputationalHash::from_bytes(
             (&Identifiers::computational_hash_universal_circuit(
@@ -1451,13 +1450,13 @@ mod tests {
         // compute expected left boundary row of the proven chunk: should correspond to row_1A
         let left_boundary_row = {
             // predecessor is node_1B, and it's not in the path
-            let predecessor_info_1A = NeighborInfo::new(node_1B.value, None);
+            let predecessor_info_1a = NeighborInfo::new(node_1b.value, None);
             // successor is node_1C, and it's not in the path
-            let successor_info_1A = NeighborInfo::new(node_1C.value, None);
-            let row_1A_info = BoundaryRowNodeInfo {
-                end_node_hash: node_1A.compute_node_hash(secondary_index),
-                predecessor_info: predecessor_info_1A,
-                successor_info: successor_info_1A,
+            let successor_info_1a = NeighborInfo::new(node_1c.value, None);
+            let row_1a_info = BoundaryRowNodeInfo {
+                end_node_hash: node_1a.compute_node_hash(secondary_index),
+                predecessor_info: predecessor_info_1a,
+                successor_info: successor_info_1a,
             };
             // predecessor is node_0, and it's not in the path
             let predecessor_index_1 = NeighborInfo::new(node_0.node.value, None);
@@ -1469,26 +1468,26 @@ mod tests {
                 successor_info: successor_index_1,
             };
             BoundaryRowData {
-                row_node_info: row_1A_info,
+                row_node_info: row_1a_info,
                 index_node_info: index_1_info,
             }
         };
         // compute expected right boundary row of the proven chunk: should correspond to row_2D
         let right_boundary_row = {
             // predecessor is node_2B, and it's in the path
-            let predecessor_2D = NeighborInfo::new(
-                node_2B.value,
-                Some(node_2B.compute_node_hash(secondary_index)),
+            let predecessor_2d = NeighborInfo::new(
+                node_2b.value,
+                Some(node_2b.compute_node_hash(secondary_index)),
             );
             // successor is node_2A, and it's in the path
-            let successor_2D = NeighborInfo::new(
-                node_2A.value,
-                Some(node_2A.compute_node_hash(secondary_index)),
+            let successor_2d = NeighborInfo::new(
+                node_2a.value,
+                Some(node_2a.compute_node_hash(secondary_index)),
             );
-            let row_2D_info = BoundaryRowNodeInfo {
-                end_node_hash: node_2D.compute_node_hash(secondary_index),
-                predecessor_info: predecessor_2D,
-                successor_info: successor_2D,
+            let row_2d_info = BoundaryRowNodeInfo {
+                end_node_hash: node_2d.compute_node_hash(secondary_index),
+                predecessor_info: predecessor_2d,
+                successor_info: successor_2d,
             };
 
             // predecessor is node 1, and it's in the path
@@ -1505,24 +1504,24 @@ mod tests {
             };
 
             BoundaryRowData {
-                row_node_info: row_2D_info,
+                row_node_info: row_2d_info,
                 index_node_info: index_2_info,
             }
         };
 
-        assert_eq!(pis.overflow_flag(), err_1A | err_1C | err_2B | err_2D,);
+        assert_eq!(pis.overflow_flag(), err_1a | err_1c | err_2b | err_2d,);
         assert_eq!(
             pis.num_matching_rows(),
             F::from_canonical_u8(
-                predicate_value_1A as u8
-                    + predicate_value_1C as u8
-                    + predicate_value_2B as u8
-                    + predicate_value_2D as u8
+                predicate_value_1a as u8
+                    + predicate_value_1c as u8
+                    + predicate_value_2b as u8
+                    + predicate_value_2d as u8
             ),
         );
         assert_eq!(
             pis.first_value_as_curve_point(),
-            (acc_1A + acc_1C + acc_2B + acc_2D).to_weierstrass(),
+            (acc_1a + acc_1c + acc_2b + acc_2d).to_weierstrass(),
         );
         // The other MAX_NUM_RESULTS -1 output values are dummy ones, as in queries
         // without aggregation we accumulate all the results in the first output value,
@@ -1541,33 +1540,33 @@ mod tests {
 
         // negative test: check that we cannot add nodes in the index tree outside of the range. We try to add
         // row 0B to the set of proven rows
-        let [node_0A, node_0B, node_0C] = node_0
+        let [node_0a, node_0b, node_0c] = node_0
             .rows_tree
             .iter()
-            .map(|n| n.node.clone())
+            .map(|n| n.node)
             .collect_vec()
             .try_into()
             .unwrap();
-        let path_0B = vec![(node_0A.clone(), ChildPosition::Left)];
-        let siblings_0B = vec![None];
-        let merkle_path_0B = MerklePathWithNeighborsGadget::new(
-            &path_0B,
-            &siblings_0B,
-            &node_0B,
-            [None, Some(node_0C.clone())],
+        let path_0b = vec![(node_0a, ChildPosition::Left)];
+        let siblings_0b = vec![None];
+        let merkle_path_0b = MerklePathWithNeighborsGadget::new(
+            &path_0b,
+            &siblings_0b,
+            &node_0b,
+            [None, Some(node_0c)],
         )
         .unwrap();
-        let path_0 = vec![(node_1.node.clone(), ChildPosition::Left)];
+        let path_0 = vec![(node_1.node, ChildPosition::Left)];
         let node_2_hash =
-            HashOutput::try_from(node_2.node.compute_node_hash(primary_index)).unwrap();
+            HashOutput::from(node_2.node.compute_node_hash(primary_index));
         let siblings_0 = vec![Some(node_2_hash)];
         let merkle_path_index_2 =
             MerklePathWithNeighborsGadget::new(&path_0, &siblings_0, &node_0.node, [None, None])
                 .unwrap();
 
-        let row_cells_0B = to_row_cells(&node_0.rows_tree[1].values);
-        let row_0B =
-            RowProcessingGadgetInputs::new(merkle_path_0B, merkle_path_index_2, &row_cells_0B)
+        let row_cells_0b = to_row_cells(&node_0.rows_tree[1].values);
+        let row_0b =
+            RowProcessingGadgetInputs::new(merkle_path_0b, merkle_path_index_2, &row_cells_0b)
                 .unwrap();
 
         let circuit = RowChunkProcessingCircuit::<
@@ -1580,7 +1579,7 @@ mod tests {
             MAX_NUM_RESULTS,
             NoAggOutputCircuit<MAX_NUM_RESULTS>,
         >::new(
-            vec![row_0B, row_1A, row_1C, row_2B, row_2D],
+            vec![row_0b, row_1a, row_1c, row_2b, row_2d],
             &column_ids,
             &predicate_operations,
             &placeholders,
