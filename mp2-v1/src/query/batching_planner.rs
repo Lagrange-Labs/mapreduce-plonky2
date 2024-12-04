@@ -180,11 +180,13 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
 ///   siblings `num_left` of the node as `parent_pos*ARITY + num_left`
 ///
 /// For instance, consider the following tree, with arity 3:
+/// ```text
 ///                 A
 ///
 ///     B           C           D
 ///
-/// E   F   G       H   I    
+/// E   F   G       H   I  
+/// ```  
 /// The nodes in this tree will be identified by the following keys:
 /// ```text
 ///                             (0,0)
