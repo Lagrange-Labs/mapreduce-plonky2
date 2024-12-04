@@ -1,3 +1,4 @@
+#![allow(clippy::single_element_loop)]
 use crate::assembler::{assemble_dynamic, DynamicCircuitPis};
 use crate::isolator;
 use crate::utils::ParsilSettingsBuilder;
@@ -10,6 +11,8 @@ use anyhow::Result;
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
 /// NOTE: queries that may bother us in the future
+// CHORE: Remove this when relevant PR is merged
+#[allow(dead_code)]
 const CAREFUL: &[&str] = &[
     // What to do if b.t is longer than a.x?
     "SELECT x, (SELECT t AS tt FROM b) FROM a;",
@@ -164,8 +167,8 @@ fn isolation() {
             .build()
             .unwrap();
 
-        let mut query = parse_and_validate(q, &settings).unwrap();
-        isolator::isolate_with(&mut query, &settings, lo_sec, hi_sec)
+        let query = parse_and_validate(q, &settings).unwrap();
+        isolator::isolate_with(&query, &settings, lo_sec, hi_sec)
             .unwrap()
             .to_string()
     }

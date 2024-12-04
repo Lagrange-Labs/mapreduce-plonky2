@@ -21,7 +21,6 @@ use crate::array::Targetable;
 use crate::poseidon::{HashableField, H};
 use crate::serialization::circuit_data_serialization::SerializableRichField;
 use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
-use crate::{D, F};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;

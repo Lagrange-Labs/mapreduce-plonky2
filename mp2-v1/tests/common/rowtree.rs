@@ -118,7 +118,7 @@ impl TestContext {
             let cell_root_hash_from_proof = cells_tree::extract_hash_from_proof(&cell_tree_proof)
                 .unwrap()
                 .to_bytes();
-            let cell_root_hash_from_row = row.cell_root_hash.clone();
+            let cell_root_hash_from_row = row.cell_root_hash;
             assert_eq!(
                 hex::encode(cell_root_hash_from_proof.clone()),
                 hex::encode(cell_root_hash_from_row.unwrap().0),
@@ -305,7 +305,7 @@ impl TestContext {
             .get_proof_exact(&ProofKey::Row(root_proof_key.clone()))
             .unwrap();
         let root_row = table.row.root_data().await.unwrap();
-        let tree_hash = root_row.hash.clone();
+        let tree_hash = root_row.hash;
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
 
         assert_eq!(

@@ -7,14 +7,11 @@ use crate::{
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
         },
-        public_inputs::{
-            PublicInputs as QueryPI, PublicInputs as QueryProofPublicInputs, PublicInputs,
-            QueryPublicInputs,
-        },
+        pi_len,
+        public_inputs::{PublicInputs as QueryPI, PublicInputs, QueryPublicInputs},
         universal_circuit::universal_circuit_inputs::{
             BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders, ResultStructure,
         },
-        PI_LEN,
     },
     revelation::NUM_PREPROCESSING_IO,
 };
@@ -113,7 +110,7 @@ pub fn random_aggregation_public_inputs<const N: usize, const S: usize>(
     });
 
     array::from_fn(|_| {
-        let mut pi = (0..PI_LEN::<S>)
+        let mut pi = (0..pi_len::<S>())
             .map(|_| rng.gen())
             .collect::<Vec<u32>>()
             .to_fields();

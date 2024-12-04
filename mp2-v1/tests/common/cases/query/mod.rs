@@ -61,6 +61,7 @@ pub type QueryCircuitInput = verifiable_db::query::api::CircuitInput<
     MAX_NUM_ITEMS_PER_OUTPUT,
 >;
 
+#[cfg(feature = "batching_circuits")]
 pub type BatchingQueryCircuitInput = verifiable_db::query::batching::CircuitInput<
     NUM_CHUNKS,
     NUM_ROWS,
@@ -220,13 +221,13 @@ async fn test_query_mapping(
                 parsed,
                 &settings,
                 res,
-                table_hash.clone(),
+                *table_hash,
                 pis,
             )
             .await
         }
         Output::NoAggregation => {
-            prove_no_aggregation_query(parsed, &table_hash, &mut planner, res).await
+            prove_no_aggregation_query(parsed, table_hash, &mut planner, res).await
         }
     }
 }
@@ -238,9 +239,7 @@ pub enum SqlType {
 impl SqlType {
     pub fn extract(&self, row: &PsqlRow, idx: usize) -> Option<SqlReturn> {
         match self {
-            SqlType::Numeric => row
-                .get::<_, Option<U256>>(idx)
-                .map(|num| SqlReturn::Numeric(num)),
+            SqlType::Numeric => row.get::<_, Option<U256>>(idx).map(SqlReturn::Numeric),
         }
     }
 }
@@ -251,11 +250,11 @@ pub enum SqlReturn {
 }
 
 fn is_empty_result(rows: &[PsqlRow], types: SqlType) -> bool {
-    if rows.len() == 0 {
+    if rows.is_empty() {
         return true;
     }
     let columns = rows.first().as_ref().unwrap().columns();
-    if columns.len() == 0 {
+    if columns.is_empty() {
         return true;
     }
     for row in rows {
@@ -267,7 +266,7 @@ fn is_empty_result(rows: &[PsqlRow], types: SqlType) -> bool {
 }
 
 fn print_vec_sql_rows(rows: &[PsqlRow], types: SqlType) {
-    if rows.len() == 0 {
+    if rows.is_empty() {
         println!("no rows returned");
         return;
     }

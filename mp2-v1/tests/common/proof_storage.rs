@@ -3,20 +3,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{
-    cases::query::{NUM_CHUNKS, NUM_ROWS},
-    context::TestContextConfig,
-    mkdir_all,
-    table::TableID,
-};
+use super::{context::TestContextConfig, mkdir_all, table::TableID};
 use alloy::primitives::{Address, U256};
 use anyhow::{bail, Context, Result};
 use envconfig::Envconfig;
 use mp2_test::cells_tree::CellTree;
-use mp2_v1::{
-    indexing::{block::BlockPrimaryIndex, row::RowTreeKey},
-    query::batching_planner::UTKey,
-};
+use mp2_v1::indexing::{block::BlockPrimaryIndex, row::RowTreeKey};
 use ryhope::tree::TreeTopology;
 use serde::{Deserialize, Serialize};
 
@@ -78,7 +70,14 @@ pub enum ProofKey {
     QueryUniversal((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
     QueryAggregateRow((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
     QueryAggregateIndex((QueryID, PlaceholderValues, BlockPrimaryIndex)),
-    QueryAggregate((QueryID, PlaceholderValues, UTKey<NUM_CHUNKS>)),
+    #[cfg(feature = "batching_circuits")]
+    QueryAggregate(
+        (
+            QueryID,
+            PlaceholderValues,
+            mp2_v1::query::batching_planner::UTKey<{ super::cases::query::NUM_CHUNKS }>,
+        ),
+    ),
 }
 
 impl ProofKey {
@@ -140,6 +139,7 @@ impl Hash for ProofKey {
                 "query_aggregate_index".hash(state);
                 n.hash(state);
             }
+            #[cfg(feature = "batching_circuits")]
             ProofKey::QueryAggregate(n) => {
                 "query_aggregate".hash(state);
                 n.hash(state);

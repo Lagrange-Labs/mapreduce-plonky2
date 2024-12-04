@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::{collections::BTreeSet, fmt::Debug, hash::Hash, iter::once};
+use std::{collections::BTreeSet, fmt::Debug, hash::Hash};
 
 use alloy::primitives::U256;
 use futures::{stream, StreamExt};
@@ -7,14 +7,11 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use parsil::symbols::ContextProvider;
 use ryhope::{
-    storage::{
-        updatetree::{UpdatePlan, UpdateTree},
-        WideLineage,
-    },
+    storage::{updatetree::UpdateTree, WideLineage},
     Epoch,
 };
 use verifiable_db::query::{
-    batching::{RowPath, RowWithPath, TreePathInputs},
+    batching::{NodePath, RowInput, TreePathInputs},
     computational_hash_ids::ColumnIDs,
     universal_circuit::universal_circuit_inputs::{ColumnCell, RowCells},
 };
@@ -36,16 +33,16 @@ async fn compute_input_for_row<T: TreeFetcher<RowTreeKey, RowPayload<BlockPrimar
     index_value: BlockPrimaryIndex,
     index_path: &TreePathInputs,
     column_ids: &ColumnIDs,
-) -> RowWithPath {
+) -> RowInput {
     let row_path = tree
         .compute_path(row_key, index_value as Epoch)
         .await
-        .expect(format!("node with key {:?} not found in cache", row_key).as_str());
-    let path = RowPath::new_from_paths(row_path, index_path.clone());
+        .unwrap_or_else(|| panic!("node with key {:?} not found in cache", row_key));
+    let path = NodePath::new(row_path, index_path.clone());
     let (_, row_payload) = tree
         .fetch_ctx_and_payload_at(row_key, index_value as Epoch)
         .await
-        .expect(format!("node with key {:?} not found in cache", row_key).as_str());
+        .unwrap_or_else(|| panic!("node with key {:?} not found in cache", row_key));
     // build row cells
     let primary_index_cell = ColumnCell::new(column_ids.primary_column(), U256::from(index_value));
     let secondary_index_cell = ColumnCell::new(
@@ -63,31 +60,30 @@ async fn compute_input_for_row<T: TreeFetcher<RowTreeKey, RowPayload<BlockPrimar
         })
         .collect::<Vec<_>>();
     let row_cells = RowCells::new(primary_index_cell, secondary_index_cell, non_indexed_cells);
-    RowWithPath::new(&row_cells, &path)
+    RowInput::new(&row_cells, &path)
 }
 
 /// Given the subtree built from the rows satisyfing the query ranges on primary and
-/// secondary indexes, this method splits the rows in chunks of `CHUNK_SIZE` consecutive 
-/// rows, with all the rows in the same chunk being proven all together in the same 
+/// secondary indexes, this method splits the rows in chunks of `CHUNK_SIZE` consecutive
+/// rows, with all the rows in the same chunk being proven all together in the same
 /// circuit. The method also builds the `UpdateTree` that specifies how to recursively
 /// aggregate all these chunks, using the chunk aggregation circuit. The `NUM_CHUNKS`
 /// constant corresponds to the maximum number of chunks that can be aggregated by such
 /// circuit, and will thus correspond to the arity of the constructed `UpdateTree`.
 /// The method requires the following inputs:
-/// - `row_cache` : Wide lineage of rows tree nodes in the subtree build from the rows 
+/// - `row_cache` : Wide lineage of rows tree nodes in the subtree build from the rows
 ///     satisfying the the query ranges on primary and secondary indexes
-/// - `index_cache` : Wide lineage of index tree nodes in the subtree build from the rows 
+/// - `index_cache` : Wide lineage of index tree nodes in the subtree build from the rows
 ///     satisfying the the query ranges on primary and secondary indexes
 /// - `column_ids` : Identifiers of the columns of the table, including primary and
 ///     secondary indexes columns
-/// - `non_existence_inputs` : This set of data is employed to find the proper row to be 
+/// - `non_existence_inputs` : This set of data is employed to find the proper row to be
 ///     proven for a rows tree that contains no rows with a secondary index value lying
 ///     in the query range over secondary index, which still needs to be proven for
 ///     completeness (i.e., proving that we are not skipping potentially matching rows
 ///     for the query); this data structure can be instantiated with its own `new` method
 /// - `epoch` : Last epoch inserted in the index tree
 pub async fn generate_chunks_and_update_tree<
-    'a,
     const CHUNK_SIZE: usize,
     const NUM_CHUNKS: usize,
     C: ContextProvider,
@@ -95,10 +91,10 @@ pub async fn generate_chunks_and_update_tree<
     row_cache: WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     index_cache: WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     column_ids: &ColumnIDs,
-    non_existence_inputs: NonExistenceInput<'a, C>,
+    non_existence_inputs: NonExistenceInput<'_, C>,
     epoch: Epoch,
 ) -> Result<(
-    HashMap<UTKey<NUM_CHUNKS>, Vec<RowWithPath>>,
+    HashMap<UTKey<NUM_CHUNKS>, Vec<RowInput>>,
     UTForChunks<NUM_CHUNKS>,
 )> {
     let chunks =
@@ -107,12 +103,12 @@ pub async fn generate_chunks_and_update_tree<
     Ok(UTForChunksBuilder { chunks }.build_update_tree_with_base_chunks(epoch))
 }
 
-async fn generate_chunks<'a, const CHUNK_SIZE: usize, C: ContextProvider>(
+async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
     row_cache: WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     index_cache: WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     column_ids: &ColumnIDs,
-    non_existence_inputs: NonExistenceInput<'a, C>,
-) -> Result<Vec<Vec<RowWithPath>>> {
+    non_existence_inputs: NonExistenceInput<'_, C>,
+) -> Result<Vec<Vec<RowInput>>> {
     let index_keys_by_epochs = index_cache.keys_by_epochs();
     assert_eq!(index_keys_by_epochs.len(), 1);
     let row_keys_by_epochs = row_cache.keys_by_epochs();
@@ -127,44 +123,42 @@ async fn generate_chunks<'a, const CHUNK_SIZE: usize, C: ContextProvider>(
             let index_path = index_cache
                 .compute_path(&index_value, current_epoch)
                 .await
-                .expect(
-                    format!("node with key {index_value} not found in index tree cache").as_str(),
-                );
-            let proven_rows = if let Some(matching_rows) =
-                row_keys_by_epochs.get(&(index_value as Epoch))
-            {
-                let sorted_rows = matching_rows.into_iter().collect::<BTreeSet<_>>();
-                stream::iter(sorted_rows.iter())
-                    .then(async |&row_key| {
-                        compute_input_for_row(
-                            &row_cache,
-                            row_key,
-                            index_value,
-                            &index_path,
-                            column_ids,
-                        )
+                .unwrap_or_else(|| {
+                    panic!("node with key {index_value} not found in index tree cache")
+                });
+            let proven_rows =
+                if let Some(matching_rows) = row_keys_by_epochs.get(&(index_value as Epoch)) {
+                    let sorted_rows = matching_rows.iter().collect::<BTreeSet<_>>();
+                    stream::iter(sorted_rows.iter())
+                        .then(async |&row_key| {
+                            compute_input_for_row(
+                                &row_cache,
+                                row_key,
+                                index_value,
+                                &index_path,
+                                column_ids,
+                            )
+                            .await
+                        })
+                        .collect::<Vec<RowInput>>()
                         .await
-                    })
-                    .collect::<Vec<RowWithPath>>()
-                    .await
-            } else {
-                let proven_node = non_existence_inputs
-                    .find_row_node_for_non_existence(index_value)
-                    .await
-                    .expect(
-                        format!("node for non-existence not found for index value {index_value}")
-                            .as_str(),
-                    );
-                let row_input = compute_input_for_row(
-                    non_existence_inputs.row_tree,
-                    &proven_node,
-                    index_value,
-                    &index_path,
-                    column_ids,
-                )
-                .await;
-                vec![row_input]
-            };
+                } else {
+                    let proven_node = non_existence_inputs
+                        .find_row_node_for_non_existence(index_value)
+                        .await
+                        .unwrap_or_else(|_| {
+                            panic!("node for non-existence not found for index value {index_value}")
+                        });
+                    let row_input = compute_input_for_row(
+                        non_existence_inputs.row_tree,
+                        &proven_node,
+                        index_value,
+                        &index_path,
+                        column_ids,
+                    )
+                    .await;
+                    vec![row_input]
+                };
             proven_rows
         })
         .concat()
@@ -184,6 +178,7 @@ async fn generate_chunks<'a, const CHUNK_SIZE: usize, C: ContextProvider>(
 ///   a node among all the nodes in the same level. It is computed recursively
 ///   from the position `parent_pos` of the parent node and the number of left
 ///   siblings `num_left` of the node as `parent_pos*ARITY + num_left`
+///
 /// For instance, consider the following tree, with arity 3:
 ///                 A
 ///
@@ -218,7 +213,7 @@ pub type UTForChunks<const NUM_CHUNKS: usize> = UpdateTree<UTKey<NUM_CHUNKS>>;
 /// Data atructure employed to build the `UpdateTreeForChunks` for the set of chunks
 #[derive(Clone, Debug)]
 struct UTForChunksBuilder<const NUM_CHUNKS: usize> {
-    chunks: Vec<Vec<RowWithPath>>,
+    chunks: Vec<Vec<RowInput>>,
 }
 
 /// Convenience trait, used just to implement the public methods to be exposed
@@ -231,9 +226,7 @@ pub trait UTForChunkProofs<const NUM_CHUNKS: usize> {
     fn get_children_keys(&self, node_key: &Self::K) -> Vec<Self::K>;
 }
 
-impl<const NUM_CHUNKS: usize> UTForChunkProofs<NUM_CHUNKS>
-    for UTForChunks<NUM_CHUNKS>
-{
+impl<const NUM_CHUNKS: usize> UTForChunkProofs<NUM_CHUNKS> for UTForChunks<NUM_CHUNKS> {
     type K = UTKey<NUM_CHUNKS>;
 
     fn get_children_keys(&self, node_key: &Self::K) -> Vec<Self::K> {
@@ -255,20 +248,22 @@ impl<const NUM_CHUNKS: usize> UTForChunkProofs<NUM_CHUNKS>
 /// - Internal nodes are associated to the proving of aggregation of multiple row chunks,
 ///   and so ARITY of the tree corresponds to the maximum number of chunks that can be
 ///   aggregated in a single proof
+///
 /// Given the number of leaves `n`, which correspond to the number of chunks to be aggregated,
 /// the tree is built in such a way to minimize the number of internal nodes, hereby
 /// minimzing the number of proofs to be generated. The overall idea is:
 /// - Place as many leaves as possible in `full` subtrees. A full subtree is defined as
 ///   a subtree containing `ARITY^exp` leaves, for an `exp >= 0`. In particular, it is
 ///   always possible to build at least one full subtree with `exp = ceil(log_{ARITY}(n))-1`.
-///   Note that, depending on `n`, it might be possible to build from one up to `ARITY` full 
+///   Note that, depending on `n`, it might be possible to build from one up to `ARITY` full
 ///   subtrees, each containing `ARITY^exp` number of leaves
 /// - If there are leaves that cannot be placed inside a full subtree, then by construction
-///   at most `ARITY-1` full subtrees have been built and placed as child nodes of the root, 
-///   and so there are still `m >= 1` spots available among the children of the root. 
+///   at most `ARITY-1` full subtrees have been built and placed as child nodes of the root,
+///   and so there are still `m >= 1` spots available among the children of the root.
 ///   So, up to `m-1` remaining leaves are placed as direct children of the root; if there
 ///   are more than `m-1` remaining leaves, they are placed in a subtree, built
 ///   recursively using the same logic, which is placed as a further child of the root
+///
 /// More details on the algorithm to construct a tree can be found in the `build_subtree`
 /// method
 #[derive(Clone, Debug)]
@@ -307,19 +302,15 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
 
     /// Insert a node as a child node of the node with key `parent_node_key`.
     /// The node is inserted as root if `parent_node_key` is `None`
-    fn insert_as_child_of(
-        &mut self,
-        parent_node_key: Option<&UTKey<ARITY>>,
-    ) -> UTKey<ARITY> {
+    fn insert_as_child_of(&mut self, parent_node_key: Option<&UTKey<ARITY>>) -> UTKey<ARITY> {
         if let Some(parent_key) = parent_node_key {
             // get parent node
-            let parent_node = self.nodes.get_mut(parent_key).expect(
-                format!(
+            let parent_node = self.nodes.get_mut(parent_key).unwrap_or_else(|| {
+                panic!(
                     "Providing a non-existing parent key for insertion: {:?}",
                     parent_key
                 )
-                .as_str(),
-            );
+            });
             // get number of existing children for the parent node, which is needed to compute
             // the key of the child to be inserted
             let num_childrens = parent_node.children_keys.len();
@@ -357,7 +348,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
     /// is full since `num_leaves` is expected to be `ARITY^exp`, for `exp >= 0`.
     /// `parent_node_key` is the key of the parent node of the root of the subtree
     fn build_full_subtree(&mut self, num_leaves: usize, parent_node_key: &UTKey<ARITY>) {
-        let root_key = self.insert_as_child_of(Some(&parent_node_key));
+        let root_key = self.insert_as_child_of(Some(parent_node_key));
         if num_leaves > 1 {
             for _ in 0..ARITY {
                 self.build_full_subtree(num_leaves / ARITY, &root_key);
@@ -424,7 +415,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
             node_key = self
                 .nodes
                 .get(key)
-                .expect(format!("Node with key {:?} not found", key).as_str())
+                .unwrap_or_else(|| panic!("Node with key {:?} not found", key))
                 .parent_key
                 .as_ref();
         }
@@ -436,14 +427,14 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
 
 impl<const NUM_CHUNKS: usize> UTForChunksBuilder<NUM_CHUNKS> {
     /// This method builds an `UpdateTree` to prove and aggregate the set of chunks
-    /// provided as input. It also returns the set of chunks to be proven, with each 
-    /// chunk being associated to the key of the node in the `UpdateTree` corresponding 
+    /// provided as input. It also returns the set of chunks to be proven, with each
+    /// chunk being associated to the key of the node in the `UpdateTree` corresponding
     /// to the proving task for that chunk
     fn build_update_tree_with_base_chunks(
         self,
         epoch: Epoch,
     ) -> (
-        HashMap<UTKey<NUM_CHUNKS>, Vec<RowWithPath>>,
+        HashMap<UTKey<NUM_CHUNKS>, Vec<RowInput>>,
         UTForChunks<NUM_CHUNKS>,
     ) {
         let num_chunks = self.chunks.len();

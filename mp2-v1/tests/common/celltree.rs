@@ -54,7 +54,7 @@ impl TestContext {
 
         while let Some(Next::Ready(wk)) = workplan.next() {
             let k = wk.k();
-            let (context, cell) = tree.fetch_with_context(&k).await;
+            let (context, cell) = tree.fetch_with_context(k).await;
             let column = table.columns.column_info(cell.identifier());
             let proof = if context.is_leaf() {
                 debug!(

@@ -9,7 +9,7 @@ use mp2_common::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
     u256::CircuitBuilderU256,
-    utils::{FromTargets, ToTargets},
+    utils::ToTargets,
     D, F,
 };
 use plonky2::{
@@ -22,15 +22,11 @@ use plonky2::{
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
-use crate::query::{
-    batching::{
-        public_inputs::PublicInputs,
-        row_chunk::{aggregate_chunks::aggregate_chunks, RowChunkDataTarget},
-    },
-    universal_circuit::universal_query_gadget::{OutputValuesTarget, UniversalQueryOutputWires},
+use crate::query::batching::{
+    public_inputs::PublicInputs, row_chunk::aggregate_chunks::aggregate_chunks,
 };
 
-use super::api::NUM_IO;
+use super::api::num_io;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkAggregationWires<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize> {
@@ -87,10 +83,8 @@ impl<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize>
                 b,
                 &row_chunk,
                 &current_chunk,
-                &min_query_primary,
-                &max_query_primary,
-                &min_query_secondary,
-                &max_query_secondary,
+                (&min_query_primary, &max_query_primary),
+                (&min_query_secondary, &max_query_secondary),
                 &ops_ids,
                 &is_non_dummy_chunk[i],
             );
@@ -162,7 +156,7 @@ where
 
     type Inputs = ChunkAggregationCircuit<NUM_CHUNKS, MAX_NUM_RESULTS>;
 
-    const NUM_PUBLIC_INPUTS: usize = NUM_IO::<MAX_NUM_RESULTS>;
+    const NUM_PUBLIC_INPUTS: usize = num_io::<MAX_NUM_RESULTS>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -179,7 +173,7 @@ where
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ChunkAggregationInputs<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize> {
+pub struct ChunkAggregationInputs<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize> {
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
@@ -190,7 +184,7 @@ pub(crate) struct ChunkAggregationInputs<const NUM_CHUNKS: usize, const MAX_NUM_
 
 #[cfg(test)]
 mod tests {
-    use std::{array, iter::repeat};
+    use std::array;
 
     use itertools::Itertools;
     use mp2_common::{array::ToField, utils::FromFields, C, D, F};
@@ -236,7 +230,7 @@ mod tests {
     {
         fn new(pis: &[Vec<F>]) -> Self {
             assert!(
-                pis.len() >= 1,
+                !pis.is_empty(),
                 "there should be at least one chunk to prove"
             );
             let dummy_pi = pis.last().unwrap();
@@ -302,7 +296,7 @@ mod tests {
 
         let input_pis = raw_pis
             .iter()
-            .map(|pi| PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&pi))
+            .map(|pi| PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(pi))
             .collect_vec();
 
         let (expected_outputs, expected_overflow) = {

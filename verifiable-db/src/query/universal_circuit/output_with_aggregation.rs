@@ -22,7 +22,7 @@ use crate::query::computational_hash_ids::{AggregationOperation, Output};
 
 use super::{
     universal_query_gadget::{
-        OutputComponent, OutputComponentHashWires, OutputComponentValueWires, OutputComponentWires,
+        OutputComponent, OutputComponentHashWires, OutputComponentValueWires,
     },
     ComputationalHashTarget,
 };
@@ -55,14 +55,14 @@ pub struct InputWires<const MAX_NUM_RESULTS: usize> {
     is_output_valid: [BoolTarget; MAX_NUM_RESULTS],
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct HashWires<const MAX_NUM_RESULTS: usize> {
+pub struct HashWires<const MAX_NUM_RESULTS: usize> {
     input_wires: InputWires<MAX_NUM_RESULTS>,
     /// Computational hash representing all the computation done in the query circuit
     output_hash: ComputationalHashTarget,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ValueWires<const MAX_NUM_RESULTS: usize> {
+pub struct ValueWires<const MAX_NUM_RESULTS: usize> {
     /// Output values computed by this component
     output_values: [UInt256Target; MAX_NUM_RESULTS],
 }
@@ -233,7 +233,6 @@ mod tests {
         utils::{gen_random_field_hash, gen_random_u256},
     };
     use plonky2::{
-        field::types::Field,
         iop::{
             target::{BoolTarget, Target},
             witness::{PartialWitness, WitnessWrite},
@@ -396,6 +395,7 @@ mod tests {
             const ACTUAL_NUM_RESULTS: usize,
         > TestOutputComponentInputs<MAX_NUM_COLUMNS, MAX_NUM_RESULTS, ACTUAL_NUM_RESULTS>
     {
+        #[allow(clippy::too_many_arguments)]
         fn new(
             column_values: [U256; MAX_NUM_COLUMNS],
             column_hash: [ComputationalHash; MAX_NUM_COLUMNS],

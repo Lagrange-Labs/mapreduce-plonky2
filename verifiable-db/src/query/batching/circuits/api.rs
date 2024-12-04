@@ -3,15 +3,22 @@ use std::iter::{repeat, repeat_with};
 use anyhow::{ensure, Result};
 
 use itertools::Itertools;
-use mp2_common::{
-    array::ToField, default_config, poseidon::H, proof::ProofWithVK, types::HashOutput, C, D, F,
-};
-use plonky2::{iop::target::Target, plonk::config::Hasher};
+use mp2_common::{array::ToField, proof::ProofWithVK, types::HashOutput, C, D, F};
+use plonky2::iop::target::Target;
 use recursion_framework::{
-    circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
-    framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
+    circuit_builder::CircuitWithUniversalVerifier, framework::RecursiveCircuits,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "batching_circuits")]
+use mp2_common::{default_config, poseidon::H};
+#[cfg(feature = "batching_circuits")]
+use plonky2::plonk::config::Hasher;
+#[cfg(feature = "batching_circuits")]
+use recursion_framework::{
+    circuit_builder::CircuitWithUniversalVerifierBuilder,
+    framework::prepare_recursive_circuit_for_circuit_set,
+};
 
 use crate::query::{
     aggregation::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
@@ -61,11 +68,11 @@ impl TreePathInputs {
         let siblings = path
             .iter()
             .map(|(node, child_pos)| {
-                let sibling_index = match child_pos {
-                    &ChildPosition::Left => 1,
-                    &ChildPosition::Right => 0,
+                let sibling_index = match *child_pos {
+                    ChildPosition::Left => 1,
+                    ChildPosition::Right => 0,
                 };
-                Some(HashOutput::try_from(node.child_hashes[sibling_index]).unwrap())
+                Some(HashOutput::from(node.child_hashes[sibling_index]))
             })
             .collect_vec();
         Self {
@@ -79,42 +86,19 @@ impl TreePathInputs {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 /// Data structure containing the information about the paths in both the rows tree
-/// and the index tree for a generic row of our tables
-pub struct RowPath {
+/// and the index tree for a node in a rows tree
+pub struct NodePath {
     pub(crate) row_tree_path: TreePathInputs,
     /// Info about the node of the index tree storing the rows tree containing the row
     pub(crate) index_tree_path: TreePathInputs,
 }
 
-impl RowPath {
-    /// Instantiate a new instance of `RowPath` for a given proven row from the following input data:
-    /// - `row_node_info`: data about the node of the row tree storing the row
-    /// - `row_tree_path`: data about the nodes in the path of the rows tree for the node storing the row;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
-    /// - `row_path_siblings`: hash of the siblings of the node in the rows tree path (except for the root)
-    /// - `row_node_children`: data about the children of the node of the row tree storing the row
-    /// - `index_node_info`: data about the node of the index tree storing the rows tree containing the row
-    /// - `index_tree_path`: data about the nodes in the path of the index tree for the index_node;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
-    /// - `index_path_siblings`: hash of the siblings of the nodes in the index tree path (except for the root)
-    /// - `index_node_children`: data about the children of the index_node
-    pub fn new(
-        row_node_info: NodeInfo,
-        row_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        row_node_children: [Option<NodeInfo>; 2],
-        index_node_info: NodeInfo,
-        index_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        index_node_children: [Option<NodeInfo>; 2],
-    ) -> Self {
-        let row_path = TreePathInputs::new(row_node_info, row_tree_path, row_node_children);
-        let index_path = TreePathInputs::new(index_node_info, index_tree_path, index_node_children);
-        Self {
-            row_tree_path: row_path,
-            index_tree_path: index_path,
-        }
-    }
-
-    pub fn new_from_paths(row_path: TreePathInputs, index_path: TreePathInputs) -> Self {
+impl NodePath {
+    /// Instantiate a new instance of `NodePath` for a given proven row from the following input data:
+    /// - `row_path`: path from the node to the root of the rows tree storing the node
+    /// - `index_path` : path from the index tree node storing the rows tree containing the node, up to the
+    ///     root of the index tree
+    pub fn new(row_path: TreePathInputs, index_path: TreePathInputs) -> Self {
         Self {
             row_tree_path: row_path,
             index_tree_path: index_path,
@@ -123,13 +107,17 @@ impl RowPath {
 }
 
 #[derive(Clone, Debug)]
-pub struct RowWithPath {
+/// Data structure containing the inputs necessary to prove a query for a row
+/// of the DB table.
+pub struct RowInput {
     pub(crate) cells: RowCells,
-    pub(crate) path: RowPath,
+    pub(crate) path: NodePath,
 }
 
-impl RowWithPath {
-    pub fn new(cells: &RowCells, path: &RowPath) -> Self {
+impl RowInput {
+    /// Initialize `RowInput` from the set of cells of the given row and the path
+    /// in the tree of the node of the rows tree associated to the given row
+    pub fn new(cells: &RowCells, path: &NodePath) -> Self {
         Self {
             cells: cells.clone(),
             path: path.clone(),
@@ -137,6 +125,7 @@ impl RowWithPath {
     }
 }
 #[derive(Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum CircuitInput<
     const NUM_CHUNKS: usize,
     const NUM_ROWS: usize,
@@ -193,19 +182,36 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
-    /// Instantiate new input for `RowChunkProcessingCircuit`
+    /// Construct the input necessary to prove a query over a chunk of rows provided as input.
+    /// It requires to provide at least 1 row; in case there are no rows to be proven, then
+    /// `Self::new_non_existence_input` should be used instead
     pub fn new_row_chunks_input(
-        rows: &[RowWithPath],
+        rows: &[RowInput],
         predicate_operations: &[BasicOperation],
         placeholders: &Placeholders,
         query_bounds: &QueryBounds,
         results: &ResultStructure,
     ) -> Result<Self> {
-        ensure!(rows.len() >= 1, "there must be at least 1 row to be proven");
+        ensure!(
+            !rows.is_empty(),
+            "there must be at least 1 row to be proven"
+        );
+        ensure!(
+            rows.len() <= NUM_ROWS,
+            format!(
+                "Found {} rows provided as input, maximum allowed is {NUM_ROWS}",
+                rows.len()
+            )
+        );
         let column_ids = &rows[0].cells.column_ids();
+        ensure!(
+            rows.iter()
+                .all(|row| row.cells.column_ids().to_vec() == column_ids.to_vec()),
+            "Rows provided as input don't have the same column ids",
+        );
         let row_inputs = rows
-            .into_iter()
-            .map(|row| RowProcessingGadgetInputs::try_from(row))
+            .iter()
+            .map(RowProcessingGadgetInputs::try_from)
             .collect::<Result<Vec<_>>>()?;
 
         Ok(Self::RowChunkWithAggregation(
@@ -220,22 +226,28 @@ where
         ))
     }
 
-    /// Instantiate new input for chunk aggregation circuit
+    /// Construct the input necessary to aggregate 2 or more row chunks already proven.
+    /// It requires at least 2 chunks to be aggregated
     pub fn new_chunk_aggregation_input(chunks_proofs: &[Vec<u8>]) -> Result<Self> {
         ensure!(
-            chunks_proofs.len() >= 1,
-            "At least one chunk proof must be provided"
+            chunks_proofs.len() >= 2,
+            "At least 2 chunk proofs must be provided"
         );
         // deserialize `chunk_proofs`` and pad to NUM_CHUNKS proofs by replicating the last proof in `chunk_proofs`
         let last_proof = chunks_proofs.last().unwrap();
         let proofs = chunks_proofs
-            .into_iter()
+            .iter()
             .map(|p| ProofWithVK::deserialize(p))
-            .chain(repeat_with(|| ProofWithVK::deserialize(&last_proof)))
+            .chain(repeat_with(|| ProofWithVK::deserialize(last_proof)))
             .take(NUM_CHUNKS)
             .collect::<Result<Vec<_>>>()?;
 
         let num_proofs = chunks_proofs.len();
+
+        ensure!(
+            num_proofs <= NUM_CHUNKS,
+            format!("Found {num_proofs} proofs provided as input, maximum allowed is {NUM_CHUNKS}")
+        );
 
         Ok(Self::ChunkAggregation(ChunkAggregationInputs {
             chunk_proofs: proofs.try_into().unwrap(),
@@ -245,8 +257,10 @@ where
         }))
     }
 
-    /// Instantiate a new input to prove non-existence of any matching row
-    /// for a query
+    /// Construct the input to prove a query in case there are no rows with a primary index value
+    /// in the primary query range. The circuit employed to prove the non-existence of such a row
+    /// requires to provide a specific node of the index tree, as described in the docs
+    /// https://www.notion.so/lagrangelabs/Batching-Query-10628d1c65a880b1b151d4ac017fa445?pvs=4#10e28d1c65a880498f41cd1cad0c61c3
     pub fn new_non_existence_input(
         index_node_path: TreePathInputs,
         column_ids: &ColumnIDs,
@@ -343,9 +357,11 @@ pub(crate) struct Parameters<
     >,
     circuit_set: RecursiveCircuits<F, C, D>,
 }
-#[rustfmt::skip]
-pub(crate) const NUM_IO<const MAX_NUM_RESULTS: usize>: usize = PublicInputs::<Target, MAX_NUM_RESULTS>::total_len();
 
+pub const fn num_io<const S: usize>() -> usize {
+    PublicInputs::<Target, S>::total_len()
+}
+#[cfg(feature = "batching_circuits")]
 impl<
         const NUM_CHUNKS: usize,
         const NUM_ROWS: usize,
@@ -372,13 +388,13 @@ where
     [(); MAX_NUM_RESULTS - 1]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
-    [(); NUM_IO::<MAX_NUM_RESULTS>]:,
+    [(); num_io::<MAX_NUM_RESULTS>()]:,
 {
     const CIRCUIT_SET_SIZE: usize = 3;
 
     pub(crate) fn build() -> Self {
         let builder =
-            CircuitWithUniversalVerifierBuilder::<F, D, { NUM_IO::<MAX_NUM_RESULTS> }>::new::<C>(
+            CircuitWithUniversalVerifierBuilder::<F, D, { num_io::<MAX_NUM_RESULTS>() }>::new::<C>(
                 default_config(),
                 Self::CIRCUIT_SET_SIZE,
             );
@@ -475,6 +491,7 @@ where
     }
 }
 
+#[cfg(feature = "batching_circuits")]
 #[cfg(test)]
 mod tests {
     use alloy::primitives::U256;
@@ -482,7 +499,6 @@ mod tests {
     use mp2_common::{
         array::ToField,
         proof::ProofWithVK,
-        types::HashOutput,
         utils::{FromFields, ToFields},
         F,
     };
@@ -496,7 +512,7 @@ mod tests {
         },
         batching::{
             circuits::{
-                api::{CircuitInput, RowPath, RowWithPath, TreePathInputs, NUM_IO},
+                api::{CircuitInput, NodePath, RowInput, TreePathInputs},
                 tests::{build_test_tree, compute_output_values_for_row},
             },
             public_inputs::PublicInputs,
@@ -710,39 +726,31 @@ mod tests {
         let [node_1a, node_1b, node_1c, node_1d] = node_1
             .rows_tree
             .iter()
-            .map(|n| n.node.clone())
+            .map(|n| n.node)
             .collect_vec()
             .try_into()
             .unwrap();
         let path_1a = vec![];
 
         let path_1 = vec![];
-        let node_1_children = [Some(node_0.node.clone()), Some(node_2.node.clone())];
+        let node_1_children = [Some(node_0.node), Some(node_2.node)];
 
-        let row_path_1a = RowPath::new(
-            node_1a,
-            path_1a,
-            [Some(node_1b.clone()), Some(node_1c.clone())],
-            node_1.node,
-            path_1.clone(),
-            node_1_children,
+        let row_path_1a = NodePath::new(
+            TreePathInputs::new(node_1a, path_1a, [Some(node_1b), Some(node_1c)]),
+            TreePathInputs::new(node_1.node, path_1.clone(), node_1_children),
         );
 
         let row_cells_1a = to_row_cells(&node_1.rows_tree[0].values);
-        let row_1a = RowWithPath::new(&row_cells_1a, &row_path_1a);
+        let row_1a = RowInput::new(&row_cells_1a, &row_path_1a);
 
-        let path_1c = vec![(node_1a.clone(), ChildPosition::Right)];
-        let row_path_1c = RowPath::new(
-            node_1c,
-            path_1c,
-            [None, Some(node_1d.clone())],
-            node_1.node,
-            path_1,
-            node_1_children,
+        let path_1c = vec![(node_1a, ChildPosition::Right)];
+        let row_path_1c = NodePath::new(
+            TreePathInputs::new(node_1c, path_1c, [None, Some(node_1d)]),
+            TreePathInputs::new(node_1.node, path_1, node_1_children),
         );
 
         let row_cells_1c = to_row_cells(&node_1.rows_tree[2].values);
-        let row_1c = RowWithPath::new(&row_cells_1c, &row_path_1c);
+        let row_1c = RowInput::new(&row_cells_1c, &row_path_1c);
 
         let row_chunk_inputs = CircuitInput::new_row_chunks_input(
             &[row_1a, row_1c],
@@ -767,59 +775,45 @@ mod tests {
         let [node_2a, node_2b, node_2c, node_2d] = node_2
             .rows_tree
             .iter()
-            .map(|n| n.node.clone())
+            .map(|n| n.node)
             .collect_vec()
             .try_into()
             .unwrap();
         let path_2d = vec![
-            (node_2b.clone(), ChildPosition::Right),
-            (node_2a.clone(), ChildPosition::Left),
+            (node_2b, ChildPosition::Right),
+            (node_2a, ChildPosition::Left),
         ];
 
-        let path_2 = vec![(node_1.node.clone(), ChildPosition::Right)];
-        let node_0_hash =
-            HashOutput::try_from(node_0.node.compute_node_hash(primary_index)).unwrap();
+        let path_2 = vec![(node_1.node, ChildPosition::Right)];
         let node_2_children = [None, None];
-        let row_path_2d = RowPath::new(
-            node_2d,
-            path_2d,
-            [None, None],
-            node_2.node,
-            path_2.clone(),
-            node_2_children,
+        let row_path_2d = NodePath::new(
+            TreePathInputs::new(node_2d, path_2d, [None, None]),
+            TreePathInputs::new(node_2.node, path_2.clone(), node_2_children),
         );
 
         let row_cells_2d = to_row_cells(&node_2.rows_tree[3].values);
 
-        let row_2d = RowWithPath::new(&row_cells_2d, &row_path_2d);
+        let row_2d = RowInput::new(&row_cells_2d, &row_path_2d);
 
-        let path_2b = vec![(node_2a.clone(), ChildPosition::Left)];
-        let row_path_2b = RowPath::new(
-            node_2b,
-            path_2b,
-            [Some(node_2c.clone()), Some(node_2d.clone())],
-            node_2.node,
-            path_2.clone(),
-            node_2_children,
+        let path_2b = vec![(node_2a, ChildPosition::Left)];
+        let row_path_2b = NodePath::new(
+            TreePathInputs::new(node_2b, path_2b, [Some(node_2c), Some(node_2d)]),
+            TreePathInputs::new(node_2.node, path_2.clone(), node_2_children),
         );
 
         let row_cells_2b = to_row_cells(&node_2.rows_tree[1].values);
 
-        let row_2b = RowWithPath::new(&row_cells_2b, &row_path_2b);
+        let row_2b = RowInput::new(&row_cells_2b, &row_path_2b);
 
         let path_2a = vec![];
-        let row_path_2a = RowPath::new(
-            node_2a,
-            path_2a,
-            [Some(node_2b.clone()), None],
-            node_2.node,
-            path_2,
-            node_2_children,
+        let row_path_2a = NodePath::new(
+            TreePathInputs::new(node_2a, path_2a, [Some(node_2b), None]),
+            TreePathInputs::new(node_2.node, path_2, node_2_children),
         );
 
         let row_cells_2a = to_row_cells(&node_2.rows_tree[0].values);
 
-        let row_2a = RowWithPath::new(&row_cells_2a, &row_path_2a);
+        let row_2a = RowInput::new(&row_cells_2a, &row_path_2a);
 
         let second_chunk_inputs = CircuitInput::new_row_chunks_input(
             &[row_2b, row_2d, row_2a],
@@ -988,7 +982,7 @@ mod tests {
         assert_eq!(pis.placeholder_hash(), expected_placeholder_hash);
 
         // generate an index tree with all nodes out side of primary index range to test non-existence circuit API
-        let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] = generate_test_tree(
+        let [node_a, node_b, _node_c, node_d, node_e, _node_f, _node_g] = generate_test_tree(
             primary_index,
             Some((max_query_primary + U256::from(1), U256::MAX)),
         );
@@ -998,8 +992,6 @@ mod tests {
             (node_b, ChildPosition::Left),
             (node_a, ChildPosition::Left),
         ];
-        let node_f_hash = HashOutput::try_from(node_f.compute_node_hash(primary_index)).unwrap();
-        let node_c_hash = HashOutput::try_from(node_c.compute_node_hash(primary_index)).unwrap();
         let merkle_path_e = TreePathInputs::new(node_e, path_e, [None, None]);
 
         let input = CircuitInput::new_non_existence_input(
@@ -1024,7 +1016,7 @@ mod tests {
         let expected_outputs = compute_dummy_output_values(&pis.operation_ids());
         assert_eq!(pis.to_values_raw(), &expected_outputs,);
         assert_eq!(pis.num_matching_rows(), F::ZERO,);
-        assert_eq!(pis.overflow_flag(), false);
+        assert!(!pis.overflow_flag());
         assert_eq!(pis.min_primary(), min_query_primary);
         assert_eq!(pis.max_primary(), max_query_primary);
         assert_eq!(pis.computational_hash(), computational_hash);

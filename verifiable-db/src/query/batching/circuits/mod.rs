@@ -71,26 +71,26 @@ mod tests {
         let [value_1, value_2] =
             gen_values_in_range(rng, bounds.min_query_primary(), bounds.max_query_primary());
         // sample secondary index values for rows tree of node 0
-        let [value_0C, value_0A] =
+        let [value_0c, value_0a] =
             gen_values_in_range(rng, *bounds.max_query_secondary().value(), U256::MAX);
-        let [value_0B] = gen_values_in_range(
+        let [value_0b] = gen_values_in_range(
             rng,
             *bounds.min_query_secondary().value(),
             *bounds.max_query_secondary().value(),
         );
         // sample secondary index values for rows tree of node 1
-        let [value_1B] =
+        let [value_1b] =
             gen_values_in_range(rng, U256::ZERO, *bounds.min_query_secondary().value());
-        let [value_1D] = gen_values_in_range(rng, *bounds.max_query_secondary().value(), U256::MAX);
-        let [value_1A, value_1C] = gen_values_in_range(
+        let [value_1d] = gen_values_in_range(rng, *bounds.max_query_secondary().value(), U256::MAX);
+        let [value_1a, value_1c] = gen_values_in_range(
             rng,
             *bounds.min_query_secondary().value(),
             *bounds.max_query_secondary().value(),
         );
         // sample secondary index values for rows tree of node 2
-        let [value_2C] =
+        let [value_2c] =
             gen_values_in_range(rng, U256::ZERO, *bounds.min_query_secondary().value());
-        let [value_2B, value_2D, value_2A] = gen_values_in_range(
+        let [value_2b, value_2d, value_2a] = gen_values_in_range(
             rng,
             *bounds.min_query_secondary().value(),
             *bounds.max_query_secondary().value(),
@@ -113,37 +113,37 @@ mod tests {
             (values, hash)
         };
         // build row 0C
-        let (values, cell_tree_hash) = build_cells(value_0, value_0C).await;
-        let node_0C = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_0, value_0c).await;
+        let node_0c = TestRowsTreeNode {
             node: build_node(
                 None,
                 None,
-                value_0C,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                value_0c,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
         };
         // build row 0B
-        let (values, cell_tree_hash) = build_cells(value_0, value_0B).await;
-        let node_0B = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_0, value_0b).await;
+        let node_0b = TestRowsTreeNode {
             node: build_node(
                 None,
-                Some(&node_0C.node),
-                value_0B,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                Some(&node_0c.node),
+                value_0b,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
         };
         // build row 0A
-        let (values, cell_tree_hash) = build_cells(value_0, value_0A).await;
-        let node_0A = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_0, value_0a).await;
+        let node_0a = TestRowsTreeNode {
             node: build_node(
-                Some(&node_0B.node),
+                Some(&node_0b.node),
                 None,
-                value_0A,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                value_0a,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
@@ -154,55 +154,55 @@ mod tests {
                 None,
                 None,
                 value_0,
-                HashOutput::try_from(node_0A.node.compute_node_hash(secondary_index)).unwrap(),
+                HashOutput::from(node_0a.node.compute_node_hash(secondary_index)),
                 primary_index,
             ),
-            rows_tree: vec![node_0A, node_0B, node_0C],
+            rows_tree: vec![node_0a, node_0b, node_0c],
         };
         // build row 2C
-        let (values, cell_tree_hash) = build_cells(value_2, value_2C).await;
-        let node_2C = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_2, value_2c).await;
+        let node_2c = TestRowsTreeNode {
             node: build_node(
                 None,
                 None,
-                value_2C,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                value_2c,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
         };
         // build row 2D
-        let (values, cell_tree_hash) = build_cells(value_2, value_2D).await;
-        let node_2D = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_2, value_2d).await;
+        let node_2d = TestRowsTreeNode {
             node: build_node(
                 None,
                 None,
-                value_2D,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                value_2d,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
         };
         // build row 2B
-        let (values, cell_tree_hash) = build_cells(value_2, value_2B).await;
-        let node_2B = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_2, value_2b).await;
+        let node_2b = TestRowsTreeNode {
             node: build_node(
-                Some(&node_2C.node),
-                Some(&node_2D.node),
-                value_2B,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                Some(&node_2c.node),
+                Some(&node_2d.node),
+                value_2b,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
         };
         // build row 2A
-        let (values, cell_tree_hash) = build_cells(value_2, value_2A).await;
-        let node_2A = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_2, value_2a).await;
+        let node_2a = TestRowsTreeNode {
             node: build_node(
-                Some(&node_2B.node),
+                Some(&node_2b.node),
                 None,
-                value_2A,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                value_2a,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
@@ -213,55 +213,55 @@ mod tests {
                 None,
                 None,
                 value_2,
-                HashOutput::try_from(node_2A.node.compute_node_hash(secondary_index)).unwrap(),
+                HashOutput::from(node_2a.node.compute_node_hash(secondary_index)),
                 primary_index,
             ),
-            rows_tree: vec![node_2A, node_2B, node_2C, node_2D],
+            rows_tree: vec![node_2a, node_2b, node_2c, node_2d],
         };
         // build row 1D
-        let (values, cell_tree_hash) = build_cells(value_1, value_1D).await;
-        let node_1D = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_1, value_1d).await;
+        let node_1d = TestRowsTreeNode {
             node: build_node(
                 None,
                 None,
-                value_1D,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                value_1d,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
         };
         // build row 1B
-        let (values, cell_tree_hash) = build_cells(value_1, value_1B).await;
-        let node_1B = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_1, value_1b).await;
+        let node_1b = TestRowsTreeNode {
             node: build_node(
                 None,
                 None,
-                value_1B,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                value_1b,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
         };
         // build row 1C
-        let (values, cell_tree_hash) = build_cells(value_1, value_1C).await;
-        let node_1C = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_1, value_1c).await;
+        let node_1c = TestRowsTreeNode {
             node: build_node(
                 None,
-                Some(&node_1D.node),
-                value_1C,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                Some(&node_1d.node),
+                value_1c,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
         };
         // build row 1A
-        let (values, cell_tree_hash) = build_cells(value_1, value_1A).await;
-        let node_1A = TestRowsTreeNode {
+        let (values, cell_tree_hash) = build_cells(value_1, value_1a).await;
+        let node_1a = TestRowsTreeNode {
             node: build_node(
-                Some(&node_1B.node),
-                Some(&node_1C.node),
-                value_1A,
-                HashOutput::try_from(cell_tree_hash).unwrap(),
+                Some(&node_1b.node),
+                Some(&node_1c.node),
+                value_1a,
+                HashOutput::from(cell_tree_hash),
                 secondary_index,
             ),
             values,
@@ -272,10 +272,10 @@ mod tests {
                 Some(&node_0.node),
                 Some(&node_2.node),
                 value_1,
-                HashOutput::try_from(node_1A.node.compute_node_hash(secondary_index)).unwrap(),
+                HashOutput::from(node_1a.node.compute_node_hash(secondary_index)),
                 primary_index,
             ),
-            rows_tree: vec![node_1A, node_1B, node_1C, node_1D],
+            rows_tree: vec![node_1a, node_1b, node_1c, node_1d],
         };
 
         [node_0, node_1, node_2]
@@ -297,16 +297,13 @@ mod tests {
             .into_iter()
             .map(|cell| cell.value)
             .collect_vec();
-        let (res, predicate_err) = BasicOperation::compute_operations(
-            &predicate_operations,
-            &column_values,
-            &placeholders,
-        )
-        .unwrap();
+        let (res, predicate_err) =
+            BasicOperation::compute_operations(predicate_operations, &column_values, placeholders)
+                .unwrap();
         let predicate_value = res.last().unwrap().try_into_bool().unwrap();
 
         let (res, result_err) = results
-            .compute_output_values(&column_values, &placeholders)
+            .compute_output_values(&column_values, placeholders)
             .unwrap();
 
         let aggregation_ops = results.aggregation_operations();

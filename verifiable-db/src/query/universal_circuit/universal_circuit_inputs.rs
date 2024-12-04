@@ -1,4 +1,4 @@
-use anyhow::{ensure, Context, Error, Result};
+use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_set, BTreeSet, HashMap};
 
@@ -83,6 +83,11 @@ impl Placeholders {
     pub fn len(&self) -> usize {
         // number of placeholders in placeholder values
         self.0.len()
+    }
+
+    /// Returns whether `self` is empty or not
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     /// Return set of placeholders ids, in the order expected in the public inputs of the final
@@ -321,12 +326,15 @@ impl BasicOperation {
     }
 
     // utility function to locate operation `op` in the set of `previous_ops`
+    #[cfg(test)] // used only in test for now
     pub(crate) fn locate_previous_operation(previous_ops: &[Self], op: &Self) -> Result<usize> {
         previous_ops
             .iter()
             .find_position(|current_op| *current_op == op)
             .map(|(pos, _)| pos)
-            .ok_or(Error::msg("operation {} not found in set of previous ops"))
+            .ok_or(anyhow::Error::msg(
+                "operation {} not found in set of previous ops",
+            ))
     }
 }
 
@@ -357,7 +365,7 @@ impl ResultStructure {
     /// `column_values` as the operands for the operations having `InputOperand::Column`
     /// operands, and the provided `placeholders` for the operations having `InputOperand::Placeholder`
     /// operands.
-    pub(crate) fn compute_output_values(
+    pub fn compute_output_values(
         &self,
         column_values: &[U256],
         placeholders: &Placeholders,

@@ -119,17 +119,17 @@ impl TableIndexing {
         let single_columns = SINGLE_SLOTS
             .iter()
             .enumerate()
-            .filter_map(|(i, slot)| {
+            .map(|(i, slot)| {
                 let identifier =
                     identifier_single_var_column(*slot, contract_address, chain_id, vec![]);
-                Some(TableColumn {
+                TableColumn {
                     name: format!("column_{}", i),
                     identifier,
                     index: IndexType::None,
                     // ALL single columns are "multiplier" since we do tableA * D(tableB), i.e. all
                     // entries of table A are repeated for each entry of table B.
                     multiplier: true,
-                })
+                }
             })
             .collect::<Vec<_>>();
         let mapping_column = vec![TableColumn {
@@ -591,10 +591,9 @@ impl TableIndexing {
                     debug!(
                         " CONTRACT storage root pis.storage_root() {:?}",
                         hex::encode(
-                            &pis.root_hash_field()
+                            pis.root_hash_field()
                                 .into_iter()
-                                .map(|u| u.to_be_bytes())
-                                .flatten()
+                                .flat_map(|u| u.to_be_bytes())
                                 .collect::<Vec<_>>()
                         )
                     );

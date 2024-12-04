@@ -22,7 +22,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    u256::{CircuitBuilderU256, UInt256Target},
     utils::{FromTargets, ToTargets},
     C, D, F,
 };
@@ -47,12 +47,13 @@ use recursion_framework::{
 use serde::{Deserialize, Serialize};
 
 use super::{
+    num_query_io, num_query_io_no_results_tree, pi_len as revelation_pi_len,
     placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
-    NUM_PREPROCESSING_IO, NUM_QUERY_IO_NO_RESULTS_TREE, PI_LEN as REVELATION_PI_LEN,
+    NUM_PREPROCESSING_IO,
 };
 
 #[cfg(feature = "batching_circuits")]
-use super::revelation_batching::RevelationCircuitBatching;
+use super::batching::RevelationCircuitBatching;
 #[cfg(feature = "batching_circuits")]
 use crate::query::batching::public_inputs::PublicInputs as BatchingPublicInputs;
 
@@ -108,7 +109,7 @@ where
     fn from(value: &'a QueryProofPublicInputs<Target, S>) -> Self {
         Self {
             tree_hash: value.tree_hash_target(),
-            results: OutputValuesTarget::from_targets(&value.to_values_raw()),
+            results: OutputValuesTarget::from_targets(value.to_values_raw()),
             entry_count: value.num_matching_rows_target(),
             overflow: value.overflow_flag_target().target,
             placeholder_hash: value.placeholder_hash_target(),
@@ -279,25 +280,27 @@ impl<const L: usize, const S: usize, const PH: usize, const PP: usize> CircuitLo
     for RecursiveCircuitWires<L, S, PH, PP>
 where
     [(); S - 1]:,
+    [(); num_query_io::<S>()]:,
+    [(); num_query_io_no_results_tree::<S>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
-    [(); NUM_QUERY_IO_NO_RESULTS_TREE::<S>]:,
 {
     type CircuitBuilderParams = CircuitBuilderParams;
 
     type Inputs = RecursiveCircuitInputs<L, S, PH, PP>;
 
-    const NUM_PUBLIC_INPUTS: usize = REVELATION_PI_LEN::<L, S, PH>;
+    const NUM_PUBLIC_INPUTS: usize = revelation_pi_len::<L, S, PH>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let query_verifier =
-            RecursiveCircuitsVerifierGagdet::<F, C, D, { NUM_QUERY_IO_NO_RESULTS_TREE::<S> }>::new(
-                default_config(),
-                &builder_parameters.query_circuit_set,
-            );
+        let query_verifier = RecursiveCircuitsVerifierGagdet::<
+            F,
+            C,
+            D,
+            { num_query_io_no_results_tree::<S>() },
+        >::new(default_config(), &builder_parameters.query_circuit_set);
         let query_verifier = query_verifier.verify_proof_in_circuit_set(builder);
         let preprocessing_verifier =
             RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PREPROCESSING_IO>::new(
@@ -308,14 +311,13 @@ where
             builder,
             &builder_parameters.preprocessing_vk,
         );
-
         let preprocessing_pi =
             OriginalTreePublicInputs::from_slice(&preprocessing_proof.public_inputs);
         #[cfg(feature = "batching_circuits")]
         let revelation_circuit = {
             let query_pi = BatchingPublicInputs::from_slice(
                 query_verifier
-                    .get_public_input_targets::<F, { NUM_QUERY_IO_NO_RESULTS_TREE::<S> }>(),
+                    .get_public_input_targets::<F, { num_query_io_no_results_tree::<S>() }>(),
             );
             RevelationCircuitBatching::build(builder, &query_pi, &preprocessing_pi)
         };
@@ -323,7 +325,7 @@ where
         let revelation_circuit = {
             let query_pi = QueryProofPublicInputs::from_slice(
                 query_verifier
-                    .get_public_input_targets::<F, { NUM_QUERY_IO_NO_RESULTS_TREE::<S> }>(),
+                    .get_public_input_targets::<F, { num_query_io_no_results_tree::<S>() }>(),
             );
             RevelationWithoutResultsTreeCircuit::build(builder, &query_pi, &preprocessing_pi)
         };
@@ -381,7 +383,7 @@ mod tests {
     // Real number of the placeholders
     const NUM_PLACEHOLDERS: usize = 5;
 
-    const QUERY_PI_LEN: usize = crate::query::PI_LEN::<S>;
+    const QUERY_PI_LEN: usize = crate::query::pi_len::<S>();
 
     impl From<&TestPlaceholders<PH, PP>> for RevelationWithoutResultsTreeCircuit<L, S, PH, PP> {
         fn from(test_placeholders: &TestPlaceholders<PH, PP>) -> Self {

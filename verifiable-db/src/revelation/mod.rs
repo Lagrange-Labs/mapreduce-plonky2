@@ -1,55 +1,55 @@
 //! Module including the revelation circuits for query
 
-use crate::{
-    ivc::NUM_IO,
-    query::{batching::circuits::api::NUM_IO as NUM_BATCHING_IO, PI_LEN as QUERY_PI_LEN},
-};
+use crate::{ivc::NUM_IO, query::pi_len as query_pi_len};
 use mp2_common::F;
 
+#[cfg(feature = "batching_circuits")]
+use crate::query::batching::circuits::api::num_io as num_batching_io;
+
 pub mod api;
+#[cfg(feature = "batching_circuits")]
+mod batching;
 pub(crate) mod placeholders_check;
 mod public_inputs;
-mod revelation_batching;
 mod revelation_unproven_offset;
 mod revelation_without_results_tree;
 
 pub use public_inputs::PublicInputs;
 pub use revelation_unproven_offset::RowPath;
 
-// L: maximum number of results
-// S: maximum number of items in each result
-// PH: maximum number of unique placeholder IDs and values bound for query
-// Without this skipping config, the generic parameter was deleted when `cargo fmt`.
-#[rustfmt::skip]
-pub(crate) const PI_LEN<const L: usize, const S: usize, const PH: usize>: usize =
-    PublicInputs::<F, L, S, PH>::total_len();
-
+/// L: maximum number of results
+/// S: maximum number of items in each result
+/// PH: maximum number of unique placeholder IDs and values bound for query
+pub const fn pi_len<const L: usize, const S: usize, const PH: usize>() -> usize {
+    PublicInputs::<F, L, S, PH>::total_len()
+}
 pub const NUM_PREPROCESSING_IO: usize = NUM_IO;
 
 #[cfg(feature = "batching_circuits")]
-#[rustfmt::skip]
-pub const NUM_QUERY_IO_NO_RESULTS_TREE<const S: usize>: usize = NUM_BATCHING_IO::<S>;
+pub const fn num_query_io_no_results_tree<const S: usize>() -> usize {
+    num_batching_io::<S>()
+}
 
 #[cfg(not(feature = "batching_circuits"))]
-#[rustfmt::skip]
-pub const NUM_QUERY_IO_NO_RESULTS_TREE<const S: usize>: usize = QUERY_PI_LEN::<S>;
+pub const fn num_query_io_no_results_tree<const S: usize>() -> usize {
+    query_pi_len::<S>()
+}
 
+pub const fn num_query_io<const S: usize>() -> usize {
+    query_pi_len::<S>()
+}
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::query::{
         computational_hash_ids::{AggregationOperation, PlaceholderIdentifier},
-        public_inputs::PublicInputs as QueryProofPublicInputs,
         universal_circuit::universal_query_gadget::OutputValues,
     };
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{array::ToField, poseidon::H, utils::ToFields, F};
     use mp2_test::utils::gen_random_u256;
-    use placeholders_check::{
-        placeholder_ids_hash, CheckPlaceholderGadget, CheckedPlaceholder,
-        NUM_SECONDARY_INDEX_PLACEHOLDERS,
-    };
+    use placeholders_check::{placeholder_ids_hash, CheckPlaceholderGadget, CheckedPlaceholder};
     use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
     use std::{array, iter::once};
@@ -214,7 +214,7 @@ pub(crate) mod tests {
             [AggregationOperation::AvgOp, AggregationOperation::CountOp].map(|op| op.to_field());
 
         // Compute the results array, and deal with AVG and COUNT operations if any.
-        let result = array::from_fn(|i| {
+        array::from_fn(|i| {
             let value = output_values.value_at_index(i);
 
             let op = ops[i];
@@ -225,8 +225,6 @@ pub(crate) mod tests {
             } else {
                 value
             }
-        });
-
-        result
+        })
     }
 }

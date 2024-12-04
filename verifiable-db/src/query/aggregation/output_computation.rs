@@ -16,7 +16,7 @@ use mp2_common::{
 };
 use plonky2::iop::target::Target;
 use plonky2_crypto::u32::arithmetic_u32::CircuitBuilderU32;
-use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
+use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 
 /// Compute the dummy targets for each of the `S` values to be returned as output.
 pub(crate) fn compute_dummy_output_targets<const S: usize>(
@@ -184,8 +184,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::{
         query::{
-            aggregation::tests::compute_output_item_value,
-            universal_circuit::universal_query_gadget::CurveOrU256, PI_LEN,
+            aggregation::tests::compute_output_item_value, pi_len,
+            universal_circuit::universal_query_gadget::CurveOrU256,
         },
         test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
@@ -206,8 +206,8 @@ pub(crate) mod tests {
 
         let mut outputs = vec![];
 
-        for i in 0..S {
-            let mut output = if ops[i] == op_min {
+        for (i, &item) in ops.iter().enumerate().take(S) {
+            let mut output = if item == op_min {
                 U256::MAX
             } else {
                 U256::ZERO
@@ -215,7 +215,7 @@ pub(crate) mod tests {
             .to_fields();
 
             if i == 0 {
-                output = if ops[i] == op_id {
+                output = if item == op_id {
                     Point::NEUTRAL.to_fields()
                 } else {
                     // Pad the current output to `CURVE_TARGET_LEN` for the first item.
@@ -250,14 +250,15 @@ pub(crate) mod tests {
         for TestOutputComputationCircuit<S, PROOF_NUM>
     where
         [(); S - 1]:,
-        [(); PI_LEN::<S>]:,
+        [(); pi_len::<S>()]:,
     {
         // Proof public inputs + expected outputs
         type Wires = ([Vec<Target>; PROOF_NUM], [TestOutputWires; S]);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             // Initialize the proofs and the expected outputs.
-            let proofs = array::from_fn(|_| b.add_virtual_target_arr::<{ PI_LEN::<S> }>().to_vec());
+            let proofs =
+                array::from_fn(|_| b.add_virtual_target_arr::<{ pi_len::<S>() }>().to_vec());
             let exp_outputs = array::from_fn(|i| {
                 let output = if i == 0 {
                     b.add_virtual_target_arr::<CURVE_TARGET_LEN>().to_vec()
