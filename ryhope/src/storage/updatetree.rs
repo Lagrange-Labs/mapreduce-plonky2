@@ -54,6 +54,10 @@ impl<K: Clone + Hash + Eq> UpdateTree<K> {
     fn node_mut(&mut self, i: usize) -> &mut UpdateTreeNode<K> {
         &mut self.nodes[i]
     }
+
+    pub fn node_from_key(&self, k: &K) -> Option<&UpdateTreeNode<K>> {
+        self.idx.get(k).map(|i| self.node(*i))
+    }
 }
 
 impl<K: Debug + Clone + Hash + Eq> UpdateTree<K> {

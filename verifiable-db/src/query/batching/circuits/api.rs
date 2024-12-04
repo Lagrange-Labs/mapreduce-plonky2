@@ -63,9 +63,18 @@ impl TreePathInputs {
     pub fn new(
         node_info: NodeInfo,
         path: Vec<(NodeInfo, ChildPosition)>,
-        siblings: Vec<Option<HashOutput>>,
         children: [Option<NodeInfo>; 2],
     ) -> Self {
+        let siblings = path
+            .iter()
+            .map(|(node, child_pos)| {
+                let sibling_index = match *child_pos {
+                    ChildPosition::Left => 1,
+                    ChildPosition::Right => 0,
+                };
+                Some(HashOutput::from(node.child_hashes[sibling_index]))
+            })
+            .collect_vec();
         Self {
             node_info,
             path,
@@ -97,6 +106,7 @@ impl NodePath {
     }
 }
 
+#[derive(Clone, Debug)]
 /// Data structure containing the inputs necessary to prove a query for a row
 /// of the DB table.
 pub struct RowInput {
@@ -475,7 +485,12 @@ where
         };
         proof.serialize()
     }
+
+    pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
+        &self.circuit_set
+    }
 }
+
 #[cfg(feature = "batching_circuits")]
 #[cfg(test)]
 mod tests {
@@ -484,7 +499,6 @@ mod tests {
     use mp2_common::{
         array::ToField,
         proof::ProofWithVK,
-        types::HashOutput,
         utils::{FromFields, ToFields},
         F,
     };
@@ -717,38 +731,22 @@ mod tests {
             .try_into()
             .unwrap();
         let path_1a = vec![];
-        let siblings_1a = vec![];
 
         let path_1 = vec![];
-        let siblings_1 = vec![];
         let node_1_children = [Some(node_0.node), Some(node_2.node)];
 
         let row_path_1a = NodePath::new(
-            node_1a,
-            path_1a,
-            siblings_1a,
-            [Some(node_1b), Some(node_1c)],
-            node_1.node,
-            path_1.clone(),
-            siblings_1.clone(),
-            node_1_children,
+            TreePathInputs::new(node_1a, path_1a, [Some(node_1b), Some(node_1c)]),
+            TreePathInputs::new(node_1.node, path_1.clone(), node_1_children),
         );
 
         let row_cells_1a = to_row_cells(&node_1.rows_tree[0].values);
         let row_1a = RowInput::new(&row_cells_1a, &row_path_1a);
 
         let path_1c = vec![(node_1a, ChildPosition::Right)];
-        let node_1b_hash = HashOutput::from(node_1b.compute_node_hash(secondary_index));
-        let siblings_1c = vec![Some(node_1b_hash)];
         let row_path_1c = NodePath::new(
-            node_1c,
-            path_1c,
-            siblings_1c,
-            [None, Some(node_1d)],
-            node_1.node,
-            path_1,
-            siblings_1,
-            node_1_children,
+            TreePathInputs::new(node_1c, path_1c, [None, Some(node_1d)]),
+            TreePathInputs::new(node_1.node, path_1, node_1_children),
         );
 
         let row_cells_1c = to_row_cells(&node_1.rows_tree[2].values);
@@ -785,22 +783,12 @@ mod tests {
             (node_2b, ChildPosition::Right),
             (node_2a, ChildPosition::Left),
         ];
-        let node_2c_hash = HashOutput::from(node_2c.compute_node_hash(secondary_index));
-        let siblings_2d = vec![Some(node_2c_hash), None];
 
         let path_2 = vec![(node_1.node, ChildPosition::Right)];
-        let node_0_hash = HashOutput::from(node_0.node.compute_node_hash(primary_index));
-        let siblings_2 = vec![Some(node_0_hash)];
         let node_2_children = [None, None];
         let row_path_2d = NodePath::new(
-            node_2d,
-            path_2d,
-            siblings_2d,
-            [None, None],
-            node_2.node,
-            path_2.clone(),
-            siblings_2.clone(),
-            node_2_children,
+            TreePathInputs::new(node_2d, path_2d, [None, None]),
+            TreePathInputs::new(node_2.node, path_2.clone(), node_2_children),
         );
 
         let row_cells_2d = to_row_cells(&node_2.rows_tree[3].values);
@@ -808,16 +796,9 @@ mod tests {
         let row_2d = RowInput::new(&row_cells_2d, &row_path_2d);
 
         let path_2b = vec![(node_2a, ChildPosition::Left)];
-        let siblings_2b = vec![None];
         let row_path_2b = NodePath::new(
-            node_2b,
-            path_2b,
-            siblings_2b,
-            [Some(node_2c), Some(node_2d)],
-            node_2.node,
-            path_2.clone(),
-            siblings_2.clone(),
-            node_2_children,
+            TreePathInputs::new(node_2b, path_2b, [Some(node_2c), Some(node_2d)]),
+            TreePathInputs::new(node_2.node, path_2.clone(), node_2_children),
         );
 
         let row_cells_2b = to_row_cells(&node_2.rows_tree[1].values);
@@ -825,16 +806,9 @@ mod tests {
         let row_2b = RowInput::new(&row_cells_2b, &row_path_2b);
 
         let path_2a = vec![];
-        let siblings_2a = vec![];
         let row_path_2a = NodePath::new(
-            node_2a,
-            path_2a,
-            siblings_2a,
-            [Some(node_2b), None],
-            node_2.node,
-            path_2,
-            siblings_2,
-            node_2_children,
+            TreePathInputs::new(node_2a, path_2a, [Some(node_2b), None]),
+            TreePathInputs::new(node_2.node, path_2, node_2_children),
         );
 
         let row_cells_2a = to_row_cells(&node_2.rows_tree[0].values);
@@ -1008,7 +982,7 @@ mod tests {
         assert_eq!(pis.placeholder_hash(), expected_placeholder_hash);
 
         // generate an index tree with all nodes out side of primary index range to test non-existence circuit API
-        let [node_a, node_b, node_c, node_d, node_e, node_f, _node_g] = generate_test_tree(
+        let [node_a, node_b, _node_c, node_d, node_e, _node_f, _node_g] = generate_test_tree(
             primary_index,
             Some((max_query_primary + U256::from(1), U256::MAX)),
         );
@@ -1018,10 +992,7 @@ mod tests {
             (node_b, ChildPosition::Left),
             (node_a, ChildPosition::Left),
         ];
-        let node_f_hash = HashOutput::from(node_f.compute_node_hash(primary_index));
-        let node_c_hash = HashOutput::from(node_c.compute_node_hash(primary_index));
-        let siblings_e = vec![Some(node_f_hash), None, Some(node_c_hash)];
-        let merkle_path_e = TreePathInputs::new(node_e, path_e, siblings_e, [None, None]);
+        let merkle_path_e = TreePathInputs::new(node_e, path_e, [None, None]);
 
         let input = CircuitInput::new_non_existence_input(
             merkle_path_e,

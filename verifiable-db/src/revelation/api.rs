@@ -448,6 +448,7 @@ where
     [(); num_query_io_no_results_tree::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
 {
     pub fn build(
+        _batching_query_circuit_set: &RecursiveCircuits<F, C, D>,
         query_circuit_set: &RecursiveCircuits<F, C, D>,
         preprocessing_circuit_set: &RecursiveCircuits<F, C, D>,
         preprocessing_vk: &VerifierOnlyCircuitData<C, D>,
@@ -462,6 +463,16 @@ where
             preprocessing_circuit_set: preprocessing_circuit_set.clone(),
             preprocessing_vk: preprocessing_vk.clone(),
         };
+        #[cfg(feature = "batching_circuits")]
+        let revelation_no_results_tree = {
+            let batching_build_params = CircuitBuilderParams {
+                query_circuit_set: _batching_query_circuit_set.clone(),
+                preprocessing_circuit_set: preprocessing_circuit_set.clone(),
+                preprocessing_vk: preprocessing_vk.clone(),
+            };
+            builder.build_circuit(batching_build_params)
+        };
+        #[cfg(not(feature = "batching_circuits"))]
         let revelation_no_results_tree = builder.build_circuit(build_parameters.clone());
         let revelation_unproven_offset = builder.build_circuit(build_parameters);
 
@@ -491,6 +502,7 @@ where
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
         >,
+        _batching_query_circuit_set: &RecursiveCircuits<F, C, D>,
         query_circuit_set: &RecursiveCircuits<F, C, D>,
         query_params: Option<
             &QueryParams<
@@ -507,6 +519,14 @@ where
                 preprocessing_proof,
                 revelation_circuit,
             } => {
+                #[cfg(feature = "batching_circuits")]
+                let input = RecursiveCircuitInputs {
+                    inputs: revelation_circuit,
+                    query_proof,
+                    preprocessing_proof,
+                    query_circuit_set: _batching_query_circuit_set.clone(),
+                };
+                #[cfg(not(feature = "batching_circuits"))]
                 let input = RecursiveCircuitInputs {
                     inputs: revelation_circuit,
                     query_proof,
@@ -568,6 +588,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "batching_circuits"))]
 mod tests {
     use crate::test_utils::{
         TestRevelationData, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
@@ -600,7 +621,6 @@ mod tests {
         },
     };
 
-    #[cfg(not(feature = "batching_circuits"))]
     #[test]
     fn test_api() {
         use mp2_common::utils::FromFields;
@@ -631,6 +651,7 @@ mod tests {
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
         >::build(
+            query_circuits.get_recursive_circuit_set(), // unused, so we use a dummy one
             query_circuits.get_recursive_circuit_set(),
             preprocessing_circuits.get_recursive_circuit_set(),
             preprocessing_circuits
@@ -669,7 +690,12 @@ mod tests {
         )
         .unwrap();
         let proof = params
-            .generate_proof(input, query_circuits.get_recursive_circuit_set(), None)
+            .generate_proof(
+                input,
+                query_circuits.get_recursive_circuit_set(), // unused in this test, so we provide a dummy one
+                query_circuits.get_recursive_circuit_set(),
+                None,
+            )
             .unwrap();
         let (proof, _) = ProofWithVK::deserialize(&proof).unwrap().into();
         let pi = PublicInputs::<F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>::from_slice(&proof.public_inputs);

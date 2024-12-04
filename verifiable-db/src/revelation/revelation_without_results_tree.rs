@@ -53,7 +53,7 @@ use super::{
 };
 
 #[cfg(feature = "batching_circuits")]
-use super::revelation_batching::RevelationCircuitBatching;
+use super::batching::RevelationCircuitBatching;
 #[cfg(feature = "batching_circuits")]
 use crate::query::batching::public_inputs::PublicInputs as BatchingPublicInputs;
 
@@ -295,11 +295,12 @@ where
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let query_verifier =
-            RecursiveCircuitsVerifierGagdet::<F, C, D, { num_query_io::<S>() }>::new(
-                default_config(),
-                &builder_parameters.query_circuit_set,
-            );
+        let query_verifier = RecursiveCircuitsVerifierGagdet::<
+            F,
+            C,
+            D,
+            { num_query_io_no_results_tree::<S>() },
+        >::new(default_config(), &builder_parameters.query_circuit_set);
         let query_verifier = query_verifier.verify_proof_in_circuit_set(builder);
         let preprocessing_verifier =
             RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PREPROCESSING_IO>::new(

@@ -275,9 +275,7 @@ mod tests {
     use std::array;
 
     use alloy::primitives::U256;
-    use mp2_common::{
-        check_panic, poseidon::empty_poseidon_hash, types::HashOutput, utils::ToFields, C, D, F,
-    };
+    use mp2_common::{check_panic, poseidon::empty_poseidon_hash, utils::ToFields, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::gen_random_field_hash,
@@ -338,7 +336,7 @@ mod tests {
         )
         .unwrap();
         // generate a test index tree with all nodes bigger than max_primary
-        let [node_a, node_b, node_c, node_d, node_e, node_f, _node_g] = generate_test_tree(
+        let [node_a, node_b, _node_c, node_d, node_e, _node_f, _node_g] = generate_test_tree(
             primary_index,
             Some((max_query_primary + U256::from(1), U256::MAX)),
         );
@@ -348,10 +346,7 @@ mod tests {
             (node_b, ChildPosition::Left),
             (node_a, ChildPosition::Left),
         ];
-        let node_f_hash = HashOutput::from(node_f.compute_node_hash(primary_index));
-        let node_c_hash = HashOutput::from(node_c.compute_node_hash(primary_index));
-        let siblings_e = vec![Some(node_f_hash), None, Some(node_c_hash)];
-        let merkle_path_e = TreePathInputs::new(node_e, path_e, siblings_e, [None, None]);
+        let merkle_path_e = TreePathInputs::new(node_e, path_e, [None, None]);
         let circuit = NonExistenceCircuit::new(
             &merkle_path_e,
             primary_index,
@@ -454,7 +449,7 @@ mod tests {
         );
 
         // generate a test index tree with all nodes smaller than min_query_primary
-        let [node_a, node_b, node_c, _node_d, _node_e, _node_f, node_g] = generate_test_tree(
+        let [node_a, _node_b, node_c, _node_d, _node_e, _node_f, node_g] = generate_test_tree(
             primary_index,
             Some((U256::ZERO, min_query_primary - U256::from(1))),
         );
@@ -463,9 +458,7 @@ mod tests {
             (node_c, ChildPosition::Right),
             (node_a, ChildPosition::Right),
         ];
-        let node_b_hash = HashOutput::from(node_b.compute_node_hash(primary_index));
-        let siblings_g = vec![None, Some(node_b_hash)];
-        let merkle_path_g = TreePathInputs::new(node_g, path_g, siblings_g, [None, None]);
+        let merkle_path_g = TreePathInputs::new(node_g, path_g, [None, None]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_g,
@@ -532,10 +525,7 @@ mod tests {
             (node_b, ChildPosition::Left),
             (node_a, ChildPosition::Left),
         ];
-        let node_e_hash = HashOutput::from(node_e.compute_node_hash(primary_index));
-        let node_c_hash = HashOutput::from(node_c.compute_node_hash(primary_index));
-        let siblings_f = vec![Some(node_e_hash), None, Some(node_c_hash)];
-        let merkle_path_f = TreePathInputs::new(node_f, path_f, siblings_f, [None, None]);
+        let merkle_path_f = TreePathInputs::new(node_f, path_f, [None, None]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_f,
@@ -572,8 +562,7 @@ mod tests {
 
         // we try to prove also with node_b
         let path_b = vec![(node_a, ChildPosition::Left)];
-        let siblings_b = vec![Some(node_c_hash)];
-        let merkle_path_b = TreePathInputs::new(node_b, path_b, siblings_b, [Some(node_d), None]);
+        let merkle_path_b = TreePathInputs::new(node_b, path_b, [Some(node_d), None]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_b,
@@ -616,9 +605,7 @@ mod tests {
         .unwrap();
         // try generate prove with node_a
         let path_a = vec![];
-        let siblings_a = vec![];
-        let merkle_path_a =
-            TreePathInputs::new(node_a, path_a, siblings_a, [Some(node_b), Some(node_c)]);
+        let merkle_path_a = TreePathInputs::new(node_a, path_a, [Some(node_b), Some(node_c)]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_a,
@@ -653,9 +640,7 @@ mod tests {
 
         // try generate prove with node_c
         let path_c = vec![(node_a, ChildPosition::Right)];
-        let node_b_hash = HashOutput::from(node_b.compute_node_hash(primary_index));
-        let siblings_c = vec![Some(node_b_hash)];
-        let merkle_path_c = TreePathInputs::new(node_c, path_c, siblings_c, [None, Some(node_g)]);
+        let merkle_path_c = TreePathInputs::new(node_c, path_c, [None, Some(node_g)]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_c,
@@ -674,9 +659,7 @@ mod tests {
 
         // try generate prove with node_d
         let path_d = vec![(node_b, ChildPosition::Left), (node_a, ChildPosition::Left)];
-        let siblings_d = vec![None, Some(node_c_hash)];
-        let merkle_path_d =
-            TreePathInputs::new(node_d, path_d, siblings_d, [Some(node_e), Some(node_f)]);
+        let merkle_path_d = TreePathInputs::new(node_d, path_d, [Some(node_e), Some(node_f)]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_d,
@@ -699,9 +682,7 @@ mod tests {
             (node_b, ChildPosition::Left),
             (node_a, ChildPosition::Left),
         ];
-        let node_f_hash = HashOutput::from(node_f.compute_node_hash(primary_index));
-        let siblings_e = vec![Some(node_f_hash), None, Some(node_c_hash)];
-        let merkle_path_e = TreePathInputs::new(node_e, path_e, siblings_e, [None, None]);
+        let merkle_path_e = TreePathInputs::new(node_e, path_e, [None, None]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_e,
@@ -740,8 +721,7 @@ mod tests {
             (node_c, ChildPosition::Right),
             (node_a, ChildPosition::Right),
         ];
-        let siblings_g = vec![None, Some(node_b_hash)];
-        let merkle_path_g = TreePathInputs::new(node_g, path_g, siblings_g, [None, None]);
+        let merkle_path_g = TreePathInputs::new(node_g, path_g, [None, None]);
 
         let circuit = NonExistenceCircuit::new(
             &merkle_path_g,

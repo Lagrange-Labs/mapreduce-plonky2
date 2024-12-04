@@ -70,6 +70,14 @@ pub enum ProofKey {
     QueryUniversal((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
     QueryAggregateRow((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
     QueryAggregateIndex((QueryID, PlaceholderValues, BlockPrimaryIndex)),
+    #[cfg(feature = "batching_circuits")]
+    QueryAggregate(
+        (
+            QueryID,
+            PlaceholderValues,
+            mp2_v1::query::batching_planner::UTKey<{ super::cases::query::NUM_CHUNKS }>,
+        ),
+    ),
 }
 
 impl ProofKey {
@@ -129,6 +137,11 @@ impl Hash for ProofKey {
             }
             ProofKey::QueryAggregateIndex(n) => {
                 "query_aggregate_index".hash(state);
+                n.hash(state);
+            }
+            #[cfg(feature = "batching_circuits")]
+            ProofKey::QueryAggregate(n) => {
+                "query_aggregate".hash(state);
                 n.hash(state);
             }
         }
