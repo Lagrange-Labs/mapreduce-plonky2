@@ -28,7 +28,7 @@ use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
+    utils::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
     computational_hash_ids::{
         ColumnIDs, ComputationalHashCache, HashPermutation, Operation, Output,
         PlaceholderIdentifier,
@@ -1094,7 +1094,6 @@ impl<const MAX_NUM_RESULTS: usize> OutputValues<MAX_NUM_RESULTS>
 where
     [(); MAX_NUM_RESULTS - 1]:,
 {
-    #[cfg(test)] // used only in test for now
     pub(crate) fn new_aggregation_outputs(values: &[U256]) -> Self {
         let first_output = CurveOrU256::<F>::from_slice(&values[0].to_fields());
         let other_outputs = values[1..]
@@ -1110,7 +1109,6 @@ where
         }
     }
 
-    #[cfg(test)] // used only in test for now
     pub(crate) fn new_outputs_no_aggregation(point: &plonky2_ecgfp5::curve::curve::Point) -> Self {
         let first_output = CurveOrU256::<F>::from_slice(&point.to_fields());
         Self {

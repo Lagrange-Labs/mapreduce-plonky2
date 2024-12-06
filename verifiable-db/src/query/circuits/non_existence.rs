@@ -22,7 +22,7 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::{output_computation::compute_dummy_output_targets, QueryBounds}, api::TreePathInputs, batching::row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget}, merkle_path::{
+    utils::QueryBounds, output_computation::compute_dummy_output_targets, api::TreePathInputs, row_chunk_gadgets::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget}, merkle_path::{
         MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs, NeighborInfoTarget,
     }, pi_len, public_inputs::PublicInputs, universal_circuit::{
         ComputationalHash, ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
@@ -281,16 +281,9 @@ mod tests {
 
     use crate::{
         query::{
-            aggregation::{
-                output_computation::tests::compute_dummy_output_values, ChildPosition, QueryBounds,
-            },
-            api::TreePathInputs,
-            batching::row_chunk::tests::{BoundaryRowData, BoundaryRowNodeInfo},
-            public_inputs::{tests::gen_values_in_range, PublicInputs},
-            merkle_path::tests::{generate_test_tree, NeighborInfo},
-            universal_circuit::universal_circuit_inputs::Placeholders,
+            api::TreePathInputs, merkle_path::{tests::generate_test_tree, NeighborInfo}, output_computation::tests::compute_dummy_output_values, public_inputs::PublicInputs, row_chunk_gadgets::{BoundaryRowData, BoundaryRowNodeInfo}, universal_circuit::universal_circuit_inputs::Placeholders, utils::{ChildPosition, QueryBounds}
         },
-        test_utils::random_aggregation_operations,
+        test_utils::{gen_values_in_range, random_aggregation_operations},
     };
 
     use super::{NonExistenceCircuit, NonExistenceWires};

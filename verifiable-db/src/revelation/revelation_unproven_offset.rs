@@ -49,7 +49,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
-        aggregation::{ChildPosition, NodeInfo, QueryBounds}, public_inputs::PublicInputsUniversalCircuit as QueryProofPublicInputs, computational_hash_ids::{ColumnIDs, ResultIdentifier}, merkle_path::{MerklePathGadget, MerklePathTargetInputs}, universal_circuit::{
+        utils::{ChildPosition, NodeInfo, QueryBounds}, public_inputs::PublicInputsUniversalCircuit as QueryProofPublicInputs, computational_hash_ids::{ColumnIDs, ResultIdentifier}, merkle_path::{MerklePathGadget, MerklePathTargetInputs}, universal_circuit::{
             build_cells_tree,
             universal_circuit_inputs::{BasicOperation, ColumnCell, Placeholders, ResultStructure, RowCells}, universal_query_circuit::{UniversalCircuitInput, UniversalQueryCircuitInputs},
         }
@@ -844,7 +844,7 @@ mod tests {
             PublicInputs as OriginalTreePublicInputs,
         },
         query::{
-            aggregation::{ChildPosition, NodeInfo},
+            utils::{ChildPosition, NodeInfo},
             public_inputs::{PublicInputsUniversalCircuit as QueryProofPublicInputs, QueryPublicInputsUniversalCircuit}, pi_len as query_pi_len,
         },
         revelation::{

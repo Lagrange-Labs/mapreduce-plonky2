@@ -20,14 +20,13 @@ serde.workspace = true
 mp2_common = { path = "../mp2-common" }
 recursion_framework = { path = "../recursion-framework" }
 ryhope = { path = "../ryhope" }
+mp2_test = { path = "../mp2-test" }
 
 [dev-dependencies]
 futures.workspace = true
 rand.workspace = true
 serial_test.workspace = true
 tokio.workspace = true
-
-mp2_test = { path = "../mp2-test" }
 
 [features]
 original_poseidon = ["mp2_common/original_poseidon"]

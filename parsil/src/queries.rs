@@ -5,7 +5,7 @@ use crate::{keys_in_index_boundaries, symbols::ContextProvider, ParsilSettings};
 use anyhow::*;
 use ryhope::{tree::sbbst::NodeIdx, Epoch, EPOCH, KEY, VALID_FROM, VALID_UNTIL};
 use verifiable_db::query::{
-    aggregation::QueryBounds, universal_circuit::universal_circuit_inputs::Placeholders,
+    utils::QueryBounds, universal_circuit::universal_circuit_inputs::Placeholders,
 };
 
 /// Return a query read to be injected in the wide lineage computation for the

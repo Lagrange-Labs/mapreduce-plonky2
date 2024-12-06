@@ -7,7 +7,7 @@ pub use utils::ParsilSettings;
 pub use utils::PlaceholderSettings;
 pub use utils::DEFAULT_MAX_BLOCK_PLACEHOLDER;
 pub use utils::DEFAULT_MIN_BLOCK_PLACEHOLDER;
-use verifiable_db::query::aggregation::QueryBounds;
+use verifiable_db::query::utils::QueryBounds;
 
 pub mod assembler;
 pub mod bracketer;

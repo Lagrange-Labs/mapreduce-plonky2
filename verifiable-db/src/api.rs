@@ -1,7 +1,5 @@
 //! Main APIs and related structures
 
-#[cfg(feature = "batching_circuits")]
-use crate::query::batching::circuits::api::Parameters as BatchingQueryParams;
 use crate::{
     block_tree, cells_tree,
     extraction::{ExtractionPI, ExtractionPIWrap},

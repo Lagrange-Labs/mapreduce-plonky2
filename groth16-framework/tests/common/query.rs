@@ -59,7 +59,6 @@ impl TestContext {
             .generate_proof(
                 input,
                 self.query_circuits.get_recursive_circuit_set(),
-                self.query_circuits.get_recursive_circuit_set(),
                 None,
             )
             .unwrap();

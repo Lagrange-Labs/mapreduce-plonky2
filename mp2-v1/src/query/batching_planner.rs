@@ -11,7 +11,7 @@ use ryhope::{
     Epoch,
 };
 use verifiable_db::query::{
-    batching::{NodePath, RowInput, TreePathInputs},
+    api::{NodePath, RowInput, TreePathInputs},
     computational_hash_ids::ColumnIDs,
     universal_circuit::universal_circuit_inputs::{ColumnCell, RowCells},
 };

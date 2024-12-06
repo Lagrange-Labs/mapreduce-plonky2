@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     query::{
-        aggregation::QueryBounds, computational_hash_ids::ColumnIDs, pi_len as query_pi_len, universal_circuit::{output_no_aggregation::Circuit as OutputNoAggCircuit, universal_circuit_inputs::{
+        utils::QueryBounds, computational_hash_ids::ColumnIDs, pi_len as query_pi_len, universal_circuit::{output_no_aggregation::Circuit as OutputNoAggCircuit, universal_circuit_inputs::{
             BasicOperation, Placeholders, ResultStructure,
         }, universal_query_circuit::{UniversalCircuitInput, UniversalQueryCircuitParams}}
     },
@@ -301,7 +301,6 @@ where
                 placeholder_hash_ids,
             )?,
         };
-        println!("{:?}", revelation_circuit);
 
         Ok(CircuitInput::NoResultsTree {
             query_proof,
@@ -477,7 +476,7 @@ where
         }
     }
 
-    pub(crate) fn generate_proof(
+    pub fn generate_proof(
         &self,
         input: CircuitInput<
             ROW_TREE_MAX_DEPTH,

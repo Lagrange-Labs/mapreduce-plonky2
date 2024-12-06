@@ -10,7 +10,7 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::QueryBounds, batching::row_chunk::
+    utils::QueryBounds, row_chunk_gadgets::
     {
         row_process_gadget::{RowProcessingGadgetInputWires, RowProcessingGadgetInputs},
         aggregate_chunks::aggregate_chunks, RowChunkDataTarget,
@@ -374,24 +374,22 @@ mod tests {
     use rand::thread_rng;
 
     use crate::query::{
-        aggregation::{
+        utils::{
             tests::aggregate_output_values, ChildPosition, QueryBoundSource, QueryBounds,
         },
-        batching::{
-            circuits::{
-                row_chunk_processing::RowChunkProcessingCircuit,
-                tests::{build_test_tree, compute_output_values_for_row},
-            },
-            row_chunk::{
-                tests::{BoundaryRowData, BoundaryRowNodeInfo},
-                row_process_gadget::RowProcessingGadgetInputs
-            },
+        circuits::{
+            row_chunk_processing::RowChunkProcessingCircuit,
+            tests::{build_test_tree, compute_output_values_for_row},
+        },
+        row_chunk_gadgets::{
+            BoundaryRowData, BoundaryRowNodeInfo,
+            row_process_gadget::RowProcessingGadgetInputs
         },
         public_inputs::PublicInputs,
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
         },
-        merkle_path::{tests::NeighborInfo, MerklePathWithNeighborsGadget},
+        merkle_path::{NeighborInfo, MerklePathWithNeighborsGadget},
         universal_circuit::{
             output_no_aggregation::Circuit as NoAggOutputCircuit,
             output_with_aggregation::Circuit as AggOutputCircuit,

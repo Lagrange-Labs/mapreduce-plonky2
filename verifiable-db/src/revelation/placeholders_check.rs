@@ -2,7 +2,7 @@
 //! compute and return the `num_placeholders` and the `placeholder_ids_hash`.
 
 use crate::query::{
-    aggregation::QueryBounds,
+    utils::QueryBounds,
     computational_hash_ids::PlaceholderIdentifier,
     universal_circuit::{
         universal_circuit_inputs::{PlaceholderId, Placeholders},

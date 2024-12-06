@@ -5,12 +5,11 @@ use log::info;
 use mp2_common::types::HashOutput;
 use mp2_v1::{
     api::MetadataHash,
-    indexing::{block::BlockPrimaryIndex, row::RowTreeKey, LagrangeNode},
-    query::planner::execute_row_query,
+    indexing::{block::BlockPrimaryIndex, row::{RowPayload, RowTreeKey}, LagrangeNode},
+    query::planner::{execute_row_query, get_node_info, TreeFetcher}, values_extraction::identifier_block_column,
 };
 use parsil::{
-    executor::generate_query_execution_with_keys, DEFAULT_MAX_BLOCK_PLACEHOLDER,
-    DEFAULT_MIN_BLOCK_PLACEHOLDER,
+    assembler::DynamicCircuitPis, executor::generate_query_execution_with_keys, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER
 };
 use ryhope::{
     storage::{pgsql::ToFromBytea, RoEpochKvStorage},
@@ -21,9 +20,7 @@ use std::{fmt::Debug, hash::Hash};
 use tokio_postgres::Row as PgSqlRow;
 use verifiable_db::{
     query::{
-        aggregation::{ChildPosition, NodeInfo},
-        computational_hash_ids::ColumnIDs,
-        universal_circuit::universal_circuit_inputs::{PlaceholderId, Placeholders},
+        computational_hash_ids::ColumnIDs, universal_circuit::universal_circuit_inputs::{ColumnCell, PlaceholderId, Placeholders, RowCells}, utils::{ChildPosition, NodeInfo}
     },
     revelation::{api::MatchingRow, RowPath},
     test_utils::MAX_NUM_OUTPUTS,
@@ -32,20 +29,19 @@ use verifiable_db::{
 use crate::common::{
     cases::{
         indexing::BLOCK_COLUMN_NAME,
-        planner::{IndexInfo, QueryPlanner, RowInfo, TreeInfo},
         query::{
             aggregated_queries::{
-                check_final_outputs, find_longest_lived_key, get_node_info, prove_single_row,
+                check_final_outputs, find_longest_lived_key,
             },
-            GlobalCircuitInput, RevelationCircuitInput, SqlReturn, SqlType,
+            GlobalCircuitInput, RevelationCircuitInput, SqlReturn, SqlType, QueryPlanner,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
-    table::Table,
+    table::{Table, TableColumns},
     TableInfo,
 };
 
-use super::QueryCooking;
+use super::{QueryCircuitInput, QueryCooking, TestContext};
 
 pub(crate) async fn prove_query(
     mut parsed: Query,
@@ -80,24 +76,12 @@ pub(crate) async fn prove_query(
         })
         .collect::<Result<Vec<_>>>()?;
     // compute input for each matching row
-    let row_tree_info = RowInfo {
-        satisfiying_rows: matching_rows
-            .iter()
-            .map(|(key, _, _)| key)
-            .cloned()
-            .collect(),
-        tree: &planner.table.row,
-    };
-    let index_tree_info = IndexInfo {
-        bounds: (planner.query.min_block, planner.query.max_block),
-        tree: &planner.table.index,
-    };
-    let current_epoch = index_tree_info.tree.current_epoch();
+    let current_epoch = planner.table.index.current_epoch();
     let mut matching_rows_input = vec![];
     for (key, epoch, result) in matching_rows.into_iter() {
         let row_proof = prove_single_row(
             planner.ctx,
-            &row_tree_info,
+            &planner.table.row,
             &planner.columns,
             epoch as BlockPrimaryIndex,
             &key,
@@ -105,13 +89,21 @@ pub(crate) async fn prove_query(
             &planner.query,
         )
         .await?;
-        let (row_node_info, _, _) = get_node_info(&row_tree_info, &key, epoch).await;
-        let (row_tree_path, row_tree_siblings) = get_path_info(&key, &row_tree_info, epoch).await?;
+        let (row_node_info, _, _) = get_node_info(&planner.table.row, &key, epoch).await;
+        let (row_tree_path, row_tree_siblings) = get_path_info(
+            &key, 
+            &planner.table.row, 
+            epoch)
+        .await?;
         let index_node_key = epoch as BlockPrimaryIndex;
         let (index_node_info, _, _) =
-            get_node_info(&index_tree_info, &index_node_key, current_epoch).await;
+            get_node_info(&planner.table.index, &index_node_key, current_epoch).await;
         let (index_tree_path, index_tree_siblings) =
-            get_path_info(&index_node_key, &index_tree_info, current_epoch).await?;
+            get_path_info(
+                &index_node_key, 
+                &planner.table.index, 
+                current_epoch
+        ).await?;
         let path = RowPath::new(
             row_node_info,
             row_tree_path,
@@ -163,7 +155,7 @@ pub(crate) async fn prove_query(
     Ok(())
 }
 
-async fn get_path_info<K, V, T: TreeInfo<K, V>>(
+async fn get_path_info<K, V, T: TreeFetcher<K, V>>(
     key: &K,
     tree_info: &T,
     epoch: Epoch,
@@ -175,7 +167,7 @@ where
     let mut tree_path = vec![];
     let mut siblings = vec![];
     let (mut node_ctx, mut node_payload) = tree_info
-        .fetch_ctx_and_payload_at(epoch, key)
+        .fetch_ctx_and_payload_at(key, epoch)
         .await
         .ok_or(Error::msg(format!("Node not found for key {:?}", key)))?;
     let mut previous_node_hash = node_payload.hash();
@@ -183,7 +175,7 @@ where
     while node_ctx.parent.is_some() {
         let parent_key = node_ctx.parent.unwrap();
         (node_ctx, node_payload) = tree_info
-            .fetch_ctx_and_payload_at(epoch, &parent_key)
+            .fetch_ctx_and_payload_at(&parent_key, epoch)
             .await
             .ok_or(Error::msg(format!(
                 "Node not found for key {:?}",
@@ -199,7 +191,7 @@ where
                 match node_ctx.right {
                     Some(k) => {
                         let (_, payload) = tree_info
-                            .fetch_ctx_and_payload_at(epoch, &k)
+                            .fetch_ctx_and_payload_at(&k, epoch)
                             .await
                             .ok_or(Error::msg(format!("Node not found for key {:?}", k)))?;
                         Some(payload.hash())
@@ -212,7 +204,7 @@ where
                 match node_ctx.left {
                     Some(k) => {
                         let (_, payload) = tree_info
-                            .fetch_ctx_and_payload_at(epoch, &k)
+                            .fetch_ctx_and_payload_at(&k, epoch)
                             .await
                             .ok_or(Error::msg(format!("Node not found for key {:?}", k)))?;
                         Some(payload.hash())
@@ -248,6 +240,71 @@ where
     }
 
     Ok((tree_path, siblings))
+}
+
+pub(crate) async fn prove_single_row<T: TreeFetcher<RowTreeKey, RowPayload<BlockPrimaryIndex>>>(
+    ctx: &mut TestContext,
+    tree: &T,
+    columns: &TableColumns,
+    primary: BlockPrimaryIndex,
+    row_key: &RowTreeKey,
+    pis: &DynamicCircuitPis,
+    query: &QueryCooking,
+) -> Result<Vec<u8>> {
+    // 1. Get the all the cells including primary and secondary index
+    // Note we can use the primary as epoch since now epoch == primary in the storage
+    let (row_ctx, row_payload) = tree
+        .fetch_ctx_and_payload_at(row_key, primary as Epoch)
+        .await
+        .expect("cache not full");
+
+    // API is gonna change on this but right now, we have to sort all the "rest" cells by index
+    // in the tree, and put the primary one and secondary one in front
+    let rest_cells = columns
+        .non_indexed_columns()
+        .iter()
+        .map(|tc| tc.identifier)
+        .filter_map(|id| {
+            row_payload
+                .cells
+                .find_by_column(id)
+                .map(|info| ColumnCell::new(id, info.value))
+        })
+        .collect::<Vec<_>>();
+
+    let secondary_cell = ColumnCell::new(
+        row_payload.secondary_index_column,
+        row_payload.secondary_index_value(),
+    );
+    let primary_cell = ColumnCell::new(identifier_block_column(), U256::from(primary));
+    let row = RowCells::new(primary_cell, secondary_cell, rest_cells);
+    // 2. create input
+    let input = QueryCircuitInput::new_universal_circuit(
+        &row,
+        &pis.predication_operations,
+        &pis.result,
+        &query.placeholders,
+        row_ctx.is_leaf(),
+        &pis.bounds,
+    )
+    .expect("unable to create universal query circuit inputs");
+    // 3. run proof if not ran already
+    let proof_key = ProofKey::QueryUniversal((
+        query.query.clone(),
+        query.placeholders.placeholder_values(),
+        primary,
+        row_key.clone(),
+    ));
+    let proof = {
+        info!("Universal query proof RUNNING for {primary} -> {row_key:?} ");
+        let proof = ctx
+            .run_query_proof("querying::universal", GlobalCircuitInput::Query(input))
+            .expect("unable to generate universal proof for {epoch} -> {row_key:?}");
+        info!("Universal query proof DONE for {primary} -> {row_key:?} ");
+        ctx.storage.store_proof(proof_key, proof.clone())?;
+        proof
+    };
+    Ok(proof)
 }
 
 /// Cook a query where the number of matching rows is the same as the maximum number of

@@ -10,26 +10,14 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "batching_circuits")]
-use mp2_common::{default_config, poseidon::H};
-#[cfg(feature = "batching_circuits")]
-use plonky2::plonk::config::Hasher;
-#[cfg(feature = "batching_circuits")]
-use recursion_framework::{
-    circuit_builder::CircuitWithUniversalVerifierBuilder,
-    framework::prepare_recursive_circuit_for_circuit_set,
-};
-
 use crate::query::{
-    aggregation::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
-    batching::{
-        circuits::{
-                chunk_aggregation::{ChunkAggregationCircuit, ChunkAggregationInputs, ChunkAggregationWires}, 
-                non_existence::{NonExistenceCircuit, NonExistenceWires},
-                row_chunk_processing::{RowChunkProcessingCircuit, RowChunkProcessingWires},
-        },
-        row_chunk::row_process_gadget::RowProcessingGadgetInputs,
+    utils::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
+    circuits::{
+            chunk_aggregation::{ChunkAggregationCircuit, ChunkAggregationInputs, ChunkAggregationWires}, 
+            non_existence::{NonExistenceCircuit, NonExistenceWires},
+            row_chunk_processing::{RowChunkProcessingCircuit, RowChunkProcessingWires},
     },
+    row_chunk_gadgets::row_process_gadget::RowProcessingGadgetInputs,
     computational_hash_ids::{AggregationOperation, ColumnIDs, Identifiers},
     universal_circuit::{
         output_with_aggregation::Circuit as OutputAggCircuit,

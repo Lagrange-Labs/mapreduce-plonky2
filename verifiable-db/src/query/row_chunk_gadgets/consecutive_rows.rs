@@ -235,7 +235,7 @@ mod tests {
     use rand::thread_rng;
 
     use crate::query::{
-        aggregation::{ChildPosition, NodeInfo},
+        utils::{ChildPosition, NodeInfo},
         merkle_path::{
             tests::{build_node, generate_test_tree},
             MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs,

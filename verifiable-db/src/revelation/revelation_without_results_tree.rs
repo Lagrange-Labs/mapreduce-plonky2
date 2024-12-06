@@ -393,7 +393,7 @@ mod tests {
     use crate::{
         ivc::PublicInputs as OriginalTreePublicInputs,
         query::{
-            aggregation::{QueryBoundSource, QueryBounds},
+            utils::{QueryBoundSource, QueryBounds},
             public_inputs::{
                     PublicInputs as QueryProofPublicInputs,
                     QueryPublicInputs,

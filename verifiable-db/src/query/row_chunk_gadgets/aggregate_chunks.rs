@@ -124,16 +124,15 @@ mod tests {
 
     use crate::{
         query::{
-            aggregation::{tests::aggregate_output_values, ChildPosition, NodeInfo},
-            batching::row_chunk::{
-                tests::{BoundaryRowData, BoundaryRowNodeInfo, RowChunkData},
+            utils::{tests::aggregate_output_values, ChildPosition, NodeInfo},
+            row_chunk_gadgets::{BoundaryRowData, BoundaryRowNodeInfo, tests::RowChunkData,
                 BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget,
             },
             public_inputs::PublicInputs, 
             computational_hash_ids::{AggregationOperation, Identifiers},
             merkle_path::{
-                tests::{build_node, generate_test_tree, NeighborInfo},
-                MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs,
+                tests::{build_node, generate_test_tree},
+                NeighborInfo, MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs,
             },
             universal_circuit::universal_query_gadget::{
                 OutputValues, OutputValuesTarget, UniversalQueryOutputWires,

@@ -4,20 +4,25 @@
 //! the chunk are labelled as the `left_boundary_row` and the `right_boundary_row`,
 //! respectively, and are the rows employed to aggregate 2 different chunks.
 
+use alloy::primitives::U256;
 use mp2_common::{
     serialization::circuit_data_serialization::SerializableRichField,
-    utils::{FromTargets, HashBuilder, SelectTarget, ToTargets},
+    utils::{FromFields, FromTargets, HashBuilder, SelectTarget, ToFields, ToTargets}, F,
 };
+use mp2_test::utils::gen_random_field_hash;
 use plonky2::{
-    hash::hash_types::{HashOutTarget, NUM_HASH_OUT_ELTS},
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
 };
+use rand::Rng;
 
-use crate::query::{
+use crate::{query::{
     merkle_path::{MerklePathWithNeighborsTarget, NeighborInfoTarget},
     universal_circuit::universal_query_gadget::UniversalQueryOutputWires,
-};
+}, test_utils::gen_values_in_range};
+
+use super::{merkle_path::NeighborInfo, utils::QueryBounds};
 
 /// This module contains gadgets to aggregate 2 different row chunks
 pub(crate) mod aggregate_chunks;
@@ -208,38 +213,43 @@ where
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
-    use alloy::primitives::U256;
-    use mp2_common::{
-        utils::{FromFields, FromTargets, ToFields},
-        F,
-    };
-    use mp2_test::utils::gen_random_field_hash;
-    use plonky2::{
-        field::types::Field,
-        hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
-    };
-    use rand::Rng;
 
-    use crate::query::{
-        aggregation::QueryBounds,
-        batching::row_chunk::BoundaryRowDataTarget,
-        merkle_path::{tests::NeighborInfo, NeighborInfoTarget},
-        universal_circuit::universal_query_gadget::OutputValues,
-        public_inputs::tests::gen_values_in_range, 
-    };
+#[derive(Clone, Debug)]
+pub(crate) struct BoundaryRowNodeInfo {
+    pub(crate) end_node_hash: HashOut<F>,
+    pub(crate) predecessor_info: NeighborInfo,
+    pub(crate) successor_info: NeighborInfo,
+}
 
-    use super::BoundaryRowNodeInfoTarget;
-
-    #[derive(Clone, Debug)]
-    pub(crate) struct BoundaryRowNodeInfo {
-        pub(crate) end_node_hash: HashOut<F>,
-        pub(crate) predecessor_info: NeighborInfo,
-        pub(crate) successor_info: NeighborInfo,
+impl ToFields<F> for BoundaryRowNodeInfo {
+    fn to_fields(&self) -> Vec<F> {
+        self.end_node_hash
+            .to_fields()
+            .into_iter()
+            .chain(self.predecessor_info.to_fields())
+            .chain(self.successor_info.to_fields())
+            .collect()
     }
+}
 
-    impl BoundaryRowNodeInfo {
+impl FromFields<F> for BoundaryRowNodeInfo {
+    fn from_fields(t: &[F]) -> Self {
+        assert!(t.len() >= BoundaryRowNodeInfoTarget::NUM_TARGETS);
+        let end_node_hash = HashOut::from_partial(&t[..NUM_HASH_OUT_ELTS]);
+        let predecessor_info = NeighborInfo::from_fields(&t[NUM_HASH_OUT_ELTS..]);
+        let successor_info = NeighborInfo::from_fields(
+            &t[NUM_HASH_OUT_ELTS + NeighborInfoTarget::NUM_TARGETS..],
+        );
+
+        Self {
+            end_node_hash,
+            predecessor_info,
+            successor_info,
+        }
+    }
+}
+
+impl BoundaryRowNodeInfo {
         /// Generate an instance of `Self` representing a random node, given the `query_bounds`
         /// provided as input and a flag `is_index_tree` specifying whether the random node
         /// should be part of an index tree or of a rows tree. It is used to generate test data
@@ -369,132 +379,121 @@ pub(crate) mod tests {
                 successor_info,
             }
         }
-    }
+}
 
-    impl ToFields<F> for BoundaryRowNodeInfo {
-        fn to_fields(&self) -> Vec<F> {
-            self.end_node_hash
-                .to_fields()
-                .into_iter()
-                .chain(self.predecessor_info.to_fields())
-                .chain(self.successor_info.to_fields())
-                .collect()
+#[derive(Clone, Debug)]
+pub(crate) struct BoundaryRowData {
+    pub(crate) row_node_info: BoundaryRowNodeInfo,
+    pub(crate) index_node_info: BoundaryRowNodeInfo,
+}
+
+impl ToFields<F> for BoundaryRowData {
+    fn to_fields(&self) -> Vec<F> {
+        self.row_node_info
+            .to_fields()
+            .into_iter()
+            .chain(self.index_node_info.to_fields())
+            .collect()
+    }
+}
+
+impl FromFields<F> for BoundaryRowData {
+    fn from_fields(t: &[F]) -> Self {
+        assert!(t.len() >= BoundaryRowDataTarget::NUM_TARGETS);
+        let row_node_info = BoundaryRowNodeInfo::from_fields(t);
+        let index_node_info =
+            BoundaryRowNodeInfo::from_fields(&t[BoundaryRowNodeInfoTarget::NUM_TARGETS..]);
+
+        Self {
+            row_node_info,
+            index_node_info,
+        }
+    }
+}
+
+impl BoundaryRowData {
+    /// Generate a random instance of `Self`, given the `query_bounds` provided as inputs.
+    /// It is employed to generate test data without the need to build an actual test tree
+    pub(crate) fn sample<R: Rng>(rng: &mut R, query_bounds: &QueryBounds) -> Self {
+        Self {
+            row_node_info: BoundaryRowNodeInfo::sample(rng, query_bounds, false),
+            index_node_info: BoundaryRowNodeInfo::sample(rng, query_bounds, true),
         }
     }
 
-    impl FromFields<F> for BoundaryRowNodeInfo {
-        fn from_fields(t: &[F]) -> Self {
-            assert!(t.len() >= BoundaryRowNodeInfoTarget::NUM_TARGETS);
-            let end_node_hash = HashOut::from_partial(&t[..NUM_HASH_OUT_ELTS]);
-            let predecessor_info = NeighborInfo::from_fields(&t[NUM_HASH_OUT_ELTS..]);
-            let successor_info = NeighborInfo::from_fields(
-                &t[NUM_HASH_OUT_ELTS + NeighborInfoTarget::NUM_TARGETS..],
-            );
-
+    /// Given the boundary row `self`, generates at random the data of the consecutive row of
+    /// `self`, given the `query_bounds` provided as input. It is employed to generate test data
+    /// without the need to build an actual test tree
+    pub(crate) fn sample_consecutive_row<R: Rng>(
+        &self,
+        rng: &mut R,
+        query_bounds: &QueryBounds,
+    ) -> Self {
+        if self.row_node_info.successor_info.is_found
+            && self.row_node_info.successor_info.value
+                <= *query_bounds.max_query_secondary().value()
+        {
+            // the successor must be in the same rows tree
+            let row_node_info =
+                self.row_node_info
+                    .sample_successor_in_tree(rng, query_bounds, false);
             Self {
+                row_node_info,
+                index_node_info: self.index_node_info.clone(),
+            }
+        } else {
+            // the successor must be in a different rows tree
+            let end_node_hash = gen_random_field_hash();
+            // predecessor value must be out of range in this case
+            let [predecessor_value] = gen_values_in_range(
+                rng,
+                U256::ZERO,
+                query_bounds
+                    .min_query_secondary()
+                    .value()
+                    .checked_sub(U256::from(1))
+                    .unwrap_or(U256::ZERO),
+            );
+            let predecessor_info = NeighborInfo::sample(rng, predecessor_value, None);
+            let [successor_value] = gen_values_in_range(
+                rng,
+                predecessor_value.max(*query_bounds.min_query_secondary().value()), // successor value must
+                // always be greater than min_secondary in circuit
+                U256::MAX,
+            );
+            let successor_info = NeighborInfo::sample(rng, successor_value, None);
+            let row_node_info = BoundaryRowNodeInfo {
                 end_node_hash,
                 predecessor_info,
                 successor_info,
-            }
-        }
-    }
-    #[derive(Clone, Debug)]
-    pub(crate) struct BoundaryRowData {
-        pub(crate) row_node_info: BoundaryRowNodeInfo,
-        pub(crate) index_node_info: BoundaryRowNodeInfo,
-    }
-
-    impl ToFields<F> for BoundaryRowData {
-        fn to_fields(&self) -> Vec<F> {
-            self.row_node_info
-                .to_fields()
-                .into_iter()
-                .chain(self.index_node_info.to_fields())
-                .collect()
-        }
-    }
-
-    impl FromFields<F> for BoundaryRowData {
-        fn from_fields(t: &[F]) -> Self {
-            assert!(t.len() >= BoundaryRowDataTarget::NUM_TARGETS);
-            let row_node_info = BoundaryRowNodeInfo::from_fields(t);
+            };
+            // index tree node must be a successor of `self.index_node`
             let index_node_info =
-                BoundaryRowNodeInfo::from_fields(&t[BoundaryRowNodeInfoTarget::NUM_TARGETS..]);
-
+                self.index_node_info
+                    .sample_successor_in_tree(rng, query_bounds, true);
             Self {
                 row_node_info,
                 index_node_info,
             }
         }
     }
+}
 
-    impl BoundaryRowData {
-        /// Generate a random instance of `Self`, given the `query_bounds` provided as inputs.
-        /// It is employed to generate test data without the need to build an actual test tree
-        pub(crate) fn sample<R: Rng>(rng: &mut R, query_bounds: &QueryBounds) -> Self {
-            Self {
-                row_node_info: BoundaryRowNodeInfo::sample(rng, query_bounds, false),
-                index_node_info: BoundaryRowNodeInfo::sample(rng, query_bounds, true),
-            }
-        }
+#[cfg(test)]
+pub(crate) mod tests {
+    use mp2_common::{
+        utils::ToFields,
+        F,
+    };
+    use plonky2::{
+        field::types::Field,
+        hash::hash_types::HashOut,
+    };
 
-        /// Given the boundary row `self`, generates at random the data of the consecutive row of
-        /// `self`, given the `query_bounds` provided as input. It is employed to generate test data
-        /// without the need to build an actual test tree
-        pub(crate) fn sample_consecutive_row<R: Rng>(
-            &self,
-            rng: &mut R,
-            query_bounds: &QueryBounds,
-        ) -> Self {
-            if self.row_node_info.successor_info.is_found
-                && self.row_node_info.successor_info.value
-                    <= *query_bounds.max_query_secondary().value()
-            {
-                // the successor must be in the same rows tree
-                let row_node_info =
-                    self.row_node_info
-                        .sample_successor_in_tree(rng, query_bounds, false);
-                Self {
-                    row_node_info,
-                    index_node_info: self.index_node_info.clone(),
-                }
-            } else {
-                // the successor must be in a different rows tree
-                let end_node_hash = gen_random_field_hash();
-                // predecessor value must be out of range in this case
-                let [predecessor_value] = gen_values_in_range(
-                    rng,
-                    U256::ZERO,
-                    query_bounds
-                        .min_query_secondary()
-                        .value()
-                        .checked_sub(U256::from(1))
-                        .unwrap_or(U256::ZERO),
-                );
-                let predecessor_info = NeighborInfo::sample(rng, predecessor_value, None);
-                let [successor_value] = gen_values_in_range(
-                    rng,
-                    predecessor_value.max(*query_bounds.min_query_secondary().value()), // successor value must
-                    // always be greater than min_secondary in circuit
-                    U256::MAX,
-                );
-                let successor_info = NeighborInfo::sample(rng, successor_value, None);
-                let row_node_info = BoundaryRowNodeInfo {
-                    end_node_hash,
-                    predecessor_info,
-                    successor_info,
-                };
-                // index tree node must be a successor of `self.index_node`
-                let index_node_info =
-                    self.index_node_info
-                        .sample_successor_in_tree(rng, query_bounds, true);
-                Self {
-                    row_node_info,
-                    index_node_info,
-                }
-            }
-        }
-    }
+    use crate::query::universal_circuit::universal_query_gadget::OutputValues;
+
+    use super::BoundaryRowData;
+
     #[derive(Clone, Debug)]
     pub(crate) struct RowChunkData<const MAX_NUM_RESULTS: usize>
     where

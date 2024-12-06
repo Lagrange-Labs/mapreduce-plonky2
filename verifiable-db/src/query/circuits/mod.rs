@@ -17,16 +17,12 @@ mod tests {
     };
     use rand::thread_rng;
 
-    use crate::query::{
-        aggregation::{NodeInfo, QueryBounds},
-        public_inputs::tests::gen_values_in_range,
-        computational_hash_ids::AggregationOperation,
-        merkle_path::tests::build_node,
-        universal_circuit::{
+    use crate::{query::{
+        computational_hash_ids::AggregationOperation, merkle_path::tests::build_node, universal_circuit::{
             universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure, RowCells},
             universal_query_gadget::OutputValues,
-        },
-    };
+        }, utils::{NodeInfo, QueryBounds}
+    }, test_utils::gen_values_in_range};
 
     /// Data structure employed to represent a node of a rows tree in the tests
     #[derive(Clone, Debug)]

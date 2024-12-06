@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use crate::revelation::placeholders_check::placeholder_ids_hash;
 
 use super::{
-    aggregation::QueryBoundSource,
+    utils::QueryBoundSource,
     universal_circuit::{
         universal_circuit_inputs::{
             BasicOperation, InputOperand, OutputItem, PlaceholderIdsSet, ResultStructure,

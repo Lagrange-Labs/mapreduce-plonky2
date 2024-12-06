@@ -1,7 +1,7 @@
 use std::iter::once;
 
 use crate::query::{
-    aggregation::QueryBounds, public_inputs::PublicInputsUniversalCircuit, batching::row_chunk::BoundaryRowDataTarget, computational_hash_ids::{Output, PlaceholderIdentifier}, pi_len
+    computational_hash_ids::{Output, PlaceholderIdentifier}, pi_len, public_inputs::PublicInputsUniversalCircuit, row_chunk_gadgets::BoundaryRowDataTarget, utils::QueryBounds
 };
 use anyhow::Result;
 use itertools::Itertools;
@@ -311,7 +311,7 @@ where
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct UniversalQueryCircuitParams<
+pub struct UniversalQueryCircuitParams<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
     const MAX_NUM_RESULT_OPS: usize,
@@ -499,7 +499,7 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-        aggregation::{QueryBoundSource, QueryBounds},
+        utils::{QueryBoundSource, QueryBounds},
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, HashPermutation, Identifiers, Operation,
             PlaceholderIdentifier,

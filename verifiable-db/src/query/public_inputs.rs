@@ -16,13 +16,13 @@ use plonky2::{
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 
 use crate::query::{
-    aggregation::output_computation::compute_dummy_output_targets,
+    output_computation::compute_dummy_output_targets,
     universal_circuit::universal_query_gadget::{
         CurveOrU256Target, OutputValues, OutputValuesTarget, UniversalQueryOutputWires,
     },
 };
 
-use super::batching::row_chunk::{BoundaryRowDataTarget, RowChunkDataTarget};
+use super::row_chunk_gadgets::{BoundaryRowDataTarget, RowChunkDataTarget};
 
 /// Query circuits public inputs
 pub enum QueryPublicInputs {
@@ -590,138 +590,20 @@ impl<const S: usize> PublicInputsUniversalCircuit<'_, F, S> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::array;
-
-    use alloy::primitives::U256;
-    use itertools::Itertools;
-    use mp2_common::{array::ToField, public_inputs::PublicInputCommon, utils::ToFields, C, D, F};
+    use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
-        utils::{gen_random_field_hash, gen_random_u256, random_vector},
+        utils::random_vector,
     };
     use plonky2::{
-        field::types::{Field, Sample},
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
         },
         plonk::circuit_builder::CircuitBuilder,
     };
-    use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{thread_rng, Rng};
 
-    use crate::query::{
-        aggregation::{QueryBoundSource, QueryBounds},
-        batching::row_chunk::tests::BoundaryRowData,
-        computational_hash_ids::{AggregationOperation, Identifiers},
-        universal_circuit::universal_circuit_inputs::Placeholders,
-    };
-
-    use super::{OutputValues, PublicInputsFactory, PublicInputs, QueryPublicInputs};
-
-    /// Generate a set of values in a given range ensuring that the i+1-th generated value is
-    /// bigger than the i-th generated value    
-    pub(crate) fn gen_values_in_range<const N: usize, R: Rng>(
-        rng: &mut R,
-        lower: U256,
-        upper: U256,
-    ) -> [U256; N] {
-        assert!(upper >= lower, "{upper} is smaller than {lower}");
-        let mut prev_value = lower;
-        array::from_fn(|_| {
-            let range = (upper - prev_value).checked_add(U256::from(1));
-            let gen_value = match range {
-                Some(range) => prev_value + gen_random_u256(rng) % range,
-                None => gen_random_u256(rng),
-            };
-            prev_value = gen_value;
-            gen_value
-        })
-    }
-
-    impl<const S: usize, const UNIVERSAL_CIRCUIT: bool> PublicInputsFactory<'_, F, S, UNIVERSAL_CIRCUIT> {
-        pub(crate) fn sample_from_ops<const NUM_INPUTS: usize>(ops: &[F; S]) -> [Vec<F>; NUM_INPUTS]
-        where
-            [(); S - 1]:,
-        {
-            let rng = &mut thread_rng();
-
-            let tree_hash = gen_random_field_hash();
-            let computational_hash = gen_random_field_hash();
-            let placeholder_hash = gen_random_field_hash();
-            let [min_primary, max_primary] = gen_values_in_range(rng, U256::ZERO, U256::MAX);
-            let [min_secondary, max_secondary] = gen_values_in_range(rng, U256::ZERO, U256::MAX);
-
-            let query_bounds = {
-                let placeholders = Placeholders::new_empty(min_primary, max_primary);
-                QueryBounds::new(
-                    &placeholders,
-                    Some(QueryBoundSource::Constant(min_secondary)),
-                    Some(QueryBoundSource::Constant(max_secondary)),
-                )
-                .unwrap()
-            };
-
-            let is_first_op_id =
-                ops[0] == Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
-
-            let mut previous_row: Option<BoundaryRowData> = None;
-            array::from_fn(|_| {
-                // generate output values
-                let output_values = if is_first_op_id {
-                    // generate random curve point
-                    OutputValues::<S>::new_outputs_no_aggregation(&Point::sample(rng))
-                } else {
-                    let values = (0..S).map(|_| gen_random_u256(rng)).collect_vec();
-                    OutputValues::<S>::new_aggregation_outputs(&values)
-                };
-                // generate random count and overflow flag
-                let count = F::from_canonical_u32(rng.gen());
-                let overflow = F::from_bool(rng.gen());
-                // generate boundary rows
-                let left_boundary_row = if let Some(row) = &previous_row {
-                    row.sample_consecutive_row(rng, &query_bounds)
-                } else {
-                    BoundaryRowData::sample(rng, &query_bounds)
-                };
-                let right_boundary_row = BoundaryRowData::sample(rng, &query_bounds);
-                assert!(
-                    left_boundary_row.index_node_info.predecessor_info.value >= min_primary
-                        && left_boundary_row.index_node_info.predecessor_info.value <= max_primary
-                );
-                assert!(
-                    left_boundary_row.index_node_info.successor_info.value >= min_primary
-                        && left_boundary_row.index_node_info.successor_info.value <= max_primary
-                );
-                assert!(
-                    right_boundary_row.index_node_info.predecessor_info.value >= min_primary
-                        && right_boundary_row.index_node_info.predecessor_info.value <= max_primary
-                );
-                assert!(
-                    right_boundary_row.index_node_info.successor_info.value >= min_primary
-                        && right_boundary_row.index_node_info.successor_info.value <= max_primary
-                );
-                previous_row = Some(right_boundary_row.clone());
-
-                PublicInputs::<F, S>::new(
-                    &tree_hash.to_fields(),
-                    &output_values.to_fields(),
-                    &[count],
-                    ops,
-                    &left_boundary_row.to_fields(),
-                    &right_boundary_row.to_fields(),
-                    &min_primary.to_fields(),
-                    &max_primary.to_fields(),
-                    &min_secondary.to_fields(),
-                    &max_secondary.to_fields(),
-                    &[overflow],
-                    &computational_hash.to_fields(),
-                    &placeholder_hash.to_fields(),
-                )
-                .to_vec()
-            })
-        }
-    }
+    use super::{PublicInputs, QueryPublicInputs};
 
     const S: usize = 10;
     #[derive(Clone, Debug)]

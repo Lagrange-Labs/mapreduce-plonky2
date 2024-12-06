@@ -3,12 +3,11 @@
 use crate::{
     ivc::public_inputs::H_RANGE as ORIGINAL_TREE_H_RANGE,
     query::{
-        aggregation::{QueryBounds, QueryHashNonExistenceCircuits}, batching::row_chunk::tests::BoundaryRowData, computational_hash_ids::{
+        computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
-        }, universal_circuit::universal_circuit_inputs::{
+        }, public_inputs::{PublicInputs as QueryPI, PublicInputsFactory, QueryPublicInputs}, row_chunk_gadgets::BoundaryRowData, universal_circuit::{universal_circuit_inputs::{
             BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders, ResultStructure,
-        },
-        public_inputs::{tests::gen_values_in_range, PublicInputs as QueryPI, QueryPublicInputs}
+        }, universal_query_gadget::OutputValues}, utils::{QueryBoundSource, QueryBounds, QueryHashNonExistenceCircuits}
     },
     revelation::NUM_PREPROCESSING_IO,
 };
@@ -19,11 +18,13 @@ use mp2_common::{
     utils::{Fieldable, ToFields},
     F,
 };
+use mp2_test::utils::{gen_random_field_hash, gen_random_u256};
 use plonky2::{
-    field::types::PrimeField64,
+    field::types::{PrimeField64, Sample, Field},
     hash::hash_types::HashOut,
     plonk::config::GenericHashOut,
 };
+use plonky2_ecgfp5::curve::curve::Point;
 use rand::{prelude::SliceRandom, thread_rng, Rng};
 use std::array;
 
@@ -42,6 +43,27 @@ pub const MAX_NUM_RESULT_OPS: usize = 20;
 pub const ROW_TREE_MAX_DEPTH: usize = 10;
 pub const INDEX_TREE_MAX_DEPTH: usize = 15;
 pub const NUM_COLUMNS: usize = 4;
+
+
+/// Generate a set of values in a given range ensuring that the i+1-th generated value is
+/// bigger than the i-th generated value    
+pub(crate) fn gen_values_in_range<const N: usize, R: Rng>(
+    rng: &mut R,
+    lower: U256,
+    upper: U256,
+) -> [U256; N] {
+    assert!(upper >= lower, "{upper} is smaller than {lower}");
+    let mut prev_value = lower;
+    array::from_fn(|_| {
+        let range = (upper - prev_value).checked_add(U256::from(1));
+        let gen_value = match range {
+            Some(range) => prev_value + gen_random_u256(rng) % range,
+            None => gen_random_u256(rng),
+        };
+        prev_value = gen_value;
+        gen_value
+    })
+}
 
 /// Generate a random original tree proof for testing.
 pub fn random_original_tree_proof(tree_hash: HashOut<F>) -> Vec<F> {
@@ -72,6 +94,90 @@ pub fn random_aggregation_operations<const S: usize>() -> [F; S] {
         let op = *ops.choose(&mut rng).unwrap();
         Identifiers::AggregationOperations(op).to_field()
     })
+}
+
+impl<const S: usize, const UNIVERSAL_CIRCUIT: bool> PublicInputsFactory<'_, F, S, UNIVERSAL_CIRCUIT> {
+    pub(crate) fn sample_from_ops<const NUM_INPUTS: usize>(ops: &[F; S]) -> [Vec<F>; NUM_INPUTS]
+    where
+        [(); S - 1]:,
+    {
+        let rng = &mut thread_rng();
+
+        let tree_hash = gen_random_field_hash();
+        let computational_hash = gen_random_field_hash();
+        let placeholder_hash = gen_random_field_hash();
+        let [min_primary, max_primary] = gen_values_in_range(rng, U256::ZERO, U256::MAX);
+        let [min_secondary, max_secondary] = gen_values_in_range(rng, U256::ZERO, U256::MAX);
+
+        let query_bounds = {
+            let placeholders = Placeholders::new_empty(min_primary, max_primary);
+            QueryBounds::new(
+                &placeholders,
+                Some(QueryBoundSource::Constant(min_secondary)),
+                Some(QueryBoundSource::Constant(max_secondary)),
+            )
+            .unwrap()
+        };
+
+        let is_first_op_id =
+            ops[0] == Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
+
+        let mut previous_row: Option<BoundaryRowData> = None;
+        array::from_fn(|_| {
+            // generate output values
+            let output_values = if is_first_op_id {
+                // generate random curve point
+                OutputValues::<S>::new_outputs_no_aggregation(&Point::sample(rng))
+            } else {
+                let values = (0..S).map(|_| gen_random_u256(rng)).collect_vec();
+                OutputValues::<S>::new_aggregation_outputs(&values)
+            };
+            // generate random count and overflow flag
+            let count = F::from_canonical_u32(rng.gen());
+            let overflow = F::from_bool(rng.gen());
+            // generate boundary rows
+            let left_boundary_row = if let Some(row) = &previous_row {
+                row.sample_consecutive_row(rng, &query_bounds)
+            } else {
+                BoundaryRowData::sample(rng, &query_bounds)
+            };
+            let right_boundary_row = BoundaryRowData::sample(rng, &query_bounds);
+            assert!(
+                left_boundary_row.index_node_info.predecessor_info.value >= min_primary
+                    && left_boundary_row.index_node_info.predecessor_info.value <= max_primary
+            );
+            assert!(
+                left_boundary_row.index_node_info.successor_info.value >= min_primary
+                    && left_boundary_row.index_node_info.successor_info.value <= max_primary
+            );
+            assert!(
+                right_boundary_row.index_node_info.predecessor_info.value >= min_primary
+                    && right_boundary_row.index_node_info.predecessor_info.value <= max_primary
+            );
+            assert!(
+                right_boundary_row.index_node_info.successor_info.value >= min_primary
+                    && right_boundary_row.index_node_info.successor_info.value <= max_primary
+            );
+            previous_row = Some(right_boundary_row.clone());
+
+            PublicInputsFactory::<F, S, UNIVERSAL_CIRCUIT>::new(
+                &tree_hash.to_fields(),
+                &output_values.to_fields(),
+                &[count],
+                ops,
+                &left_boundary_row.to_fields(),
+                &right_boundary_row.to_fields(),
+                &min_primary.to_fields(),
+                &max_primary.to_fields(),
+                &min_secondary.to_fields(),
+                &max_secondary.to_fields(),
+                &[overflow],
+                &computational_hash.to_fields(),
+                &placeholder_hash.to_fields(),
+            )
+            .to_vec()
+        })
+    }
 }
 
 /// Revelation related data used for testing
