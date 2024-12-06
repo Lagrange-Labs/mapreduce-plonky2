@@ -14,10 +14,12 @@ use mp2_common::{
     },
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
-    utils::{FromTargets, HashBuilder, SelectTarget, ToTargets},
+    utils::{FromFields, FromTargets, HashBuilder, SelectTarget, ToFields, ToTargets, TryIntoBool},
     D, F,
 };
+use mp2_test::utils::gen_random_field_hash;
 use plonky2::{
+    field::types::Field,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::{
         target::{BoolTarget, Target},
@@ -25,9 +27,10 @@ use plonky2::{
     },
     plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
 };
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use super::aggregation::{ChildPosition, NodeInfo, NodeInfoTarget};
+use super::utils::{ChildPosition, NodeInfo, NodeInfoTarget};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for Merkle path verification gadget
@@ -688,6 +691,66 @@ where
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct NeighborInfo {
+    pub(crate) is_found: bool,
+    pub(crate) is_in_path: bool,
+    pub(crate) value: U256,
+    pub(crate) hash: HashOut<F>,
+}
+
+impl FromFields<F> for NeighborInfo {
+    fn from_fields(t: &[F]) -> Self {
+        assert!(t.len() >= NeighborInfoTarget::NUM_TARGETS);
+        Self {
+            is_found: t[0].try_into_bool().unwrap(),
+            is_in_path: t[1].try_into_bool().unwrap(),
+            value: U256::from_fields(&t[2..2 + NUM_LIMBS]),
+            hash: HashOut::from_vec(t[2 + NUM_LIMBS..NeighborInfoTarget::NUM_TARGETS].to_vec()),
+        }
+    }
+}
+
+impl ToFields<F> for NeighborInfo {
+    fn to_fields(&self) -> Vec<F> {
+        [F::from_bool(self.is_found), F::from_bool(self.is_in_path)]
+            .into_iter()
+            .chain(self.value.to_fields())
+            .chain(self.hash.to_fields())
+            .collect()
+    }
+}
+
+impl NeighborInfo {
+    // Initialize `Self` for the predecessor/successor of a node. `value`
+    // must be the value of the predecessor/successor, while `hash` must
+    // be its hash. If `hash` is `None`, it is assumed that the
+    // predecessor/successor is not located in the path of the node
+    pub(crate) fn new(value: U256, hash: Option<HashOut<F>>) -> Self {
+        Self {
+            is_found: true,
+            is_in_path: hash.is_some(),
+            value,
+            hash: hash.unwrap_or(*empty_poseidon_hash()),
+        }
+    }
+    /// Generate at random data about the successor/predecessor of a node. The generated
+    /// predecessor/successor must have the `value` provided as input;
+    /// the existence of the generated predecessor/successor depends on the `is_found` input:
+    /// - if `is_found` is `None`, then the existence of the generated predecessor/successor
+    ///   is chosen at random
+    /// - otherwise, the generated predecessor/successor will be marked as found if and only if
+    ///   the flag wrapped by `is_found` is `true`
+    pub(crate) fn sample<R: Rng>(rng: &mut R, value: U256, is_found: Option<bool>) -> Self {
+        NeighborInfo {
+            is_found: is_found.unwrap_or(rng.gen()),
+            is_in_path: rng.gen(),
+            value,
+            hash: gen_random_field_hash(),
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use std::array;
@@ -696,8 +759,8 @@ pub(crate) mod tests {
     use mp2_common::{
         poseidon::empty_poseidon_hash,
         types::HashOutput,
-        u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
-        utils::{FromFields, FromTargets, ToFields, ToTargets, TryIntoBool},
+        u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+        utils::{FromFields, FromTargets, ToTargets},
         C, D, F,
     };
     use mp2_test::{
@@ -705,7 +768,7 @@ pub(crate) mod tests {
         utils::{gen_random_field_hash, gen_random_u256},
     };
     use plonky2::{
-        field::types::{Field, Sample},
+        field::types::Sample,
         hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
         iop::{
             target::Target,
@@ -715,13 +778,13 @@ pub(crate) mod tests {
             circuit_builder::CircuitBuilder, config::GenericHashOut, proof::ProofWithPublicInputs,
         },
     };
-    use rand::{thread_rng, Rng};
+    use rand::thread_rng;
 
-    use crate::query::aggregation::{ChildPosition, NodeInfo};
+    use crate::query::utils::{ChildPosition, NodeInfo};
 
     use super::{
         MerklePathGadget, MerklePathTargetInputs, MerklePathWithNeighborsGadget,
-        MerklePathWithNeighborsTargetInputs, NeighborInfoTarget,
+        MerklePathWithNeighborsTargetInputs, NeighborInfo, NeighborInfoTarget,
     };
 
     #[derive(Clone, Debug)]
@@ -757,50 +820,7 @@ pub(crate) mod tests {
         }
     }
 
-    #[derive(Clone, Debug, Eq, PartialEq)]
-    pub(crate) struct NeighborInfo {
-        pub(crate) is_found: bool,
-        pub(crate) is_in_path: bool,
-        pub(crate) value: U256,
-        pub(crate) hash: HashOut<F>,
-    }
-
-    impl FromFields<F> for NeighborInfo {
-        fn from_fields(t: &[F]) -> Self {
-            assert!(t.len() >= NeighborInfoTarget::NUM_TARGETS);
-            Self {
-                is_found: t[0].try_into_bool().unwrap(),
-                is_in_path: t[1].try_into_bool().unwrap(),
-                value: U256::from_fields(&t[2..2 + NUM_LIMBS]),
-                hash: HashOut::from_vec(t[2 + NUM_LIMBS..NeighborInfoTarget::NUM_TARGETS].to_vec()),
-            }
-        }
-    }
-
-    impl ToFields<F> for NeighborInfo {
-        fn to_fields(&self) -> Vec<F> {
-            [F::from_bool(self.is_found), F::from_bool(self.is_in_path)]
-                .into_iter()
-                .chain(self.value.to_fields())
-                .chain(self.hash.to_fields())
-                .collect()
-        }
-    }
-
     impl NeighborInfo {
-        // Initialize `Self` for the predecessor/successor of a node. `value`
-        // must be the value of the predecessor/successor, while `hash` must
-        // be its hash. If `hash` is `None`, it is assumed that the
-        // predecessor/successor is not located in the path of the node
-        pub(crate) fn new(value: U256, hash: Option<HashOut<F>>) -> Self {
-            Self {
-                is_found: true,
-                is_in_path: hash.is_some(),
-                value,
-                hash: hash.unwrap_or(*empty_poseidon_hash()),
-            }
-        }
-
         // Initialize `Self` for a node with no predecessor
         pub(crate) fn new_dummy_predecessor() -> Self {
             Self {
@@ -818,22 +838,6 @@ pub(crate) mod tests {
                 is_in_path: true, // the circuit still looks at the successor in the path
                 value: U256::MAX,
                 hash: *empty_poseidon_hash(),
-            }
-        }
-
-        /// Generate at random data about the successor/predecessor of a node. The generated
-        /// predecessor/successor must have the `value` provided as input;
-        /// the existence of the generated predecessor/successor depends on the `is_found` input:
-        /// - if `is_found` is `None`, then the existence of the generated predecessor/successor
-        ///   is chosen at random
-        /// - otherwise, the generated predecessor/successor will be marked as found if and only if
-        ///   the flag wrapped by `is_found` is `true`
-        pub(crate) fn sample<R: Rng>(rng: &mut R, value: U256, is_found: Option<bool>) -> Self {
-            NeighborInfo {
-                is_found: is_found.unwrap_or(rng.gen()),
-                is_in_path: rng.gen(),
-                value,
-                hash: gen_random_field_hash(),
             }
         }
     }

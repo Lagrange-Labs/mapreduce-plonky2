@@ -1,19 +1,11 @@
 //! Main APIs and related structures
 
-#[cfg(feature = "batching_circuits")]
-use crate::query::batching::circuits::api::Parameters as BatchingQueryParams;
 use crate::{
     block_tree, cells_tree,
     extraction::{ExtractionPI, ExtractionPIWrap},
     ivc,
-    query::{
-        self, api::Parameters as QueryParams, batching::circuits::api::num_io as batching_num_io,
-        pi_len as query_pi_len,
-    },
-    revelation::{
-        self, api::Parameters as RevelationParams, num_query_io, num_query_io_no_results_tree,
-        pi_len as revelation_pi_len,
-    },
+    query::{self, api::Parameters as QueryParams, pi_len as query_pi_len},
+    revelation::{self, api::Parameters as RevelationParams, pi_len as revelation_pi_len},
     row_tree::{self},
 };
 use anyhow::Result;
@@ -218,25 +210,16 @@ pub struct QueryParameters<
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
     [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
-    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
-    [(); num_query_io_no_results_tree::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
 {
-    #[cfg(feature = "batching_circuits")]
-    batching_query_params: BatchingQueryParams<
+    query_params: QueryParams<
         NUM_CHUNKS,
         NUM_ROWS,
         ROW_TREE_MAX_DEPTH,
         INDEX_TREE_MAX_DEPTH,
-        MAX_NUM_COLUMNS,
-        MAX_NUM_PREDICATE_OPS,
-        MAX_NUM_RESULT_OPS,
-        MAX_NUM_ITEMS_PER_OUTPUT,
-    >,
-    query_params: QueryParams<
         MAX_NUM_COLUMNS,
         MAX_NUM_PREDICATE_OPS,
         MAX_NUM_RESULT_OPS,
@@ -275,21 +258,12 @@ pub enum QueryCircuitInput<
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
 {
-    #[cfg(feature = "batching_circuits")]
-    BatchingQuery(
-        query::batching::circuits::api::CircuitInput<
+    Query(
+        query::api::CircuitInput<
             NUM_CHUNKS,
             NUM_ROWS,
             ROW_TREE_MAX_DEPTH,
             INDEX_TREE_MAX_DEPTH,
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_ITEMS_PER_OUTPUT,
-        >,
-    ),
-    Query(
-        query::api::CircuitInput<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
@@ -337,34 +311,21 @@ impl<
 where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); num_query_io_no_results_tree::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
-    [(); batching_num_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
-    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()]:,
 {
     /// Build `QueryParameters` from serialized `ParamsInfo` of `PublicParamaters`
     pub fn build_params(preprocessing_params_info: &[u8]) -> Result<Self> {
         let params_info: ParamsInfo = bincode::deserialize(preprocessing_params_info)?;
-        #[cfg(feature = "batching_circuits")]
-        let batching_query_params = BatchingQueryParams::build();
         let query_params = QueryParams::build();
         info!("Building the revelation circuit parameters...");
-        #[cfg(feature = "batching_circuits")]
-        let revelation_params = RevelationParams::build(
-            batching_query_params.get_circuit_set(),
-            query_params.get_circuit_set(),
-            &params_info.preprocessing_circuit_set,
-            &params_info.preprocessing_vk,
-        );
-        #[cfg(not(feature = "batching_circuits"))]
         let revelation_params = RevelationParams::build(
             query_params.get_circuit_set(), // unused, so we provide same query params
-            query_params.get_circuit_set(),
+            query_params.get_universal_circuit().data.verifier_data(),
             &params_info.preprocessing_circuit_set,
             &params_info.preprocessing_vk,
         );
@@ -372,8 +333,6 @@ where
         let wrap_circuit = WrapCircuitParams::build(revelation_params.get_circuit_set());
         info!("All QUERY parameters built !");
         Ok(Self {
-            #[cfg(feature = "batching_circuits")]
-            batching_query_params,
             query_params,
             revelation_params,
             wrap_circuit,
@@ -396,25 +355,12 @@ where
         >,
     ) -> Result<Vec<u8>> {
         match input {
-            #[cfg(feature = "batching_circuits")]
-            QueryCircuitInput::BatchingQuery(input) => {
-                self.batching_query_params.generate_proof(input)
-            }
             QueryCircuitInput::Query(input) => self.query_params.generate_proof(input),
             QueryCircuitInput::Revelation(input) => {
-                #[cfg(feature = "batching_circuits")]
                 let proof = self.revelation_params.generate_proof(
                     input,
-                    self.batching_query_params.get_circuit_set(),
                     self.query_params.get_circuit_set(),
-                    Some(&self.query_params),
-                )?;
-                #[cfg(not(feature = "batching_circuits"))]
-                let proof = self.revelation_params.generate_proof(
-                    input,
-                    self.query_params.get_circuit_set(), // unused, so we provide a dummy one
-                    self.query_params.get_circuit_set(),
-                    Some(&self.query_params),
+                    Some(self.query_params.get_universal_circuit()),
                 )?;
                 self.wrap_circuit.generate_proof(
                     self.revelation_params.get_circuit_set(),

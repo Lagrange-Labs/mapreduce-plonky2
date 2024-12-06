@@ -22,20 +22,19 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::{output_computation::compute_dummy_output_targets, QueryBounds},
-    batching::{
-        public_inputs::PublicInputs,
-        row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget},
-    },
+    api::TreePathInputs,
     merkle_path::{
         MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs, NeighborInfoTarget,
     },
+    output_computation::compute_dummy_output_targets,
+    pi_len,
+    public_inputs::PublicInputs,
+    row_chunk_gadgets::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget},
     universal_circuit::{
         ComputationalHash, ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
     },
+    utils::QueryBounds,
 };
-
-use super::api::{num_io, TreePathInputs};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NonExistenceWires<const INDEX_TREE_MAX_DEPTH: usize, const MAX_NUM_RESULTS: usize>
@@ -254,7 +253,7 @@ where
 
     type Inputs = NonExistenceCircuit<INDEX_TREE_MAX_DEPTH, MAX_NUM_RESULTS>;
 
-    const NUM_PUBLIC_INPUTS: usize = num_io::<MAX_NUM_RESULTS>();
+    const NUM_PUBLIC_INPUTS: usize = pi_len::<MAX_NUM_RESULTS>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -289,18 +288,15 @@ mod tests {
 
     use crate::{
         query::{
-            aggregation::{
-                output_computation::tests::compute_dummy_output_values, ChildPosition, QueryBounds,
-            },
-            batching::{
-                circuits::api::TreePathInputs,
-                public_inputs::{tests::gen_values_in_range, PublicInputs},
-                row_chunk::tests::{BoundaryRowData, BoundaryRowNodeInfo},
-            },
-            merkle_path::tests::{generate_test_tree, NeighborInfo},
+            api::TreePathInputs,
+            merkle_path::{tests::generate_test_tree, NeighborInfo},
+            output_computation::tests::compute_dummy_output_values,
+            public_inputs::PublicInputs,
+            row_chunk_gadgets::{BoundaryRowData, BoundaryRowNodeInfo},
             universal_circuit::universal_circuit_inputs::Placeholders,
+            utils::{ChildPosition, QueryBounds},
         },
-        test_utils::random_aggregation_operations,
+        test_utils::{gen_values_in_range, random_aggregation_operations},
     };
 
     use super::{NonExistenceCircuit, NonExistenceWires};
