@@ -3,7 +3,6 @@
 use crate::ivc::NUM_IO;
 use mp2_common::F;
 
-
 pub mod api;
 pub(crate) mod placeholders_check;
 mod public_inputs;

@@ -5,11 +5,17 @@ use log::info;
 use mp2_common::types::HashOutput;
 use mp2_v1::{
     api::MetadataHash,
-    indexing::{block::BlockPrimaryIndex, row::{RowPayload, RowTreeKey}, LagrangeNode},
-    query::planner::{execute_row_query, get_node_info, TreeFetcher}, values_extraction::identifier_block_column,
+    indexing::{
+        block::BlockPrimaryIndex,
+        row::{RowPayload, RowTreeKey},
+        LagrangeNode,
+    },
+    query::planner::{execute_row_query, get_node_info, TreeFetcher},
+    values_extraction::identifier_block_column,
 };
 use parsil::{
-    assembler::DynamicCircuitPis, executor::generate_query_execution_with_keys, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER
+    assembler::DynamicCircuitPis, executor::generate_query_execution_with_keys,
+    DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{pgsql::ToFromBytea, RoEpochKvStorage},
@@ -20,7 +26,11 @@ use std::{fmt::Debug, hash::Hash};
 use tokio_postgres::Row as PgSqlRow;
 use verifiable_db::{
     query::{
-        computational_hash_ids::ColumnIDs, universal_circuit::universal_circuit_inputs::{ColumnCell, PlaceholderId, Placeholders, RowCells}, utils::{ChildPosition, NodeInfo}
+        computational_hash_ids::ColumnIDs,
+        universal_circuit::universal_circuit_inputs::{
+            ColumnCell, PlaceholderId, Placeholders, RowCells,
+        },
+        utils::{ChildPosition, NodeInfo},
     },
     revelation::{api::MatchingRow, RowPath},
     test_utils::MAX_NUM_OUTPUTS,
@@ -30,10 +40,8 @@ use crate::common::{
     cases::{
         indexing::BLOCK_COLUMN_NAME,
         query::{
-            aggregated_queries::{
-                check_final_outputs, find_longest_lived_key,
-            },
-            GlobalCircuitInput, RevelationCircuitInput, SqlReturn, SqlType, QueryPlanner,
+            aggregated_queries::{check_final_outputs, find_longest_lived_key},
+            GlobalCircuitInput, QueryPlanner, RevelationCircuitInput, SqlReturn, SqlType,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
@@ -90,20 +98,13 @@ pub(crate) async fn prove_query(
         )
         .await?;
         let (row_node_info, _, _) = get_node_info(&planner.table.row, &key, epoch).await;
-        let (row_tree_path, row_tree_siblings) = get_path_info(
-            &key, 
-            &planner.table.row, 
-            epoch)
-        .await?;
+        let (row_tree_path, row_tree_siblings) =
+            get_path_info(&key, &planner.table.row, epoch).await?;
         let index_node_key = epoch as BlockPrimaryIndex;
         let (index_node_info, _, _) =
             get_node_info(&planner.table.index, &index_node_key, current_epoch).await;
         let (index_tree_path, index_tree_siblings) =
-            get_path_info(
-                &index_node_key, 
-                &planner.table.index, 
-                current_epoch
-        ).await?;
+            get_path_info(&index_node_key, &planner.table.index, current_epoch).await?;
         let path = RowPath::new(
             row_node_info,
             row_tree_path,

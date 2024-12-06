@@ -19,12 +19,12 @@ use mp2_common::{
 };
 use mp2_test::utils::gen_random_field_hash;
 use plonky2::{
+    field::types::Field,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    field::types::Field,
     plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
 };
 use rand::Rng;
@@ -783,7 +783,8 @@ pub(crate) mod tests {
     use crate::query::utils::{ChildPosition, NodeInfo};
 
     use super::{
-        MerklePathGadget, MerklePathTargetInputs, MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs, NeighborInfo, NeighborInfoTarget
+        MerklePathGadget, MerklePathTargetInputs, MerklePathWithNeighborsGadget,
+        MerklePathWithNeighborsTargetInputs, NeighborInfo, NeighborInfoTarget,
     };
 
     #[derive(Clone, Debug)]

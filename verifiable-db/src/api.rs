@@ -4,14 +4,8 @@ use crate::{
     block_tree, cells_tree,
     extraction::{ExtractionPI, ExtractionPIWrap},
     ivc,
-    query::{
-        self, api::Parameters as QueryParams,
-        pi_len as query_pi_len,
-    },
-    revelation::{
-        self, api::Parameters as RevelationParams,
-        pi_len as revelation_pi_len,
-    },
+    query::{self, api::Parameters as QueryParams, pi_len as query_pi_len},
+    revelation::{self, api::Parameters as RevelationParams, pi_len as revelation_pi_len},
     row_tree::{self},
 };
 use anyhow::Result;

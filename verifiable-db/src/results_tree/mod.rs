@@ -1,6 +1,6 @@
 pub(crate) mod binding;
 pub(crate) mod construction;
-/// Old query public inputs, moved here because the circuits in this module still expects 
+/// Old query public inputs, moved here because the circuits in this module still expects
 /// these public inputs for now
 pub(crate) mod old_public_inputs;
 
@@ -9,7 +9,10 @@ pub(crate) mod tests {
     use std::array;
 
     use mp2_common::{array::ToField, types::CURVE_TARGET_LEN, utils::ToFields, F};
-    use plonky2::{field::types::{Field, Sample}, hash::hash_types::NUM_HASH_OUT_ELTS};
+    use plonky2::{
+        field::types::{Field, Sample},
+        hash::hash_types::NUM_HASH_OUT_ELTS,
+    };
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
 
@@ -32,7 +35,8 @@ pub(crate) mod tests {
         ]
         .map(PublicInputs::<F, S>::to_range);
 
-        let first_value_start = PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues).start;
+        let first_value_start =
+            PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues).start;
         let is_first_op_id =
             ops[0] == Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
 
@@ -48,7 +52,7 @@ pub(crate) mod tests {
         });
 
         array::from_fn(|_| {
-            let mut pi = (0..PublicInputs::<F,S>::total_len())
+            let mut pi = (0..PublicInputs::<F, S>::total_len())
                 .map(|_| rng.gen())
                 .collect::<Vec<u32>>()
                 .to_fields();

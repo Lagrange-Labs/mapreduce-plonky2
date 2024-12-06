@@ -99,10 +99,13 @@ impl<const S: usize> BindingResultsCircuit<S> {
 mod tests {
     use super::*;
     use crate::{
-        results_tree::{construction::{
-            public_inputs::ResultsConstructionPublicInputs,
-            tests::{pi_len, random_results_construction_public_inputs},
-        }, tests::random_aggregation_public_inputs},
+        results_tree::{
+            construction::{
+                public_inputs::ResultsConstructionPublicInputs,
+                tests::{pi_len, random_results_construction_public_inputs},
+            },
+            tests::random_aggregation_public_inputs,
+        },
         test_utils::random_aggregation_operations,
     };
     use itertools::Itertools;

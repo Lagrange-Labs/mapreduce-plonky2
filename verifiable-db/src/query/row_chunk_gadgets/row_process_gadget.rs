@@ -6,6 +6,7 @@ use plonky2::iop::witness::PartialWitness;
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
+    api::RowInput,
     merkle_path::{MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs},
     universal_circuit::{
         universal_circuit_inputs::RowCells,
@@ -14,7 +15,6 @@ use crate::query::{
             UniversalQueryValueInputs, UniversalQueryValueWires,
         },
     },
-    api::RowInput,
 };
 
 use super::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget};

@@ -28,7 +28,6 @@ use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    utils::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
     computational_hash_ids::{
         ColumnIDs, ComputationalHashCache, HashPermutation, Operation, Output,
         PlaceholderIdentifier,
@@ -37,6 +36,7 @@ use crate::query::{
         basic_operation::BasicOperationInputs, column_extraction::ColumnExtractionValueWires,
         universal_circuit_inputs::OutputItem,
     },
+    utils::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
 };
 
 use super::{
@@ -163,6 +163,7 @@ impl QueryBound {
     /// Initialize a query bound for the primary index, from the set of `placeholders` employed in the query,
     /// which include also the primary index bounds by construction. The flag `is_min_bound`
     /// must be true iff the bound to be initialized is a lower bound in the range specified in the query
+    #[allow(dead_code)] // unused for now, but it could be useful to keep it
     pub(crate) fn new_primary_index_bound(
         placeholders: &Placeholders,
         is_min_bound: bool,
@@ -765,8 +766,11 @@ where
 
         let min_secondary = min_query_secondary.get_bound_value().clone();
         let max_secondary = max_query_secondary.get_bound_value().clone();
-        let num_bound_overflows =
-            QueryBoundTarget::num_overflows_for_query_bound_operations(b, &min_query_secondary, &max_query_secondary);
+        let num_bound_overflows = QueryBoundTarget::num_overflows_for_query_bound_operations(
+            b,
+            &min_query_secondary,
+            &max_query_secondary,
+        );
         UniversalQueryHashWires {
             input_wires: UniversalQueryHashInputWires {
                 column_extraction_wires: column_extraction_wires.input_wires,
@@ -806,8 +810,12 @@ where
             .assign(pw, &wires.column_extraction_wires);
         pw.set_u256_target(&wires.min_query_primary, self.min_query_primary);
         pw.set_u256_target(&wires.max_query_primary, self.max_query_primary);
-        wires.min_query_secondary.assign(pw, &self.min_query_secondary);
-        wires.max_query_secondary.assign(pw, &self.max_query_secondary);
+        wires
+            .min_query_secondary
+            .assign(pw, &self.min_query_secondary);
+        wires
+            .max_query_secondary
+            .assign(pw, &self.max_query_secondary);
         self.filtering_predicate_inputs
             .iter()
             .chain(self.result_values_inputs.iter())
@@ -1309,11 +1317,12 @@ where
 
         // Enforce that the value of primary index for the current row is in the range given by these bounds
         let index_value = &column_values[0];
-        let less_than_max = b.is_less_or_equal_than_u256(index_value, &hash_input_wires.max_query_primary);
-        let greater_than_min = b.is_less_or_equal_than_u256(&hash_input_wires.min_query_primary, index_value);
+        let less_than_max =
+            b.is_less_or_equal_than_u256(index_value, &hash_input_wires.max_query_primary);
+        let greater_than_min =
+            b.is_less_or_equal_than_u256(&hash_input_wires.min_query_primary, index_value);
         b.connect(less_than_max.target, _true.target);
         b.connect(greater_than_min.target, _true.target);
-     
 
         // min and max for secondary indexed column
         let node_min = &column_values[1];

@@ -11,7 +11,10 @@ use log::info;
 use mp2_v1::{
     api::MetadataHash, indexing::block::BlockPrimaryIndex, query::planner::execute_row_query,
 };
-use parsil::{assembler::DynamicCircuitPis, parse_and_validate, utils::ParsilSettingsBuilder, ParsilSettings, PlaceholderSettings};
+use parsil::{
+    assembler::DynamicCircuitPis, parse_and_validate, utils::ParsilSettingsBuilder, ParsilSettings,
+    PlaceholderSettings,
+};
 use simple_select_queries::{
     cook_query_no_matching_rows, cook_query_too_big_offset, cook_query_with_distinct,
     cook_query_with_matching_rows, cook_query_with_max_num_matching_rows,
@@ -23,7 +26,10 @@ use verifiable_db::query::{
     computational_hash_ids::Output, universal_circuit::universal_circuit_inputs::Placeholders,
 };
 
-use crate::common::{table::{Table, TableColumns}, TableInfo, TestContext};
+use crate::common::{
+    table::{Table, TableColumns},
+    TableInfo, TestContext,
+};
 
 use super::table_source::TableSource;
 
@@ -217,13 +223,7 @@ async fn test_query_mapping(
 
     match pis.result.query_variant() {
         Output::Aggregation => {
-            prove_aggregation_query(
-                parsed,
-                res,
-                *table_hash,
-                &mut planner,
-            )
-            .await
+            prove_aggregation_query(parsed, res, *table_hash, &mut planner).await
         }
         Output::NoAggregation => {
             prove_no_aggregation_query(parsed, table_hash, &mut planner, res).await

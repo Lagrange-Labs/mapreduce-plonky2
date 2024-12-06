@@ -74,10 +74,10 @@ pub enum QueryPublicInputsUniversalCircuit {
     /// `ops` : `[F; S]` Set of identifiers of the aggregation operations for each of the `S` items found in `V`
     /// (like "SUM", "MIN", "MAX", "COUNT" operations)
     OpIds,
-    /// Data associated to the left boundary row of the row chunk being proven; it is dummy in case of universal query 
+    /// Data associated to the left boundary row of the row chunk being proven; it is dummy in case of universal query
     /// circuit, it is just empoyed to re-use the same public inputs
     LeftBoundaryRow,
-    /// Data associated to the right boundary row of the row chunk being proven; it is dummy in case of universal query 
+    /// Data associated to the right boundary row of the row chunk being proven; it is dummy in case of universal query
     /// circuit, it is just empoyed to re-use the same public inputs
     RightBoundaryRow,
     /// `MIN_primary`: `u256` Lower bound of the range of primary indexed column values specified in the query
@@ -103,18 +103,28 @@ impl From<QueryPublicInputsUniversalCircuit> for QueryPublicInputs {
             QueryPublicInputsUniversalCircuit::OutputValues => QueryPublicInputs::OutputValues,
             QueryPublicInputsUniversalCircuit::NumMatching => QueryPublicInputs::NumMatching,
             QueryPublicInputsUniversalCircuit::OpIds => QueryPublicInputs::NumMatching,
-            QueryPublicInputsUniversalCircuit::LeftBoundaryRow => QueryPublicInputs::LeftBoundaryRow,
-            QueryPublicInputsUniversalCircuit::RightBoundaryRow => QueryPublicInputs::RightBoundaryRow,
+            QueryPublicInputsUniversalCircuit::LeftBoundaryRow => {
+                QueryPublicInputs::LeftBoundaryRow
+            }
+            QueryPublicInputsUniversalCircuit::RightBoundaryRow => {
+                QueryPublicInputs::RightBoundaryRow
+            }
             QueryPublicInputsUniversalCircuit::MinPrimary => QueryPublicInputs::MinPrimary,
             QueryPublicInputsUniversalCircuit::MaxPrimary => QueryPublicInputs::MaxPrimary,
-            QueryPublicInputsUniversalCircuit::SecondaryIndexValue => QueryPublicInputs::MinSecondary,
+            QueryPublicInputsUniversalCircuit::SecondaryIndexValue => {
+                QueryPublicInputs::MinSecondary
+            }
             QueryPublicInputsUniversalCircuit::PrimaryIndexValue => QueryPublicInputs::MaxSecondary,
             QueryPublicInputsUniversalCircuit::Overflow => QueryPublicInputs::Overflow,
-            QueryPublicInputsUniversalCircuit::ComputationalHash => QueryPublicInputs::ComputationalHash,
-            QueryPublicInputsUniversalCircuit::PlaceholderHash => QueryPublicInputs::PlaceholderHash,
+            QueryPublicInputsUniversalCircuit::ComputationalHash => {
+                QueryPublicInputs::ComputationalHash
+            }
+            QueryPublicInputsUniversalCircuit::PlaceholderHash => {
+                QueryPublicInputs::PlaceholderHash
+            }
         }
     }
-} 
+}
 /// Public inputs for generic query circuits
 pub type PublicInputs<'a, T, const S: usize> = PublicInputsFactory<'a, T, S, false>;
 /// Public inputs for universal query circuit
@@ -128,8 +138,8 @@ pub type PublicInputsUniversalCircuit<'a, T, const S: usize> = PublicInputsFacto
 /// public inputs of universal query circuit. The methods being common between the
 /// 2 public inputs are implemented for this data structure, while the methods that
 /// are specific to each public input type are implemented for the corresponding alias.
-/// In this way, the methods implemented for the type alias define the correct semantics 
-/// of each of the items in both types of public inputs. 
+/// In this way, the methods implemented for the type alias define the correct semantics
+/// of each of the items in both types of public inputs.
 #[derive(Clone, Debug)]
 pub struct PublicInputsFactory<'a, T, const S: usize, const UNIVERSAL_CIRCUIT: bool> {
     h: &'a [T],
@@ -149,12 +159,9 @@ pub struct PublicInputsFactory<'a, T, const S: usize, const UNIVERSAL_CIRCUIT: b
 
 const NUM_PUBLIC_INPUTS: usize = QueryPublicInputs::PlaceholderHash as usize + 1;
 
-impl<
-    'a, 
-    T: Clone, 
-    const S: usize,
-    const UNIVERSAL_CIRCUIT: bool,
-> PublicInputsFactory<'a, T, S, UNIVERSAL_CIRCUIT> {
+impl<'a, T: Clone, const S: usize, const UNIVERSAL_CIRCUIT: bool>
+    PublicInputsFactory<'a, T, S, UNIVERSAL_CIRCUIT>
+{
     const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
         Self::to_range_internal(QueryPublicInputs::TreeHash),
         Self::to_range_internal(QueryPublicInputs::OutputValues),
@@ -211,8 +218,7 @@ impl<
         offset..offset + Self::SIZES[pi_pos]
     }
 
-    pub fn to_range<Q: Into<QueryPublicInputs>>(query_pi: Q) -> PublicInputRange 
-    {
+    pub fn to_range<Q: Into<QueryPublicInputs>>(query_pi: Q) -> PublicInputRange {
         Self::to_range_internal(query_pi.into())
     }
 
@@ -348,7 +354,9 @@ impl<
     }
 }
 
-impl<const S: usize, const UNIVERSAL_CIRCUIT: bool> PublicInputCommon for PublicInputsFactory<'_, Target, S, UNIVERSAL_CIRCUIT> {
+impl<const S: usize, const UNIVERSAL_CIRCUIT: bool> PublicInputCommon
+    for PublicInputsFactory<'_, Target, S, UNIVERSAL_CIRCUIT>
+{
     const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -368,7 +376,9 @@ impl<const S: usize, const UNIVERSAL_CIRCUIT: bool> PublicInputCommon for Public
     }
 }
 
-impl<const S: usize, const UNIVERSAL_CIRCUIT: bool> PublicInputsFactory<'_, Target, S, UNIVERSAL_CIRCUIT> {
+impl<const S: usize, const UNIVERSAL_CIRCUIT: bool>
+    PublicInputsFactory<'_, Target, S, UNIVERSAL_CIRCUIT>
+{
     pub fn tree_hash_target(&self) -> HashOutTarget {
         HashOutTarget::try_from(self.to_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
     }
@@ -493,13 +503,13 @@ impl<const S: usize> PublicInputs<'_, Target, S> {
 
 impl<const S: usize> PublicInputsUniversalCircuit<'_, Target, S> {
     pub fn secondary_index_value_target(&self) -> UInt256Target {
-        // secondary index value is found in `self.min_s` for 
+        // secondary index value is found in `self.min_s` for
         // `PublicInputsUniversalCircuit`
         UInt256Target::from_targets(self.min_s)
     }
 
     pub fn primary_index_value_target(&self) -> UInt256Target {
-        // primary index value is found in `self.max_s` for 
+        // primary index value is found in `self.max_s` for
         // `PublicInputsUniversalCircuit`
         UInt256Target::from_targets(self.max_s)
     }
@@ -576,13 +586,13 @@ impl<const S: usize> PublicInputs<'_, F, S> {
 
 impl<const S: usize> PublicInputsUniversalCircuit<'_, F, S> {
     pub fn secondary_index_value(&self) -> U256 {
-        // secondary index value is found in `self.min_s` for 
+        // secondary index value is found in `self.min_s` for
         // `PublicInputsUniversalCircuit`
         U256::from_fields(self.min_s)
     }
 
     pub fn primary_index_value(&self) -> U256 {
-        // primary index value is found in `self.max_s` for 
+        // primary index value is found in `self.max_s` for
         // `PublicInputsUniversalCircuit`
         U256::from_fields(self.max_s)
     }

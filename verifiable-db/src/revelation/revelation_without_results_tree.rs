@@ -3,7 +3,8 @@
 use crate::{
     ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
-        public_inputs::PublicInputs as QueryProofPublicInputs, computational_hash_ids::AggregationOperation, pi_len as query_pi_len,
+        computational_hash_ids::AggregationOperation, pi_len as query_pi_len,
+        public_inputs::PublicInputs as QueryProofPublicInputs,
     },
     revelation::PublicInputs,
 };
@@ -97,21 +98,25 @@ where
         let mut results = Vec::with_capacity(L * S);
         // flag to determine whether entry count is zero
         let is_entry_count_zero = b.add_virtual_bool_target_unsafe();
-        query_proof.operation_ids_target().into_iter().enumerate().for_each(|(i, op)| {
-            let is_op_avg = b.is_equal(op, op_avg);
-            let is_op_count = b.is_equal(op, op_count);
-            let result = query_proof.value_target_at_index(i);
+        query_proof
+            .operation_ids_target()
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, op)| {
+                let is_op_avg = b.is_equal(op, op_avg);
+                let is_op_count = b.is_equal(op, op_count);
+                let result = query_proof.value_target_at_index(i);
 
-            // Compute the AVG result (and it's set to zero if the divisor is zero).
-            let (avg_result, _, is_divisor_zero) = b.div_u256(&result, &entry_count);
+                // Compute the AVG result (and it's set to zero if the divisor is zero).
+                let (avg_result, _, is_divisor_zero) = b.div_u256(&result, &entry_count);
 
-            let result = b.select_u256(is_op_avg, &avg_result, &result);
-            let result = b.select_u256(is_op_count, &entry_count, &result);
+                let result = b.select_u256(is_op_avg, &avg_result, &result);
+                let result = b.select_u256(is_op_count, &entry_count, &result);
 
-            b.connect(is_divisor_zero.target, is_entry_count_zero.target);
+                b.connect(is_divisor_zero.target, is_entry_count_zero.target);
 
-            results.push(result);
-        });
+                results.push(result);
+            });
         results.resize(L * S, u256_zero);
 
         // Pre-compute the final placeholder hash then check it in the
@@ -132,7 +137,10 @@ where
 
         // Check that the tree employed to build the queries is the same as the
         // tree constructed in pre-processing.
-        b.connect_hashes(query_proof.tree_hash_target(), original_tree_proof.merkle_hash());
+        b.connect_hashes(
+            query_proof.tree_hash_target(),
+            original_tree_proof.merkle_hash(),
+        );
 
         // Add the hash of placeholder identifiers and pre-processing metadata
         // hash to the computational hash:
@@ -323,12 +331,11 @@ where
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let query_verifier = RecursiveCircuitsVerifierGagdet::<
-            F,
-            C,
-            D,
-            { query_pi_len::<S>() },
-        >::new(default_config(), &builder_parameters.query_circuit_set);
+        let query_verifier =
+            RecursiveCircuitsVerifierGagdet::<F, C, D, { query_pi_len::<S>() }>::new(
+                default_config(),
+                &builder_parameters.query_circuit_set,
+            );
         let query_verifier = query_verifier.verify_proof_in_circuit_set(builder);
         let preprocessing_verifier =
             RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PREPROCESSING_IO>::new(
@@ -343,8 +350,7 @@ where
             OriginalTreePublicInputs::from_slice(&preprocessing_proof.public_inputs);
         let revelation_circuit = {
             let query_pi = QueryProofPublicInputs::from_slice(
-                query_verifier
-                    .get_public_input_targets::<F, { query_pi_len::<S>() }>(),
+                query_verifier.get_public_input_targets::<F, { query_pi_len::<S>() }>(),
             );
             RevelationWithoutResultsTreeCircuit::build(builder, &query_pi, &preprocessing_pi)
         };
@@ -393,15 +399,12 @@ mod tests {
     use crate::{
         ivc::PublicInputs as OriginalTreePublicInputs,
         query::{
-            utils::{QueryBoundSource, QueryBounds},
-            public_inputs::{
-                    PublicInputs as QueryProofPublicInputs,
-                    QueryPublicInputs,
-                },
             computational_hash_ids::AggregationOperation,
+            public_inputs::{PublicInputs as QueryProofPublicInputs, QueryPublicInputs},
             universal_circuit::{
                 universal_circuit_inputs::Placeholders, universal_query_gadget::OutputValues,
             },
+            utils::{QueryBoundSource, QueryBounds},
         },
         revelation::{
             revelation_without_results_tree::{
@@ -410,7 +413,10 @@ mod tests {
             tests::{compute_results_from_query_proof_outputs, TestPlaceholders},
             PublicInputs, NUM_PREPROCESSING_IO,
         },
-        test_utils::{random_aggregation_operations, random_original_tree_proof, sample_boundary_rows_for_revelation},
+        test_utils::{
+            random_aggregation_operations, random_original_tree_proof,
+            sample_boundary_rows_for_revelation,
+        },
     };
 
     // L: maximum number of results
@@ -434,7 +440,6 @@ mod tests {
             }
         }
     }
-        
 
     #[derive(Clone, Debug)]
     struct TestRevelationCircuit<'a> {
@@ -516,7 +521,8 @@ mod tests {
             Some(QueryBoundSource::Constant(max_secondary)),
         )
         .unwrap();
-        let (left_boundary_row, right_boundary_row) = sample_boundary_rows_for_revelation(&query_bounds, rng);
+        let (left_boundary_row, right_boundary_row) =
+            sample_boundary_rows_for_revelation(&query_bounds, rng);
 
         proof[left_row_range].copy_from_slice(&left_boundary_row.to_fields());
         proof[right_row_range].copy_from_slice(&right_boundary_row.to_fields());
@@ -665,4 +671,3 @@ mod tests {
         test_revelation_batching_circuit(&ops, Some(0));
     }
 }
-

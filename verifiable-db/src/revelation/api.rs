@@ -12,7 +12,9 @@ use mp2_common::{
     C, D, F,
 };
 use plonky2::plonk::{
-    circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData}, config::Hasher, proof::ProofWithPublicInputs,
+    circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData},
+    config::Hasher,
+    proof::ProofWithPublicInputs,
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -24,15 +26,21 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     query::{
-        utils::QueryBounds, computational_hash_ids::ColumnIDs, pi_len as query_pi_len, universal_circuit::{output_no_aggregation::Circuit as OutputNoAggCircuit, universal_circuit_inputs::{
-            BasicOperation, Placeholders, ResultStructure,
-        }, universal_query_circuit::{UniversalCircuitInput, UniversalQueryCircuitParams}}
+        computational_hash_ids::ColumnIDs,
+        pi_len as query_pi_len,
+        universal_circuit::{
+            output_no_aggregation::Circuit as OutputNoAggCircuit,
+            universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure},
+            universal_query_circuit::{UniversalCircuitInput, UniversalQueryCircuitParams},
+        },
+        utils::QueryBounds,
     },
     revelation::{
         placeholders_check::CheckPlaceholderGadget,
         revelation_unproven_offset::{
             generate_dummy_row_proof_inputs,
             RecursiveCircuitWires as RecursiveCircuitWiresUnprovenOffset,
+            TabularQueryOutputModifiers,
         },
     },
 };
@@ -40,11 +48,12 @@ use crate::{
 use super::{
     pi_len,
     revelation_unproven_offset::{
-        CircuitBuilderParams, RecursiveCircuitInputs as RecursiveCircuitInputsUnporvenOffset, RevelationCircuit as RevelationCircuitUnprovenOffset, RowPath
+        CircuitBuilderParams, RecursiveCircuitInputs as RecursiveCircuitInputsUnporvenOffset,
+        RevelationCircuit as RevelationCircuitUnprovenOffset, RowPath,
     },
     revelation_without_results_tree::{
-        CircuitBuilderParams as CircuitBuilderParamsNoResultsTree, RecursiveCircuitInputs, RecursiveCircuitWires,
-        RevelationWithoutResultsTreeCircuit,
+        CircuitBuilderParams as CircuitBuilderParamsNoResultsTree, RecursiveCircuitInputs,
+        RecursiveCircuitWires, RevelationWithoutResultsTreeCircuit,
     },
 };
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -391,9 +400,11 @@ where
             [column_ids.primary, column_ids.secondary],
             &results_structure.output_ids,
             result_values,
-            limit,
-            offset,
-            results_structure.distinct.unwrap_or(false),
+            TabularQueryOutputModifiers::new(
+                limit,
+                offset,
+                results_structure.distinct.unwrap_or(false),
+            ),
             placeholder_inputs,
         )?;
 
@@ -570,10 +581,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{query::pi_len as query_pi_len, test_utils::{
-        TestRevelationData, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
-        MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
-    }};
+    use crate::{
+        query::pi_len as query_pi_len,
+        test_utils::{
+            TestRevelationData, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
+            MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
+        },
+    };
     use itertools::Itertools;
     use mp2_common::{
         array::ToField,
@@ -619,7 +633,8 @@ mod tests {
         >::default();
         let preprocessing_circuits =
             TestingRecursiveCircuits::<F, C, D, NUM_PREPROCESSING_IO>::default();
-        let dummy_universal_circuit = TestDummyCircuit::<{query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()}>::build();
+        let dummy_universal_circuit =
+            TestDummyCircuit::<{ query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>() }>::build();
         println!("building params");
         let params = Parameters::<
             ROW_TREE_MAX_DEPTH,
@@ -668,11 +683,7 @@ mod tests {
         )
         .unwrap();
         let proof = params
-            .generate_proof(
-                input,
-                query_circuits.get_recursive_circuit_set(),
-                None,
-            )
+            .generate_proof(input, query_circuits.get_recursive_circuit_set(), None)
             .unwrap();
         let (proof, _) = ProofWithVK::deserialize(&proof).unwrap().into();
         let pi = PublicInputs::<F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>::from_slice(&proof.public_inputs);

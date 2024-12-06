@@ -1,18 +1,35 @@
 use std::iter::once;
 
 use crate::query::{
-    computational_hash_ids::{Output, PlaceholderIdentifier}, pi_len, public_inputs::PublicInputsUniversalCircuit, row_chunk_gadgets::BoundaryRowDataTarget, utils::QueryBounds
+    computational_hash_ids::{Output, PlaceholderIdentifier},
+    pi_len,
+    public_inputs::PublicInputsUniversalCircuit,
+    row_chunk_gadgets::BoundaryRowDataTarget,
+    utils::QueryBounds,
 };
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
-    array::ToField, poseidon::{empty_poseidon_hash, HashPermutation}, public_inputs::PublicInputCommon, serialization::{deserialize, serialize}, types::CBuilder, utils::{FromTargets, HashBuilder, ToFields, ToTargets}, CHasher, C, D, F
+    array::ToField,
+    poseidon::{empty_poseidon_hash, HashPermutation},
+    public_inputs::PublicInputCommon,
+    serialization::{deserialize, serialize},
+    types::CBuilder,
+    utils::{FromTargets, HashBuilder, ToFields, ToTargets},
+    CHasher, C, D, F,
 };
 use plonky2::{
-    field::types::Field, hash::hashing::hash_n_to_hash_no_pad, iop::{
+    field::types::Field,
+    hash::hashing::hash_n_to_hash_no_pad,
+    iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
-    }, plonk::{circuit_builder::CircuitBuilder, circuit_data::{CircuitConfig, CircuitData}, proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget}}
+    },
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, CircuitData},
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+    },
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -157,7 +174,9 @@ where
             .chain(empty_hash.elements.iter())
             .chain(node_min.to_targets().iter())
             .chain(node_max.to_targets().iter())
-            .chain(once(&hash_wires.input_wires.column_extraction_wires.column_ids[1]))
+            .chain(once(
+                &hash_wires.input_wires.column_extraction_wires.column_ids[1],
+            ))
             .chain(node_min.to_targets().iter())
             .chain(value_wires.output_wires.tree_hash.elements.iter())
             .cloned()
@@ -173,7 +192,8 @@ where
         // compute dummy left boundary and right boundary rows to be exposed as public inputs;
         // they are ignored by the circuits processing this proof, so it's ok to use dummy
         // values
-        let dummy_boundary_row_targets = b.constants(&vec![F::ZERO; BoundaryRowDataTarget::NUM_TARGETS]);
+        let dummy_boundary_row_targets =
+            b.constants(&vec![F::ZERO; BoundaryRowDataTarget::NUM_TARGETS]);
         let primary_index_value = &value_wires.input_wires.column_values[0];
         PublicInputsUniversalCircuit::<Target, MAX_NUM_RESULTS>::new(
             &tree_hash.to_targets(),
@@ -318,19 +338,32 @@ pub struct UniversalQueryCircuitParams<
     const MAX_NUM_RESULTS: usize,
     T: OutputComponent<MAX_NUM_RESULTS> + Serialize,
 > {
-    #[serde(serialize_with="serialize", deserialize_with="deserialize")]
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) data: CircuitData<F, C, D>,
-    wires: UniversalQueryCircuitWires<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS, T>,
+    wires: UniversalQueryCircuitWires<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+        T,
+    >,
 }
 
 impl<
-    const MAX_NUM_COLUMNS: usize,
-    const MAX_NUM_PREDICATE_OPS: usize,
-    const MAX_NUM_RESULT_OPS: usize,
-    const MAX_NUM_RESULTS: usize,
-    T: OutputComponent<MAX_NUM_RESULTS> + Serialize + DeserializeOwned, 
-> UniversalQueryCircuitParams<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS, T> 
-where 
+        const MAX_NUM_COLUMNS: usize,
+        const MAX_NUM_PREDICATE_OPS: usize,
+        const MAX_NUM_RESULT_OPS: usize,
+        const MAX_NUM_RESULTS: usize,
+        T: OutputComponent<MAX_NUM_RESULTS> + Serialize + DeserializeOwned,
+    >
+    UniversalQueryCircuitParams<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+        T,
+    >
+where
     [(); MAX_NUM_RESULTS - 1]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
@@ -338,19 +371,18 @@ where
         let mut builder = CBuilder::new(config);
         let wires = UniversalQueryCircuitInputs::build(&mut builder);
         let data = builder.build();
-        Self {
-            data,
-            wires,
-        }
+        Self { data, wires }
     }
 
-    pub(crate) fn generate_proof(&self, input: &UniversalQueryCircuitInputs<
+    pub(crate) fn generate_proof(
+        &self,
+        input: &UniversalQueryCircuitInputs<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
             T,
-        >
+        >,
     ) -> Result<ProofWithPublicInputs<F, C, D>> {
         let mut pw = PartialWitness::<F>::new();
         input.assign(&mut pw, &self.wires);
@@ -481,7 +513,12 @@ mod tests {
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
-        array::ToField, default_config, group_hashing::map_to_curve_point, poseidon::empty_poseidon_hash, utils::{FromFields, ToFields, TryIntoBool}, C, D, F
+        array::ToField,
+        default_config,
+        group_hashing::map_to_curve_point,
+        poseidon::empty_poseidon_hash,
+        utils::{FromFields, ToFields, TryIntoBool},
+        C, D, F,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
@@ -499,24 +536,25 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use crate::query::{
-        utils::{QueryBoundSource, QueryBounds},
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, HashPermutation, Identifiers, Operation,
             PlaceholderIdentifier,
         },
         public_inputs::PublicInputsUniversalCircuit,
         universal_circuit::{
-            output_no_aggregation::Circuit as OutputNoAggCircuit, output_with_aggregation::Circuit as OutputAggCircuit, universal_circuit_inputs::{
+            output_no_aggregation::Circuit as OutputNoAggCircuit,
+            output_with_aggregation::Circuit as OutputAggCircuit,
+            universal_circuit_inputs::{
                 BasicOperation, ColumnCell, InputOperand, OutputItem, PlaceholderId, Placeholders,
                 ResultStructure, RowCells,
-            }, universal_query_circuit::{placeholder_hash, UniversalQueryCircuitParams}, ComputationalHash
+            },
+            universal_query_circuit::{placeholder_hash, UniversalQueryCircuitParams},
+            ComputationalHash,
         },
+        utils::{QueryBoundSource, QueryBounds},
     };
 
-    use super::{
-        OutputComponent, UniversalQueryCircuitInputs,
-        UniversalQueryCircuitWires,
-    };
+    use super::{OutputComponent, UniversalQueryCircuitInputs, UniversalQueryCircuitWires};
 
     impl<
             const MAX_NUM_COLUMNS: usize,
@@ -574,17 +612,21 @@ mod tests {
                         // ensure that primary index column value is in the range specified by the query:
                         // we sample a random u256 in range [0, max_query - min_query) and then we
                         // add min_query
-                        gen_random_u256(rng).div_rem(max_query_primary - min_query_primary + U256::from(1)).1 + min_query_primary
-                    },
+                        gen_random_u256(rng)
+                            .div_rem(max_query_primary - min_query_primary + U256::from(1))
+                            .1
+                            + min_query_primary
+                    }
                     1 => {
                         // ensure that second column value is in the range specified by the query:
                         // we sample a random u256 in range [0, max_query - min_query) and then we
                         // add min_query
-                        gen_random_u256(rng).div_rem(max_query_secondary - min_query_secondary + U256::from(1)).1 + min_query_secondary
-                    }, 
-                    _ => {
                         gen_random_u256(rng)
-                    },
+                            .div_rem(max_query_secondary - min_query_secondary + U256::from(1))
+                            .1
+                            + min_query_secondary
+                    }
+                    _ => gen_random_u256(rng),
                 }
             })
             .collect_vec();
@@ -602,10 +644,7 @@ mod tests {
         // define placeholders
         let first_placeholder_id = PlaceholderId::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
-        let mut placeholders = Placeholders::new_empty(
-            min_query_primary,
-            max_query_primary,
-        );
+        let mut placeholders = Placeholders::new_empty(min_query_primary, max_query_primary);
         [first_placeholder_id, second_placeholder_id]
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
@@ -875,17 +914,14 @@ mod tests {
                 .into(),
         );
         let proof = if build_parameters {
-            let params = UniversalQueryCircuitParams::build(
-                default_config()
-            );
-            params
-                .generate_proof(&circuit)
-                .unwrap()
+            let params = UniversalQueryCircuitParams::build(default_config());
+            params.generate_proof(&circuit).unwrap()
         } else {
             run_circuit::<F, D, C, _>(circuit.clone())
         };
 
-        let pi = PublicInputsUniversalCircuit::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+        let pi =
+            PublicInputsUniversalCircuit::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
         assert_eq!(tree_hash, pi.tree_hash());
         assert_eq!(output_values[0], pi.first_value_as_u256());
         assert_eq!(output_values[1..], pi.values()[..output_values.len() - 1]);
@@ -934,17 +970,21 @@ mod tests {
                         // ensure that primary index column value is in the range specified by the query:
                         // we sample a random u256 in range [0, max_query - min_query) and then we
                         // add min_query
-                        gen_random_u256(rng).div_rem(max_query_primary - min_query_primary + U256::from(1)).1 + min_query_primary
-                    },
+                        gen_random_u256(rng)
+                            .div_rem(max_query_primary - min_query_primary + U256::from(1))
+                            .1
+                            + min_query_primary
+                    }
                     1 => {
                         // ensure that second column value is in the range specified by the query:
                         // we sample a random u256 in range [0, max_query - min_query) and then we
                         // add min_query
-                        gen_random_u256(rng).div_rem(max_query_secondary - min_query_secondary + U256::from(1)).1 + min_query_secondary
-                    }, 
-                    _ => {
                         gen_random_u256(rng)
-                    },
+                            .div_rem(max_query_secondary - min_query_secondary + U256::from(1))
+                            .1
+                            + min_query_secondary
+                    }
+                    _ => gen_random_u256(rng),
                 }
             })
             .collect_vec();
@@ -962,10 +1002,7 @@ mod tests {
         // define placeholders
         let first_placeholder_id = PlaceholderId::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
-        let mut placeholders = Placeholders::new_empty(
-            min_query_primary,
-            max_query_primary,
-        );
+        let mut placeholders = Placeholders::new_empty(min_query_primary, max_query_primary);
         [first_placeholder_id, second_placeholder_id]
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
@@ -1271,17 +1308,14 @@ mod tests {
         );
 
         let proof = if build_parameters {
-            let params = UniversalQueryCircuitParams::build(
-                default_config()
-            );
-            params
-                .generate_proof(&circuit)
-                .unwrap()
+            let params = UniversalQueryCircuitParams::build(default_config());
+            params.generate_proof(&circuit).unwrap()
         } else {
             run_circuit::<F, D, C, _>(circuit.clone())
         };
 
-        let pi = PublicInputsUniversalCircuit::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+        let pi =
+            PublicInputsUniversalCircuit::<_, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
         assert_eq!(tree_hash, pi.tree_hash());
         assert_eq!(output_acc.to_weierstrass(), pi.first_value_as_curve_point());
         // The other MAX_NUM_RESULTS -1 output values are dummy ones, as in queries

@@ -36,7 +36,10 @@ use mp2_v1::{
         cell::MerkleCell,
         row::{Row, RowPayload, RowTreeKey},
     },
-    query::{batching_planner::{generate_chunks_and_update_tree, UTForChunkProofs, UTKey}, planner::{execute_row_query, NonExistenceInput, TreeFetcher}},
+    query::{
+        batching_planner::{generate_chunks_and_update_tree, UTForChunkProofs, UTKey},
+        planner::{execute_row_query, NonExistenceInput, TreeFetcher},
+    },
 };
 use parsil::{
     assembler::{DynamicCircuitPis, StaticCircuitPis},
@@ -56,15 +59,14 @@ use verifiable_db::{
     ivc::PublicInputs as IndexingPIS,
     query::{
         computational_hash_ids::{ColumnIDs, Identifiers},
-        universal_circuit::universal_circuit_inputs::{
-            ColumnCell, PlaceholderId, Placeholders,
-        },
+        universal_circuit::universal_circuit_inputs::{ColumnCell, PlaceholderId, Placeholders},
     },
     revelation::PublicInputs,
 };
 
 use super::{
-    GlobalCircuitInput, QueryCircuitInput, QueryPlanner, RevelationCircuitInput, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS
+    GlobalCircuitInput, QueryCircuitInput, QueryPlanner, RevelationCircuitInput,
+    MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
 };
 
 pub type RevelationPublicInputs<'a> =
@@ -77,12 +79,21 @@ pub(crate) async fn prove_query(
     metadata: MetadataHash,
     planner: &mut QueryPlanner<'_>,
 ) -> Result<()> {
-    let row_cache = planner.table
+    let row_cache = planner
+        .table
         .row
         .wide_lineage_between(
             planner.table.row.current_epoch(),
-            &core_keys_for_row_tree(&planner.query.query, planner.settings, &planner.pis.bounds, &planner.query.placeholders)?,
-            (planner.query.min_block as Epoch, planner.query.max_block as Epoch),
+            &core_keys_for_row_tree(
+                &planner.query.query,
+                planner.settings,
+                &planner.pis.bounds,
+                &planner.query.placeholders,
+            )?,
+            (
+                planner.query.min_block as Epoch,
+                planner.query.max_block as Epoch,
+            ),
         )
         .await?;
     // prove the index tree, on a single version. Both path can be taken depending if we do have
@@ -113,14 +124,14 @@ pub(crate) async fn prove_query(
                 planner.query.max_block
             );
         } as BlockPrimaryIndex;
-        let index_path = planner.table
+        let index_path = planner
+            .table
             .index
             .compute_path(&to_be_proven_node, current_epoch as Epoch)
             .await
-            .expect(
-                format!("Compute path for index node with key {to_be_proven_node} failed")
-                    .as_str(),
-            );
+            .unwrap_or_else(|| {
+                panic!("Compute path for index node with key {to_be_proven_node} failed")
+            });
         let input = QueryCircuitInput::new_non_existence_input(
             index_path,
             &column_ids,
@@ -129,16 +140,18 @@ pub(crate) async fn prove_query(
             &planner.query.placeholders,
             &planner.pis.bounds,
         )?;
-        let query_proof = planner.ctx.run_query_proof(
-            "batching::non_existence",
-            GlobalCircuitInput::Query(input),
-        )?;
+        let query_proof = planner
+            .ctx
+            .run_query_proof("batching::non_existence", GlobalCircuitInput::Query(input))?;
         let proof_key = ProofKey::QueryAggregate((
             planner.query.query.clone(),
             planner.query.placeholders.placeholder_values(),
             UTKey::default(),
         ));
-        planner.ctx.storage.store_proof(proof_key.clone(), query_proof)?;
+        planner
+            .ctx
+            .storage
+            .store_proof(proof_key.clone(), query_proof)?;
         proof_key
     } else {
         info!("Running INDEX tree proving from cache");
@@ -147,7 +160,8 @@ pub(crate) async fn prove_query(
             current_epoch as Epoch,
             (planner.query.min_block, planner.query.max_block),
         )?;
-        let big_index_cache = planner.table
+        let big_index_cache = planner
+            .table
             .index
             // The bounds here means between which versions of the tree should we look. For index tree,
             // we only look at _one_ version of the tree.
@@ -185,9 +199,9 @@ pub(crate) async fn prove_query(
                 // this is a row chunk to be proven
                 let to_be_proven_chunk = proven_chunks
                     .get(k)
-                    .expect(format!("chunk for key {:?} not found", k).as_str());
+                    .unwrap_or_else(|| panic!("chunk for key {:?} not found", k));
                 let input = QueryCircuitInput::new_row_chunks_input(
-                    &to_be_proven_chunk,
+                    to_be_proven_chunk,
                     &planner.pis.predication_operations,
                     &planner.query.placeholders,
                     &planner.pis.bounds,
@@ -199,7 +213,7 @@ pub(crate) async fn prove_query(
                     GlobalCircuitInput::Query(input),
                 )
             } else {
-                let children_keys = workplan.t.get_children_keys(&k);
+                let children_keys = workplan.t.get_children_keys(k);
                 info!("children keys: {:?}", children_keys);
                 // fetch the proof for each child from the storage
                 let child_proofs = children_keys
@@ -213,8 +227,7 @@ pub(crate) async fn prove_query(
                         planner.ctx.storage.get_proof_exact(&proof_key)
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let input =
-                    QueryCircuitInput::new_chunk_aggregation_input(&child_proofs)?;
+                let input = QueryCircuitInput::new_chunk_aggregation_input(&child_proofs)?;
                 info!("Aggregating chunk {:?}", k);
                 planner.ctx.run_query_proof(
                     "batching::chunk_aggregation",
@@ -238,7 +251,7 @@ pub(crate) async fn prove_query(
     let proof = prove_revelation(
         planner.ctx,
         &planner.query,
-        &planner.pis,
+        planner.pis,
         planner.table.index.current_epoch(),
         &query_proof_id,
     )

@@ -156,9 +156,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::{
         query::{
-            utils::tests::compute_output_item_value, pi_len,
-            public_inputs::PublicInputs,
+            pi_len, public_inputs::PublicInputs,
             universal_circuit::universal_query_gadget::CurveOrU256,
+            utils::tests::compute_output_item_value,
         },
         test_utils::random_aggregation_operations,
     };

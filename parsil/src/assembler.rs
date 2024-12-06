@@ -15,11 +15,11 @@ use sqlparser::ast::{
     SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
 };
 use verifiable_db::query::{
-    utils::{QueryBoundSource, QueryBounds},
     computational_hash_ids::{AggregationOperation, Operation, PlaceholderIdentifier},
     universal_circuit::universal_circuit_inputs::{
         BasicOperation, InputOperand, OutputItem, Placeholders, ResultStructure,
     },
+    utils::{QueryBoundSource, QueryBounds},
 };
 
 use crate::{

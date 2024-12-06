@@ -31,7 +31,6 @@ use serde::{Deserialize, Serialize};
 use crate::revelation::placeholders_check::placeholder_ids_hash;
 
 use super::{
-    utils::QueryBoundSource,
     universal_circuit::{
         universal_circuit_inputs::{
             BasicOperation, InputOperand, OutputItem, PlaceholderIdsSet, ResultStructure,
@@ -39,6 +38,7 @@ use super::{
         universal_query_gadget::QueryBound,
         ComputationalHash, ComputationalHashTarget,
     },
+    utils::QueryBoundSource,
 };
 
 pub enum Identifiers {

@@ -34,25 +34,32 @@ use plonky2::{
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
-        circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData}, config::Hasher, proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget}
+        circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData},
+        config::Hasher,
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
-    framework::{
-        RecursiveCircuits, RecursiveCircuitsVerifierGagdet,
-    },
+    framework::{RecursiveCircuits, RecursiveCircuitsVerifierGagdet},
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
-        utils::{ChildPosition, NodeInfo, QueryBounds}, public_inputs::PublicInputsUniversalCircuit as QueryProofPublicInputs, computational_hash_ids::{ColumnIDs, ResultIdentifier}, merkle_path::{MerklePathGadget, MerklePathTargetInputs}, universal_circuit::{
+        computational_hash_ids::{ColumnIDs, ResultIdentifier},
+        merkle_path::{MerklePathGadget, MerklePathTargetInputs},
+        public_inputs::PublicInputsUniversalCircuit as QueryProofPublicInputs,
+        universal_circuit::{
             build_cells_tree,
-            universal_circuit_inputs::{BasicOperation, ColumnCell, Placeholders, ResultStructure, RowCells}, universal_query_circuit::{UniversalCircuitInput, UniversalQueryCircuitInputs},
-        }
+            universal_circuit_inputs::{
+                BasicOperation, ColumnCell, Placeholders, ResultStructure, RowCells,
+            },
+            universal_query_circuit::{UniversalCircuitInput, UniversalQueryCircuitInputs},
+        },
+        utils::{ChildPosition, NodeInfo, QueryBounds},
     },
 };
 
@@ -142,6 +149,26 @@ impl NodeInfoTarget {
             .for_each(|(&target, value)| pw.set_hash_target(target, value));
         pw.set_u256_target(&self.node_min, inputs.min);
         pw.set_u256_target(&self.node_max, inputs.max);
+    }
+}
+
+/// Data structure containing the parameters found in tabular
+/// queries that specify which outputs should be returned
+#[derive(Clone, Debug)]
+pub(crate) struct TabularQueryOutputModifiers {
+    limit: u32,
+    offset: u32,
+    /// Boolean flag specifying whether DISTINCT keyword must be applied to results
+    distinct: bool,
+}
+
+impl TabularQueryOutputModifiers {
+    pub(crate) fn new(limit: u32, offset: u32, distinct: bool) -> Self {
+        Self {
+            limit,
+            offset,
+            distinct,
+        }
     }
 }
 
@@ -287,9 +314,7 @@ where
         index_column_ids: [F; 2],
         item_ids: &[F],
         results: [Vec<U256>; L],
-        limit: u32,
-        offset: u32,
-        distinct: bool,
+        query_modifiers: TabularQueryOutputModifiers,
         placeholder_inputs: CheckPlaceholderGadget<PH, PP>,
     ) -> Result<Self> {
         let mut row_tree_paths = [MerklePathGadget::<ROW_TREE_MAX_DEPTH>::default(); L];
@@ -337,9 +362,9 @@ where
             num_actual_items_per_row,
             ids: padded_ids.try_into().unwrap(),
             results: results.try_into().unwrap(),
-            limit,
-            offset,
-            distinct,
+            limit: query_modifiers.limit,
+            offset: query_modifiers.offset,
+            distinct: query_modifiers.distinct,
             check_placeholder_inputs: placeholder_inputs,
         })
     }
@@ -481,14 +506,8 @@ where
             b.connect_hashes(row_proof.computational_hash_target(), computational_hash);
             b.connect_hashes(row_proof.placeholder_hash_target(), placeholder_hash);
             // check that query bounds on primary index are the same for all the proofs
-            b.enforce_equal_u256(
-                &row_proof.min_primary_target(), 
-                &min_query_primary,
-            );
-            b.enforce_equal_u256(
-                &row_proof.max_primary_target(), 
-                &max_query_primary,
-            );
+            b.enforce_equal_u256(&row_proof.min_primary_target(), &min_query_primary);
+            b.enforce_equal_u256(&row_proof.max_primary_target(), &max_query_primary);
 
             overflow = b.or(overflow, row_proof.overflow_flag_target());
         });
@@ -663,13 +682,15 @@ where
         value: U256::default(),
         id: column_ids.secondary,
     };
-    let non_indexed_columns = column_ids.non_indexed_columns().iter().map(|id|
-        ColumnCell::new(*id, U256::default())
-    ).collect_vec();
+    let non_indexed_columns = column_ids
+        .non_indexed_columns()
+        .iter()
+        .map(|id| ColumnCell::new(*id, U256::default()))
+        .collect_vec();
     let cells = RowCells::new(
         primary_index_column,
         secondary_index_column,
-        non_indexed_columns
+        non_indexed_columns,
     );
     let universal_query_circuit = UniversalQueryCircuitInputs::new(
         &cells,
@@ -680,11 +701,7 @@ where
         results,
         true, // we generate proof for a dummy row
     )?;
-    Ok(
-        UniversalCircuitInput::QueryNoAgg(
-            universal_query_circuit
-        )
-    )
+    Ok(UniversalCircuitInput::QueryNoAgg(universal_query_circuit))
 }
 
 pub struct CircuitBuilderParams {
@@ -765,10 +782,8 @@ where
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let row_verifiers = [0; L].map(|_| verify_proof_fixed_circuit(
-            builder,
-            &builder_parameters.universal_query_vk,
-        ));
+        let row_verifiers = [0; L]
+            .map(|_| verify_proof_fixed_circuit(builder, &builder_parameters.universal_query_vk));
         let preprocessing_verifier =
             RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PREPROCESSING_IO>::new(
                 default_config(),
@@ -780,11 +795,7 @@ where
         );
         let row_pis = row_verifiers
             .iter()
-            .map(|verifier| {
-                QueryProofPublicInputs::from_slice(
-                    &verifier.public_inputs,
-                )
-            })
+            .map(|verifier| QueryProofPublicInputs::from_slice(&verifier.public_inputs))
             .collect_vec();
         let preprocessing_pi =
             OriginalTreePublicInputs::from_slice(&preprocessing_proof.public_inputs);
@@ -844,11 +855,16 @@ mod tests {
             PublicInputs as OriginalTreePublicInputs,
         },
         query::{
+            pi_len as query_pi_len,
+            public_inputs::{
+                PublicInputsUniversalCircuit as QueryProofPublicInputs,
+                QueryPublicInputsUniversalCircuit,
+            },
             utils::{ChildPosition, NodeInfo},
-            public_inputs::{PublicInputsUniversalCircuit as QueryProofPublicInputs, QueryPublicInputsUniversalCircuit}, pi_len as query_pi_len,
         },
         revelation::{
-            revelation_unproven_offset::RowPath, tests::TestPlaceholders,
+            revelation_unproven_offset::{RowPath, TabularQueryOutputModifiers},
+            tests::TestPlaceholders,
             NUM_PREPROCESSING_IO,
         },
         test_utils::random_aggregation_operations,
@@ -950,7 +966,7 @@ mod tests {
         let placeholder_hash = test_placeholders.query_placeholder_hash;
         let min_query_primary = test_placeholders.min_query;
         let max_query_primary = test_placeholders.max_query;
-        // set same primary index query bounds, computational hash and placeholder hash for all proofs; 
+        // set same primary index query bounds, computational hash and placeholder hash for all proofs;
         // set also num matching rows to 1 for all proofs
         row_pis.iter_mut().for_each(|pis| {
             let [min_primary_range, max_primary_range, ch_range, ph_range, count_range] = [
@@ -967,8 +983,11 @@ mod tests {
             pis[ph_range].copy_from_slice(&placeholder_hash.to_fields());
             pis[count_range].copy_from_slice(&[F::ONE]);
         });
-        let hash_range = QueryProofPublicInputs::<F, S>::to_range(QueryPublicInputsUniversalCircuit::TreeHash);
-        let index_value_range = QueryProofPublicInputs::<F, S>::to_range(QueryPublicInputsUniversalCircuit::PrimaryIndexValue);
+        let hash_range =
+            QueryProofPublicInputs::<F, S>::to_range(QueryPublicInputsUniversalCircuit::TreeHash);
+        let index_value_range = QueryProofPublicInputs::<F, S>::to_range(
+            QueryPublicInputsUniversalCircuit::PrimaryIndexValue,
+        );
         // build a test tree containing the rows 0..5 found in row_pis
         // Index tree:
         //          A
@@ -1015,8 +1034,7 @@ mod tests {
         };
         let node_2 = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[2]);
-            let embedded_tree_hash =
-                HashOutput::from(gen_random_field_hash::<F>());
+            let embedded_tree_hash = HashOutput::from(gen_random_field_hash::<F>());
             let node_value = row_pi.secondary_index_value();
             NodeInfo::new(
                 &embedded_tree_hash,
@@ -1032,8 +1050,7 @@ mod tests {
         row_pis[2][hash_range.clone()].copy_from_slice(&node_2_hash.to_fields());
         let node_4 = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[4]);
-            let embedded_tree_hash =
-                HashOutput::from(gen_random_field_hash::<F>());
+            let embedded_tree_hash = HashOutput::from(gen_random_field_hash::<F>());
             let node_value = row_pi.secondary_index_value();
             NodeInfo::new(
                 &embedded_tree_hash,
@@ -1049,8 +1066,7 @@ mod tests {
         row_pis[4][hash_range.clone()].copy_from_slice(&node_4_hash.to_fields());
         let node_5 = {
             // can use all dummy values for this node, since there is no proof associated to it
-            let embedded_tree_hash =
-                HashOutput::from(gen_random_field_hash::<F>());
+            let embedded_tree_hash = HashOutput::from(gen_random_field_hash::<F>());
             let [node_value, node_min, node_max] = array::from_fn(|_| gen_random_u256(rng));
             NodeInfo::new(
                 &embedded_tree_hash,
@@ -1062,8 +1078,7 @@ mod tests {
             )
         };
         let node_4_hash = HashOutput::from(node_4_hash);
-        let node_5_hash =
-            HashOutput::from(node_5.compute_node_hash(index_ids[1]));
+        let node_5_hash = HashOutput::from(node_5.compute_node_hash(index_ids[1]));
         let node_3 = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[3]);
             let embedded_tree_hash = HashOutput::from(row_pi.tree_hash());
@@ -1079,8 +1094,7 @@ mod tests {
         };
         let node_b = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[2]);
-            let embedded_tree_hash =
-                HashOutput::from(node_2.compute_node_hash(index_ids[1]));
+            let embedded_tree_hash = HashOutput::from(node_2.compute_node_hash(index_ids[1]));
             let node_value = row_pi.primary_index_value();
             NodeInfo::new(
                 &embedded_tree_hash,
@@ -1093,12 +1107,11 @@ mod tests {
         };
         let node_c = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[3]);
-            let embedded_tree_hash =
-                HashOutput::from(node_3.compute_node_hash(index_ids[1]));
+            let embedded_tree_hash = HashOutput::from(node_3.compute_node_hash(index_ids[1]));
             let node_value = row_pi.primary_index_value();
             // we need to set index value in `row_pis[4]` to the same value of `row_pis[3]`, as
             // they are in the same index tree
-            row_pis[4][index_value_range.clone()].copy_from_slice(&node_value.to_fields()); 
+            row_pis[4][index_value_range.clone()].copy_from_slice(&node_value.to_fields());
             NodeInfo::new(
                 &embedded_tree_hash,
                 None,
@@ -1108,18 +1121,15 @@ mod tests {
                 node_value,
             )
         };
-        let node_b_hash =
-            HashOutput::from(node_b.compute_node_hash(index_ids[0]));
-        let node_c_hash =
-            HashOutput::from(node_c.compute_node_hash(index_ids[0]));
+        let node_b_hash = HashOutput::from(node_b.compute_node_hash(index_ids[0]));
+        let node_c_hash = HashOutput::from(node_c.compute_node_hash(index_ids[0]));
         let node_a = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[0]);
-            let embedded_tree_hash =
-                HashOutput::from(node_0.compute_node_hash(index_ids[1]));
+            let embedded_tree_hash = HashOutput::from(node_0.compute_node_hash(index_ids[1]));
             let node_value = row_pi.primary_index_value();
             // we need to set index value in `row_pis[1]` to the same value of `row_pis[0]`, as
             // they are in the same index tree
-            row_pis[1][index_value_range].copy_from_slice(&node_value.to_fields()); 
+            row_pis[1][index_value_range].copy_from_slice(&node_value.to_fields());
             NodeInfo::new(
                 &embedded_tree_hash,
                 Some(&node_b_hash), // left child is node B
@@ -1182,8 +1192,9 @@ mod tests {
             .await;
 
         row_pis.iter_mut().zip(digests).for_each(|(pis, digest)| {
-            let values_range =
-                QueryProofPublicInputs::<F, S>::to_range(QueryPublicInputsUniversalCircuit::OutputValues);
+            let values_range = QueryProofPublicInputs::<F, S>::to_range(
+                QueryPublicInputsUniversalCircuit::OutputValues,
+            );
             pis[values_range.start..values_range.start + CURVE_TARGET_LEN]
                 .copy_from_slice(&digest.to_fields())
         });
@@ -1237,9 +1248,7 @@ mod tests {
                     index_ids,
                     &ids,
                     results.map(|res| res.to_vec()),
-                    0,
-                    0,
-                    false,
+                    TabularQueryOutputModifiers::new(0, 0, false),
                     test_placeholders.check_placeholder_inputs,
                 )
                 .unwrap(),

@@ -19,8 +19,8 @@ use ryhope::{
 use std::{fmt::Debug, future::Future};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql, NoTls};
 use verifiable_db::query::{
-    utils::{ChildPosition, NodeInfo, QueryBounds},
     api::TreePathInputs,
+    utils::{ChildPosition, NodeInfo, QueryBounds},
 };
 
 use crate::indexing::{
@@ -374,7 +374,6 @@ impl<
         self.try_fetch_with_context_at(k, epoch).await
     }
 }
-
 
 /// Fetch a key `k` from a tree, assuming that the key is in the
 /// tree. Therefore, it handles differently the case when `k` is not found:

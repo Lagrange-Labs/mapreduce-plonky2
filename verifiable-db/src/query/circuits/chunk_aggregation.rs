@@ -23,7 +23,7 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    row_chunk_gadgets::aggregate_chunks::aggregate_chunks, pi_len, public_inputs::PublicInputs
+    pi_len, public_inputs::PublicInputs, row_chunk_gadgets::aggregate_chunks::aggregate_chunks,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -198,10 +198,10 @@ mod tests {
 
     use crate::{
         query::{
-            utils::tests::aggregate_output_values,
-            public_inputs::PublicInputs,
             computational_hash_ids::{AggregationOperation, Identifiers},
+            public_inputs::PublicInputs,
             universal_circuit::universal_query_gadget::OutputValues,
+            utils::tests::aggregate_output_values,
         },
         test_utils::random_aggregation_operations,
     };

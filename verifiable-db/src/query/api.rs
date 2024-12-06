@@ -3,30 +3,53 @@ use std::iter::{repeat, repeat_with};
 use anyhow::{bail, ensure, Result};
 
 use itertools::Itertools;
-use mp2_common::{array::ToField, default_config, poseidon::{HashPermutation, H}, proof::{serialize_proof, ProofWithVK}, types::HashOutput, utils::ToFields, C, D, F};
-use plonky2::{hash::hashing::hash_n_to_hash_no_pad, plonk::config::{GenericHashOut, Hasher}};
+use mp2_common::{
+    array::ToField,
+    default_config,
+    poseidon::{HashPermutation, H},
+    proof::{serialize_proof, ProofWithVK},
+    types::HashOutput,
+    utils::ToFields,
+    C, D, F,
+};
+use plonky2::{
+    hash::hashing::hash_n_to_hash_no_pad,
+    plonk::config::{GenericHashOut, Hasher},
+};
 use recursion_framework::{
-    circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder}, framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
+    circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
+    framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
 };
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    utils::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
     circuits::{
-            chunk_aggregation::{ChunkAggregationCircuit, ChunkAggregationInputs, ChunkAggregationWires}, 
-            non_existence::{NonExistenceCircuit, NonExistenceWires},
-            row_chunk_processing::{RowChunkProcessingCircuit, RowChunkProcessingWires},
+        chunk_aggregation::{
+            ChunkAggregationCircuit, ChunkAggregationInputs, ChunkAggregationWires,
+        },
+        non_existence::{NonExistenceCircuit, NonExistenceWires},
+        row_chunk_processing::{RowChunkProcessingCircuit, RowChunkProcessingWires},
     },
-    row_chunk_gadgets::row_process_gadget::RowProcessingGadgetInputs,
     computational_hash_ids::{AggregationOperation, ColumnIDs, Identifiers},
+    row_chunk_gadgets::row_process_gadget::RowProcessingGadgetInputs,
     universal_circuit::{
-        output_with_aggregation::Circuit as OutputAggCircuit,
         output_no_aggregation::Circuit as OutputNoAggCircuit,
+        output_with_aggregation::Circuit as OutputAggCircuit,
         universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure, RowCells},
     },
+    utils::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
 };
 
-use super::{computational_hash_ids::Output, pi_len, universal_circuit::{universal_circuit_inputs::PlaceholderId, universal_query_circuit::{placeholder_hash, UniversalCircuitInput, UniversalQueryCircuitParams}}};
+use super::{
+    computational_hash_ids::Output,
+    pi_len,
+    universal_circuit::{
+        universal_circuit_inputs::PlaceholderId,
+        universal_query_circuit::{
+            placeholder_hash, UniversalCircuitInput, UniversalQueryCircuitParams,
+        },
+    },
+};
 
 /// Data structure containing all the information needed to verify the membership of
 /// a node in a tree and to compute info about its predecessor/successor
@@ -362,7 +385,9 @@ where
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
-        >::ids_for_placeholder_hash(predicate_operations, results, placeholders, query_bounds)
+        >::ids_for_placeholder_hash(
+            predicate_operations, results, placeholders, query_bounds
+        )
     }
 
     /// Compute the `placeholder_hash` associated to a query
@@ -442,9 +467,9 @@ pub(crate) struct Parameters<
         NonExistenceWires<INDEX_TREE_MAX_DEPTH, MAX_NUM_RESULTS>,
     >,
     universal_circuit: UniversalQueryCircuitParams<
-        MAX_NUM_COLUMNS, 
-        MAX_NUM_PREDICATE_OPS, 
-        MAX_NUM_RESULT_OPS, 
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
         MAX_NUM_RESULTS,
         OutputNoAggCircuit<MAX_NUM_RESULTS>,
     >,
@@ -452,15 +477,15 @@ pub(crate) struct Parameters<
 }
 
 impl<
-    const NUM_CHUNKS: usize,
-    const NUM_ROWS: usize,
-    const ROW_TREE_MAX_DEPTH: usize,
-    const INDEX_TREE_MAX_DEPTH: usize,
-    const MAX_NUM_COLUMNS: usize,
-    const MAX_NUM_PREDICATE_OPS: usize,
-    const MAX_NUM_RESULT_OPS: usize,
-    const MAX_NUM_RESULTS: usize,
->
+        const NUM_CHUNKS: usize,
+        const NUM_ROWS: usize,
+        const ROW_TREE_MAX_DEPTH: usize,
+        const INDEX_TREE_MAX_DEPTH: usize,
+        const MAX_NUM_COLUMNS: usize,
+        const MAX_NUM_PREDICATE_OPS: usize,
+        const MAX_NUM_RESULT_OPS: usize,
+        const MAX_NUM_RESULTS: usize,
+    >
     Parameters<
         NUM_CHUNKS,
         NUM_ROWS,
@@ -523,20 +548,23 @@ where
         >,
     ) -> Result<Vec<u8>> {
         match input {
-            CircuitInput::RowChunkWithAggregation(row_chunk_processing_circuit) => 
-            ProofWithVK::serialize(
-            &(
-                self.circuit_set.generate_proof(
-                    &self.row_chunk_agg_circuit,
-                    [],
-                    [],
-                    row_chunk_processing_circuit,
-                )?,
-                self.row_chunk_agg_circuit
-                    .circuit_data()
-                    .verifier_only
-                    .clone(),
-            ).into()),
+            CircuitInput::RowChunkWithAggregation(row_chunk_processing_circuit) => {
+                ProofWithVK::serialize(
+                    &(
+                        self.circuit_set.generate_proof(
+                            &self.row_chunk_agg_circuit,
+                            [],
+                            [],
+                            row_chunk_processing_circuit,
+                        )?,
+                        self.row_chunk_agg_circuit
+                            .circuit_data()
+                            .verifier_only
+                            .clone(),
+                    )
+                        .into(),
+                )
+            }
             CircuitInput::ChunkAggregation(chunk_aggregation_inputs) => {
                 let ChunkAggregationInputs {
                     chunk_proofs,
@@ -550,41 +578,42 @@ where
                 let input_proofs = chunk_proofs.map(|p| p.proof);
                 ProofWithVK::serialize(
                     &(
+                        self.circuit_set.generate_proof(
+                            &self.aggregation_circuit,
+                            input_proofs,
+                            input_vd.iter().collect_vec().try_into().unwrap(),
+                            circuit,
+                        )?,
+                        self.aggregation_circuit
+                            .circuit_data()
+                            .verifier_only
+                            .clone(),
+                    )
+                        .into(),
+                )
+            }
+            CircuitInput::NonExistence(non_existence_circuit) => ProofWithVK::serialize(
+                &(
                     self.circuit_set.generate_proof(
-                        &self.aggregation_circuit,
-                        input_proofs,
-                        input_vd.iter().collect_vec().try_into().unwrap(),
-                        circuit,
+                        &self.non_existence_circuit,
+                        [],
+                        [],
+                        non_existence_circuit,
                     )?,
-                    self.aggregation_circuit
+                    self.non_existence_circuit
                         .circuit_data()
                         .verifier_only
                         .clone(),
                 )
-                    .into())
-            }
-            CircuitInput::NonExistence(non_existence_circuit) => 
-            ProofWithVK::serialize(
-                &(
-                self.circuit_set.generate_proof(
-                    &self.non_existence_circuit,
-                    [],
-                    [],
-                    non_existence_circuit,
-                )?,
-                self.non_existence_circuit
-                    .circuit_data()
-                    .verifier_only
-                    .clone(),
-            )
-                .into()),
-            CircuitInput::UniversalCircuit(universal_circuit_input) => 
+                    .into(),
+            ),
+            CircuitInput::UniversalCircuit(universal_circuit_input) => {
                 if let UniversalCircuitInput::QueryNoAgg(input) = universal_circuit_input {
                     serialize_proof(&self.universal_circuit.generate_proof(&input)?)
                 } else {
                     unreachable!("Universal circuit should only be used for queries with no aggregation operations")
                 }
-            ,
+            }
         }
     }
 
@@ -592,10 +621,12 @@ where
         &self.circuit_set
     }
 
-    pub(crate) fn get_universal_circuit(&self) -> &UniversalQueryCircuitParams<
-        MAX_NUM_COLUMNS, 
-        MAX_NUM_PREDICATE_OPS, 
-        MAX_NUM_RESULT_OPS, 
+    pub(crate) fn get_universal_circuit(
+        &self,
+    ) -> &UniversalQueryCircuitParams<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
         MAX_NUM_RESULTS,
         OutputNoAggCircuit<MAX_NUM_RESULTS>,
     > {

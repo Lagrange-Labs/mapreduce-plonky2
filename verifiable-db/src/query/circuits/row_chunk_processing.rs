@@ -10,17 +10,21 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::query::{
-    utils::QueryBounds, row_chunk_gadgets::
-    {
+    computational_hash_ids::ColumnIDs,
+    pi_len,
+    public_inputs::PublicInputs,
+    row_chunk_gadgets::{
+        aggregate_chunks::aggregate_chunks,
         row_process_gadget::{RowProcessingGadgetInputWires, RowProcessingGadgetInputs},
-        aggregate_chunks::aggregate_chunks, RowChunkDataTarget,
-    }, 
-        computational_hash_ids::ColumnIDs, pi_len, public_inputs::PublicInputs, universal_circuit::{
+        RowChunkDataTarget,
+    },
+    universal_circuit::{
         universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure},
         universal_query_gadget::{
             OutputComponent, UniversalQueryHashInputWires, UniversalQueryHashInputs,
         },
-    }
+    },
+    utils::QueryBounds,
 };
 
 use mp2_common::{
@@ -217,7 +221,10 @@ where
                 b,
                 &chunk,
                 &current_chunk,
-                (&query_input_wires.input_wires.min_query_primary, &query_input_wires.input_wires.max_query_primary),
+                (
+                    &query_input_wires.input_wires.min_query_primary,
+                    &query_input_wires.input_wires.max_query_primary,
+                ),
                 (
                     &query_input_wires.min_secondary,
                     &query_input_wires.max_secondary,
@@ -374,22 +381,18 @@ mod tests {
     use rand::thread_rng;
 
     use crate::query::{
-        utils::{
-            tests::aggregate_output_values, ChildPosition, QueryBoundSource, QueryBounds,
-        },
         circuits::{
             row_chunk_processing::RowChunkProcessingCircuit,
             tests::{build_test_tree, compute_output_values_for_row},
         },
-        row_chunk_gadgets::{
-            BoundaryRowData, BoundaryRowNodeInfo,
-            row_process_gadget::RowProcessingGadgetInputs
-        },
-        public_inputs::PublicInputs,
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
         },
-        merkle_path::{NeighborInfo, MerklePathWithNeighborsGadget},
+        merkle_path::{MerklePathWithNeighborsGadget, NeighborInfo},
+        public_inputs::PublicInputs,
+        row_chunk_gadgets::{
+            row_process_gadget::RowProcessingGadgetInputs, BoundaryRowData, BoundaryRowNodeInfo,
+        },
         universal_circuit::{
             output_no_aggregation::Circuit as NoAggOutputCircuit,
             output_with_aggregation::Circuit as AggOutputCircuit,
@@ -401,6 +404,7 @@ mod tests {
             universal_query_gadget::CurveOrU256,
             ComputationalHash,
         },
+        utils::{tests::aggregate_output_values, ChildPosition, QueryBoundSource, QueryBounds},
     };
 
     use super::{OutputComponent, RowChunkProcessingWires};

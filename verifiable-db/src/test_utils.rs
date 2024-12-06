@@ -5,9 +5,16 @@ use crate::{
     query::{
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
-        }, public_inputs::{PublicInputs as QueryPI, PublicInputsFactory, QueryPublicInputs}, row_chunk_gadgets::BoundaryRowData, universal_circuit::{universal_circuit_inputs::{
-            BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders, ResultStructure,
-        }, universal_query_gadget::OutputValues}, utils::{QueryBoundSource, QueryBounds, QueryHashNonExistenceCircuits}
+        },
+        public_inputs::{PublicInputs as QueryPI, PublicInputsFactory, QueryPublicInputs},
+        row_chunk_gadgets::BoundaryRowData,
+        universal_circuit::{
+            universal_circuit_inputs::{
+                BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders, ResultStructure,
+            },
+            universal_query_gadget::OutputValues,
+        },
+        utils::{QueryBoundSource, QueryBounds, QueryHashNonExistenceCircuits},
     },
     revelation::NUM_PREPROCESSING_IO,
 };
@@ -20,7 +27,7 @@ use mp2_common::{
 };
 use mp2_test::utils::{gen_random_field_hash, gen_random_u256};
 use plonky2::{
-    field::types::{PrimeField64, Sample, Field},
+    field::types::{Field, PrimeField64, Sample},
     hash::hash_types::HashOut,
     plonk::config::GenericHashOut,
 };
@@ -43,7 +50,6 @@ pub const MAX_NUM_RESULT_OPS: usize = 20;
 pub const ROW_TREE_MAX_DEPTH: usize = 10;
 pub const INDEX_TREE_MAX_DEPTH: usize = 15;
 pub const NUM_COLUMNS: usize = 4;
-
 
 /// Generate a set of values in a given range ensuring that the i+1-th generated value is
 /// bigger than the i-th generated value    
@@ -96,7 +102,9 @@ pub fn random_aggregation_operations<const S: usize>() -> [F; S] {
     })
 }
 
-impl<const S: usize, const UNIVERSAL_CIRCUIT: bool> PublicInputsFactory<'_, F, S, UNIVERSAL_CIRCUIT> {
+impl<const S: usize, const UNIVERSAL_CIRCUIT: bool>
+    PublicInputsFactory<'_, F, S, UNIVERSAL_CIRCUIT>
+{
     pub(crate) fn sample_from_ops<const NUM_INPUTS: usize>(ops: &[F; S]) -> [Vec<F>; NUM_INPUTS]
     where
         [(); S - 1]:,
@@ -286,23 +294,24 @@ impl TestRevelationData {
         let computational_hash = non_existence_circuits.computational_hash();
         let placeholder_hash = non_existence_circuits.placeholder_hash();
 
-        let [mut query_pi_raw] = QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::sample_from_ops(
-            &ops_ids.try_into().unwrap(),
-        );
-        let [min_query_primary, max_query_primary, min_query_secondary, max_query_secondary, p_hash_range, c_hash_range, left_row_range, right_row_range] = [
-            QueryPublicInputs::MinPrimary,
-            QueryPublicInputs::MaxPrimary,
-            QueryPublicInputs::MinSecondary,
-            QueryPublicInputs::MaxSecondary,
-            QueryPublicInputs::PlaceholderHash,
-            QueryPublicInputs::ComputationalHash,
-            QueryPublicInputs::LeftBoundaryRow,
-            QueryPublicInputs::RightBoundaryRow,
-        ]
-        .map(QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::to_range);
-    
+        let [mut query_pi_raw] =
+            QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::sample_from_ops(&ops_ids.try_into().unwrap());
+        let [min_query_primary, max_query_primary, min_query_secondary, max_query_secondary, p_hash_range, c_hash_range, left_row_range, right_row_range] =
+            [
+                QueryPublicInputs::MinPrimary,
+                QueryPublicInputs::MaxPrimary,
+                QueryPublicInputs::MinSecondary,
+                QueryPublicInputs::MaxSecondary,
+                QueryPublicInputs::PlaceholderHash,
+                QueryPublicInputs::ComputationalHash,
+                QueryPublicInputs::LeftBoundaryRow,
+                QueryPublicInputs::RightBoundaryRow,
+            ]
+            .map(QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::to_range);
+
         // sample left boundary row and right boundary row to satisfy revelation circuit constraints
-        let (left_boundary_row, right_boundary_row) = sample_boundary_rows_for_revelation(&query_bounds, rng);
+        let (left_boundary_row, right_boundary_row) =
+            sample_boundary_rows_for_revelation(&query_bounds, rng);
 
         // Set the minimum, maximum query, placeholder hash andn computational hash to expected values.
         [
@@ -325,20 +334,14 @@ impl TestRevelationData {
             (p_hash_range, placeholder_hash.to_vec()),
             (c_hash_range, computational_hash.to_vec()),
             (left_row_range, left_boundary_row.to_fields()),
-            (right_row_range, right_boundary_row.to_fields())
+            (right_row_range, right_boundary_row.to_fields()),
         ]
         .into_iter()
         .for_each(|(range, fields)| query_pi_raw[range].copy_from_slice(&fields));
 
         let query_pi = QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::from_slice(&query_pi_raw);
-        assert_eq!(
-            query_pi.min_primary(),
-            query_bounds.min_query_primary(),
-        );
-        assert_eq!(
-            query_pi.max_primary(),
-            query_bounds.max_query_primary(),
-        );
+        assert_eq!(query_pi.min_primary(), query_bounds.min_query_primary(),);
+        assert_eq!(query_pi.max_primary(), query_bounds.max_query_primary(),);
         assert_eq!(
             query_pi.min_secondary(),
             query_bounds.min_query_secondary().value,
@@ -393,52 +396,51 @@ pub(crate) fn sample_boundary_rows_for_revelation<R: Rng>(
     query_bounds: &QueryBounds,
     rng: &mut R,
 ) -> (BoundaryRowData, BoundaryRowData) {
-        let min_secondary = *query_bounds.min_query_secondary().value();
-        let max_secondary = *query_bounds.max_query_secondary().value();
-        let mut left_boundary_row = BoundaryRowData::sample(rng, &query_bounds);
-        // for predecessor of `left_boundary_row` in index tree, we need to either mark it as
-        // non-existent or to make its value out of range
-        if rng.gen() || query_bounds.min_query_primary() == U256::ZERO {
-            left_boundary_row.index_node_info.predecessor_info.is_found = false;
-        } else {
-            let [predecessor_value] = gen_values_in_range(
-                rng,
-                U256::ZERO,
-                query_bounds.min_query_primary() - U256::from(1),
-            );
-            left_boundary_row.index_node_info.predecessor_info.value = predecessor_value;
-        }
-        // for predecessor of `left_boundary_row` in rows tree, we need to either mark it as
-        // non-existent or to make its value out of range
-        if rng.gen() || min_secondary == U256::ZERO {
-            left_boundary_row.row_node_info.predecessor_info.is_found = false;
-        } else {
-            let [predecessor_value] =
-                gen_values_in_range(rng, U256::ZERO, min_secondary - U256::from(1));
-            left_boundary_row.row_node_info.predecessor_info.value = predecessor_value;
-        }
-        let mut right_boundary_row = BoundaryRowData::sample(rng, &query_bounds);
-        // for successor of `right_boundary_row` in index tree, we need to either mark it as
-        // non-existent or to make its value out of range
-        if rng.gen() || query_bounds.max_query_primary() == U256::MAX {
-            right_boundary_row.index_node_info.successor_info.is_found = false;
-        } else {
-            let [successor_value] = gen_values_in_range(
-                rng,
-                query_bounds.max_query_primary() + U256::from(1),
-                U256::MAX,
-            );
-            right_boundary_row.index_node_info.successor_info.value = successor_value;
-        }
-        // for successor of `right_boundary_row` in rows tree, we need to either mark it as
-        // non-existent or to make its value out of range
-        if rng.gen() || max_secondary == U256::MAX {
-            right_boundary_row.row_node_info.successor_info.is_found = false;
-        } else {
-            let [successor_value] =
-                gen_values_in_range(rng, max_secondary + U256::from(1), U256::MAX);
-            right_boundary_row.row_node_info.successor_info.value = successor_value;
-        }
+    let min_secondary = *query_bounds.min_query_secondary().value();
+    let max_secondary = *query_bounds.max_query_secondary().value();
+    let mut left_boundary_row = BoundaryRowData::sample(rng, query_bounds);
+    // for predecessor of `left_boundary_row` in index tree, we need to either mark it as
+    // non-existent or to make its value out of range
+    if rng.gen() || query_bounds.min_query_primary() == U256::ZERO {
+        left_boundary_row.index_node_info.predecessor_info.is_found = false;
+    } else {
+        let [predecessor_value] = gen_values_in_range(
+            rng,
+            U256::ZERO,
+            query_bounds.min_query_primary() - U256::from(1),
+        );
+        left_boundary_row.index_node_info.predecessor_info.value = predecessor_value;
+    }
+    // for predecessor of `left_boundary_row` in rows tree, we need to either mark it as
+    // non-existent or to make its value out of range
+    if rng.gen() || min_secondary == U256::ZERO {
+        left_boundary_row.row_node_info.predecessor_info.is_found = false;
+    } else {
+        let [predecessor_value] =
+            gen_values_in_range(rng, U256::ZERO, min_secondary - U256::from(1));
+        left_boundary_row.row_node_info.predecessor_info.value = predecessor_value;
+    }
+    let mut right_boundary_row = BoundaryRowData::sample(rng, query_bounds);
+    // for successor of `right_boundary_row` in index tree, we need to either mark it as
+    // non-existent or to make its value out of range
+    if rng.gen() || query_bounds.max_query_primary() == U256::MAX {
+        right_boundary_row.index_node_info.successor_info.is_found = false;
+    } else {
+        let [successor_value] = gen_values_in_range(
+            rng,
+            query_bounds.max_query_primary() + U256::from(1),
+            U256::MAX,
+        );
+        right_boundary_row.index_node_info.successor_info.value = successor_value;
+    }
+    // for successor of `right_boundary_row` in rows tree, we need to either mark it as
+    // non-existent or to make its value out of range
+    if rng.gen() || max_secondary == U256::MAX {
+        right_boundary_row.row_node_info.successor_info.is_found = false;
+    } else {
+        let [successor_value] = gen_values_in_range(rng, max_secondary + U256::from(1), U256::MAX);
+        right_boundary_row.row_node_info.successor_info.value = successor_value;
+    }
 
-        (left_boundary_row, right_boundary_row)
+    (left_boundary_row, right_boundary_row)
 }

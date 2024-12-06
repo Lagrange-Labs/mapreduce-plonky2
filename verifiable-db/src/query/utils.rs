@@ -27,12 +27,13 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-
 use super::{
     computational_hash_ids::{ColumnIDs, Identifiers, PlaceholderIdentifier},
     universal_circuit::{
         universal_circuit_inputs::{BasicOperation, PlaceholderId, Placeholders, ResultStructure},
-        universal_query_circuit::{placeholder_hash, placeholder_hash_without_query_bounds, UniversalCircuitInput},
+        universal_query_circuit::{
+            placeholder_hash, placeholder_hash_without_query_bounds, UniversalCircuitInput,
+        },
         universal_query_gadget::QueryBound,
         ComputationalHash, PlaceholderHash,
     },

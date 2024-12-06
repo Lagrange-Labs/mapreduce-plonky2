@@ -7,7 +7,8 @@
 use alloy::primitives::U256;
 use mp2_common::{
     serialization::circuit_data_serialization::SerializableRichField,
-    utils::{FromFields, FromTargets, HashBuilder, SelectTarget, ToFields, ToTargets}, F,
+    utils::{FromFields, FromTargets, HashBuilder, SelectTarget, ToFields, ToTargets},
+    F,
 };
 use mp2_test::utils::gen_random_field_hash;
 use plonky2::{
@@ -17,10 +18,13 @@ use plonky2::{
 };
 use rand::Rng;
 
-use crate::{query::{
-    merkle_path::{MerklePathWithNeighborsTarget, NeighborInfoTarget},
-    universal_circuit::universal_query_gadget::UniversalQueryOutputWires,
-}, test_utils::gen_values_in_range};
+use crate::{
+    query::{
+        merkle_path::{MerklePathWithNeighborsTarget, NeighborInfoTarget},
+        universal_circuit::universal_query_gadget::UniversalQueryOutputWires,
+    },
+    test_utils::gen_values_in_range,
+};
 
 use super::{merkle_path::NeighborInfo, utils::QueryBounds};
 
@@ -213,7 +217,6 @@ where
     }
 }
 
-
 #[derive(Clone, Debug)]
 pub(crate) struct BoundaryRowNodeInfo {
     pub(crate) end_node_hash: HashOut<F>,
@@ -237,9 +240,8 @@ impl FromFields<F> for BoundaryRowNodeInfo {
         assert!(t.len() >= BoundaryRowNodeInfoTarget::NUM_TARGETS);
         let end_node_hash = HashOut::from_partial(&t[..NUM_HASH_OUT_ELTS]);
         let predecessor_info = NeighborInfo::from_fields(&t[NUM_HASH_OUT_ELTS..]);
-        let successor_info = NeighborInfo::from_fields(
-            &t[NUM_HASH_OUT_ELTS + NeighborInfoTarget::NUM_TARGETS..],
-        );
+        let successor_info =
+            NeighborInfo::from_fields(&t[NUM_HASH_OUT_ELTS + NeighborInfoTarget::NUM_TARGETS..]);
 
         Self {
             end_node_hash,
@@ -250,135 +252,135 @@ impl FromFields<F> for BoundaryRowNodeInfo {
 }
 
 impl BoundaryRowNodeInfo {
-        /// Generate an instance of `Self` representing a random node, given the `query_bounds`
-        /// provided as input and a flag `is_index_tree` specifying whether the random node
-        /// should be part of an index tree or of a rows tree. It is used to generate test data
-        /// without the need to generate an actual tree
-        pub(crate) fn sample<R: Rng>(
-            rng: &mut R,
-            query_bounds: &QueryBounds,
-            is_index_tree: bool,
-        ) -> Self {
-            let (min_query_bound, max_query_bound) = if is_index_tree {
-                (
-                    query_bounds.min_query_primary(),
-                    query_bounds.max_query_primary(),
-                )
+    /// Generate an instance of `Self` representing a random node, given the `query_bounds`
+    /// provided as input and a flag `is_index_tree` specifying whether the random node
+    /// should be part of an index tree or of a rows tree. It is used to generate test data
+    /// without the need to generate an actual tree
+    pub(crate) fn sample<R: Rng>(
+        rng: &mut R,
+        query_bounds: &QueryBounds,
+        is_index_tree: bool,
+    ) -> Self {
+        let (min_query_bound, max_query_bound) = if is_index_tree {
+            (
+                query_bounds.min_query_primary(),
+                query_bounds.max_query_primary(),
+            )
+        } else {
+            (
+                *query_bounds.min_query_secondary().value(),
+                *query_bounds.max_query_secondary().value(),
+            )
+        };
+        let end_node_hash = gen_random_field_hash();
+        let [predecessor_value] = gen_values_in_range(
+            rng,
+            if is_index_tree {
+                min_query_bound // predecessor in index tree must always be in range
             } else {
-                (
-                    *query_bounds.min_query_secondary().value(),
-                    *query_bounds.max_query_secondary().value(),
-                )
-            };
-            let end_node_hash = gen_random_field_hash();
-            let [predecessor_value] = gen_values_in_range(
-                rng,
-                if is_index_tree {
-                    min_query_bound // predecessor in index tree must always be in range
-                } else {
-                    U256::ZERO
-                },
-                max_query_bound, // predecessor value must always be smaller than max_secondary in circuit
-            );
-            let predecessor_info = NeighborInfo::sample(
-                rng,
-                predecessor_value,
-                if is_index_tree {
-                    // in index tree, there must always be a predecessor for boundary rows
-                    Some(true)
-                } else {
-                    None
-                },
-            );
-            let [successor_value] = gen_values_in_range(
-                rng,
-                predecessor_value.max(min_query_bound), // successor value must
-                // always be greater than min_secondary in circuit, and it must be also
-                // greater than predecessor value since we are in a BST
-                if is_index_tree {
-                    max_query_bound // successor in index tree must always be in range
-                } else {
-                    U256::MAX
-                },
-            );
-            let successor_info = NeighborInfo::sample(
-                rng,
-                successor_value,
-                if is_index_tree {
-                    // in index tree, there must always be a successor for boundary rows
-                    Some(true)
-                } else {
-                    None
-                },
-            );
+                U256::ZERO
+            },
+            max_query_bound, // predecessor value must always be smaller than max_secondary in circuit
+        );
+        let predecessor_info = NeighborInfo::sample(
+            rng,
+            predecessor_value,
+            if is_index_tree {
+                // in index tree, there must always be a predecessor for boundary rows
+                Some(true)
+            } else {
+                None
+            },
+        );
+        let [successor_value] = gen_values_in_range(
+            rng,
+            predecessor_value.max(min_query_bound), // successor value must
+            // always be greater than min_secondary in circuit, and it must be also
+            // greater than predecessor value since we are in a BST
+            if is_index_tree {
+                max_query_bound // successor in index tree must always be in range
+            } else {
+                U256::MAX
+            },
+        );
+        let successor_info = NeighborInfo::sample(
+            rng,
+            successor_value,
+            if is_index_tree {
+                // in index tree, there must always be a successor for boundary rows
+                Some(true)
+            } else {
+                None
+            },
+        );
 
-            Self {
-                end_node_hash,
-                predecessor_info,
-                successor_info,
-            }
+        Self {
+            end_node_hash,
+            predecessor_info,
+            successor_info,
         }
+    }
 
-        /// Given a boundary node with info stored in `self`, this method generates at random the
-        /// information about a node that can be the successor of `self` in a BST. This method
-        /// requires as additional inputs the `query_bounds` and a flag `is_index_tree`, which
-        /// specifies whether `self` and the generated node should be part of an index tree or
-        /// of a rows tree
-        pub(crate) fn sample_successor_in_tree<R: Rng>(
-            &self,
-            rng: &mut R,
-            query_bounds: &QueryBounds,
-            is_index_tree: bool,
-        ) -> Self {
-            let (min_query_bound, max_query_bound) = if is_index_tree {
-                (
-                    query_bounds.min_query_primary(),
-                    query_bounds.max_query_primary(),
-                )
+    /// Given a boundary node with info stored in `self`, this method generates at random the
+    /// information about a node that can be the successor of `self` in a BST. This method
+    /// requires as additional inputs the `query_bounds` and a flag `is_index_tree`, which
+    /// specifies whether `self` and the generated node should be part of an index tree or
+    /// of a rows tree
+    pub(crate) fn sample_successor_in_tree<R: Rng>(
+        &self,
+        rng: &mut R,
+        query_bounds: &QueryBounds,
+        is_index_tree: bool,
+    ) -> Self {
+        let (min_query_bound, max_query_bound) = if is_index_tree {
+            (
+                query_bounds.min_query_primary(),
+                query_bounds.max_query_primary(),
+            )
+        } else {
+            (
+                *query_bounds.min_query_secondary().value(),
+                *query_bounds.max_query_secondary().value(),
+            )
+        };
+        let end_node_hash = self.successor_info.hash;
+        // value of predecessor must be in query range and between the predecessor and successor value
+        // of `self`
+        let [predecessor_value] = gen_values_in_range(
+            rng,
+            min_query_bound.max(self.predecessor_info.value),
+            self.successor_info.value.min(max_query_bound),
+        );
+        let predecessor_info = if self.successor_info.is_in_path {
+            NeighborInfo::new(predecessor_value, None)
+        } else {
+            NeighborInfo::new(predecessor_value, Some(self.end_node_hash))
+        };
+        let [successor_value] = gen_values_in_range(
+            rng,
+            predecessor_value.max(min_query_bound),
+            if is_index_tree {
+                max_query_bound // successor must always be in range in index tree
             } else {
-                (
-                    *query_bounds.min_query_secondary().value(),
-                    *query_bounds.max_query_secondary().value(),
-                )
-            };
-            let end_node_hash = self.successor_info.hash;
-            // value of predecessor must be in query range and between the predecessor and successor value
-            // of `self`
-            let [predecessor_value] = gen_values_in_range(
-                rng,
-                min_query_bound.max(self.predecessor_info.value),
-                self.successor_info.value.min(max_query_bound),
-            );
-            let predecessor_info = if self.successor_info.is_in_path {
-                NeighborInfo::new(predecessor_value, None)
+                U256::MAX
+            },
+        );
+        let successor_info = NeighborInfo::sample(
+            rng,
+            successor_value,
+            if is_index_tree {
+                // in index tree, there must always be a successor for boundary rows
+                Some(true)
             } else {
-                NeighborInfo::new(predecessor_value, Some(self.end_node_hash))
-            };
-            let [successor_value] = gen_values_in_range(
-                rng,
-                predecessor_value.max(min_query_bound),
-                if is_index_tree {
-                    max_query_bound // successor must always be in range in index tree
-                } else {
-                    U256::MAX
-                },
-            );
-            let successor_info = NeighborInfo::sample(
-                rng,
-                successor_value,
-                if is_index_tree {
-                    // in index tree, there must always be a successor for boundary rows
-                    Some(true)
-                } else {
-                    None
-                },
-            );
-            BoundaryRowNodeInfo {
-                end_node_hash,
-                predecessor_info,
-                successor_info,
-            }
+                None
+            },
+        );
+        BoundaryRowNodeInfo {
+            end_node_hash,
+            predecessor_info,
+            successor_info,
         }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -481,14 +483,8 @@ impl BoundaryRowData {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use mp2_common::{
-        utils::ToFields,
-        F,
-    };
-    use plonky2::{
-        field::types::Field,
-        hash::hash_types::HashOut,
-    };
+    use mp2_common::{utils::ToFields, F};
+    use plonky2::{field::types::Field, hash::hash_types::HashOut};
 
     use crate::query::universal_circuit::universal_query_gadget::OutputValues;
 

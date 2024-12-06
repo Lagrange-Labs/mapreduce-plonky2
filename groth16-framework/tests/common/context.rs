@@ -6,10 +6,13 @@ use mp2_common::{C, D, F};
 use mp2_test::circuit::TestDummyCircuit;
 use recursion_framework::framework_testing::TestingRecursiveCircuits;
 use verifiable_db::{
-    api::WrapCircuitParams, query::pi_len, revelation::api::Parameters as RevelationParameters, test_utils::{
+    api::WrapCircuitParams,
+    query::pi_len,
+    revelation::api::Parameters as RevelationParameters,
+    test_utils::{
         INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
         MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH,
-    }
+    },
 };
 
 /// Test context
@@ -39,8 +42,9 @@ impl TestContext {
 
         // Generate a fake query circuit set.
         let query_circuits = TestingRecursiveCircuits::<F, C, D, NUM_QUERY_IO>::default();
-        let dummy_universal_circuit = TestDummyCircuit::<{pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()}>::build();
-        
+        let dummy_universal_circuit =
+            TestDummyCircuit::<{ pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>() }>::build();
+
         // Create the revelation parameters.
         let revelation_params = RevelationParameters::<
             ROW_TREE_MAX_DEPTH,
