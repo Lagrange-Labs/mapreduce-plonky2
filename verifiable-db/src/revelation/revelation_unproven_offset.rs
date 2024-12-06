@@ -942,7 +942,7 @@ mod tests {
 
     // test function for this revelation circuit. If `distinct` is true, then the
     // results are enforced to be distinct
-    async fn test_revelation_unproven_offset_circuit() {
+    async fn test_revelation_unproven_offset_circuit(distinct: bool) {
         const ROW_TREE_MAX_DEPTH: usize = 10;
         const INDEX_TREE_MAX_DEPTH: usize = 10;
         const L: usize = 5;
@@ -1145,8 +1145,17 @@ mod tests {
 
         // sample final results and set order-agnostic digests in row_pis proofs accordingly
         const NUM_ACTUAL_ITEMS_PER_OUTPUT: usize = 4;
-        let mut results: [[U256; NUM_ACTUAL_ITEMS_PER_OUTPUT]; L] =
-            array::from_fn(|_| array::from_fn(|_| gen_random_u256(rng)));
+        let mut results: [[U256; NUM_ACTUAL_ITEMS_PER_OUTPUT]; L] = if distinct {
+            // generate all the output values distinct from each other; generating at
+            // random will make them distinct with overwhelming probability
+            array::from_fn(|_| array::from_fn(|_| gen_random_u256(rng)))
+        } else {
+            // generate some values which are the same
+            let mut res = array::from_fn(|_| array::from_fn(|_| gen_random_u256(rng)));
+            res[L - 1] = res[0];
+            res
+        };
+
         // sort them to ensure that DISTINCT constraints are satisfied
         results.sort_by(|a, b| {
             let (is_smaller, is_eq) = is_less_than_or_equal_to_u256_arr(a, b);
@@ -1261,11 +1270,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_revelation_unproven_offset_circuit_no_distinct() {
-        test_revelation_unproven_offset_circuit().await
+        test_revelation_unproven_offset_circuit(false).await
     }
 
     #[tokio::test]
     async fn test_revelation_unproven_offset_circuit_distinct() {
-        test_revelation_unproven_offset_circuit().await
+        test_revelation_unproven_offset_circuit(true).await
     }
 }
