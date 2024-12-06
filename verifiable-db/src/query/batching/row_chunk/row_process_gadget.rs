@@ -14,12 +14,10 @@ use crate::query::{
             UniversalQueryValueInputs, UniversalQueryValueWires,
         },
     },
+    api::RowInput,
 };
 
-use super::{
-    circuits::api::RowInput,
-    row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget},
-};
+use super::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct RowProcessingGadgetInputWires<
@@ -221,8 +219,6 @@ where
         >,
         min_query_secondary: &UInt256Target,
         max_query_secondary: &UInt256Target,
-        min_query_primary: &UInt256Target,
-        max_query_primary: &UInt256Target,
     ) -> RowProcessingGadgetWires<
         ROW_TREE_MAX_DEPTH,
         INDEX_TREE_MAX_DEPTH,
@@ -235,8 +231,6 @@ where
             hash_input_wires,
             min_query_secondary,
             max_query_secondary,
-            Some(min_query_primary),
-            Some(max_query_primary),
             &zero,
         );
         let [primary_index_id, secondary_index_id] =

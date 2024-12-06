@@ -28,22 +28,13 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-pub(crate) mod child_proven_single_path_node;
-pub(crate) mod embedded_tree_proven_single_path_node;
-pub(crate) mod full_node_index_leaf;
-pub(crate) mod full_node_with_one_child;
-pub(crate) mod full_node_with_two_children;
-pub(crate) mod non_existence_inter;
 pub(crate) mod output_computation;
-pub(crate) mod partial_node;
-mod utils;
 
 use super::{
-    api::CircuitInput,
     computational_hash_ids::{ColumnIDs, Identifiers, PlaceholderIdentifier},
     universal_circuit::{
         universal_circuit_inputs::{BasicOperation, PlaceholderId, Placeholders, ResultStructure},
-        universal_query_circuit::{placeholder_hash, placeholder_hash_without_query_bounds},
+        universal_query_circuit::{placeholder_hash, placeholder_hash_without_query_bounds, UniversalCircuitInput},
         universal_query_gadget::QueryBound,
         ComputationalHash, PlaceholderHash,
     },
@@ -474,7 +465,7 @@ impl QueryHashNonExistenceCircuits {
                     .into(),
             )
         };
-        let placeholder_hash_ids = CircuitInput::<
+        let placeholder_hash_ids = UniversalCircuitInput::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,

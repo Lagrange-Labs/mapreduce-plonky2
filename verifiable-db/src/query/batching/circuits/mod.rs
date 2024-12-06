@@ -1,4 +1,3 @@
-pub(crate) mod api;
 pub(crate) mod chunk_aggregation;
 pub(crate) mod non_existence;
 pub(crate) mod row_chunk_processing;
@@ -20,7 +19,7 @@ mod tests {
 
     use crate::query::{
         aggregation::{NodeInfo, QueryBounds},
-        batching::public_inputs::tests::gen_values_in_range,
+        public_inputs::tests::gen_values_in_range,
         computational_hash_ids::AggregationOperation,
         merkle_path::tests::build_node,
         universal_circuit::{

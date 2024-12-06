@@ -97,7 +97,6 @@ pub(crate) fn constrain_input_proofs<const S: usize>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::query::public_inputs::QueryPublicInputs;
     use alloy::primitives::U256;
     use mp2_common::utils::ToFields;
 

@@ -23,6 +23,8 @@ use crate::query::{
 pub(crate) mod aggregate_chunks;
 /// This module contains gadgets to enforce whether 2 rows are consecutive
 pub(crate) mod consecutive_rows;
+/// This module copntains a gadget to prove a single row of the DB
+pub(crate) mod row_process_gadget;
 
 /// Data structure containing the wires representing the data related to the node of
 /// the row/index tree containing a row that is on the boundary of a row chunk.
@@ -222,9 +224,10 @@ pub(crate) mod tests {
 
     use crate::query::{
         aggregation::QueryBounds,
-        batching::{public_inputs::tests::gen_values_in_range, row_chunk::BoundaryRowDataTarget},
+        batching::row_chunk::BoundaryRowDataTarget,
         merkle_path::{tests::NeighborInfo, NeighborInfoTarget},
         universal_circuit::universal_query_gadget::OutputValues,
+        public_inputs::tests::gen_values_in_range, 
     };
 
     use super::BoundaryRowNodeInfoTarget;

@@ -3,15 +3,12 @@
 use crate::{
     ivc::public_inputs::H_RANGE as ORIGINAL_TREE_H_RANGE,
     query::{
-        aggregation::{QueryBounds, QueryHashNonExistenceCircuits},
-        computational_hash_ids::{
+        aggregation::{QueryBounds, QueryHashNonExistenceCircuits}, batching::row_chunk::tests::BoundaryRowData, computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
-        },
-        pi_len,
-        public_inputs::{PublicInputs as QueryPI, PublicInputs, QueryPublicInputs},
-        universal_circuit::universal_circuit_inputs::{
+        }, universal_circuit::universal_circuit_inputs::{
             BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders, ResultStructure,
         },
+        public_inputs::{tests::gen_values_in_range, PublicInputs as QueryPI, QueryPublicInputs}
     },
     revelation::NUM_PREPROCESSING_IO,
 };
@@ -19,16 +16,14 @@ use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    types::CURVE_TARGET_LEN,
     utils::{Fieldable, ToFields},
     F,
 };
 use plonky2::{
-    field::types::{Field, PrimeField64, Sample},
-    hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
+    field::types::PrimeField64,
+    hash::hash_types::HashOut,
     plonk::config::GenericHashOut,
 };
-use plonky2_ecgfp5::curve::curve::Point;
 use rand::{prelude::SliceRandom, thread_rng, Rng};
 use std::array;
 
@@ -76,65 +71,6 @@ pub fn random_aggregation_operations<const S: usize>() -> [F; S] {
     array::from_fn(|_| {
         let op = *ops.choose(&mut rng).unwrap();
         Identifiers::AggregationOperations(op).to_field()
-    })
-}
-
-/// Generate S number of proof public input slices by the specified operations for testing.
-/// The each returned proof public inputs could be constructed by
-/// `PublicInputs::from_slice` function.
-pub fn random_aggregation_public_inputs<const N: usize, const S: usize>(
-    ops: &[F; S],
-) -> [Vec<F>; N] {
-    let [ops_range, overflow_range, index_ids_range, c_hash_range, p_hash_range] = [
-        QueryPublicInputs::OpIds,
-        QueryPublicInputs::Overflow,
-        QueryPublicInputs::IndexIds,
-        QueryPublicInputs::ComputationalHash,
-        QueryPublicInputs::PlaceholderHash,
-    ]
-    .map(PublicInputs::<F, S>::to_range);
-
-    let first_value_start = PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues).start;
-    let is_first_op_id =
-        ops[0] == Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
-
-    // Generate the index ids, computational hash and placeholder hash,
-    // they should be same for a series of public inputs.
-    let mut rng = thread_rng();
-    let index_ids = (0..2).map(|_| rng.gen()).collect::<Vec<u32>>().to_fields();
-    let [computational_hash, placeholder_hash]: [Vec<_>; 2] = array::from_fn(|_| {
-        (0..NUM_HASH_OUT_ELTS)
-            .map(|_| rng.gen())
-            .collect::<Vec<u32>>()
-            .to_fields()
-    });
-
-    array::from_fn(|_| {
-        let mut pi = (0..pi_len::<S>())
-            .map(|_| rng.gen())
-            .collect::<Vec<u32>>()
-            .to_fields();
-
-        // Copy the specified operations to the proofs.
-        pi[ops_range.clone()].copy_from_slice(ops);
-
-        // Set the overflow flag to a random boolean.
-        let overflow = F::from_bool(rng.gen());
-        pi[overflow_range.clone()].copy_from_slice(&[overflow]);
-
-        // Set the index ids, computational hash and placeholder hash,
-        pi[index_ids_range.clone()].copy_from_slice(&index_ids);
-        pi[c_hash_range.clone()].copy_from_slice(&computational_hash);
-        pi[p_hash_range.clone()].copy_from_slice(&placeholder_hash);
-
-        // If the first operation is ID, set the value to a random point.
-        if is_first_op_id {
-            let first_value = Point::sample(&mut rng).to_weierstrass().to_fields();
-            pi[first_value_start..first_value_start + CURVE_TARGET_LEN]
-                .copy_from_slice(&first_value);
-        }
-
-        pi
     })
 }
 
@@ -244,34 +180,67 @@ impl TestRevelationData {
         let computational_hash = non_existence_circuits.computational_hash();
         let placeholder_hash = non_existence_circuits.placeholder_hash();
 
-        let [mut query_pi_raw] = random_aggregation_public_inputs::<1, MAX_NUM_ITEMS_PER_OUTPUT>(
+        let [mut query_pi_raw] = QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::sample_from_ops(
             &ops_ids.try_into().unwrap(),
         );
-        let [min_query_range, max_query_range, p_hash_range, c_hash_range] = [
-            QueryPublicInputs::MinQuery,
-            QueryPublicInputs::MaxQuery,
+        let [min_query_primary, max_query_primary, min_query_secondary, max_query_secondary, p_hash_range, c_hash_range, left_row_range, right_row_range] = [
+            QueryPublicInputs::MinPrimary,
+            QueryPublicInputs::MaxPrimary,
+            QueryPublicInputs::MinSecondary,
+            QueryPublicInputs::MaxSecondary,
             QueryPublicInputs::PlaceholderHash,
             QueryPublicInputs::ComputationalHash,
+            QueryPublicInputs::LeftBoundaryRow,
+            QueryPublicInputs::RightBoundaryRow,
         ]
         .map(QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::to_range);
+    
+        // sample left boundary row and right boundary row to satisfy revelation circuit constraints
+        let (left_boundary_row, right_boundary_row) = sample_boundary_rows_for_revelation(&query_bounds, rng);
 
         // Set the minimum, maximum query, placeholder hash andn computational hash to expected values.
         [
             (
-                min_query_range,
+                min_query_primary,
                 query_bounds.min_query_primary().to_fields(),
             ),
             (
-                max_query_range,
+                max_query_primary,
                 query_bounds.max_query_primary().to_fields(),
+            ),
+            (
+                min_query_secondary,
+                query_bounds.min_query_secondary().value().to_fields(),
+            ),
+            (
+                max_query_secondary,
+                query_bounds.max_query_secondary().value().to_fields(),
             ),
             (p_hash_range, placeholder_hash.to_vec()),
             (c_hash_range, computational_hash.to_vec()),
+            (left_row_range, left_boundary_row.to_fields()),
+            (right_row_range, right_boundary_row.to_fields())
         ]
         .into_iter()
         .for_each(|(range, fields)| query_pi_raw[range].copy_from_slice(&fields));
 
         let query_pi = QueryPI::<F, MAX_NUM_ITEMS_PER_OUTPUT>::from_slice(&query_pi_raw);
+        assert_eq!(
+            query_pi.min_primary(),
+            query_bounds.min_query_primary(),
+        );
+        assert_eq!(
+            query_pi.max_primary(),
+            query_bounds.max_query_primary(),
+        );
+        assert_eq!(
+            query_pi.min_secondary(),
+            query_bounds.min_query_secondary().value,
+        );
+        assert_eq!(
+            query_pi.max_secondary(),
+            query_bounds.max_query_secondary().value,
+        );
         // generate preprocessing proof public inputs
         let preprocessing_pi_raw = random_original_tree_proof(query_pi.tree_hash());
 
@@ -312,4 +281,58 @@ impl TestRevelationData {
     pub fn query_pi_raw(&self) -> &[F] {
         &self.query_pi_raw
     }
+}
+
+pub(crate) fn sample_boundary_rows_for_revelation<R: Rng>(
+    query_bounds: &QueryBounds,
+    rng: &mut R,
+) -> (BoundaryRowData, BoundaryRowData) {
+        let min_secondary = *query_bounds.min_query_secondary().value();
+        let max_secondary = *query_bounds.max_query_secondary().value();
+        let mut left_boundary_row = BoundaryRowData::sample(rng, &query_bounds);
+        // for predecessor of `left_boundary_row` in index tree, we need to either mark it as
+        // non-existent or to make its value out of range
+        if rng.gen() || query_bounds.min_query_primary() == U256::ZERO {
+            left_boundary_row.index_node_info.predecessor_info.is_found = false;
+        } else {
+            let [predecessor_value] = gen_values_in_range(
+                rng,
+                U256::ZERO,
+                query_bounds.min_query_primary() - U256::from(1),
+            );
+            left_boundary_row.index_node_info.predecessor_info.value = predecessor_value;
+        }
+        // for predecessor of `left_boundary_row` in rows tree, we need to either mark it as
+        // non-existent or to make its value out of range
+        if rng.gen() || min_secondary == U256::ZERO {
+            left_boundary_row.row_node_info.predecessor_info.is_found = false;
+        } else {
+            let [predecessor_value] =
+                gen_values_in_range(rng, U256::ZERO, min_secondary - U256::from(1));
+            left_boundary_row.row_node_info.predecessor_info.value = predecessor_value;
+        }
+        let mut right_boundary_row = BoundaryRowData::sample(rng, &query_bounds);
+        // for successor of `right_boundary_row` in index tree, we need to either mark it as
+        // non-existent or to make its value out of range
+        if rng.gen() || query_bounds.max_query_primary() == U256::MAX {
+            right_boundary_row.index_node_info.successor_info.is_found = false;
+        } else {
+            let [successor_value] = gen_values_in_range(
+                rng,
+                query_bounds.max_query_primary() + U256::from(1),
+                U256::MAX,
+            );
+            right_boundary_row.index_node_info.successor_info.value = successor_value;
+        }
+        // for successor of `right_boundary_row` in rows tree, we need to either mark it as
+        // non-existent or to make its value out of range
+        if rng.gen() || max_secondary == U256::MAX {
+            right_boundary_row.row_node_info.successor_info.is_found = false;
+        } else {
+            let [successor_value] =
+                gen_values_in_range(rng, max_secondary + U256::from(1), U256::MAX);
+            right_boundary_row.row_node_info.successor_info.value = successor_value;
+        }
+
+        (left_boundary_row, right_boundary_row)
 }

@@ -22,11 +22,9 @@ use plonky2::{
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
-use crate::query::batching::{
-    public_inputs::PublicInputs, row_chunk::aggregate_chunks::aggregate_chunks,
+use crate::query::{
+    batching::row_chunk::aggregate_chunks::aggregate_chunks, pi_len, public_inputs::PublicInputs
 };
-
-use super::api::num_io;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkAggregationWires<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize> {
@@ -156,7 +154,7 @@ where
 
     type Inputs = ChunkAggregationCircuit<NUM_CHUNKS, MAX_NUM_RESULTS>;
 
-    const NUM_PUBLIC_INPUTS: usize = num_io::<MAX_NUM_RESULTS>();
+    const NUM_PUBLIC_INPUTS: usize = pi_len::<MAX_NUM_RESULTS>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -201,7 +199,7 @@ mod tests {
     use crate::{
         query::{
             aggregation::tests::aggregate_output_values,
-            batching::public_inputs::PublicInputs,
+            public_inputs::PublicInputs,
             computational_hash_ids::{AggregationOperation, Identifiers},
             universal_circuit::universal_query_gadget::OutputValues,
         },

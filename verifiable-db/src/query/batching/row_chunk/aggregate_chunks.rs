@@ -129,17 +129,17 @@ mod tests {
                 tests::{BoundaryRowData, BoundaryRowNodeInfo, RowChunkData},
                 BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget,
             },
+            public_inputs::PublicInputs, 
             computational_hash_ids::{AggregationOperation, Identifiers},
             merkle_path::{
                 tests::{build_node, generate_test_tree, NeighborInfo},
                 MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs,
             },
-            public_inputs::PublicInputs,
             universal_circuit::universal_query_gadget::{
                 OutputValues, OutputValuesTarget, UniversalQueryOutputWires,
             },
         },
-        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
+        test_utils::random_aggregation_operations,
     };
 
     use super::aggregate_chunks;
@@ -445,7 +445,7 @@ mod tests {
         let root = index_node.compute_node_hash(primary_index_id);
 
         // generate the output values associated to each chunk
-        let inputs = random_aggregation_public_inputs::<2, MAX_NUM_RESULTS>(&ops);
+        let inputs = PublicInputs::<F, MAX_NUM_RESULTS>::sample_from_ops::<2>(&ops);
         let [(first_chunk_count, first_chunk_outputs, fist_chunk_num_overflows), (second_chunk_count, second_chunk_outputs, second_chunk_num_overflows)] =
             inputs
                 .into_iter()

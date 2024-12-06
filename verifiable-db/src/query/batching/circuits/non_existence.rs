@@ -22,20 +22,12 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::{output_computation::compute_dummy_output_targets, QueryBounds},
-    batching::{
-        public_inputs::PublicInputs,
-        row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget},
-    },
-    merkle_path::{
+    aggregation::{output_computation::compute_dummy_output_targets, QueryBounds}, api::TreePathInputs, batching::row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget}, merkle_path::{
         MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs, NeighborInfoTarget,
-    },
-    universal_circuit::{
+    }, pi_len, public_inputs::PublicInputs, universal_circuit::{
         ComputationalHash, ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
-    },
+    }
 };
-
-use super::api::{num_io, TreePathInputs};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NonExistenceWires<const INDEX_TREE_MAX_DEPTH: usize, const MAX_NUM_RESULTS: usize>
@@ -254,7 +246,7 @@ where
 
     type Inputs = NonExistenceCircuit<INDEX_TREE_MAX_DEPTH, MAX_NUM_RESULTS>;
 
-    const NUM_PUBLIC_INPUTS: usize = num_io::<MAX_NUM_RESULTS>();
+    const NUM_PUBLIC_INPUTS: usize = pi_len::<MAX_NUM_RESULTS>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -292,11 +284,9 @@ mod tests {
             aggregation::{
                 output_computation::tests::compute_dummy_output_values, ChildPosition, QueryBounds,
             },
-            batching::{
-                circuits::api::TreePathInputs,
-                public_inputs::{tests::gen_values_in_range, PublicInputs},
-                row_chunk::tests::{BoundaryRowData, BoundaryRowNodeInfo},
-            },
+            api::TreePathInputs,
+            batching::row_chunk::tests::{BoundaryRowData, BoundaryRowNodeInfo},
+            public_inputs::{tests::gen_values_in_range, PublicInputs},
             merkle_path::tests::{generate_test_tree, NeighborInfo},
             universal_circuit::universal_circuit_inputs::Placeholders,
         },

@@ -16,4 +16,5 @@ pub mod results_tree;
 /// Module for the query revelation circuits
 pub mod revelation;
 pub mod row_tree;
+#[cfg(test)]
 pub mod test_utils;
