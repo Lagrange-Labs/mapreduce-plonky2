@@ -964,7 +964,7 @@ mod test {
         }
 
         let block_number = transactions.first().unwrap().block_number.unwrap();
-        println!("block number: {block_number}");
+
         // We want to get the event signature so we can make a ReceiptQuery
         let all_events = EventEmitter::abi::events();
 
