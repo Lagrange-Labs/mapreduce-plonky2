@@ -1,18 +1,23 @@
 //! Module containing several structure definitions for Ethereum related operations
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use alloy::{
+    consensus::{ReceiptEnvelope as CRE, ReceiptWithBloom, TxEnvelope},
     eips::BlockNumberOrTag,
-    primitives::{Address, B256},
+    json_abi::Event,
+    network::{eip2718::Encodable2718, BlockResponse},
+    primitives::{Address, Log, LogData, B256},
     providers::{Provider, RootProvider},
-    rlp::Encodable as AlloyEncodable,
-    rpc::types::{Block, EIP1186AccountProofResponse},
+    rlp::{Decodable, Encodable as AlloyEncodable},
+    rpc::types::{
+        Block, BlockTransactions, EIP1186AccountProofResponse, Filter, ReceiptEnvelope, Transaction,
+    },
     transports::Transport,
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethereum_types::H256;
 use log::warn;
-use rlp::Rlp;
+use rlp::{Encodable, Rlp};
 use serde::{Deserialize, Serialize};
 use std::{array::from_fn as create_array, sync::Arc};
 
@@ -21,7 +26,7 @@ use crate::{mpt_sequential::utils::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN, ut
 /// Retry number for the RPC request
 const RETRY_NUM: usize = 3;
 
-pub trait BlockUtil {
+pub trait Rlpable {
     fn block_hash(&self) -> Vec<u8> {
         keccak256(&self.rlp())
     }
@@ -109,6 +114,177 @@ pub async fn query_latest_block<T: Transport + Clone>(provider: &RootProvider<T>
 pub struct ProofQuery {
     pub contract: Address,
     pub(crate) slot: StorageSlot,
+}
+
+/// Struct used for storing relevant data to query blocks as they come in.
+#[derive(Debug, Clone)]
+pub struct ReceiptQuery {
+    /// The contract that emits the event we care about
+    pub contract: Address,
+    /// The event we wish to monitor for,
+    pub event: Event,
+}
+
+/// Struct used to store all the information needed for proving a leaf in the Receipt Trie is one we care about.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReceiptProofInfo {
+    /// The MPT proof that this Receipt is in the tree
+    pub mpt_proof: Vec<Vec<u8>>,
+    /// The root of the Receipt Trie this receipt belongs to
+    pub mpt_root: H256,
+    /// The index of this transaction in the block
+    pub tx_index: u64,
+    /// The size of the index in bytes
+    pub index_size: usize,
+    /// The offset in the leaf (in RLP form) to status
+    pub status_offset: usize,
+    /// The offset in the leaf (in RLP form) to the start of logs
+    pub logs_offset: usize,
+    /// Data about the type of log we are proving the existence of
+    pub event_log_info: EventLogInfo,
+    /// The offsets for the relevant logs
+    pub relevant_logs_offset: Vec<usize>,
+}
+
+/// Contains all the information for an [`Event`] in rlp form
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct EventLogInfo {
+    /// Size in bytes of the whole log rlp encoded
+    pub size: usize,
+    /// Packed contract address to check
+    pub address: Address,
+    /// Byte offset for the address from the beginning of a Log
+    pub add_rel_offset: usize,
+    /// Packed event signature,
+    pub event_signature: [u8; 32],
+    /// Byte offset from the start of the log to event signature
+    pub sig_rel_offset: usize,
+    /// The topics for this Log
+    pub topics: [LogDataInfo; 3],
+    /// The extra data stored by this Log
+    pub data: [LogDataInfo; 2],
+}
+
+/// Contains all the information for data contained in an [`Event`]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct LogDataInfo {
+    pub column_id: usize,
+    /// The byte offset from the beggining of the log to this target
+    pub rel_byte_offset: usize,
+    /// The length of this topic/data
+    pub len: usize,
+}
+
+impl TryFrom<&Log<LogData>> for EventLogInfo {
+    type Error = anyhow::Error;
+
+    fn try_from(log: &Log<LogData>) -> std::result::Result<Self, Self::Error> {
+        // First we encode the log in rlp form
+        let mut buf = Vec::<u8>::new();
+        log.encode(&mut buf);
+
+        let rlp_log = rlp::Rlp::new(&buf);
+        // Extract the header
+        let log_header = rlp_log.payload_info()?;
+        let next_data = &buf[log_header.header_len..log_header.header_len + log_header.value_len];
+        let rlp_log_no_header = rlp::Rlp::new(next_data);
+        // Find the address offset (skipping its header)
+        let address_header = rlp_log_no_header.payload_info()?;
+        let rel_address_offset = log_header.header_len + address_header.header_len;
+        // Find the signature offset (skipping its header)
+        let topics_data = &buf[rel_address_offset + address_header.value_len
+            ..log_header.header_len + log_header.value_len];
+        let topics_rlp = rlp::Rlp::new(topics_data);
+        let topics_header = topics_rlp.payload_info()?;
+        let topic_0_data =
+            &buf[rel_address_offset + address_header.value_len + topics_header.header_len
+                ..log_header.header_len
+                    + address_header.header_len
+                    + address_header.value_len
+                    + topics_header.header_len
+                    + topics_header.value_len];
+        let topic_0_rlp = rlp::Rlp::new(topic_0_data);
+        let topic_0_header = topic_0_rlp.payload_info()?;
+        let rel_sig_offset = log_header.header_len
+            + address_header.header_len
+            + address_header.value_len
+            + topics_header.header_len
+            + topic_0_header.header_len;
+        let event_signature: [u8; 32] = buf[rel_sig_offset..rel_sig_offset + 32].try_into()?;
+        // Each topic takes 33 bytes to encode so we divide this length by 33 to get the number of topics remaining
+        let remaining_topics = buf[rel_sig_offset + topic_0_header.value_len
+            ..log_header.header_len
+                + address_header.header_len
+                + address_header.value_len
+                + topics_header.header_len
+                + topics_header.value_len]
+            .len()
+            / 33;
+
+        let mut topics = [LogDataInfo::default(); 3];
+        let mut current_topic_offset = rel_sig_offset + topic_0_header.value_len + 1;
+        topics
+            .iter_mut()
+            .enumerate()
+            .take(remaining_topics)
+            .for_each(|(j, info)| {
+                *info = LogDataInfo {
+                    column_id: j + 2,
+                    rel_byte_offset: current_topic_offset,
+                    len: 32,
+                };
+                current_topic_offset += 33;
+            });
+
+        // Deal with any remaining data
+        let mut data = [LogDataInfo::default(); 2];
+
+        let data_vec = if current_topic_offset < buf.len() {
+            buf.iter()
+                .skip(current_topic_offset - 1)
+                .copied()
+                .collect::<Vec<u8>>()
+        } else {
+            vec![]
+        };
+
+        if !data_vec.is_empty() {
+            let data_rlp = rlp::Rlp::new(&data_vec);
+            let data_header = data_rlp.payload_info()?;
+            // Since we can deal with at most two words of additional data we only need to take 66 bytes from this list
+            let mut additional_offset = data_header.header_len;
+            data_vec[data_header.header_len..]
+                .chunks(33)
+                .enumerate()
+                .take(2)
+                .try_for_each(|(j, chunk)| {
+                    let chunk_rlp = rlp::Rlp::new(chunk);
+                    let chunk_header = chunk_rlp.payload_info()?;
+                    if chunk_header.value_len <= 32 {
+                        data[j] = LogDataInfo {
+                            column_id: remaining_topics + 2 + j,
+                            rel_byte_offset: current_topic_offset
+                                + additional_offset
+                                + chunk_header.header_len,
+                            len: chunk_header.value_len,
+                        };
+                        additional_offset += chunk_header.header_len + chunk_header.value_len;
+                    } else {
+                        return Ok(());
+                    }
+                    Result::<(), anyhow::Error>::Ok(())
+                })?;
+        }
+        Ok(EventLogInfo {
+            size: log_header.header_len + log_header.value_len,
+            address: log.address,
+            add_rel_offset: rel_address_offset,
+            event_signature,
+            sig_rel_offset: rel_sig_offset,
+            topics,
+            data,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -252,7 +428,140 @@ impl ProofQuery {
     }
 }
 
-impl BlockUtil for alloy::rpc::types::Block {
+impl ReceiptProofInfo {
+    pub fn to_receipt(&self) -> Result<ReceiptWithBloom> {
+        let memdb = Arc::new(MemoryDB::new(true));
+        let tx_trie = EthTrie::new(Arc::clone(&memdb));
+
+        let mpt_key = self.tx_index.rlp_bytes();
+
+        let valid = tx_trie
+            .verify_proof(self.mpt_root, &mpt_key, self.mpt_proof.clone())?
+            .ok_or(anyhow!("No proof found when verifying"))?;
+
+        let rlp_receipt = rlp::Rlp::new(&valid[1..]);
+        ReceiptWithBloom::decode(&mut rlp_receipt.as_raw())
+            .map_err(|e| anyhow!("Could not decode receipt got: {}", e))
+    }
+}
+
+impl ReceiptQuery {
+    pub fn new(contract: Address, event: Event) -> Self {
+        Self { contract, event }
+    }
+
+    /// Function that returns the MPT Trie inclusion proofs for all receipts in a block whose logs contain
+    /// the specified event for the contract.
+    pub async fn query_receipt_proofs<T: Transport + Clone>(
+        &self,
+        provider: &RootProvider<T>,
+        block: BlockNumberOrTag,
+    ) -> Result<Vec<ReceiptProofInfo>> {
+        let expected_topic_0 = B256::from_slice(&keccak256(self.event.signature().as_bytes()));
+        let filter = Filter::new()
+            .select(block)
+            .address(self.contract)
+            .event(&self.event.signature());
+        let logs = provider.get_logs(&filter).await?;
+        // Find the length of the RLP encoded log
+        let event_log_info: EventLogInfo = (&logs
+            .first()
+            .ok_or(anyhow!("No relevant logs in this block"))?
+            .inner)
+            .try_into()?;
+
+        // For each of the logs return the transacion its included in, then sort and remove duplicates.
+        let mut tx_indices = logs
+            .iter()
+            .map(|log| log.transaction_index)
+            .collect::<Option<Vec<u64>>>()
+            .ok_or(anyhow!("One of the logs did not have a transaction index"))?;
+        tx_indices.sort();
+        tx_indices.dedup();
+
+        // Construct the Receipt Trie for this block so we can retrieve MPT proofs.
+        let mut block_util = BlockUtil::fetch(provider, block).await?;
+        let mpt_root = block_util.receipts_trie.root_hash()?;
+        let proofs = tx_indices
+            .into_iter()
+            .map(|index| {
+                let key = index.rlp_bytes();
+
+                let index_size = key.len();
+
+                let proof = block_util.receipts_trie.get_proof(&key[..])?;
+
+                // Since the compact encoding of the key is stored first plus an additional list header and
+                // then the first element in the receipt body is the transaction type we calculate the offset to that point
+
+                let last_node = proof.last().ok_or(eth_trie::TrieError::DB(
+                    "Could not get last node in proof".to_string(),
+                ))?;
+
+                let list_length_hint = last_node[0] as usize - 247;
+                let key_length = if last_node[1 + list_length_hint] > 128 {
+                    last_node[1 + list_length_hint] as usize - 128
+                } else {
+                    0
+                };
+                let body_length_hint = last_node[2 + list_length_hint + key_length] as usize - 183;
+                let body_offset = 4 + list_length_hint + key_length + body_length_hint;
+
+                let receipt = block_util.txs[index as usize].receipt();
+
+                let body_length_hint = last_node[body_offset] as usize - 247;
+                let length_hint = body_offset + body_length_hint;
+
+                let status_offset = 1 + length_hint;
+                let gas_hint = last_node[2 + length_hint] as usize - 128;
+                // Logs bloom is always 256 bytes long and comes after the gas used the first byte is 185 then 1 then 0 then the bloom so the
+                // log data starts at 4 + length_hint + gas_hint + 259
+                let log_offset = 3 + length_hint + gas_hint + 259;
+
+                let log_hint = if last_node[log_offset] < 247 {
+                    last_node[log_offset] as usize - 192
+                } else {
+                    last_node[log_offset] as usize - 247
+                };
+                // We iterate through the logs and store the offsets we care about.
+                let mut current_log_offset = log_offset + 1 + log_hint;
+
+                let relevant_logs = receipt
+                    .logs()
+                    .iter()
+                    .filter_map(|log| {
+                        let length = log.length();
+                        if log.address == self.contract
+                            && log.data.topics().contains(&expected_topic_0)
+                        {
+                            let out = current_log_offset;
+                            current_log_offset += length;
+                            Some(out)
+                        } else {
+                            current_log_offset += length;
+                            None
+                        }
+                    })
+                    .collect::<Vec<usize>>();
+
+                Ok(ReceiptProofInfo {
+                    mpt_proof: proof,
+                    mpt_root,
+                    tx_index: index,
+                    index_size,
+                    status_offset,
+                    logs_offset: log_offset,
+                    event_log_info,
+                    relevant_logs_offset: relevant_logs,
+                })
+            })
+            .collect::<Result<Vec<ReceiptProofInfo>, eth_trie::TrieError>>()?;
+
+        Ok(proofs)
+    }
+}
+
+impl Rlpable for alloy::rpc::types::Block {
     fn rlp(&self) -> Vec<u8> {
         let mut out = Vec::new();
         self.header.encode(&mut out);
@@ -260,11 +569,129 @@ impl BlockUtil for alloy::rpc::types::Block {
     }
 }
 
-impl BlockUtil for alloy::rpc::types::Header {
+impl Rlpable for alloy::rpc::types::Header {
+    fn rlp(&self) -> Vec<u8> {
+        self.inner.rlp()
+    }
+}
+
+impl Rlpable for alloy::consensus::Header {
     fn rlp(&self) -> Vec<u8> {
         let mut out = Vec::new();
         self.encode(&mut out);
         out
+    }
+}
+
+pub struct BlockUtil {
+    pub block: Block,
+    pub txs: Vec<TxWithReceipt>,
+    pub receipts_trie: EthTrie<MemoryDB>,
+    pub transactions_trie: EthTrie<MemoryDB>,
+}
+
+pub struct TxWithReceipt(Transaction, ReceiptEnvelope);
+impl TxWithReceipt {
+    pub fn receipt(&self) -> &ReceiptEnvelope {
+        &self.1
+    }
+    pub fn transaction(&self) -> &Transaction {
+        &self.0
+    }
+}
+
+impl BlockUtil {
+    pub async fn fetch<T: Transport + Clone>(
+        t: &RootProvider<T>,
+        id: BlockNumberOrTag,
+    ) -> Result<BlockUtil> {
+        let block = t
+            .get_block(id.into(), alloy::rpc::types::BlockTransactionsKind::Full)
+            .await?
+            .context("can't get block")?;
+        let receipts = t
+            .get_block_receipts(id.into())
+            .await?
+            .context("can't get receipts")?;
+        let BlockTransactions::Full(all_tx) = block.transactions() else {
+            bail!("can't see full transactions");
+        };
+        // check receipt root
+        let memdb = Arc::new(MemoryDB::new(true));
+        let mut receipts_trie = EthTrie::new(memdb.clone());
+        let mut transactions_trie = EthTrie::new(memdb.clone());
+        let consensus_receipts = receipts
+            .into_iter()
+            .zip(all_tx.iter())
+            .map(|(receipt, transaction)| {
+                let tx_index = receipt.transaction_index.unwrap().rlp_bytes();
+
+                let receipt_primitive = match receipt.inner {
+                    CRE::Legacy(ref r) => CRE::Legacy(from_rpc_logs_to_consensus(r)),
+                    CRE::Eip2930(ref r) => CRE::Eip2930(from_rpc_logs_to_consensus(r)),
+                    CRE::Eip1559(ref r) => CRE::Eip1559(from_rpc_logs_to_consensus(r)),
+                    CRE::Eip4844(ref r) => CRE::Eip4844(from_rpc_logs_to_consensus(r)),
+                    CRE::Eip7702(ref r) => CRE::Eip7702(from_rpc_logs_to_consensus(r)),
+                    _ => panic!("aie"),
+                };
+
+                let transaction_primitive = TxEnvelope::from(transaction.clone());
+
+                let body_rlp = receipt_primitive.encoded_2718();
+
+                let tx_body_rlp = transaction_primitive.encoded_2718();
+
+                receipts_trie
+                    .insert(&tx_index, &body_rlp)
+                    .expect("can't insert receipt");
+                transactions_trie
+                    .insert(&tx_index, &tx_body_rlp)
+                    .expect("can't insert transaction");
+                TxWithReceipt(transaction.clone(), receipt_primitive)
+            })
+            .collect::<Vec<_>>();
+        receipts_trie.root_hash()?;
+        transactions_trie.root_hash()?;
+        Ok(BlockUtil {
+            block,
+            txs: consensus_receipts,
+            receipts_trie,
+            transactions_trie,
+        })
+    }
+
+    // recompute the receipts trie by first converting all receipts form RPC type to consensus type
+    // since in Alloy these are two different types and RLP functions are only implemented for
+    // consensus ones.
+    pub fn check(&mut self) -> Result<()> {
+        let computed = self.receipts_trie.root_hash()?;
+        let tx_computed = self.transactions_trie.root_hash()?;
+        let expected = self.block.header.receipts_root;
+        let tx_expected = self.block.header.transactions_root;
+        assert_eq!(expected.0, computed.0);
+        assert_eq!(tx_expected.0, tx_computed.0);
+        Ok(())
+    }
+}
+
+fn from_rpc_logs_to_consensus(
+    r: &ReceiptWithBloom<alloy::rpc::types::Log>,
+) -> ReceiptWithBloom<alloy::primitives::Log> {
+    ReceiptWithBloom {
+        logs_bloom: r.logs_bloom,
+        receipt: alloy::consensus::Receipt {
+            status: r.receipt.status,
+            cumulative_gas_used: r.receipt.cumulative_gas_used,
+            logs: r
+                .receipt
+                .logs
+                .iter()
+                .map(|l| alloy::primitives::Log {
+                    address: l.inner.address,
+                    data: l.inner.data.clone(),
+                })
+                .collect(),
+        },
     }
 }
 
@@ -274,7 +701,16 @@ mod test {
     use std::env;
     use std::str::FromStr;
 
-    use alloy::{primitives::Bytes, providers::ProviderBuilder};
+    use alloy::{
+        network::{TransactionBuilder, TransactionResponse},
+        node_bindings::Anvil,
+        primitives::{Bytes, Log, U256},
+        providers::{ext::AnvilApi, Provider, ProviderBuilder},
+        rlp::Decodable,
+        sol,
+    };
+
+    use eth_trie::Nibbles;
     use ethereum_types::U64;
     use ethers::{
         providers::{Http, Middleware},
@@ -283,38 +719,316 @@ mod test {
     use hashbrown::HashMap;
 
     use crate::{
-        types::MAX_BLOCK_LEN,
+        mpt_sequential::utils::nibbles_to_bytes,
         utils::{Endianness, Packer},
     };
     use mp2_test::eth::{get_mainnet_url, get_sepolia_url};
 
+    use super::*;
+
     #[tokio::test]
-    #[ignore]
-    async fn test_rlp_andrus() -> Result<()> {
+    async fn test_block_receipt_trie() -> Result<()> {
         let url = get_sepolia_url();
-        let block_number1 = 5674446;
-        let block_number2 = block_number1 + 1;
+        // get some tx and receipt
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
-        let block = provider
-            .get_block(BlockNumberOrTag::Number(block_number1).into(), false.into())
-            .await?
-            .unwrap();
-        let comp_hash = keccak256(&block.rlp());
-        let block_next = provider
-            .get_block(BlockNumberOrTag::from(block_number2).into(), false.into())
-            .await?
-            .unwrap();
-        let exp_hash = block_next.header.parent_hash;
-        assert!(comp_hash == exp_hash.as_slice());
-        assert!(
-            block.rlp().len() <= MAX_BLOCK_LEN,
-            " rlp len = {}",
-            block.rlp().len()
+        let bn = 6893107;
+        let bna = BlockNumberOrTag::Number(bn);
+        let mut block = BlockUtil::fetch(&provider, bna).await?;
+        // check if we compute the RLP correctly now
+        block.check()?;
+        let mut be = tryethers::BlockData::fetch(bn, url).await?;
+        be.check()?;
+        let er = be.receipts_trie.root_hash()?;
+        let ar = block.receipts_trie.root_hash()?;
+        assert_eq!(er, ar);
+        // dissect one receipt entry in the trie
+        let tx_receipt = block.txs.first().unwrap();
+        // https://sepolia.etherscan.io/tx/0x9bef12fafd3962b0e0d66b738445d6ea2c1f3daabe10c889bd1916acc75d698b#eventlog
+        println!(
+            "Looking at tx hash on sepolia: {}",
+            hex::encode(tx_receipt.0.tx_hash())
         );
+        // in the MPT trie it's
+        // RLP ( RLP(Index), RLP ( DATA ))
+        // the second component is done like that:
+        // DATA = RLP [ Rlp(status), Rlp(gas_used), Rlp(logs_bloom), Rlp(logs) ]
+        // it contains multiple logs so
+        // logs = RLP_LIST(RLP(logs[0]), RLP(logs[1])...)
+        // Each RLP(logs[0]) = RLP([ RLP(Address), RLP(topics), RLP(data)])
+        // RLP(topics) is a list with up to 4 topics
+        let rlp_encoding = tx_receipt.receipt().encoded_2718();
+        println!(
+            "Size of RLP encoded receipt in bytes: {}",
+            rlp_encoding.len()
+        );
+        let state = rlp::Rlp::new(&rlp_encoding);
+        assert!(state.is_list());
+        //  index 0 -> status,
+        //  index 1 -> gas used
+        //  index 2 -> logs_bloom
+        //  index 3 -> logs
+        let gas_used: Vec<u8> = state.val_at(1).context("can't access gas used")?;
+        println!("gas used byte length: {}", gas_used.len());
+        let bloom: Vec<u8> = state.val_at(2).context("can't access bloom")?;
+        println!("bloom byte length: {}", bloom.len());
+        //let logs: Vec<Vec<u8>> = state.list_at(3).context("can't access logs")?;
+        //println!("logs byte length: {}", logs.len());
+
+        let logs_state = state.at(3).context("can't access logs field3")?;
+        assert!(logs_state.is_list());
+        println!("logs in hex: {}", hex::encode(logs_state.data()?));
+        let log_state = logs_state.at(0).context("can't access single log state")?;
+        assert!(log_state.is_list());
+        // log:
+        // 0: address where it has been emitted
+        // 1: Topics (4 topics max, with 1 mandatory, the event sig)
+        // 2: Bytes32 array
+        let log_address: Vec<u8> = log_state.val_at(0).context("can't decode address")?;
+        let hex_address = hex::encode(&log_address);
+        assert_eq!(
+            hex_address,
+            "BBd3EDd4D3b519c0d14965d9311185CFaC8c3220".to_lowercase(),
+        );
+        // the topics are in a list
+        let topics: Vec<Vec<u8>> = log_state.list_at(1).context("can't decode topics")?;
+        // Approval (index_topic_1 address owner, index_topic_2 address approved, index_topic_3 uint256 tokenId)View Source
+        // first topic is signature of the event keccak(fn_name,args...)
+        let expected_sig = "8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
+        let found_sig = hex::encode(&topics[0]);
+        assert_eq!(expected_sig, found_sig);
+        // second topic is owner
+        let expected_owner = hex::encode(left_pad32(&hex::decode(
+            "66d2F437a12d8f9f340C226b1EDC605124e763A6",
+        )?));
+        let found_owner = hex::encode(&topics[1]);
+        assert_eq!(expected_owner, found_owner);
+        // third topic is approved
+        let expected_approved = hex::encode(left_pad32(&hex::decode(
+            "094f1570A8B5fc99d6756aD54DF0Fd6906795cd3",
+        )?));
+        let found_approved = hex::encode(left_pad32(&topics[2]));
+        assert_eq!(expected_approved, found_approved);
+        // final is tokenid - not in topic
+        let expected_data = "000000000000000000000000000000000000000000115eec47f6cf7e35000000";
+        let log_data: Vec<u8> = log_state.val_at(2).context("can't decode log data")?;
+        let found_data = hex::encode(left_pad32(
+            &log_data.into_iter().take(32).collect::<Vec<_>>(),
+        ));
+        assert_eq!(expected_data, found_data);
+
+        let mpt_key = tx_receipt.0.transaction_index.unwrap();
+        let proof = block
+            .receipts_trie
+            .get_proof(&mpt_key.rlp_bytes())
+            .expect("can't retrieve mpt proof");
+        let mpt_node = proof.last().unwrap();
+        println!("MPT LEAF NODE: {:?}", mpt_node);
+        // First decode the top level header
+        let top_header = rlp::Rlp::new(mpt_node);
+        assert!(top_header.is_list());
+        // then extract the buffer containing all elements (key and value)
+        let top_info = top_header.payload_info()?;
+        println!("TOP level header: {:?}", top_info);
+        let list_buff = &mpt_node[top_info.header_len..top_info.header_len + top_info.value_len];
+        // then check the key and make sure it's equal to the RLP encoding of the index
+        let key_header = rlp::Rlp::new(list_buff);
+        assert!(!key_header.is_list());
+        // key is RLP( compact ( RLP(index)))
+        let key_info = key_header.payload_info()?;
+        let compact_key = &list_buff[key_info.header_len..key_info.header_len + key_info.value_len];
+        let decoded_key = rlp::encode(&nibbles_to_bytes(
+            Nibbles::from_compact(compact_key).nibbles(),
+        ));
+        assert_eq!(decoded_key, &mpt_key.rlp_bytes().to_vec(),);
+
+        // then check if the value portion fits what we tested above
+        // value is RLP ( RLP(status, etc...))
+        let outer_value_min = top_info.header_len + key_info.header_len + key_info.value_len;
+        let outer_value_buff = &mpt_node[outer_value_min..];
+        let outer_value_state = rlp::Rlp::new(outer_value_buff);
+        assert!(!outer_value_state.is_list());
+        let outer_payload = outer_value_state.payload_info()?;
+        let inner_value_min = outer_value_min + outer_payload.header_len;
+        let inner_value_buff = &mpt_node[inner_value_min..];
+        assert_eq!(rlp_encoding, inner_value_buff);
         Ok(())
     }
 
-    use super::*;
+    #[tokio::test]
+    async fn test_receipt_query() -> Result<()> {
+        // Make a contract that emits events so we can pick up on them
+        sol! {
+            #[allow(missing_docs)]
+        // solc v0.8.26; solc Counter.sol --via-ir --optimize --bin
+        #[sol(rpc, abi, bytecode="6080604052348015600e575f80fd5b506102288061001c5f395ff3fe608060405234801561000f575f80fd5b506004361061004a575f3560e01c8063488814e01461004e5780638381f58a14610058578063d09de08a14610076578063db73227914610080575b5f80fd5b61005661008a565b005b6100606100f8565b60405161006d9190610165565b60405180910390f35b61007e6100fd565b005b610088610115565b005b5f547fdcd9c7fa0342f01013bd0bf2bec103a81936162dcebd1f0c38b1d4164c17e0fc60405160405180910390a26100c06100fd565b5f547fdcd9c7fa0342f01013bd0bf2bec103a81936162dcebd1f0c38b1d4164c17e0fc60405160405180910390a26100f66100fd565b565b5f5481565b5f8081548092919061010e906101ab565b9190505550565b5f547fdcd9c7fa0342f01013bd0bf2bec103a81936162dcebd1f0c38b1d4164c17e0fc60405160405180910390a261014b6100fd565b565b5f819050919050565b61015f8161014d565b82525050565b5f6020820190506101785f830184610156565b92915050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f6101b58261014d565b91507fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff82036101e7576101e661017e565b5b60018201905091905056fea26469706673582212202787ca0f2ea71e118bc4d1bf239cde5ec4730aeb35a404c44e6c9d587316418564736f6c634300081a0033")]
+        contract EventEmitter {
+            uint256 public number;
+            event testEvent(uint256 indexed num);
+
+            function testEmit() public {
+                emit testEvent(number);
+                increment();
+            }
+
+            function twoEmits() public {
+                emit testEvent(number);
+                increment();
+                emit testEvent(number);
+                increment();
+            }
+
+            function increment() public {
+                number++;
+            }
+        }
+        }
+
+        sol! {
+            #[allow(missing_docs)]
+            // solc v0.8.26; solc Counter.sol --via-ir --optimize --bin
+            #[sol(rpc, abi, bytecode="6080604052348015600e575f80fd5b506102288061001c5f395ff3fe608060405234801561000f575f80fd5b506004361061004a575f3560e01c8063488814e01461004e5780637229db15146100585780638381f58a14610062578063d09de08a14610080575b5f80fd5b61005661008a565b005b6100606100f8565b005b61006a610130565b6040516100779190610165565b60405180910390f35b610088610135565b005b5f547fbe3cbcfa5d4a62a595b4a15f51de63c11797bbef2ff687873efb0bb2852ee20f60405160405180910390a26100c0610135565b5f547fbe3cbcfa5d4a62a595b4a15f51de63c11797bbef2ff687873efb0bb2852ee20f60405160405180910390a26100f6610135565b565b5f547fbe3cbcfa5d4a62a595b4a15f51de63c11797bbef2ff687873efb0bb2852ee20f60405160405180910390a261012e610135565b565b5f5481565b5f80815480929190610146906101ab565b9190505550565b5f819050919050565b61015f8161014d565b82525050565b5f6020820190506101785f830184610156565b92915050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f6101b58261014d565b91507fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff82036101e7576101e661017e565b5b60018201905091905056fea26469706673582212203b7602644bfff2df89c2fe9498cd533326876859a0df7b96ac10be1fdc09c3a064736f6c634300081a0033")]
+
+           contract OtherEmitter {
+            uint256 public number;
+            event otherEvent(uint256 indexed num);
+
+            function otherEmit() public {
+                emit otherEvent(number);
+                increment();
+            }
+
+            function twoEmits() public {
+                emit otherEvent(number);
+                increment();
+                emit otherEvent(number);
+                increment();
+            }
+
+            function increment() public {
+                number++;
+            }
+        }
+        }
+
+        // Spin up a local node.
+
+        let rpc = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .on_anvil_with_config(|anvil| Anvil::arg(anvil, "--no-mining"));
+
+        // Turn on auto mining to deploy the contracts
+        rpc.anvil_set_auto_mine(true).await.unwrap();
+
+        // Deploy the contract using anvil
+        let event_contract = EventEmitter::deploy(rpc.root()).await.unwrap();
+
+        // Deploy the contract using anvil
+        let other_contract = OtherEmitter::deploy(rpc.root()).await.unwrap();
+
+        // Disable auto mining so we can ensure that all the transaction appear in the same block
+        rpc.anvil_set_auto_mine(false).await.unwrap();
+
+        let mut pending_tx_builders = vec![];
+        for i in 0..25 {
+            let tx_req = match i % 4 {
+                0 => event_contract.testEmit().into_transaction_request(),
+                1 => event_contract.twoEmits().into_transaction_request(),
+                2 => other_contract.otherEmit().into_transaction_request(),
+                3 => other_contract.twoEmits().into_transaction_request(),
+                _ => unreachable!(),
+            };
+
+            let sender_address = Address::random();
+            let funding = U256::from(1e18 as u64);
+            rpc.anvil_set_balance(sender_address, funding)
+                .await
+                .unwrap();
+            rpc.anvil_auto_impersonate_account(true).await.unwrap();
+            let new_req = tx_req.with_from(sender_address);
+            let tx_req_final = rpc
+                .fill(new_req)
+                .await
+                .unwrap()
+                .as_builder()
+                .unwrap()
+                .clone();
+            pending_tx_builders.push(rpc.send_transaction(tx_req_final).await.unwrap());
+        }
+
+        rpc.anvil_mine(Some(U256::from(1u8)), None).await.unwrap();
+
+        let mut transactions = Vec::new();
+        for pending in pending_tx_builders.into_iter() {
+            let hash = pending.watch().await.unwrap();
+            transactions.push(rpc.get_transaction_by_hash(hash).await.unwrap().unwrap());
+        }
+
+        let block_number = transactions.first().unwrap().block_number.unwrap();
+
+        // We want to get the event signature so we can make a ReceiptQuery
+        let all_events = EventEmitter::abi::events();
+
+        let events = all_events.get("testEvent").unwrap();
+        let receipt_query = ReceiptQuery::new(*event_contract.address(), events[0].clone());
+
+        let block = rpc
+            .get_block(
+                BlockNumberOrTag::Number(block_number).into(),
+                alloy::rpc::types::BlockTransactionsKind::Full,
+            )
+            .await?
+            .ok_or(anyhow!("Could not get block test"))?;
+        let receipt_hash = block.header().receipts_root;
+        let proofs = receipt_query
+            .query_receipt_proofs(rpc.root(), BlockNumberOrTag::Number(block_number))
+            .await?;
+
+        // Now for each transaction we fetch the block, then get the MPT Trie proof that the receipt is included and verify it
+
+        for proof in proofs.iter() {
+            let memdb = Arc::new(MemoryDB::new(true));
+            let tx_trie = EthTrie::new(Arc::clone(&memdb));
+
+            let mpt_key = proof.tx_index.rlp_bytes();
+
+            let _ = tx_trie
+                .verify_proof(receipt_hash.0.into(), &mpt_key, proof.mpt_proof.clone())?
+                .ok_or(anyhow!("No proof found when verifying"))?;
+
+            let last_node = proof
+                .mpt_proof
+                .last()
+                .ok_or(anyhow!("Couldn't get first node in proof"))?;
+            let expected_sig: [u8; 32] = keccak256(receipt_query.event.signature().as_bytes())
+                .try_into()
+                .unwrap();
+
+            for log_offset in proof.relevant_logs_offset.iter() {
+                let mut buf = &last_node[*log_offset..*log_offset + proof.event_log_info.size];
+                let decoded_log = Log::decode(&mut buf)?;
+                let raw_bytes: [u8; 20] = last_node[*log_offset
+                    + proof.event_log_info.add_rel_offset
+                    ..*log_offset + proof.event_log_info.add_rel_offset + 20]
+                    .to_vec()
+                    .try_into()
+                    .unwrap();
+                assert_eq!(decoded_log.address, receipt_query.contract);
+                assert_eq!(raw_bytes, receipt_query.contract);
+                let topics = decoded_log.topics();
+                assert_eq!(topics[0].0, expected_sig);
+                let raw_bytes: [u8; 32] = last_node[*log_offset
+                    + proof.event_log_info.sig_rel_offset
+                    ..*log_offset + proof.event_log_info.sig_rel_offset + 32]
+                    .to_vec()
+                    .try_into()
+                    .unwrap();
+                assert_eq!(topics[0].0, raw_bytes);
+            }
+        }
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_sepolia_slot() -> Result<()> {
         #[cfg(feature = "ci")]
@@ -504,7 +1218,7 @@ mod test {
         let previous_block = provider
             .get_block_by_number(
                 BlockNumberOrTag::Number(block.header.number - 1),
-                true.into(),
+                alloy::rpc::types::BlockTransactionsKind::Full,
             )
             .await?
             .unwrap();
@@ -567,7 +1281,7 @@ mod test {
     }
     /// TEST to compare alloy with ethers
     pub struct RLPBlock<'a, X>(pub &'a ethers::types::Block<X>);
-    impl<X> BlockUtil for ethers::types::Block<X> {
+    impl<X> Rlpable for ethers::types::Block<X> {
         fn rlp(&self) -> Vec<u8> {
             let rlp = RLPBlock(self);
             rlp::encode(&rlp).to_vec()
@@ -603,6 +1317,166 @@ mod test {
     pub(crate) fn rlp_opt<T: rlp::Encodable>(rlp: &mut rlp::RlpStream, opt: &Option<T>) {
         if let Some(inner) = opt {
             rlp.append(inner);
+        }
+    }
+    // for compatibility check with alloy
+    mod tryethers {
+
+        use std::sync::Arc;
+
+        use anyhow::Result;
+        use eth_trie::{EthTrie, MemoryDB, Trie};
+        use ethers::{
+            providers::{Http, Middleware, Provider},
+            types::{BlockId, Bytes, Transaction, TransactionReceipt, U64},
+        };
+        use rlp::{Encodable, RlpStream};
+
+        /// A wrapper around a transaction and its receipt. The receipt is used to filter
+        /// bad transactions, so we only compute over valid transactions.
+        pub struct TxAndReceipt(Transaction, TransactionReceipt);
+
+        impl TxAndReceipt {
+            pub fn tx(&self) -> &Transaction {
+                &self.0
+            }
+            pub fn receipt(&self) -> &TransactionReceipt {
+                &self.1
+            }
+            pub fn tx_rlp(&self) -> Bytes {
+                self.0.rlp()
+            }
+            // TODO: this should be upstreamed to ethers-rs
+            pub fn receipt_rlp(&self) -> Bytes {
+                let tx_type = self.tx().transaction_type;
+                let mut rlp = RlpStream::new();
+                rlp.begin_unbounded_list();
+                match &self.1.status {
+                    Some(s) if s.as_u32() == 1 => rlp.append(s),
+                    _ => rlp.append_empty_data(),
+                };
+                rlp.append(&self.1.cumulative_gas_used)
+                    .append(&self.1.logs_bloom)
+                    .append_list(&self.1.logs);
+
+                rlp.finalize_unbounded_list();
+                let rlp_bytes: Bytes = rlp.out().freeze().into();
+                let mut encoded = vec![];
+                match tx_type {
+                    // EIP-2930 (0x01)
+                    Some(x) if x == U64::from(0x1) => {
+                        encoded.extend_from_slice(&[0x1]);
+                        encoded.extend_from_slice(rlp_bytes.as_ref());
+                        encoded.into()
+                    }
+                    // EIP-1559 (0x02)
+                    Some(x) if x == U64::from(0x2) => {
+                        encoded.extend_from_slice(&[0x2]);
+                        encoded.extend_from_slice(rlp_bytes.as_ref());
+                        encoded.into()
+                    }
+                    _ => rlp_bytes,
+                }
+            }
+        }
+        /// Structure containing the block header and its transactions / receipts. Amongst other things,
+        /// it is used to create a proof of inclusion for any transaction inside this block.
+        pub struct BlockData {
+            pub block: ethers::types::Block<Transaction>,
+            // TODO: add generics later - this may be re-used amongst different workers
+            pub tx_trie: EthTrie<MemoryDB>,
+            pub receipts_trie: EthTrie<MemoryDB>,
+        }
+
+        impl BlockData {
+            pub async fn fetch<T: Into<BlockId> + Send + Sync>(
+                blockid: T,
+                url: String,
+            ) -> Result<Self> {
+                let provider =
+                    Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
+                Self::fetch_from(&provider, blockid).await
+            }
+            pub async fn fetch_from<T: Into<BlockId> + Send + Sync>(
+                provider: &Provider<Http>,
+                blockid: T,
+            ) -> Result<Self> {
+                let block = provider
+                    .get_block_with_txs(blockid)
+                    .await?
+                    .expect("should have been a block");
+                let receipts = provider.get_block_receipts(block.number.unwrap()).await?;
+
+                let tx_with_receipt = block
+                    .transactions
+                    .clone()
+                    .into_iter()
+                    .map(|tx| {
+                        let tx_hash = tx.hash();
+                        let r = receipts
+                            .iter()
+                            .find(|r| r.transaction_hash == tx_hash)
+                            .expect("RPC sending invalid data");
+                        // TODO remove cloning
+                        TxAndReceipt(tx, r.clone())
+                    })
+                    .collect::<Vec<_>>();
+
+                // check transaction root
+                let memdb = Arc::new(MemoryDB::new(true));
+                let mut tx_trie = EthTrie::new(Arc::clone(&memdb));
+                for tr in tx_with_receipt.iter() {
+                    tx_trie
+                        .insert(&tr.receipt().transaction_index.rlp_bytes(), &tr.tx_rlp())
+                        .expect("can't insert tx");
+                }
+
+                // check receipt root
+                let memdb = Arc::new(MemoryDB::new(true));
+                let mut receipts_trie = EthTrie::new(Arc::clone(&memdb));
+                for tr in tx_with_receipt.iter() {
+                    if tr.tx().transaction_index.unwrap() == U64::from(0) {
+                        println!(
+                            "Ethers: Index {} -> {:?}",
+                            tr.tx().transaction_index.unwrap(),
+                            tr.receipt_rlp().to_vec()
+                        );
+                    }
+                    receipts_trie
+                        .insert(
+                            &tr.receipt().transaction_index.rlp_bytes(),
+                            // TODO: make getter value for rlp encoding
+                            &tr.receipt_rlp(),
+                        )
+                        .expect("can't insert tx");
+                }
+                let computed = tx_trie.root_hash().expect("root hash problem");
+                let expected = block.transactions_root;
+                assert_eq!(expected, computed);
+
+                let computed = receipts_trie.root_hash().expect("root hash problem");
+                let expected = block.receipts_root;
+                assert_eq!(expected, computed);
+
+                Ok(BlockData {
+                    block,
+                    tx_trie,
+                    receipts_trie,
+                })
+            }
+
+            // recompute the receipts trie by first converting all receipts form RPC type to consensus type
+            // since in Alloy these are two different types and RLP functions are only implemented for
+            // consensus ones.
+            pub fn check(&mut self) -> Result<()> {
+                let computed = self.receipts_trie.root_hash()?;
+                let tx_computed = self.tx_trie.root_hash()?;
+                let expected = self.block.receipts_root;
+                let tx_expected = self.block.transactions_root;
+                assert_eq!(expected.0, computed.0);
+                assert_eq!(tx_expected.0, tx_computed.0);
+                Ok(())
+            }
         }
     }
 }

@@ -5,6 +5,7 @@ use mp2_common::types::HashOutput;
 pub mod block;
 pub mod cell;
 pub mod index;
+pub mod planner;
 pub mod row;
 
 pub type ColumnID = u64;

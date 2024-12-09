@@ -33,6 +33,7 @@ use common::{
 };
 use envconfig::Envconfig;
 use log::info;
+
 use parsil::{
     assembler::DynamicCircuitPis,
     parse_and_validate,

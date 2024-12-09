@@ -40,6 +40,21 @@ impl<K: Debug + Clone + Hash + Eq> UpdateTreeNode<K> {
     fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
+
+    /// Getter for the key
+    pub fn key(&self) -> &K {
+        &self.k
+    }
+
+    /// Getter for the children of this node
+    pub fn children(&self) -> &BTreeSet<usize> {
+        &self.children
+    }
+
+    /// Getter for the parent if it exists
+    pub fn parent(&self) -> Option<usize> {
+        self.parent
+    }
 }
 
 impl<K: Clone + Hash + Eq> UpdateTree<K> {
@@ -47,7 +62,7 @@ impl<K: Clone + Hash + Eq> UpdateTree<K> {
         &self.nodes[0].k
     }
 
-    fn node(&self, i: usize) -> &UpdateTreeNode<K> {
+    pub fn node(&self, i: usize) -> &UpdateTreeNode<K> {
         &self.nodes[i]
     }
 
