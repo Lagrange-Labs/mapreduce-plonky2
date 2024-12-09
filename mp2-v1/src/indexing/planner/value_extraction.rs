@@ -1,7 +1,6 @@
 //! This code returns an [`UpdateTree`] used to plan how we prove a series of values was extracted from a Merkle Patricia Trie.
 
-use std::iter;
-
+use super::ports::input::Extractable;
 use alloy::{
     consensus::Header,
     primitives::{keccak256, B256},
@@ -9,16 +8,17 @@ use alloy::{
 use anyhow::{anyhow, Result};
 use mp2_common::eth::Rlpable;
 use ryhope::storage::updatetree::UpdateTree;
+use std::iter;
 
 /// Given a list MPT proofs, a block [`Header`] and an epoch, this function produces an [`UpdateTree`]
 /// for proving correct value extraction. The leaves of the tree represent proofs that have no dependencies.
-pub fn produce_update_tree(
-    paths: &[Vec<Vec<u8>>],
+pub fn produce_update_tree<E: Extractable>(
+    data: &[E],
     block_header: &Header,
     epoch: i64,
 ) -> Result<UpdateTree<B256>> {
     // First check that paths is not empty, even if there are no relevant paths we still prove emptiness of the Block.
-    if paths.is_empty() {
+    if data.is_empty() {
         return Err(anyhow!("No paths were provided, there is nothing to prove"));
     }
 
@@ -31,14 +31,14 @@ pub fn produce_update_tree(
 
     // All of the paths should be from root to leaf, so we append the hash of the trie root and the block as the first element, this corresponds to the final extraction proof
     // we also make a two element path consisting of this final key and the block hash.
-    let final_key = keccak256([keccak256(&paths[0][0]).0, block_hash].concat());
+    let final_key = keccak256([keccak256(&data[0].to_path()[0]).0, block_hash].concat());
 
     // Convert the paths into their keys using keccak
-    let key_paths = paths
+    let key_paths = data
         .iter()
-        .map(|path| {
+        .map(|input| {
             iter::once(final_key)
-                .chain(path.iter().map(keccak256))
+                .chain(input.to_path().iter().map(keccak256))
                 .collect::<Vec<B256>>()
         })
         .chain(vec![vec![final_key, block_proof_key]])
@@ -66,14 +66,10 @@ pub mod tests {
 
         let block_info = build_test_data().await;
 
-        let paths = receipt_proofs
-            .iter()
-            .map(|info| info.mpt_proof.clone())
-            .collect::<Vec<Vec<Vec<u8>>>>();
         let header = block_info.block.header.inner.clone();
         let epoch: i64 = 21362445;
 
-        let update_tree = produce_update_tree(&paths, &header, epoch)?;
+        let update_tree = produce_update_tree(&receipt_proofs, &header, epoch)?;
 
         // The root of the update tree should be the ahsh of the block hash and the root of the receipt trie.
         let block_hash: [u8; 32] = header
@@ -106,29 +102,32 @@ pub mod tests {
         // We iterate up the paths from leaf to root to check that each node has the correct parent.
         // First we return an iterator over all the nodes
         let mut all_nodes = update_tree.descendants(0);
-        paths.iter().try_for_each(|path| {
-            // Find the intial state we need for the scan
-            let leaf_key = keccak256(path.last().ok_or(anyhow!("Path was empty!"))?);
-            let leaf_node_index = all_nodes
-                .find(|index| *update_tree.node(*index).key() == leaf_key)
-                .ok_or(anyhow!("Leaf key did not exist in tree"))?;
-            // Since in the `produce_update_tree` function we append a node to each of these paths at the start if all the nodes are included the following shoult return `0usize`.
-            let final_parent = path
-                .iter()
-                .rev()
-                .try_fold(leaf_node_index, |state, node| {
-                    let tree_node = update_tree.node(state);
-                    if *tree_node.key() == keccak256(node) {
-                        tree_node.parent()
-                    } else {
-                        None
-                    }
-                })
-                .ok_or(anyhow!("final parent was a None value"))?;
+        receipt_proofs
+            .iter()
+            .map(Extractable::to_path)
+            .try_for_each(|path| {
+                // Find the intial state we need for the scan
+                let leaf_key = keccak256(path.last().ok_or(anyhow!("Path was empty!"))?);
+                let leaf_node_index = all_nodes
+                    .find(|index| *update_tree.node(*index).key() == leaf_key)
+                    .ok_or(anyhow!("Leaf key did not exist in tree"))?;
+                // Since in the `produce_update_tree` function we append a node to each of these paths at the start if all the nodes are included the following shoult return `0usize`.
+                let final_parent = path
+                    .iter()
+                    .rev()
+                    .try_fold(leaf_node_index, |state, node| {
+                        let tree_node = update_tree.node(state);
+                        if *tree_node.key() == keccak256(node) {
+                            tree_node.parent()
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or(anyhow!("final parent was a None value"))?;
 
-            assert_eq!(final_parent, 0usize);
-            Ok(())
-        })
+                assert_eq!(final_parent, 0usize);
+                Ok(())
+            })
     }
 
     /// Function that fetches a block together with its transaction trie and receipt trie for testing purposes.
