@@ -6,7 +6,9 @@ use crate::{
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
         },
-        public_inputs::{PublicInputs as QueryPI, PublicInputsFactory, QueryPublicInputs},
+        public_inputs::{
+            PublicInputsFactory, PublicInputsQueryCircuits as QueryPI, QueryPublicInputs,
+        },
         row_chunk_gadgets::BoundaryRowData,
         universal_circuit::{
             universal_circuit_inputs::{

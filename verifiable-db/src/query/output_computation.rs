@@ -156,7 +156,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::{
         query::{
-            pi_len, public_inputs::PublicInputs,
+            pi_len, public_inputs::PublicInputsQueryCircuits,
             universal_circuit::universal_query_gadget::CurveOrU256,
             utils::tests::compute_output_item_value,
         },
@@ -177,7 +177,7 @@ pub(crate) mod tests {
     pub(crate) fn compute_output_item<const S: usize>(
         b: &mut CBuilder,
         i: usize,
-        proofs: &[&PublicInputs<Target, S>],
+        proofs: &[&PublicInputsQueryCircuits<Target, S>],
     ) -> (Vec<Target>, Target)
     where
         [(); S - 1]:,
@@ -271,7 +271,8 @@ pub(crate) mod tests {
             });
 
             // Build the public inputs.
-            let pis = [0; PROOF_NUM].map(|i| PublicInputs::<Target, S>::from_slice(&proofs[i]));
+            let pis = [0; PROOF_NUM]
+                .map(|i| PublicInputsQueryCircuits::<Target, S>::from_slice(&proofs[i]));
             let pis = [0; PROOF_NUM].map(|i| &pis[i]);
 
             // Check if the outputs as expected.
@@ -308,7 +309,8 @@ pub(crate) mod tests {
         [(); S - 1]:,
     {
         fn new(proofs: [Vec<F>; PROOF_NUM]) -> Self {
-            let pis = [0; PROOF_NUM].map(|i| PublicInputs::<F, S>::from_slice(&proofs[i]));
+            let pis =
+                [0; PROOF_NUM].map(|i| PublicInputsQueryCircuits::<F, S>::from_slice(&proofs[i]));
             let pis = [0; PROOF_NUM].map(|i| &pis[i]);
 
             let exp_outputs = array::from_fn(|i| {
@@ -333,7 +335,7 @@ pub(crate) mod tests {
         let ops: [_; S] = random_aggregation_operations();
 
         // Build the input proofs.
-        let inputs = PublicInputs::<F, S>::sample_from_ops(&ops);
+        let inputs = PublicInputsQueryCircuits::<F, S>::sample_from_ops(&ops);
 
         // Construct the test circuit.
         let test_circuit = TestOutputComputationCircuit::<S, PROOF_NUM>::new(inputs);
@@ -354,7 +356,7 @@ pub(crate) mod tests {
         ops[0] = Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
 
         // Build the input proofs.
-        let inputs = PublicInputs::<F, S>::sample_from_ops(&ops);
+        let inputs = PublicInputsQueryCircuits::<F, S>::sample_from_ops(&ops);
 
         // Construct the test circuit.
         let test_circuit = TestOutputComputationCircuit::<S, PROOF_NUM>::new(inputs);

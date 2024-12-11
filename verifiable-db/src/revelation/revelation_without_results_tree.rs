@@ -4,7 +4,7 @@ use crate::{
     ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
         computational_hash_ids::AggregationOperation, pi_len as query_pi_len,
-        public_inputs::PublicInputs as QueryProofPublicInputs,
+        public_inputs::PublicInputsQueryCircuits as QueryProofPublicInputs,
     },
     revelation::PublicInputs,
 };
@@ -400,7 +400,9 @@ mod tests {
         ivc::PublicInputs as OriginalTreePublicInputs,
         query::{
             computational_hash_ids::AggregationOperation,
-            public_inputs::{PublicInputs as QueryProofPublicInputs, QueryPublicInputs},
+            public_inputs::{
+                PublicInputsQueryCircuits as QueryProofPublicInputs, QueryPublicInputs,
+            },
             universal_circuit::{
                 universal_circuit_inputs::Placeholders, universal_query_gadget::OutputValues,
             },

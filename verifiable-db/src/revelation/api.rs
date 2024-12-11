@@ -403,7 +403,7 @@ where
             TabularQueryOutputModifiers::new(
                 limit,
                 offset,
-                results_structure.distinct.unwrap_or(false),
+                results_structure.distinct.unwrap_or_default(),
             ),
             placeholder_inputs,
         )?;
@@ -605,7 +605,7 @@ mod tests {
         ivc::PublicInputs as PreprocessingPI,
         query::{
             computational_hash_ids::{ColumnIDs, Identifiers},
-            public_inputs::PublicInputs as QueryPI,
+            public_inputs::PublicInputsQueryCircuits as QueryPI,
         },
         revelation::{
             api::{CircuitInput, Parameters},

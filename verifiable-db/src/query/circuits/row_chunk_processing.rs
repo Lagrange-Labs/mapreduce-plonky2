@@ -12,7 +12,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use crate::query::{
     computational_hash_ids::ColumnIDs,
     pi_len,
-    public_inputs::PublicInputs,
+    public_inputs::PublicInputsQueryCircuits,
     row_chunk_gadgets::{
         aggregate_chunks::aggregate_chunks,
         row_process_gadget::{RowProcessingGadgetInputWires, RowProcessingGadgetInputs},
@@ -243,7 +243,7 @@ where
             b.is_not_equal(num_overflows, zero)
         };
 
-        PublicInputs::<Target, MAX_NUM_RESULTS>::new(
+        PublicInputsQueryCircuits::<Target, MAX_NUM_RESULTS>::new(
             &row_chunk.chunk_outputs.tree_hash.to_targets(),
             &row_chunk.chunk_outputs.values.to_targets(),
             &[row_chunk.chunk_outputs.count],
@@ -286,16 +286,6 @@ where
             .for_each(|(value, target)| value.assign(pw, target));
         self.universal_query_inputs
             .assign(pw, &wires.universal_query_inputs);
-    }
-
-    /// This method returns the ids of the placeholders employed to compute the placeholder hash,
-    /// in the same order, so that those ids can be provided as input to other circuits that need
-    /// to recompute this hash
-    #[cfg(test)] // only used in test for now
-    pub(crate) fn ids_for_placeholder_hash(
-        &self,
-    ) -> Vec<crate::query::universal_circuit::universal_circuit_inputs::PlaceholderId> {
-        self.universal_query_inputs.ids_for_placeholder_hash()
     }
 }
 
@@ -382,14 +372,14 @@ mod tests {
 
     use crate::query::{
         circuits::{
-            row_chunk_processing::RowChunkProcessingCircuit,
+            row_chunk_processing::{RowChunkProcessingCircuit, UniversalQueryHashInputs},
             tests::{build_test_tree, compute_output_values_for_row},
         },
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
         },
         merkle_path::{MerklePathWithNeighborsGadget, NeighborInfo},
-        public_inputs::PublicInputs,
+        public_inputs::PublicInputsQueryCircuits,
         row_chunk_gadgets::{
             row_process_gadget::RowProcessingGadgetInputs, BoundaryRowData, BoundaryRowNodeInfo,
         },
@@ -773,13 +763,22 @@ mod tests {
         .unwrap();
 
         // compute placeholder hash for `circuit`
-        let placeholder_hash_ids = circuit.ids_for_placeholder_hash();
+        let placeholder_hash_ids = UniversalQueryHashInputs::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+            AggOutputCircuit<MAX_NUM_RESULTS>,
+        >::ids_for_placeholder_hash(
+            &predicate_operations, &results, &placeholders, &bounds
+        )
+        .unwrap();
         let placeholder_hash =
             placeholder_hash(&placeholder_hash_ids, &placeholders, &bounds).unwrap();
 
         let proof = run_circuit::<F, D, C, _>(circuit);
         // check public inputs
-        let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+        let pis = PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
 
         let root = node_1.node.compute_node_hash(primary_index);
         assert_eq!(root, pis.tree_hash(),);
@@ -1319,13 +1318,25 @@ mod tests {
         .unwrap();
 
         // compute placeholder hash for `circuit`
-        let placeholder_hash_ids = circuit.ids_for_placeholder_hash();
+        let placeholder_hash_ids = UniversalQueryHashInputs::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+            NoAggOutputCircuit<MAX_NUM_RESULTS>,
+        >::ids_for_placeholder_hash(
+            &predicate_operations,
+            &results,
+            &placeholders,
+            &query_bounds,
+        )
+        .unwrap();
         let placeholder_hash =
             placeholder_hash(&placeholder_hash_ids, &placeholders, &query_bounds).unwrap();
 
         let proof = run_circuit::<F, D, C, _>(circuit);
         // check public inputs
-        let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+        let pis = PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
 
         let root = node_1.node.compute_node_hash(primary_index);
         assert_eq!(root, pis.tree_hash(),);

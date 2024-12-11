@@ -234,13 +234,6 @@ where
         self.hash_gadget_inputs.assign(pw, &wires.hash_wires);
         self.value_gadget_inputs.assign(pw, &wires.value_wires);
     }
-
-    /// This method returns the ids of the placeholders employed to compute the placeholder hash,
-    /// in the same order, so that those ids can be provided as input to other circuits that need
-    /// to recompute this hash
-    pub(crate) fn ids_for_placeholder_hash(&self) -> Vec<PlaceholderId> {
-        self.hash_gadget_inputs.ids_for_placeholder_hash()
-    }
 }
 
 pub(crate) fn dummy_placeholder_id() -> PlaceholderId {
@@ -462,45 +455,26 @@ where
         placeholders: &Placeholders,
         query_bounds: &QueryBounds,
     ) -> Result<[PlaceholderId; 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]> {
-        let row_cells = &RowCells::default();
         Ok(match results.output_variant {
-            Output::Aggregation => {
-                let circuit = UniversalQueryCircuitInputs::<
-                    MAX_NUM_COLUMNS,
-                    MAX_NUM_PREDICATE_OPS,
-                    MAX_NUM_RESULT_OPS,
-                    MAX_NUM_RESULTS,
-                    AggOutputCircuit<MAX_NUM_RESULTS>,
-                >::new(
-                    row_cells,
-                    predicate_operations,
-                    placeholders,
-                    false, // doesn't matter for placeholder hash computation
-                    query_bounds,
-                    results,
-                    false, // doesn't matter for placeholder hash computation
-                )?;
-                circuit.ids_for_placeholder_hash()
-            }
-            Output::NoAggregation => {
-                let circuit = UniversalQueryCircuitInputs::<
-                    MAX_NUM_COLUMNS,
-                    MAX_NUM_PREDICATE_OPS,
-                    MAX_NUM_RESULT_OPS,
-                    MAX_NUM_RESULTS,
-                    NoAggOutputCircuit<MAX_NUM_RESULTS>,
-                >::new(
-                    row_cells,
-                    predicate_operations,
-                    placeholders,
-                    false, // doesn't matter for placeholder hash computation
-                    query_bounds,
-                    results,
-                    false, // doesn't matter for placeholder hash computation
-                )?;
-                circuit.ids_for_placeholder_hash()
-            }
-        }
+            Output::Aggregation => UniversalQueryHashInputs::<
+                MAX_NUM_COLUMNS,
+                MAX_NUM_PREDICATE_OPS,
+                MAX_NUM_RESULT_OPS,
+                MAX_NUM_RESULTS,
+                AggOutputCircuit<MAX_NUM_RESULTS>,
+            >::ids_for_placeholder_hash(
+                predicate_operations, results, placeholders, query_bounds
+            ),
+            Output::NoAggregation => UniversalQueryHashInputs::<
+                MAX_NUM_COLUMNS,
+                MAX_NUM_PREDICATE_OPS,
+                MAX_NUM_RESULT_OPS,
+                MAX_NUM_RESULTS,
+                NoAggOutputCircuit<MAX_NUM_RESULTS>,
+            >::ids_for_placeholder_hash(
+                predicate_operations, results, placeholders, query_bounds
+            ),
+        }?
         .try_into()
         .unwrap())
     }
@@ -548,7 +522,9 @@ mod tests {
                 BasicOperation, ColumnCell, InputOperand, OutputItem, PlaceholderId, Placeholders,
                 ResultStructure, RowCells,
             },
-            universal_query_circuit::{placeholder_hash, UniversalQueryCircuitParams},
+            universal_query_circuit::{
+                placeholder_hash, UniversalCircuitInput, UniversalQueryCircuitParams,
+            },
             ComputationalHash,
         },
         utils::{QueryBoundSource, QueryBounds},
@@ -892,7 +868,18 @@ mod tests {
             })
             .collect_vec();
 
-        let placeholder_hash_ids = circuit.ids_for_placeholder_hash();
+        let placeholder_hash_ids = UniversalCircuitInput::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >::ids_for_placeholder_hash(
+            &predicate_operations,
+            &results,
+            &placeholders,
+            &query_bounds,
+        )
+        .unwrap();
         let placeholder_hash =
             placeholder_hash(&placeholder_hash_ids, &placeholders, &query_bounds).unwrap();
         let computational_hash = ComputationalHash::from_bytes(
@@ -1285,7 +1272,18 @@ mod tests {
             Point::NEUTRAL
         };
 
-        let placeholder_hash_ids = circuit.ids_for_placeholder_hash();
+        let placeholder_hash_ids = UniversalCircuitInput::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >::ids_for_placeholder_hash(
+            &predicate_operations,
+            &results,
+            &placeholders,
+            &query_bounds,
+        )
+        .unwrap();
         let placeholder_hash =
             placeholder_hash(&placeholder_hash_ids, &placeholders, &query_bounds).unwrap();
         let computational_hash = ComputationalHash::from_bytes(

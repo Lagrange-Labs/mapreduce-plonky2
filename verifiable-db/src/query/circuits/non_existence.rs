@@ -28,7 +28,7 @@ use crate::query::{
     },
     output_computation::compute_dummy_output_targets,
     pi_len,
-    public_inputs::PublicInputs,
+    public_inputs::PublicInputsQueryCircuits,
     row_chunk_gadgets::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget},
     universal_circuit::{
         ComputationalHash, ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
@@ -189,7 +189,7 @@ where
         // can be dummy values since they are un-used in this circuit
         let min_secondary = b.zero_u256();
         let max_secondary = b.constant_u256(U256::MAX);
-        PublicInputs::<Target, MAX_NUM_RESULTS>::new(
+        PublicInputsQueryCircuits::<Target, MAX_NUM_RESULTS>::new(
             &index_path.root.to_targets(),
             &outputs,
             &[zero], // there are no matching rows
@@ -291,7 +291,7 @@ mod tests {
             api::TreePathInputs,
             merkle_path::{tests::generate_test_tree, NeighborInfo},
             output_computation::tests::compute_dummy_output_values,
-            public_inputs::PublicInputs,
+            public_inputs::PublicInputsQueryCircuits,
             row_chunk_gadgets::{BoundaryRowData, BoundaryRowNodeInfo},
             universal_circuit::universal_circuit_inputs::Placeholders,
             utils::{ChildPosition, QueryBounds},
@@ -360,7 +360,8 @@ mod tests {
                                    expected_index_node_info: BoundaryRowNodeInfo,
                                    expected_query_bounds: &QueryBounds,
                                    test_name: &str| {
-            let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+            let pis =
+                PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
             assert_eq!(
                 pis.tree_hash(),
                 expected_root,

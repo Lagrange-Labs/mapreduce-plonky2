@@ -125,9 +125,9 @@ impl From<QueryPublicInputsUniversalCircuit> for QueryPublicInputs {
         }
     }
 }
-/// Public inputs for generic query circuits
-pub type PublicInputs<'a, T, const S: usize> = PublicInputsFactory<'a, T, S, false>;
-/// Public inputs for universal query circuit
+/// Public inputs for query circuits
+pub type PublicInputsQueryCircuits<'a, T, const S: usize> = PublicInputsFactory<'a, T, S, false>;
+/// Public inputs only for universal query circuit
 pub type PublicInputsUniversalCircuit<'a, T, const S: usize> = PublicInputsFactory<'a, T, S, true>;
 
 /// This is the data structure employed for both public inputs of generic query circuits
@@ -436,7 +436,7 @@ impl<const S: usize, const UNIVERSAL_CIRCUIT: bool>
     }
 }
 
-impl<const S: usize> PublicInputs<'_, Target, S> {
+impl<const S: usize> PublicInputsQueryCircuits<'_, Target, S> {
     pub(crate) fn left_boundary_row_target(&self) -> BoundaryRowDataTarget {
         BoundaryRowDataTarget::from_targets(self.to_left_row_raw())
     }
@@ -574,7 +574,7 @@ where
     }
 }
 
-impl<const S: usize> PublicInputs<'_, F, S> {
+impl<const S: usize> PublicInputsQueryCircuits<'_, F, S> {
     pub fn min_secondary(&self) -> U256 {
         U256::from_fields(self.to_min_secondary_raw())
     }
@@ -613,7 +613,7 @@ pub(crate) mod tests {
         plonk::circuit_builder::CircuitBuilder,
     };
 
-    use super::{PublicInputs, QueryPublicInputs};
+    use super::{PublicInputsQueryCircuits, QueryPublicInputs};
 
     const S: usize = 10;
     #[derive(Clone, Debug)]
@@ -625,8 +625,10 @@ pub(crate) mod tests {
         type Wires = Vec<Target>;
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let targets = c.add_virtual_target_arr::<{ PublicInputs::<Target, S>::total_len() }>();
-            let pi_targets = PublicInputs::<Target, S>::from_slice(targets.as_slice());
+            let targets = c
+                .add_virtual_target_arr::<{ PublicInputsQueryCircuits::<Target, S>::total_len() }>(
+                );
+            let pi_targets = PublicInputsQueryCircuits::<Target, S>::from_slice(targets.as_slice());
             pi_targets.register_args(c);
             pi_targets.to_vec()
         }
@@ -638,59 +640,64 @@ pub(crate) mod tests {
 
     #[test]
     fn test_batching_query_public_inputs() {
-        let pis_raw: Vec<F> = random_vector::<u32>(PublicInputs::<F, S>::total_len()).to_fields();
-        let pis = PublicInputs::<F, S>::from_slice(pis_raw.as_slice());
+        let pis_raw: Vec<F> =
+            random_vector::<u32>(PublicInputsQueryCircuits::<F, S>::total_len()).to_fields();
+        let pis = PublicInputsQueryCircuits::<F, S>::from_slice(pis_raw.as_slice());
         // check public inputs are constructed correctly
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::TreeHash)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::TreeHash)],
             pis.to_hash_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::OutputValues)],
             pis.to_values_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::NumMatching)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::NumMatching)],
             &[*pis.to_count_raw()],
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::OpIds)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::OpIds)],
             pis.to_ops_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::LeftBoundaryRow)],
+            &pis_raw
+                [PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::LeftBoundaryRow)],
             pis.to_left_row_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::RightBoundaryRow)],
+            &pis_raw
+                [PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::RightBoundaryRow)],
             pis.to_right_row_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::MinPrimary)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::MinPrimary)],
             pis.to_min_primary_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::MaxPrimary)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::MaxPrimary)],
             pis.to_max_primary_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::MinSecondary)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::MinSecondary)],
             pis.to_min_secondary_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::MaxSecondary)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::MaxSecondary)],
             pis.to_max_secondary_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::Overflow)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::Overflow)],
             &[*pis.to_overflow_raw()],
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::ComputationalHash)],
+            &pis_raw
+                [PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::ComputationalHash)],
             pis.to_computational_hash_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::PlaceholderHash)],
+            &pis_raw
+                [PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::PlaceholderHash)],
             pis.to_placeholder_hash_raw(),
         );
         // use public inputs in circuit

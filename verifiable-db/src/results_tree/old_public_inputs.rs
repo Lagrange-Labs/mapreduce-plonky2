@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::iter::once;
 
 use alloy::primitives::U256;

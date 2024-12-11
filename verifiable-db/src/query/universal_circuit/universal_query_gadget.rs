@@ -833,15 +833,33 @@ where
     /// This method returns the ids of the placeholders employed to compute the placeholder hash,
     /// in the same order, so that those ids can be provided as input to other circuits that need
     /// to recompute this hash
-    pub(crate) fn ids_for_placeholder_hash(&self) -> Vec<PlaceholderId> {
-        self.filtering_predicate_inputs
+    pub(crate) fn ids_for_placeholder_hash(
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+        placeholders: &Placeholders,
+        query_bounds: &QueryBounds,
+    ) -> Result<Vec<PlaceholderId>> {
+        let hash_input_gadget = Self::new(
+            &ColumnIDs::default(),
+            predicate_operations,
+            placeholders,
+            query_bounds,
+            results,
+        )?;
+        Ok(hash_input_gadget
+            .filtering_predicate_inputs
             .iter()
             .flat_map(|op_inputs| vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]])
-            .chain(self.result_values_inputs.iter().flat_map(|op_inputs| {
-                vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]]
-            }))
+            .chain(
+                hash_input_gadget
+                    .result_values_inputs
+                    .iter()
+                    .flat_map(|op_inputs| {
+                        vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]]
+                    }),
+            )
             .map(|id| PlaceholderIdentifier::from_fields(&[id]))
-            .collect_vec()
+            .collect_vec())
     }
 
     /// Utility function to compute the `BasicOperationInputs` corresponding to the set of `operations` specified

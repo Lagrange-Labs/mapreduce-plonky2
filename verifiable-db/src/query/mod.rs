@@ -1,5 +1,5 @@
 use plonky2::iop::target::Target;
-use public_inputs::PublicInputs;
+use public_inputs::PublicInputsQueryCircuits;
 
 pub mod api;
 pub(crate) mod circuits;
@@ -12,5 +12,5 @@ pub mod universal_circuit;
 pub mod utils;
 
 pub const fn pi_len<const MAX_NUM_RESULTS: usize>() -> usize {
-    PublicInputs::<Target, MAX_NUM_RESULTS>::total_len()
+    PublicInputsQueryCircuits::<Target, MAX_NUM_RESULTS>::total_len()
 }

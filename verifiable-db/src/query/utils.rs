@@ -416,7 +416,7 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
 pub(crate) mod tests {
     use crate::query::{
         computational_hash_ids::{AggregationOperation, Identifiers},
-        public_inputs::PublicInputs,
+        public_inputs::PublicInputsQueryCircuits,
         universal_circuit::universal_query_gadget::{CurveOrU256, OutputValues},
     };
     use alloy::primitives::U256;
@@ -518,7 +518,7 @@ pub(crate) mod tests {
     /// the proofs. It's the test function corresponding to `compute_output_item`.
     pub(crate) fn compute_output_item_value<const S: usize>(
         i: usize,
-        proofs: &[&PublicInputs<F, S>],
+        proofs: &[&PublicInputsQueryCircuits<F, S>],
     ) -> (Vec<F>, u32)
     where
         [(); S - 1]:,
