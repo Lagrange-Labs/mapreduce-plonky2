@@ -10,6 +10,7 @@ use ryhope::{
     storage::{updatetree::UpdateTree, WideLineage},
     Epoch,
 };
+use serde::{Deserialize, Serialize};
 use verifiable_db::query::{
     api::{NodePath, RowInput, TreePathInputs},
     computational_hash_ids::ColumnIDs,
@@ -195,8 +196,10 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
 ///
 /// (2,0)  (2,1)  (2,2)         (2,3)  (2,4)
 /// ```      
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Default)]
-pub struct UTKey<const ARITY: usize>((usize, usize));
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize,
+)]
+pub struct UTKey<const ARITY: usize>(pub (usize, usize));
 
 impl<const ARITY: usize> UTKey<ARITY> {
     /// Compute the key of the child node of `self` that has `num_left_siblings`

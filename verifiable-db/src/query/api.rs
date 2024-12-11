@@ -119,7 +119,7 @@ impl NodePath {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 /// Data structure containing the inputs necessary to prove a query for a row
 /// of the DB table.
 pub struct RowInput {

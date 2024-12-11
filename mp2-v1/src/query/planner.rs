@@ -65,7 +65,7 @@ impl<'a, C: ContextProvider> NonExistenceInput<'a, C> {
         }
     }
 
-    pub(crate) async fn find_row_node_for_non_existence(
+    pub async fn find_row_node_for_non_existence(
         &self,
         primary: BlockPrimaryIndex,
     ) -> anyhow::Result<RowTreeKey> {
