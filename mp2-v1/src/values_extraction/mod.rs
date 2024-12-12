@@ -2,7 +2,7 @@ use alloy::primitives::Address;
 use mp2_common::{
     digest::TableDimension,
     eth::left_pad32,
-    group_hashing::{add_curve_point, field_hashed_scalar_mul, map_to_curve_point},
+    group_hashing::{add_curve_point, map_to_curve_point},
     poseidon::H,
     types::{GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
@@ -167,15 +167,4 @@ pub fn compute_table_row_digest(dimension: TableDimension, digests: &[Digest]) -
     let acc_digest = add_curve_point(digests);
 
     dimension.conditional_row_digest(acc_digest)
-}
-
-/// Merge the row value digests of multiple tables.
-pub fn merge_table_row_digests(
-    individual_digests: &[Digest],
-    multiplier_digests: &[Digest],
-) -> Digest {
-    let [acc_individual_digest, acc_multiplier_digest] =
-        [individual_digests, multiplier_digests].map(add_curve_point);
-
-    field_hashed_scalar_mul(acc_multiplier_digest.to_fields(), acc_individual_digest)
 }

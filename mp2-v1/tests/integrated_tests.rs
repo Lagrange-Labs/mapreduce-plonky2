@@ -29,7 +29,7 @@ use common::{
     context::{self, ParamsType, TestContextConfig},
     proof_storage::{ProofKV, DEFAULT_PROOF_STORE_FOLDER},
     table::Table,
-    TableInfo, TestContext,
+    TableInfo,
 };
 use envconfig::Envconfig;
 use log::info;
@@ -112,8 +112,6 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Deletion,
     ];
     merged.run(&mut ctx, genesis, changes).await?;
-
-    run_no_provable_test_cases(&mut ctx).await?;
 
     // save columns information and table information in JSON so querying test can pick up
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
@@ -248,52 +246,4 @@ async fn test_andrus_query() -> Result<()> {
     let _proof = ctx.run_query_proof("revelation", GlobalCircuitInput::Revelation(input))?;
     info!("all good");
     Ok(())
-}
-
-async fn run_no_provable_test_cases(ctx: &mut TestContext) -> Result<()> {
-    // Run a test case for no provable extraction of single value slots.
-    let (mut no_provable, genesis) = {
-        let (single, genesis) = TableIndexing::single_value_test_case(ctx).await?;
-        let no_provable = TableIndexing::no_provable_test_case(single);
-
-        (no_provable, genesis)
-    };
-    let changes = vec![
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Silent,
-        ChangeType::Update(UpdateType::SecondaryIndex),
-    ];
-    no_provable.run(ctx, genesis, changes).await?;
-
-    // Run a test case for no provable extraction of mapping slot.
-    let (mut no_provable, genesis) = {
-        let (mapping, genesis) = TableIndexing::mapping_test_case(ctx).await?;
-        let no_provable = TableIndexing::no_provable_test_case(mapping);
-
-        (no_provable, genesis)
-    };
-    let changes = vec![
-        ChangeType::Insertion,
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Silent,
-        ChangeType::Update(UpdateType::SecondaryIndex),
-        ChangeType::Deletion,
-    ];
-    no_provable.run(ctx, genesis, changes).await?;
-
-    // Run a test case for no provable extraction of merge table.
-    let (mut no_provable, genesis) = {
-        let (merge, genesis) = TableIndexing::merge_table_test_case(ctx).await?;
-        let no_provable = TableIndexing::no_provable_test_case(merge);
-
-        (no_provable, genesis)
-    };
-    let changes = vec![
-        ChangeType::Insertion,
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Silent,
-        ChangeType::Deletion,
-    ];
-    no_provable.run(ctx, genesis, changes).await
 }

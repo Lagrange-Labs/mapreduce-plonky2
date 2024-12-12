@@ -4,6 +4,7 @@
 use anyhow::Result;
 use log::{debug, info};
 use mp2_v1::{
+    contract_extraction,
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
@@ -22,7 +23,7 @@ use crate::common::{
         identifier_single_var_column,
         table_source::{
             LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs, MergeSource,
-            NoProvableExtractionArgs, SingleValuesExtractionArgs, DEFAULT_ADDRESS,
+            SingleValuesExtractionArgs, DEFAULT_ADDRESS,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
@@ -43,7 +44,7 @@ use alloy::{
     primitives::{Address, U256},
     providers::ProviderBuilder,
 };
-use mp2_common::{eth::StorageSlot, types::HashOutput};
+use mp2_common::{eth::StorageSlot, proof::ProofWithVK, types::HashOutput};
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
@@ -68,15 +69,6 @@ pub(crate) const MAPPING_VALUE_COLUMN: &str = "map_value";
 pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
 
 impl TableIndexing {
-    /// Create a wrapping test case from the original one for testing no provable extraction.
-    pub(crate) fn no_provable_test_case(mut original: Self) -> Self {
-        // Wrap the original table source to a source of no provable extraction type.
-        original.source =
-            TableSource::NoProvable(NoProvableExtractionArgs::new(Box::new(original.source)));
-
-        original
-    }
-
     pub(crate) async fn merge_table_test_case(
         ctx: &mut TestContext,
     ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
@@ -569,25 +561,88 @@ impl TableIndexing {
         ctx: &mut TestContext,
         bn: BlockPrimaryIndex,
     ) -> Result<HashOutput> {
+        let contract_proof_key = ProofKey::ContractExtraction((self.contract.address, bn));
+        let contract_proof = match ctx.storage.get_proof_exact(&contract_proof_key) {
+            Ok(proof) => {
+                info!(
+                    "Loaded Contract Extraction (C.3) proof for block number {}",
+                    bn
+                );
+                proof
+            }
+            Err(_) => {
+                let contract_proof = ctx
+                    .prove_contract_extraction(
+                        &self.contract.address,
+                        self.contract_extraction.slot.clone(),
+                        bn,
+                    )
+                    .await;
+                ctx.storage
+                    .store_proof(contract_proof_key, contract_proof.clone())?;
+                info!(
+                    "Generated Contract Extraction (C.3) proof for block number {}",
+                    bn
+                );
+                {
+                    let pvk = ProofWithVK::deserialize(&contract_proof)?;
+                    let pis =
+                        contract_extraction::PublicInputs::from_slice(&pvk.proof().public_inputs);
+                    debug!(
+                        " CONTRACT storage root pis.storage_root() {:?}",
+                        hex::encode(
+                            pis.root_hash_field()
+                                .into_iter()
+                                .flat_map(|u| u.to_be_bytes())
+                                .collect::<Vec<_>>()
+                        )
+                    );
+                }
+                contract_proof
+            }
+        };
+
+        // We look if block proof has already been generated for this block
+        // since it is the same between proofs
+        let block_proof_key = ProofKey::BlockExtraction(bn as BlockPrimaryIndex);
+        let block_proof = match ctx.storage.get_proof_exact(&block_proof_key) {
+            Ok(proof) => {
+                info!(
+                    "Loaded Block Extraction (C.4) proof for block number {}",
+                    bn
+                );
+                proof
+            }
+            Err(_) => {
+                let proof = ctx
+                    .prove_block_extraction(bn as BlockPrimaryIndex)
+                    .await
+                    .unwrap();
+                ctx.storage.store_proof(block_proof_key, proof.clone())?;
+                info!(
+                    "Generated Block Extraction (C.4) proof for block number {}",
+                    bn
+                );
+                proof
+            }
+        };
+
         let table_id = &self.table.public_name.clone();
         // we construct the proof key for both mappings and single variable in the same way since
         // it is derived from the table id which should be different for any tables we create.
         let value_key = ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));
         // final extraction for single variables combining the different proofs generated before
         let final_key = ProofKey::FinalExtraction((table_id.clone(), bn as BlockPrimaryIndex));
-
         let (extraction, metadata_hash) = self
             .source
-            .generate_extraction_proof_inputs(
-                ctx,
-                &self.contract,
-                &self.contract_extraction,
-                value_key,
-            )
+            .generate_extraction_proof_inputs(ctx, &self.contract, value_key)
             .await?;
         // no need to generate it if it's already present
         if ctx.storage.get_proof_exact(&final_key).is_err() {
-            let proof = ctx.prove_final_extraction(extraction).await.unwrap();
+            let proof = ctx
+                .prove_final_extraction(contract_proof, block_proof, extraction)
+                .await
+                .unwrap();
             ctx.storage
                 .store_proof(final_key, proof.clone())
                 .expect("unable to save in storage?");
@@ -886,12 +941,10 @@ impl TableIndexing {
         TableInfo {
             public_name: self.table.public_name.clone(),
             value_column: self.value_column.clone(),
+            chain_id: self.contract.chain_id,
             columns: self.table.columns.clone(),
+            contract_address: self.contract.address,
             source: self.source.clone(),
-            contract: Contract {
-                chain_id: self.contract.chain_id,
-                address: self.contract.address,
-            },
         }
     }
 }

@@ -21,7 +21,7 @@ use mp2_common::{
 };
 use plonky2::{
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::proof::ProofWithPublicInputsTarget,
@@ -33,8 +33,6 @@ use std::array;
 
 #[derive(Clone, Debug, Constructor)]
 pub struct DummyCircuit {
-    /// Merge flag
-    is_merge: bool,
     /// Block number
     block_number: U256,
     /// Packed block hash
@@ -54,8 +52,6 @@ pub struct DummyCircuit {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DummyWires {
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    is_merge: BoolTarget,
     block_number: UInt256Target,
     block_hash: [Target; PACKED_HASH_LEN],
     prev_block_hash: [Target; PACKED_HASH_LEN],
@@ -67,7 +63,6 @@ pub struct DummyWires {
 
 impl DummyCircuit {
     fn build(b: &mut CBuilder) -> DummyWires {
-        let is_merge = b.add_virtual_bool_target_unsafe();
         let block_number = b.add_virtual_u256_unsafe();
         let [block_hash, prev_block_hash] = array::from_fn(|_| b.add_virtual_target_arr());
         let [metadata_digest, row_digest] = array::from_fn(|_| b.add_virtual_curve_target());
@@ -81,18 +76,19 @@ impl DummyCircuit {
             .collect_vec();
         let encoded_metadata_digest = b.map_to_curve_point(&inputs);
 
+        let _false = b._false();
+
         PublicInputs::new(
             &block_hash,
             &prev_block_hash,
             &row_digest.to_targets(),
             &encoded_metadata_digest.to_targets(),
             &block_number.to_targets(),
-            &[is_merge.target],
+            &[_false.target],
         )
         .register_args(b);
 
         DummyWires {
-            is_merge,
             block_number,
             block_hash,
             prev_block_hash,
@@ -102,7 +98,6 @@ impl DummyCircuit {
     }
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &DummyWires) {
-        pw.set_bool_target(wires.is_merge, self.is_merge);
         pw.set_u256_target(&wires.block_number, self.block_number);
         [
             (wires.block_hash, self.block_hash),
@@ -167,13 +162,11 @@ mod test {
     fn test_final_extraction_dummy_circuit() {
         let rng = &mut thread_rng();
 
-        let is_merge = rng.gen();
         let block_number = U256::from(rng.gen::<u64>());
         let [block_hash, prev_block_hash] = array::from_fn(|_| F::rand_array());
         let [metadata_digest, row_digest] = array::from_fn(|_| Digest::sample(rng));
 
         let test_circuit = DummyCircuit::new(
-            is_merge,
             block_number,
             block_hash,
             prev_block_hash,
@@ -185,7 +178,6 @@ mod test {
         let pi = PublicInputs::from_slice(&proof.public_inputs);
 
         // Check the public inputs.
-        assert_eq!(pi.is_merge_case(), is_merge);
         assert_eq!(U256::from(pi.block_number()), block_number);
         assert_eq!(pi.block_hash_raw(), block_hash);
         assert_eq!(pi.prev_block_hash_raw(), prev_block_hash);

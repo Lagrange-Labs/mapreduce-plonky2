@@ -254,7 +254,6 @@ impl CircuitInput {
     }
     /// Instantiate inputs for the dummy circuit dealing with no provable extraction case
     pub fn new_no_provable_input(
-        is_merge: bool,
         block_number: U256,
         block_hash: HashOutput,
         prev_block_hash: HashOutput,
@@ -271,7 +270,6 @@ impl CircuitInput {
         });
 
         Self::NoProvable(DummyCircuit::new(
-            is_merge,
             block_number,
             block_hash,
             prev_block_hash,
