@@ -119,54 +119,62 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
         .cloned()
         .collect::<BTreeSet<_>>();
 
-    Ok(stream::iter(sorted_index_values.into_iter())
-        .then(async |index_value| {
-            let index_path = index_cache
-                .compute_path(&index_value, current_epoch)
+    let prove_rows = async |index_value| {
+        let index_path = index_cache
+            .compute_path(&index_value, current_epoch)
+            .await
+            .unwrap_or_else(|| panic!("node with key {index_value} not found in index tree cache"));
+        let proven_rows = if let Some(matching_rows) =
+            row_keys_by_epochs.get(&(index_value as Epoch))
+        {
+            let sorted_rows = matching_rows.iter().collect::<BTreeSet<_>>();
+            stream::iter(sorted_rows.iter())
+                .then(async |&row_key| {
+                    compute_input_for_row(&row_cache, row_key, index_value, &index_path, column_ids)
+                        .await
+                })
+                .collect::<Vec<RowInput>>()
                 .await
-                .unwrap_or_else(|| {
-                    panic!("node with key {index_value} not found in index tree cache")
+        } else {
+            let proven_node = non_existence_inputs
+                .find_row_node_for_non_existence(index_value)
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("node for non-existence not found for index value {index_value}")
                 });
-            let proven_rows =
-                if let Some(matching_rows) = row_keys_by_epochs.get(&(index_value as Epoch)) {
-                    let sorted_rows = matching_rows.iter().collect::<BTreeSet<_>>();
-                    stream::iter(sorted_rows.iter())
-                        .then(async |&row_key| {
-                            compute_input_for_row(
-                                &row_cache,
-                                row_key,
-                                index_value,
-                                &index_path,
-                                column_ids,
-                            )
-                            .await
-                        })
-                        .collect::<Vec<RowInput>>()
-                        .await
-                } else {
-                    let proven_node = non_existence_inputs
-                        .find_row_node_for_non_existence(index_value)
-                        .await
-                        .unwrap_or_else(|_| {
-                            panic!("node for non-existence not found for index value {index_value}")
-                        });
-                    let row_input = compute_input_for_row(
-                        non_existence_inputs.row_tree,
-                        &proven_node,
-                        index_value,
-                        &index_path,
-                        column_ids,
-                    )
-                    .await;
-                    vec![row_input]
-                };
-            proven_rows
-        })
-        .concat()
-        .await
+            let row_input = compute_input_for_row(
+                non_existence_inputs.row_tree,
+                &proven_node,
+                index_value,
+                &index_path,
+                column_ids,
+            )
+            .await;
+            vec![row_input]
+        };
+        proven_rows
+    };
+
+    // TODO: This implementation causes an error in DQ:
+    // `implementation of `std::marker::Send` is not general enough`
+    /*
+        let chunks = stream::iter(sorted_index_values.into_iter())
+            .then(prove_rows)
+            .concat()
+            .await
+    */
+    let mut chunks = vec![];
+    for index_value in sorted_index_values {
+        let chunk = prove_rows(index_value).await;
+        chunks.extend(chunk);
+    }
+
+    let chunks = chunks
         .chunks(CHUNK_SIZE)
         .map(|chunk| chunk.to_vec())
-        .collect_vec())
+        .collect_vec();
+
+    Ok(chunks)
 }
 
 /// Key for nodes of the `UTForChunks<NUM_CHUNKS>` employed to
