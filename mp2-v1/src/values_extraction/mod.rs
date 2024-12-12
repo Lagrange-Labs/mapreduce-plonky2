@@ -1,8 +1,8 @@
 use alloy::primitives::Address;
+use itertools::Itertools;
 use mp2_common::{
-    digest::TableDimension,
     eth::left_pad32,
-    group_hashing::{add_curve_point, map_to_curve_point},
+    group_hashing::map_to_curve_point,
     poseidon::H,
     types::{GFp, MAPPING_KEY_LEN, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
@@ -13,7 +13,8 @@ use plonky2::{
     plonk::config::Hasher,
 };
 use plonky2_ecgfp5::curve::curve::Point as Digest;
-use std::iter;
+use std::iter::{self, once};
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::RowCells;
 
 pub mod api;
 mod branch;
@@ -160,11 +161,32 @@ pub fn compute_leaf_mapping_metadata_digest(key_id: u64, value_id: u64, slot: u8
     ])
 }
 
-/// Compute the row value digest of one table.
-/// The parameter `digests` are computed by `compute_leaf_single_values_digest` or
-/// `compute_leaf_mapping_values_digest`.
-pub fn compute_table_row_digest(dimension: TableDimension, digests: &[Digest]) -> Digest {
-    let acc_digest = add_curve_point(digests);
-
-    dimension.conditional_row_digest(acc_digest)
+/// Compute the row value digest of one table, whose rows are provided as input
+pub fn compute_table_row_digest(table_rows: &[RowCells]) -> Digest {
+    let column_ids = table_rows[0].column_ids();
+    table_rows
+        .into_iter()
+        .enumerate()
+        .fold(Digest::NEUTRAL, |acc, (i, row)| {
+            // check that column ids are the same for each row
+            assert_eq!(
+                row.column_ids(),
+                column_ids,
+                "row {i} has different column ids than other rows"
+            );
+            let cells = row.to_cells();
+            let current_row_digest = map_to_curve_point(
+                &cells
+                    .into_iter()
+                    .skip(1) // we skip primary index column
+                    .fold(Digest::NEUTRAL, |acc, row| {
+                        acc + map_to_curve_point(
+                            &once(row.id).chain(row.value.to_fields()).collect_vec(),
+                        )
+                    })
+                    .to_fields(),
+            );
+            // accumulate with digest of previous rows
+            acc + current_row_digest
+        })
 }

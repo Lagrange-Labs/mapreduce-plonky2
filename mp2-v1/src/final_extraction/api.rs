@@ -1,13 +1,9 @@
 use alloy::primitives::U256;
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
-    self, default_config,
-    digest::{Digest, TableDimension},
-    proof::ProofWithVK,
-    types::HashOutput,
-    utils::Packer,
-    C, D, F,
+    self, default_config, digest::TableDimension, proof::ProofWithVK, types::HashOutput,
+    utils::Packer, C, D, F,
 };
 use plonky2::{field::types::Field, iop::target::Target, plonk::circuit_data::VerifierCircuitData};
 use recursion_framework::{
@@ -15,6 +11,9 @@ use recursion_framework::{
     framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
 };
 use serde::{Deserialize, Serialize};
+use verifiable_db::query::universal_circuit::universal_circuit_inputs::RowCells;
+
+use crate::{api::no_provable_metadata_digest, values_extraction::compute_table_row_digest};
 
 use super::{
     base_circuit::BaseCircuitInput,
@@ -257,9 +256,8 @@ impl CircuitInput {
         block_number: U256,
         block_hash: HashOutput,
         prev_block_hash: HashOutput,
-        metadata_digest: Digest,
-        row_digest: Digest,
-    ) -> Self {
+        table_rows: &[RowCells],
+    ) -> Result<Self> {
         let [block_hash, prev_block_hash] = [block_hash, prev_block_hash].map(|h| {
             h.pack(mp2_common::utils::Endianness::Little)
                 .into_iter()
@@ -268,14 +266,21 @@ impl CircuitInput {
                 .try_into()
                 .unwrap()
         });
+        ensure!(
+            !table_rows.is_empty(),
+            "At least one row should be provided as input to construct a table"
+        );
+        let column_ids = table_rows[0].column_ids();
+        let metadata_digest = no_provable_metadata_digest(&column_ids);
+        let row_digest = compute_table_row_digest(table_rows);
 
-        Self::NoProvable(DummyCircuit::new(
+        Ok(Self::NoProvable(DummyCircuit::new(
             block_number,
             block_hash,
             prev_block_hash,
             metadata_digest,
             row_digest,
-        ))
+        )))
     }
 }
 
