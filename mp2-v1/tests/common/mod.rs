@@ -2,7 +2,8 @@
 use alloy::primitives::Address;
 use anyhow::Result;
 use cases::table_source::TableSource;
-use mp2_v1::api::{merge_metadata_hash, metadata_hash, MetadataHash, SlotInputs};
+use itertools::Itertools;
+use mp2_v1::api::{merge_metadata_hash, metadata_hash, MetadataHash, SlotInput, SlotInputs};
 use serde::{Deserialize, Serialize};
 use table::TableColumns;
 pub mod benchmarker;
@@ -30,7 +31,19 @@ pub(crate) use context::TestContext;
 use mp2_common::{proof::ProofWithVK, types::HashOutput};
 use plonky2::plonk::config::GenericHashOut;
 
+/// Testing maximum columns
+const TEST_MAX_COLUMNS: usize = 32;
+/// Testing maximum fields for each EVM word
+const TEST_MAX_FIELD_PER_EVM: usize = 32;
+
 type ColumnIdentifier = u64;
+type StorageSlotInfo =
+    mp2_v1::values_extraction::StorageSlotInfo<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
+type MetadataGadget = mp2_v1::values_extraction::gadgets::metadata_gadget::MetadataGadget<
+    TEST_MAX_COLUMNS,
+    TEST_MAX_FIELD_PER_EVM,
+>;
+type PublicParameters = mp2_v1::api::PublicParameters<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
     let root_pi = ProofWithVK::deserialize(proof)
@@ -79,18 +92,65 @@ impl TableInfo {
     pub fn metadata_hash(&self) -> MetadataHash {
         match &self.source {
             TableSource::Mapping((mapping, _)) => {
-                let slot = SlotInputs::Mapping(mapping.slot);
-                metadata_hash(slot, &self.contract_address, self.chain_id, vec![])
+                let slot_input = SlotInputs::Mapping(vec![SlotInput::new(
+                    mapping.slot, // byte_offset
+                    0,            // bit_offset
+                    0,            // length
+                    0,            // evm_word
+                    0,
+                )]);
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot_input,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
             }
             // mapping with length not tested right now
             TableSource::SingleValues(args) => {
-                let slot = SlotInputs::Simple(args.slots.clone());
-                metadata_hash(slot, &self.contract_address, self.chain_id, vec![])
+                let inputs = args
+                    .slots
+                    .iter()
+                    .flat_map(|slot_info| {
+                        slot_info
+                            .metadata()
+                            .extracted_table_info()
+                            .iter()
+                            .map(Into::into)
+                            .collect_vec()
+                    })
+                    .collect();
+                let slot = SlotInputs::Simple(inputs);
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
             }
             TableSource::Merge(merge) => {
-                let single = SlotInputs::Simple(merge.single.slots.clone());
-                let mapping = SlotInputs::Mapping(merge.mapping.slot);
-                merge_metadata_hash(
+                let inputs = merge
+                    .single
+                    .slots
+                    .iter()
+                    .flat_map(|slot_info| {
+                        slot_info
+                            .metadata()
+                            .extracted_table_info()
+                            .iter()
+                            .map(Into::into)
+                            .collect_vec()
+                    })
+                    .collect();
+                let single = SlotInputs::Simple(inputs);
+                let mapping = SlotInputs::Mapping(vec![SlotInput::new(
+                    merge.mapping.slot, // byte_offset
+                    0,                  // bit_offset
+                    0,                  // length
+                    0,                  // evm_word
+                    0,
+                )]);
+                merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
                     self.contract_address,
                     self.chain_id,
                     vec![],

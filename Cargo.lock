@@ -3829,6 +3829,7 @@ dependencies = [
  "paste",
  "plonky2",
  "plonky2_crypto",
+ "plonky2_ecdsa",
  "plonky2_ecgfp5",
  "rand",
  "rand_chacha",
