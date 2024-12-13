@@ -93,8 +93,8 @@ impl<const S: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS> for LeafNodeWi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::results_tree::construction::{
-        tests::random_results_construction_public_inputs, PI_LEN,
+    use crate::results_tree::construction::tests::{
+        pi_len, random_results_construction_public_inputs,
     };
     use mp2_common::{utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};
@@ -112,7 +112,7 @@ mod tests {
         type Wires = (LeafNodeWires<S>, Vec<Target>);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let subtree_proof = b.add_virtual_target_arr::<{ PI_LEN::<S> }>().to_vec();
+            let subtree_proof = b.add_virtual_target_arr::<{ pi_len::<S>() }>().to_vec();
             let subtree_pi = PublicInputs::<Target, S>::from_slice(&subtree_proof);
 
             let wires = LeafNodeCircuit::build(b, &subtree_pi);

@@ -47,14 +47,13 @@ use mp2_v1::{
 };
 use parsil::{
     assembler::{DynamicCircuitPis, StaticCircuitPis},
-    parse_and_validate,
     queries::{core_keys_for_index_tree, core_keys_for_row_tree},
     ParsilSettings, DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
     storage::{
         updatetree::{Next, UpdateTree, WorkplanItem},
-        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage, WideLineage,
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
     tree::NodeContext,
     Epoch, NodePayload,
@@ -71,20 +70,19 @@ use verifiable_db::{
         },
     },
     revelation::PublicInputs,
-    row_tree,
 };
 
 use super::{
-    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, INDEX_TREE_MAX_DEPTH,
-    MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
-    MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH,
+    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, MAX_NUM_COLUMNS,
+    MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
+    MAX_NUM_RESULT_OPS,
 };
 
 pub type RevelationPublicInputs<'a> =
     PublicInputs<'a, F, MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>;
 
 /// Execute a query to know all the touched rows, and then call the universal circuit on all rows
-#[warn(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn prove_query(
     ctx: &mut TestContext,
     table: &Table,
@@ -99,7 +97,7 @@ pub(crate) async fn prove_query(
         .row
         .wide_lineage_between(
             table.row.current_epoch(),
-            &core_keys_for_row_tree(&query.query, &settings, &pis.bounds, &query.placeholders)?,
+            &core_keys_for_row_tree(&query.query, settings, &pis.bounds, &query.placeholders)?,
             (query.min_block as Epoch, query.max_block as Epoch),
         )
         .await?;
@@ -215,9 +213,9 @@ pub(crate) async fn prove_query(
 
     // get `StaticPublicInputs`, i.e., the data about the query available only at query registration time,
     // to check the public inputs
-    let pis = parsil::assembler::assemble_static(&parsed, &settings)?;
+    let pis = parsil::assembler::assemble_static(&parsed, settings)?;
     // get number of matching rows
-    let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, &settings)?;
+    let mut exec_query = parsil::executor::generate_query_keys(&mut parsed, settings)?;
     let query_params = exec_query.convert_placeholders(&query.placeholders);
     let num_touched_rows = execute_row_query(
         &table.db_pool,
@@ -281,7 +279,7 @@ async fn prove_revelation(
     Ok(proof)
 }
 
-#[warn(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check_final_outputs(
     revelation_proof: Vec<u8>,
     ctx: &TestContext,
@@ -759,8 +757,8 @@ pub fn generate_non_existence_proof(
 }
 
 /// Generate a proof for a node of the index tree which is outside of the query bounds
-async fn prove_non_existence_index<'a>(
-    planner: &mut QueryPlanner<'a>,
+async fn prove_non_existence_index(
+    planner: &mut QueryPlanner<'_>,
     primary: BlockPrimaryIndex,
 ) -> Result<()> {
     let tree = &planner.table.index;
@@ -794,8 +792,8 @@ async fn prove_non_existence_index<'a>(
     Ok(())
 }
 
-pub async fn prove_non_existence_row<'a>(
-    planner: &mut QueryPlanner<'a>,
+pub async fn prove_non_existence_row(
+    planner: &mut QueryPlanner<'_>,
     primary: BlockPrimaryIndex,
 ) -> Result<()> {
     let (chosen_node, plan) = find_row_node_for_non_existence(
@@ -803,7 +801,7 @@ pub async fn prove_non_existence_row<'a>(
         planner.table.public_name.clone(),
         &planner.table.db_pool,
         primary,
-        &planner.settings,
+        planner.settings,
         &planner.pis.bounds,
     )
     .await?;
@@ -1349,7 +1347,6 @@ async fn check_correct_cells_tree(
     let local_cells = all_cells.to_vec();
     let expected_cells_root = payload
         .cell_root_hash
-        .clone()
         .unwrap_or(HashOutput::from(*empty_poseidon_hash()));
     let mut tree = indexing::cell::new_tree().await;
     tree.in_transaction(|t| {

@@ -228,6 +228,19 @@ where
     circuit_params.generate_proof(circuit_type)?.serialize()
 }
 
+pub trait BranchMacroTrait {
+    fn new(builder: &CircuitWithUniversalVerifierBuilder<F, D, NUM_IO>) -> Self;
+
+    fn circuit_set(&self) -> Vec<HashOut<F>>;
+
+    fn generate_proof(
+        &self,
+        set: &RecursiveCircuits<F, C, D>,
+        branch_node: InputNode,
+        child_proofs: Vec<ProofWithVK>,
+    ) -> Result<ProofWithVK>;
+}
+
 /// generate a macro filling the BranchCircuit structs manually
 macro_rules! impl_branch_circuits {
     ($struct_name:ty, $($i:expr),*) => {
@@ -247,7 +260,7 @@ macro_rules! impl_branch_circuits {
         in combination with the node input length."]
         pub type $struct_name =  [< $struct_name GenericNodeLen>]<MAX_BRANCH_NODE_LEN>;
 
-        impl $struct_name {
+        impl BranchMacroTrait for $struct_name {
             fn new(builder: &CircuitWithUniversalVerifierBuilder<F, D, NUM_IO>) -> Self {
                 $struct_name {
                     $(
@@ -258,11 +271,11 @@ macro_rules! impl_branch_circuits {
             }
             /// Returns the set of circuits to be fed to the recursive framework
             fn circuit_set(&self) -> Vec<HashOut<F>> {
-                let mut arr = Vec::new();
-                $(
-                    arr.push(self.[< b $i >].circuit_data().verifier_only.circuit_digest);
-                )+
-                arr
+
+                vec![$(
+                    self.[< b $i >].circuit_data().verifier_only.circuit_digest,
+                )+]
+
             }
             /// generates a proof from the inputs stored in `branch`. Depending on the size of the node,
             /// and the number of children proofs, it selects the right specialized circuit to generate the proof.

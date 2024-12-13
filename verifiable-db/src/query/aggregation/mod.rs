@@ -12,7 +12,6 @@ use mp2_common::{
     F,
 };
 use plonky2::{
-    field::types::Field,
     hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
     plonk::config::GenericHashOut,
 };
@@ -226,7 +225,7 @@ pub enum ChildPosition {
 
 impl ChildPosition {
     // convert `self` to a flag specifying whether a node is the left child of another node or not
-    pub(crate) fn to_flag(&self) -> bool {
+    pub(crate) fn to_flag(self) -> bool {
         match self {
             ChildPosition::Left => true,
             ChildPosition::Right => false,

@@ -7,7 +7,7 @@ use plonky2::{
         circuit_data::{
             CircuitConfig, CommonCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData,
         },
-        config::{AlgebraicHasher, GenericConfig, Hasher},
+        config::{AlgebraicHasher, GenericConfig},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -56,7 +56,6 @@ impl<const D: usize> UniversalVerifierTarget<D> {
     ) -> Result<()>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         pw.set_proof_with_pis_target(&self.verified_proof, proof);
         pw.set_verifier_data_target(&self.verifier_data, verifier_data);
@@ -92,7 +91,6 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
     ) -> Self
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         let rec_data = build_data_for_universal_verifier::<F, C, D>(config, NUM_PUBLIC_INPUTS);
         Self {
@@ -114,7 +112,6 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
     ) -> ProofWithPublicInputsTarget<D>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         let proof = builder.add_virtual_proof_with_pis(&self.rec_data);
         builder.verify_proof::<C>(&proof, verifier_data, &self.rec_data);
@@ -143,7 +140,6 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
     ) -> UniversalVerifierTarget<D>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         // allocate verifier data targets
         let verifier_data = VerifierCircuitTarget {
@@ -221,7 +217,6 @@ mod tests {
         > TestCircuitForUniversalVerifier<F, C, D, INPUT_SIZE>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         fn build_circuit(
             config: CircuitConfig,
@@ -317,17 +312,16 @@ mod tests {
         > CircuitWithUniversalVerifier<F, C, D, INPUT_SIZE>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         fn build_circuit(config: CircuitConfig, circuit_set_size: usize) -> Self {
-            let builder = UniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::new(
+            let builder = UniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::new::<C>(
                 config.clone(),
                 circuit_set_size,
             );
             let mut circuit_builder = CircuitBuilder::<F, D>::new(config.clone());
             let circuit_set_target = CircuitSetTarget::build_target(&mut circuit_builder);
             let verifier_targets =
-                builder.universal_verifier_circuit(&mut circuit_builder, &circuit_set_target);
+                builder.universal_verifier_circuit::<C>(&mut circuit_builder, &circuit_set_target);
             let proof_t = verifier_targets.get_proof_target();
             let input_targets =
                 <RecursiveCircuitWires<INPUT_SIZE> as CircuitLogicWires<F, D, 1>>::circuit_logic(

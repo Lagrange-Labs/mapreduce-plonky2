@@ -59,7 +59,7 @@ where
     C: ContextProvider,
 {
     let (query_for_min, query_for_max) =
-        bracket_secondary_index(&table_name, settings, primary as Epoch, &bounds);
+        bracket_secondary_index(&table_name, settings, primary as Epoch, bounds);
 
     // try first with lower node than secondary min query bound
     let to_be_proven_node =
@@ -108,13 +108,12 @@ async fn get_successor_node_with_same_value(
             successor_ctx = row_tree
                 .node_context_at(successor_ctx.left.as_ref().unwrap(), primary as Epoch)
                 .await
-                .expect(
-                    format!(
+                .unwrap_or_else(|| {
+                    panic!(
                         "Node context not found for left child of node {:?}",
                         successor_ctx.node_id
                     )
-                    .as_str(),
-                );
+                });
         }
         Some(successor_ctx)
     } else {
@@ -192,13 +191,12 @@ async fn get_predecessor_node_with_same_value(
             predecessor_ctx = row_tree
                 .node_context_at(predecessor_ctx.right.as_ref().unwrap(), primary as Epoch)
                 .await
-                .expect(
-                    format!(
+                .unwrap_or_else(|| {
+                    panic!(
                         "Node context not found for right child of node {:?}",
                         predecessor_ctx.node_id
                     )
-                    .as_str(),
-                );
+                });
         }
         Some(predecessor_ctx)
     } else {
@@ -299,11 +297,11 @@ async fn find_node_for_proof(
         // from the value `value` stored in the node with key `row_key`; the node found is the one to be
         // employed to generate the non-existence proof
         let mut successor_ctx =
-            get_successor_node_with_same_value(&row_tree, &node_ctx, value, primary).await;
+            get_successor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
         while successor_ctx.is_some() {
             node_ctx = successor_ctx.unwrap();
             successor_ctx =
-                get_successor_node_with_same_value(&row_tree, &node_ctx, value, primary).await;
+                get_successor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
         }
     } else {
         // starting from the node with key `row_key`, we iterate over its predecessor nodes in the tree,
@@ -311,11 +309,11 @@ async fn find_node_for_proof(
         // from the value `value` stored in the node with key `row_key`; the node found is the one to be
         // employed to generate the non-existence proof
         let mut predecessor_ctx =
-            get_predecessor_node_with_same_value(&row_tree, &node_ctx, value, primary).await;
+            get_predecessor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
         while predecessor_ctx.is_some() {
             node_ctx = predecessor_ctx.unwrap();
             predecessor_ctx =
-                get_predecessor_node_with_same_value(&row_tree, &node_ctx, value, primary).await;
+                get_predecessor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
         }
     }
 
