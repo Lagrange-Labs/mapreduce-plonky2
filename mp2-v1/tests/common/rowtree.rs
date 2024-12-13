@@ -11,7 +11,7 @@ use mp2_v1::{
         row::{RowPayload, RowTree, RowTreeKey, ToNonce},
     },
 };
-use plonky2::plonk::config::GenericHashOut;
+use plonky2::{field::types::Sample, hash::hash_types::HashOut, plonk::config::GenericHashOut};
 use ryhope::{
     storage::{
         pgsql::PgsqlStorage,
@@ -132,8 +132,8 @@ impl TestContext {
                 let pis = cells_tree::PublicInputs::from_slice(&pvk.proof().public_inputs);
                 debug!(
                     " Cell Root SPLIT digest: multiplier {:?}, individual {:?}",
-                    pis.multiplier_digest_point(),
-                    pis.individual_digest_point()
+                    pis.multiplier_values_digest_point(),
+                    pis.individual_values_digest_point()
                 );
             }
 
@@ -151,6 +151,10 @@ impl TestContext {
                         id,
                         value,
                         multiplier,
+                        // TODO: mpt_metadata
+                        HashOut::rand(),
+                        // TODO: row_unique_data
+                        HashOut::rand(),
                         cell_tree_proof,
                     )
                     .unwrap(),
@@ -187,6 +191,10 @@ impl TestContext {
                         value,
                         multiplier,
                         context.left.is_some(),
+                        // TODO: mpt_metadata
+                        HashOut::rand(),
+                        // TODO: row_unique_data
+                        HashOut::rand(),
                         child_proof,
                         cell_tree_proof,
                     )
@@ -229,6 +237,10 @@ impl TestContext {
                         id,
                         value,
                         multiplier,
+                        // TODO: mpt_metadata
+                        HashOut::rand(),
+                        // TODO: row_unique_data
+                        HashOut::rand(),
                         left_proof,
                         right_proof,
                         cell_tree_proof,
@@ -277,7 +289,7 @@ impl TestContext {
         let pi = verifiable_db::row_tree::PublicInputs::from_slice(&pproof.proof().public_inputs);
         debug!(
             "[--] FINAL MERKLE DIGEST VALUE --> {:?} ",
-            pi.rows_digest_field()
+            pi.individual_digest_point()
         );
         if root_proof_key.primary != primary {
             debug!("[--] NO UPDATES on row this turn? row.root().primary = {} vs new primary proving step {}",root_proof_key.primary,primary);

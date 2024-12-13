@@ -10,7 +10,7 @@ use mp2_v1::{
         row::{CellCollection, Row, RowPayload, RowTreeKey},
     },
 };
-use plonky2::plonk::config::GenericHashOut;
+use plonky2::{field::types::Sample, hash::hash_types::HashOut, plonk::config::GenericHashOut};
 use ryhope::storage::{
     updatetree::{Next, UpdateTree},
     RoEpochKvStorage,
@@ -69,6 +69,8 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
+                        // TODO:
+                        HashOut::rand(),
                     ));
                 self.b.bench("indexing::cell_tree::leaf", || {
                     api::generate_proof(self.params(), inputs)
@@ -93,6 +95,8 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
+                        // TODO:
+                        HashOut::rand(),
                         left_proof.clone(),
                     ));
                 debug!(
@@ -147,6 +151,8 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
+                        // TODO:
+                        HashOut::rand(),
                         [left_proof, right_proof],
                     ));
 
@@ -168,7 +174,7 @@ impl TestContext {
                 "[+] [+] Merkle SLOT identifier {:?} -> value {} value.digest() = {:?}",
                 cell.identifier(),
                 cell.value(),
-                pi.individual_digest_point()
+                pi.individual_values_digest_point()
             );
 
             self.storage
