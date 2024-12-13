@@ -3,12 +3,12 @@ use log::info;
 use mp2_common::{
     eth::StorageSlot, mpt_sequential::utils::bytes_to_nibbles, proof::ProofWithVK, types::GFp,
 };
-use mp2_v1::length_extraction::PublicInputs;
+use mp2_v1::{length_extraction::PublicInputs, values_extraction::StorageSlotInfo};
 use plonky2::field::types::Field;
 
 use crate::common::storage_trie::TestStorageTrie;
 
-use super::{StorageSlotInfo, TestContext};
+use super::TestContext;
 
 impl TestContext {
     /// Generate the Values Extraction (C.2) proof for single variables.

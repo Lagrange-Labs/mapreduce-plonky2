@@ -5,7 +5,7 @@
 use crate::values_extraction::{
     gadgets::{
         column_gadget::ColumnGadget,
-        metadata_gadget::{MetadataGadget, MetadataTarget},
+        metadata_gadget::{ColumnsMetadata, MetadataTarget},
     },
     public_inputs::{PublicInputs, PublicInputsArgs},
     INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
@@ -39,6 +39,8 @@ use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::{iter, iter::once};
+
+use super::gadgets::metadata_gadget::MetadataGadget;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafMappingOfMappingsWires<
@@ -79,7 +81,7 @@ pub struct LeafMappingOfMappingsCircuit<
     pub(crate) inner_key: Vec<u8>,
     pub(crate) outer_key_id: F,
     pub(crate) inner_key_id: F,
-    pub(crate) metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    pub(crate) metadata: ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
 }
 
 impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
@@ -234,7 +236,7 @@ where
             &self.inner_key,
             self.metadata.evm_word,
         );
-        self.metadata.assign(pw, &wires.metadata);
+        MetadataGadget::assign(pw, &self.metadata, &wires.metadata);
     }
 }
 
@@ -349,7 +351,7 @@ mod tests {
         let evm_word = storage_slot.evm_offset();
         let [outer_key_id, inner_key_id] = array::from_fn(|_| rng.gen());
         let metadata =
-            MetadataGadget::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
+            ColumnsMetadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
         let table_info = metadata.actual_table_info().to_vec();
         let extracted_column_identifiers = metadata.extracted_column_identifiers();

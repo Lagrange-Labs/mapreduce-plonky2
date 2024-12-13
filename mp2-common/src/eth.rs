@@ -12,6 +12,7 @@ use anyhow::{bail, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethereum_types::H256;
 use itertools::Itertools;
+use log::debug;
 use log::warn;
 use rlp::Rlp;
 use serde::{Deserialize, Serialize};
@@ -214,6 +215,10 @@ impl StorageSlot {
                     .checked_add(U256::from(*evm_offset))
                     .unwrap()
                     .to_be_bytes();
+                debug!(
+                    "Storage slot struct: parent_location = {}, evm_offset = {}",
+                    parent_location, evm_offset,
+                );
                 B256::from_slice(&location)
             }
         }
@@ -235,8 +240,28 @@ impl StorageSlot {
             StorageSlot::Node(node) => node.parent().is_simple_slot(),
         }
     }
+    /// Get the mapping key path from the outer key to the inner.
+    pub fn mapping_keys(&self) -> Vec<Vec<u8>> {
+        match self {
+            StorageSlot::Simple(_) => vec![],
+            StorageSlot::Mapping(mapping_key, _) => {
+                vec![mapping_key.clone()]
+            }
+            StorageSlot::Node(StorageSlotNode::Mapping(parent, mapping_key)) => {
+                // [parent_mapping_keys || mapping_key]
+                let mut mapping_keys = parent.mapping_keys();
+                mapping_keys.push(mapping_key.clone());
+
+                mapping_keys
+            }
+            StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => parent.mapping_keys(),
+        }
+    }
 }
 impl ProofQuery {
+    pub fn new(contract: Address, slot: StorageSlot) -> Self {
+        Self { contract, slot }
+    }
     pub fn new_simple_slot(address: Address, slot: usize) -> Self {
         Self {
             contract: address,
@@ -256,8 +281,14 @@ impl ProofQuery {
     ) -> Result<EIP1186AccountProofResponse> {
         // Query the MPT proof with retries.
         for i in 0..RETRY_NUM {
+            let location = self.slot.location();
+            debug!(
+                "Querying MPT proof:\n\tslot = {:?}, location = {:?}",
+                self.slot,
+                U256::from_be_slice(location.as_slice()),
+            );
             match provider
-                .get_proof(self.contract, vec![self.slot.location()])
+                .get_proof(self.contract, vec![location])
                 .block_id(block.into())
                 .await
             {

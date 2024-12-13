@@ -1,6 +1,9 @@
 //! Storage trie for proving tests
 
-use super::{benchmarker::Benchmarker, PublicParameters, StorageSlotInfo, TestContext};
+use super::{
+    benchmarker::Benchmarker, PublicParameters, TestContext, TEST_MAX_COLUMNS,
+    TEST_MAX_FIELD_PER_EVM,
+};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
@@ -15,7 +18,8 @@ use mp2_common::{
 };
 use mp2_v1::{
     api::{generate_proof, CircuitInput},
-    length_extraction, values_extraction,
+    length_extraction,
+    values_extraction::{self, StorageSlotInfo},
 };
 use plonky2::field::types::PrimeField64;
 use rlp::{Prototype, Rlp};
@@ -201,7 +205,6 @@ impl TrieNode {
 
         // Find the storage slot information for this leaf node.
         let slot_info = ctx.slots.get(&node).unwrap();
-        let metadata = slot_info.metadata().clone();
 
         // Build the leaf circuit input.
         let (name, input) = match slot_info.slot() {
@@ -211,7 +214,8 @@ impl TrieNode {
                 values_extraction::CircuitInput::new_single_variable_leaf(
                     node.clone(),
                     *slot as u8,
-                    metadata,
+                    slot_info.evm_word(),
+                    slot_info.table_info().to_vec(),
                 ),
             ),
             // Mapping variable
@@ -221,8 +225,11 @@ impl TrieNode {
                     node.clone(),
                     *slot as u8,
                     mapping_key.clone(),
-                    slot_info.outer_key_id(),
-                    metadata,
+                    slot_info
+                        .outer_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                        .unwrap(),
+                    slot_info.evm_word(),
+                    slot_info.table_info().to_vec(),
                 ),
             ),
             StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => match &**parent {
@@ -232,7 +239,8 @@ impl TrieNode {
                     values_extraction::CircuitInput::new_single_variable_leaf(
                         node.clone(),
                         *slot as u8,
-                        metadata,
+                        slot_info.evm_word(),
+                        slot_info.table_info().to_vec(),
                     ),
                 ),
                 // Mapping Struct
@@ -242,8 +250,11 @@ impl TrieNode {
                         node.clone(),
                         *slot as u8,
                         mapping_key.clone(),
-                        slot_info.outer_key_id(),
-                        metadata,
+                        slot_info
+                            .outer_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                            .unwrap(),
+                        slot_info.evm_word(),
+                        slot_info.table_info().to_vec(),
                     ),
                 ),
                 // Mapping of mappings Struct
@@ -256,9 +267,14 @@ impl TrieNode {
                                 *slot as u8,
                                 outer_mapping_key.clone(),
                                 inner_mapping_key.clone(),
-                                slot_info.outer_key_id(),
-                                slot_info.inner_key_id(),
-                                metadata,
+                                slot_info
+                                    .outer_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                                    .unwrap(),
+                                slot_info
+                                    .inner_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                                    .unwrap(),
+                                slot_info.evm_word(),
+                                slot_info.table_info().to_vec(),
                             ),
                         ),
                         _ => unreachable!(),
@@ -280,10 +296,16 @@ impl TrieNode {
         let list: Vec<Vec<u8>> = rlp::decode_list(&node);
         let value: Vec<u8> = rlp::decode(&list[1]).unwrap();
         debug!(
-            "[+] [+] MPT SLOT {:?} -> value {:?} value.digest() = {:?}",
+            "[+] [+] MPT SLOT {} -> identifiers {:?} value {:?} value.digest() = {:?}",
             slot_info.slot().slot(),
+            slot_info
+                .metadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>()
+                .extracted_table_info()
+                .iter()
+                .map(|info| info.identifier().to_canonical_u64())
+                .collect_vec(),
             U256::from_be_slice(&value),
-            pi.values_digest()
+            pi.values_digest(),
         );
         proof
     }
@@ -431,10 +453,10 @@ impl TestStorageTrie {
         bn: BlockNumberOrTag,
         slot_info: StorageSlotInfo,
     ) {
-        let slot = slot_info.slot().slot() as usize;
-        log::debug!("Querying the simple slot `{slot:?}` of the contract `{contract_address}` from the test context's RPC");
+        let storage_slot = slot_info.slot();
+        log::debug!("Querying the slot `{storage_slot:?}` of the contract `{contract_address}` from the test context's RPC");
 
-        let query = ProofQuery::new_simple_slot(*contract_address, slot);
+        let query = ProofQuery::new(*contract_address, storage_slot.clone());
         let response = ctx.query_mpt_proof(&query, bn).await;
 
         // Get the nodes to prove. Reverse to the sequence from leaf to root.
@@ -445,10 +467,8 @@ impl TestStorageTrie {
             .map(|node| node.to_vec())
             .collect();
 
-        let slot = StorageSlot::Simple(slot);
-
         log::debug!(
-            "Simple slot {slot:?} queried, appending `{}` proof nodes to the trie",
+            "Storage slot {storage_slot:?} queried, appending `{}` proof nodes to the trie",
             nodes.len()
         );
 
@@ -499,11 +519,21 @@ impl TestStorageTrie {
     fn check_new_slot(&self, new_slot: &StorageSlot, new_nodes: &[RawNode]) {
         if let Some((_, slot)) = self.slots.iter().next() {
             // The new slot must be the same type.
-            match (slot.slot(), new_slot) {
-                (&StorageSlot::Simple(_), &StorageSlot::Simple(_)) => (),
-                (&StorageSlot::Mapping(_, slot), &StorageSlot::Mapping(_, new_slot)) => {
-                    // Must have the same slot number for the mapping type.
-                    assert_eq!(slot, new_slot);
+            let current_slot = slot.slot();
+            match (current_slot.is_simple_slot(), new_slot.is_simple_slot()) {
+                // We could combine the different simple slots.
+                (true, true) => (),
+                (false, false) => {
+                    assert_eq!(
+                        current_slot.slot(),
+                        new_slot.slot(),
+                        "Mapping slot number must be same in a storage trie",
+                    );
+                    assert_eq!(
+                        current_slot.mapping_keys().len(),
+                        new_slot.mapping_keys().len(),
+                        "Mapping keys must have the same number in a storage trie",
+                    );
                 }
                 _ => panic!("Add the different type of storage slots: {slot:?}, {new_slot:?}"),
             }
