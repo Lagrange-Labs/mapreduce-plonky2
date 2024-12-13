@@ -29,6 +29,7 @@ use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
+use std::iter::once;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafSingleWires<
@@ -83,8 +84,8 @@ where
         // Left pad the leaf value.
         let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
 
-        // Compute the metadata digest.
-        let metadata_digest = metadata.digest(b, slot.base.slot);
+        // Compute the metadata digest and number of actual columns.
+        let (metadata_digest, num_actual_columns) = metadata.digest_info(b, slot.base.slot);
 
         // Compute the values digest.
         let values_digest = ColumnGadget::<MAX_FIELD_PER_EVM>::new(
@@ -94,12 +95,12 @@ where
         )
         .build(b);
 
-        // row_id = H2int(H("") || metadata_digest)
+        // row_id = H2int(H("") || num_actual_columns)
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
         let inputs = empty_hash
             .to_targets()
             .into_iter()
-            .chain(metadata_digest.to_targets())
+            .chain(once(num_actual_columns))
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         let row_id = hash_to_int_target(b, hash);
@@ -253,7 +254,6 @@ mod tests {
         let table_info = metadata.actual_table_info().to_vec();
         let extracted_column_identifiers = metadata.extracted_column_identifiers();
         let values_digest = compute_leaf_single_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-            &metadata_digest,
             table_info,
             &extracted_column_identifiers,
             value.clone().try_into().unwrap(),

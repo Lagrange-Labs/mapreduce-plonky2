@@ -895,7 +895,6 @@ mod tests {
                 >(table_info.clone());
 
                 let values_digest = compute_leaf_single_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                    &metadata_digest,
                     table_info,
                     &extracted_column_identifiers,
                     value,
@@ -916,7 +915,6 @@ mod tests {
                 );
 
                 let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                    &metadata_digest,
                     table_info,
                     &extracted_column_identifiers,
                     value,
@@ -944,7 +942,6 @@ mod tests {
                     >(table_info.clone());
 
                     let values_digest = compute_leaf_single_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                        &metadata_digest,
                         table_info,
                         &extracted_column_identifiers,
                         value,
@@ -965,7 +962,6 @@ mod tests {
                     );
 
                     let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                        &metadata_digest,
                         table_info,
                         &extracted_column_identifiers,
                         value,
@@ -1001,7 +997,6 @@ mod tests {
                             let values_digest = compute_leaf_mapping_of_mappings_values_digest::<
                                 TEST_MAX_FIELD_PER_EVM,
                             >(
-                                &metadata_digest,
                                 table_info,
                                 &extracted_column_identifiers,
                                 value,

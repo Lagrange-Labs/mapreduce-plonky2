@@ -39,18 +39,12 @@ impl CircuitInput {
     /// Create a circuit input for proving a leaf node whose value is considered as a multiplier
     /// depending on the boolean value.
     /// i.e. it means it's one of the repeated value amongst all the rows
-    pub fn leaf(
-        identifier: u64,
-        value: U256,
-        is_multiplier: bool,
-        mpt_metadata: HashOut<F>,
-    ) -> Self {
+    pub fn leaf(identifier: u64, value: U256, is_multiplier: bool) -> Self {
         CircuitInput::Leaf(
             Cell {
                 identifier: F::from_canonical_u64(identifier),
                 value,
                 is_multiplier,
-                mpt_metadata,
             }
             .into(),
         )
@@ -61,14 +55,12 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
-        mpt_metadata: HashOut<F>,
         child_proofs: [Vec<u8>; 2],
     ) -> Self {
         CircuitInput::FullNode(new_child_input(
             F::from_canonical_u64(identifier),
             value,
             is_multiplier,
-            mpt_metadata,
             child_proofs.to_vec(),
         ))
     }
@@ -77,14 +69,12 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
-        mpt_metadata: HashOut<F>,
         child_proof: Vec<u8>,
     ) -> Self {
         CircuitInput::PartialNode(new_child_input(
             F::from_canonical_u64(identifier),
             value,
             is_multiplier,
-            mpt_metadata,
             vec![child_proof],
         ))
     }
@@ -95,7 +85,6 @@ fn new_child_input(
     identifier: F,
     value: U256,
     is_multiplier: bool,
-    mpt_metadata: HashOut<F>,
     serialized_child_proofs: Vec<Vec<u8>>,
 ) -> ChildInput {
     ChildInput {
@@ -103,7 +92,6 @@ fn new_child_input(
             identifier,
             value,
             is_multiplier,
-            mpt_metadata,
         },
         serialized_child_proofs,
     }
@@ -260,13 +248,12 @@ mod tests {
 
     fn generate_leaf_proof(params: &PublicParameters) -> Vec<u8> {
         // Build the circuit input.
-        let cell = Cell::sample(false);
+        let is_multiplier = false;
+        let cell = Cell::sample(is_multiplier);
         let id = cell.identifier;
         let value = cell.value;
-        let mpt_metadata = cell.mpt_metadata;
         let values_digests = cell.split_values_digest();
-        let metadata_digests = cell.split_metadata_digest();
-        let input = CircuitInput::leaf(id.to_canonical_u64(), value, false, mpt_metadata);
+        let input = CircuitInput::leaf(id.to_canonical_u64(), value, false);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -303,16 +290,11 @@ mod tests {
             pi.multiplier_values_digest_point(),
             values_digests.multiplier.to_weierstrass(),
         );
-        // Check individual metadata digest
-        assert_eq!(
-            pi.individual_metadata_digest_point(),
-            metadata_digests.individual.to_weierstrass(),
-        );
-        // Check multiplier metadata digest
-        assert_eq!(
-            pi.multiplier_metadata_digest_point(),
-            metadata_digests.multiplier.to_weierstrass(),
-        );
+        // Check individual counter
+        let multiplier_cnt = F::from_bool(is_multiplier);
+        assert_eq!(pi.individual_counter(), F::ONE - multiplier_cnt);
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), multiplier_cnt);
 
         proof
     }
@@ -341,16 +323,10 @@ mod tests {
             pi.multiplier_values_digest_point(),
             WeierstrassPoint::NEUTRAL
         );
-        // Check individual metadata digest
-        assert_eq!(
-            pi.individual_metadata_digest_point(),
-            WeierstrassPoint::NEUTRAL
-        );
-        // Check multiplier metadata digest
-        assert_eq!(
-            pi.multiplier_metadata_digest_point(),
-            WeierstrassPoint::NEUTRAL
-        );
+        // Check individual counter
+        assert_eq!(pi.individual_counter(), F::ZERO);
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), F::ZERO);
 
         proof
     }
@@ -367,19 +343,12 @@ mod tests {
             .collect();
 
         // Build the circuit input.
-        let cell = Cell::sample(false);
+        let is_multiplier = false;
+        let cell = Cell::sample(is_multiplier);
         let id = cell.identifier;
         let value = cell.value;
-        let mpt_metadata = cell.mpt_metadata;
         let values_digests = cell.split_values_digest();
-        let metadata_digests = cell.split_metadata_digest();
-        let input = CircuitInput::full(
-            id.to_canonical_u64(),
-            value,
-            false,
-            mpt_metadata,
-            child_proofs,
-        );
+        let input = CircuitInput::full(id.to_canonical_u64(), value, false, child_proofs);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -393,9 +362,6 @@ mod tests {
 
         let values_digests = child_pis.iter().fold(values_digests, |acc, pi| {
             acc.accumulate(&pi.split_values_digest_point())
-        });
-        let metadata_digests = child_pis.iter().fold(metadata_digests, |acc, pi| {
-            acc.accumulate(&pi.split_metadata_digest_point())
         });
 
         // Check the node hash
@@ -423,15 +389,19 @@ mod tests {
             pi.multiplier_values_digest_point(),
             values_digests.multiplier.to_weierstrass(),
         );
-        // Check individual metadata digest
+        // Check individual counter
+        let multiplier_cnt = F::from_bool(is_multiplier);
         assert_eq!(
-            pi.individual_metadata_digest_point(),
-            metadata_digests.individual.to_weierstrass(),
+            pi.individual_counter(),
+            child_pis.iter().fold(F::ONE - multiplier_cnt, |acc, pi| acc
+                + pi.individual_counter()),
         );
-        // Check multiplier metadata digest
+        // Check multiplier counter
         assert_eq!(
-            pi.multiplier_metadata_digest_point(),
-            metadata_digests.multiplier.to_weierstrass(),
+            pi.multiplier_counter(),
+            child_pis
+                .iter()
+                .fold(multiplier_cnt, |acc, pi| acc + pi.multiplier_counter()),
         );
 
         proof
@@ -446,19 +416,12 @@ mod tests {
         let child_pi = PublicInputs::from_slice(&child_pi);
 
         // Build the circuit input.
-        let cell = Cell::sample(false);
+        let is_multiplier = false;
+        let cell = Cell::sample(is_multiplier);
         let id = cell.identifier;
         let value = cell.value;
-        let mpt_metadata = cell.mpt_metadata;
         let values_digests = cell.split_values_digest();
-        let metadata_digests = cell.split_metadata_digest();
-        let input = CircuitInput::partial(
-            id.to_canonical_u64(),
-            value,
-            false,
-            mpt_metadata,
-            child_proof,
-        );
+        let input = CircuitInput::partial(id.to_canonical_u64(), value, false, child_proof);
 
         // Generate proof.
         let proof = params.generate_proof(input).unwrap();
@@ -471,7 +434,6 @@ mod tests {
         let pi = PublicInputs::from_slice(&pi);
 
         let values_digests = values_digests.accumulate(&child_pi.split_values_digest_point());
-        let metadata_digests = metadata_digests.accumulate(&child_pi.split_metadata_digest_point());
 
         // Check the node hash
         {
@@ -499,15 +461,16 @@ mod tests {
             pi.multiplier_values_digest_point(),
             values_digests.multiplier.to_weierstrass(),
         );
-        // Check individual metadata digest
+        // Check individual counter
+        let multiplier_cnt = F::from_bool(is_multiplier);
         assert_eq!(
-            pi.individual_metadata_digest_point(),
-            metadata_digests.individual.to_weierstrass(),
+            pi.individual_counter(),
+            F::ONE - multiplier_cnt + child_pi.individual_counter(),
         );
-        // Check multiplier metadata digest
+        // Check multiplier counter
         assert_eq!(
-            pi.multiplier_metadata_digest_point(),
-            metadata_digests.multiplier.to_weierstrass(),
+            pi.multiplier_counter(),
+            multiplier_cnt + child_pi.multiplier_counter(),
         );
 
         proof

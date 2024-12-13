@@ -91,6 +91,7 @@ where
         b: &mut CBuilder,
     ) -> LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM> {
         let zero = b.zero();
+        let two = b.two();
 
         let [outer_key_id, inner_key_id] = b.add_virtual_target_arr();
         let metadata = MetadataGadget::build(b);
@@ -108,8 +109,10 @@ where
         // Left pad the leaf value.
         let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
 
-        // Compute the metadata digest.
-        let metadata_digest = metadata.digest(b, slot.mapping_slot);
+        // Compute the metadata digest and number of actual columns.
+        let (metadata_digest, num_actual_columns) = metadata.digest_info(b, slot.mapping_slot);
+        // Add inner key and outer key columns to the number of actual columns.
+        let num_actual_columns = b.add(num_actual_columns, two);
 
         // Compute the outer and inner key metadata digests.
         let [outer_key_digest, inner_key_digest] = [
@@ -173,11 +176,11 @@ where
             .chain(packed_inner_key)
             .collect();
         let row_unique_data = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
-        // row_id = H2int(row_unique_data || metadata_digest)
+        // row_id = H2int(row_unique_data || num_actual_columns)
         let inputs = row_unique_data
             .to_targets()
             .into_iter()
-            .chain(metadata_digest.to_targets())
+            .chain(once(num_actual_columns))
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         let row_id = hash_to_int_target(b, hash);
@@ -356,7 +359,6 @@ mod tests {
         >(table_info.clone(), slot, outer_key_id, inner_key_id);
         // Compute the values digest.
         let values_digest = compute_leaf_mapping_of_mappings_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-            &metadata_digest,
             table_info,
             &extracted_column_identifiers,
             value.clone().try_into().unwrap(),
