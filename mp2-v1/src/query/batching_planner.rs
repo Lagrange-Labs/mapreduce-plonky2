@@ -10,6 +10,7 @@ use ryhope::{
     storage::{updatetree::UpdateTree, WideLineage},
     Epoch,
 };
+use serde::{Deserialize, Serialize};
 use verifiable_db::query::{
     api::{NodePath, RowInput, TreePathInputs},
     computational_hash_ids::ColumnIDs,
@@ -195,8 +196,10 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
 ///
 /// (2,0)  (2,1)  (2,2)         (2,3)  (2,4)
 /// ```      
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Default)]
-pub struct UTKey<const ARITY: usize>((usize, usize));
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize,
+)]
+pub struct UTKey<const ARITY: usize>(pub (usize, usize));
 
 impl<const ARITY: usize> UTKey<ARITY> {
     /// Compute the key of the child node of `self` that has `num_left_siblings`
@@ -318,15 +321,13 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
             let num_childrens = parent_node.children_keys.len();
             let new_child_key = parent_key.children_key(num_childrens);
             let child_node = ProvingTreeNode {
-                parent_key: Some(parent_key.clone()),
+                parent_key: Some(*parent_key),
                 children_keys: vec![],
             };
             // insert new child in the set of children of the parent
-            parent_node.children_keys.push(new_child_key.clone());
+            parent_node.children_keys.push(new_child_key);
             assert!(
-                self.nodes
-                    .insert(new_child_key.clone(), child_node)
-                    .is_none(),
+                self.nodes.insert(new_child_key, child_node).is_none(),
                 "Node with key {:?} already found in the tree",
                 new_child_key
             );
@@ -339,7 +340,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
             };
             let root_key = UTKey((0, 0));
             assert!(
-                self.nodes.insert(root_key.clone(), root).is_none(),
+                self.nodes.insert(root_key, root).is_none(),
                 "Error: root node inserted multiple times"
             );
             root_key
@@ -412,7 +413,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
         while node_key.is_some() {
             // place node key in the path
             let key = node_key.unwrap();
-            path.push(key.clone());
+            path.push(*key);
             // fetch key of the parent node, if any
             node_key = self
                 .nodes
@@ -449,7 +450,7 @@ impl<const NUM_CHUNKS: usize> UTForChunksBuilder<NUM_CHUNKS> {
                 let path = tree.compute_path_for_leaf(node_index);
                 (
                     (
-                        path.last().unwrap().clone(), // chunk node is always a leaf of the tree, so it is the last node
+                        *path.last().unwrap(), // chunk node is always a leaf of the tree, so it is the last node
                         // in the path
                         chunk,
                     ),

@@ -237,7 +237,7 @@ pub(crate) async fn prove_query(
             let proof_key = ProofKey::QueryAggregate((
                 planner.query.query.clone(),
                 planner.query.placeholders.placeholder_values(),
-                k.clone(),
+                *k,
             ));
             planner.ctx.storage.store_proof(proof_key.clone(), proof)?;
             proof_id = Some(proof_key);
