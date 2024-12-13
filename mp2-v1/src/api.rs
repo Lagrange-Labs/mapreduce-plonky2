@@ -1,11 +1,12 @@
 //! Main APIs and related structures
 
-use std::iter::once;
+use std::{collections::BTreeSet, iter::once};
 
 use crate::{
     block_extraction,
     contract_extraction::{self, compute_metadata_digest as contract_metadata_digest},
     final_extraction,
+    indexing::ColumnID,
     length_extraction::{
         self, compute_metadata_digest as length_metadata_digest, LengthCircuitInput,
     },
@@ -33,7 +34,6 @@ use plonky2::{
 };
 use plonky2_ecgfp5::curve::curve::Point;
 use serde::{Deserialize, Serialize};
-use verifiable_db::query::computational_hash_ids::ColumnIDs;
 
 /// Struct containing the expected input MPT Extension/Branch node
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -253,19 +253,23 @@ pub fn metadata_hash(
 
 // compute metadata digest for a table including no provable extraction data:
 // it corresponds to the digest of the column identifiers
-pub(crate) fn no_provable_metadata_digest(column_ids: &ColumnIDs) -> Digest {
+pub(crate) fn no_provable_metadata_digest<I: IntoIterator<Item = ColumnID>>(
+    column_ids: I,
+) -> Digest {
     map_to_curve_point(
-        &vec![column_ids.primary_column(), column_ids.secondary_column()]
+        &column_ids
             .into_iter()
-            .chain(column_ids.non_indexed_columns())
-            .map(|id| F::from_canonical_u64(id))
+            .collect::<BTreeSet<_>>() // collect into a BTreeSet to ensure they are hashed
+            // in a deterministic order
+            .into_iter()
+            .map(F::from_canonical_u64)
             .collect_vec(),
     )
 }
 
 /// Compute the metadata hash for a table including no provable extraction data.
 /// The input is the set of the column identifiers of the table
-pub fn no_provable_metadata_hash(column_ids: &ColumnIDs) -> MetadataHash {
+pub fn no_provable_metadata_hash<I: IntoIterator<Item = ColumnID>>(column_ids: I) -> MetadataHash {
     let metadata_digest = no_provable_metadata_digest(column_ids);
     // Add the prefix to the metadata digest to ensure the metadata digest
     // will keep track of whether we use this dummy circuit or not.

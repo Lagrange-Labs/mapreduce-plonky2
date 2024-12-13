@@ -105,7 +105,9 @@ pub(crate) struct QueryPlanner<'a> {
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
     match &t.source {
-        TableSource::Mapping(_) | TableSource::Merge(_) => query_mapping(ctx, &table, &t).await?,
+        TableSource::Mapping(_) | TableSource::Merge(_) | TableSource::OffChain(_) => {
+            query_mapping(ctx, &table, &t).await?
+        }
         _ => unimplemented!("yet"),
     }
     Ok(())

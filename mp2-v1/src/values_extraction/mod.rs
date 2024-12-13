@@ -14,7 +14,6 @@ use plonky2::{
 };
 use plonky2_ecgfp5::curve::curve::Point as Digest;
 use std::iter::{self, once};
-use verifiable_db::query::universal_circuit::universal_circuit_inputs::RowCells;
 
 pub mod api;
 mod branch;
@@ -26,12 +25,23 @@ pub mod public_inputs;
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
 pub use public_inputs::PublicInputs;
 
+use crate::indexing::row::CellCollection;
+
 /// Constant prefixes for key and value IDs. Restrict both prefixes to 3-bytes,
 /// so `prefix + slot (u8)` could be converted to an U32.
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"KEY";
 pub(crate) const VALUE_ID_PREFIX: &[u8] = b"VAL";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
+
+/// Compute the identifier for a column of a table containing off-chain data
+pub fn identifier_offchain_column(table_name: &str, column_name: &str) -> u64 {
+    let inputs: Vec<F> = vec![table_name, column_name]
+        .into_iter()
+        .flat_map(|name| name.as_bytes().to_fields())
+        .collect_vec();
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+}
 
 pub fn identifier_block_column() -> u64 {
     let inputs: Vec<F> = BLOCK_ID_DST.to_fields();
@@ -162,26 +172,28 @@ pub fn compute_leaf_mapping_metadata_digest(key_id: u64, value_id: u64, slot: u8
 }
 
 /// Compute the row value digest of one table, whose rows are provided as input
-pub fn compute_table_row_digest(table_rows: &[RowCells]) -> Digest {
+pub fn compute_table_row_digest<PrimaryIndex: PartialEq + Eq + Default + Clone>(
+    table_rows: &[CellCollection<PrimaryIndex>],
+) -> Digest {
     let column_ids = table_rows[0].column_ids();
     table_rows
-        .into_iter()
+        .iter()
         .enumerate()
         .fold(Digest::NEUTRAL, |acc, (i, row)| {
+            let current_column_ids = row.column_ids();
             // check that column ids are the same for each row
             assert_eq!(
-                row.column_ids(),
-                column_ids,
+                current_column_ids, column_ids,
                 "row {i} has different column ids than other rows"
             );
-            let cells = row.to_cells();
             let current_row_digest = map_to_curve_point(
-                &cells
+                &current_column_ids
                     .into_iter()
-                    .skip(1) // we skip primary index column
-                    .fold(Digest::NEUTRAL, |acc, row| {
+                    .fold(Digest::NEUTRAL, |acc, id| {
                         acc + map_to_curve_point(
-                            &once(row.id).chain(row.value.to_fields()).collect_vec(),
+                            &once(F::from_canonical_u64(id))
+                                .chain(row.find_by_column(id).unwrap().value.to_fields())
+                                .collect_vec(),
                         )
                     })
                     .to_fields(),

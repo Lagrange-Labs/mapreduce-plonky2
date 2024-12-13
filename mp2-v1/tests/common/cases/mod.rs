@@ -17,8 +17,8 @@ pub mod table_source;
 /// Test case definition
 pub(crate) struct TableIndexing {
     pub(crate) table: Table,
-    pub(crate) contract: Contract,
-    pub(crate) contract_extraction: ContractExtractionArgs,
+    pub(crate) contract: Option<Contract>, // might be meaningless for off-chain data
+    pub(crate) contract_extraction: Option<ContractExtractionArgs>, // might be meaningless for off-chain data
     pub(crate) source: TableSource,
     // the column over which we can do queries like ` y > 64`. It is not the address column that we
     // assume it the secondary index always.

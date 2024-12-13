@@ -69,6 +69,7 @@ pub(crate) mod common;
 const PROOF_STORE_FILE: &str = "test_proofs.store";
 const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
 const MERGE_TABLE_INFO_FILE: &str = "merge_column_info.json";
+const OFFCHAIN_TABLE_INFO_FILE: &str = "off_chain_column_info.json";
 
 #[test(tokio::test)]
 #[ignore]
@@ -112,10 +113,20 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Deletion,
     ];
     merged.run(&mut ctx, genesis, changes).await?;
-
+    let (mut off_chain, genesis) = TableIndexing::off_chain_test_case(&mut ctx).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
+        ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
+    ];
+    off_chain.run(&mut ctx, genesis, changes).await?;
     // save columns information and table information in JSON so querying test can pick up
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
     write_table_info(MERGE_TABLE_INFO_FILE, merged.table_info())?;
+    write_table_info(OFFCHAIN_TABLE_INFO_FILE, off_chain.table_info())?;
+
     Ok(())
 }
 
@@ -147,6 +158,15 @@ async fn integrated_querying_merged_table() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test for merged table");
     let table_info = read_table_info(MERGE_TABLE_INFO_FILE)?;
+    integrated_querying(table_info).await
+}
+
+#[test(tokio::test)]
+#[ignore]
+async fn integrated_querying_off_chain_table() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test for off-chain table");
+    let table_info = read_table_info(OFFCHAIN_TABLE_INFO_FILE)?;
     integrated_querying(table_info).await
 }
 
