@@ -58,7 +58,7 @@ pub type PackedMappingKeyTarget = Array<U32Target, PACKED_MAPPING_KEY_LEN>;
 
 /// Regular hash output function - it can be generated from field elements using
 /// poseidon with the output serialized or via regular hash functions.
-#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, Deref, PartialEq, Eq)]
+#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, Deref, PartialEq, Eq, Copy)]
 pub struct HashOutput(pub [u8; 32]);
 impl AsRef<[u8]> for &HashOutput {
     fn as_ref(&self) -> &[u8] {

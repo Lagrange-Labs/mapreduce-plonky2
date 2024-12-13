@@ -114,9 +114,6 @@ pub(crate) struct BaseCircuitProofWires {
 
 pub(crate) const CONTRACT_SET_NUM_IO: usize = contract_extraction::PublicInputs::<F>::TOTAL_LEN;
 pub(crate) const VALUE_SET_NUM_IO: usize = values_extraction::PublicInputs::<F>::TOTAL_LEN;
-// WARN: clippy is wrong on this one, it is used somewhere else.
-pub(crate) const BLOCK_SET_NUM_IO: usize =
-    block_extraction::public_inputs::PublicInputs::<F>::TOTAL_LEN;
 
 #[derive(Clone, Debug)]
 pub struct BaseCircuitInput {
@@ -431,7 +428,7 @@ pub(crate) mod test {
         pub(crate) fn random() -> Self {
             let value_h = HashOut::<F>::rand().to_bytes().pack(Endianness::Little);
             let key = random_vector(64);
-            let ptr = usize::max_value();
+            let ptr = usize::MAX;
             let value_dv = Point::rand();
             let value_dm = Point::rand();
             let n = 10;

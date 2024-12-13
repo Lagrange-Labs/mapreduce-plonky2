@@ -654,10 +654,9 @@ impl TableIndexing {
                     debug!(
                         " CONTRACT storage root pis.storage_root() {:?}",
                         hex::encode(
-                            &pis.root_hash_field()
+                            pis.root_hash_field()
                                 .into_iter()
-                                .map(|u| u.to_be_bytes())
-                                .flatten()
+                                .flat_map(|u| u.to_be_bytes())
                                 .collect::<Vec<_>>()
                         )
                     );

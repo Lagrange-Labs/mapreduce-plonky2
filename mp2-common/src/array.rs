@@ -16,7 +16,7 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
-use crate::utils::{less_than, less_than_or_equal_to};
+use crate::utils::less_than;
 
 /// Utility trait to convert any value into its field representation equivalence
 pub trait ToField<F: RichField> {

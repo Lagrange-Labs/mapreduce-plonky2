@@ -238,7 +238,6 @@ mod test {
 
     use super::*;
     use mp2_common::{
-        group_hashing::{cond_field_hashed_scalar_mul, map_to_curve_point},
         poseidon::{empty_poseidon_hash, H},
         utils::ToFields,
         F,

@@ -22,7 +22,7 @@ use std::{
 type WrapCircuit = WrappedCircuit<DefaultParameters, Groth16WrapperParameters, D>;
 
 /// Compile the circuit data and generate the asset files of `r1cs.bin`,
-/// `pk.bin`, `vk.bin` and `verifier.sol`.
+/// `pk.bin`, `vk.bin` and `Verifier.sol`.
 /// This function returns the full file path of the Solidity verifier contract.
 pub fn compile_and_generate_assets(
     circuit_data: CircuitData<F, C, D>,

@@ -45,6 +45,8 @@ pub struct PublicInputs<'a, T> {
 
 const NUM_PUBLIC_INPUTS: usize = ResultsBindingPublicInputs::Overflow as usize + 1;
 
+// CHORE: Remove this when relevant PR is merged
+#[allow(dead_code)]
 impl<'a, T: Clone> PublicInputs<'a, T> {
     const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
         Self::to_range(ResultsBindingPublicInputs::ResultsTreeHash),
@@ -169,6 +171,8 @@ impl PublicInputCommon for PublicInputs<'_, Target> {
     }
 }
 
+// CHORE: Remove this when relevant PR is merged
+#[allow(dead_code)]
 impl PublicInputs<'_, Target> {
     pub fn results_tree_hash_target(&self) -> HashOutTarget {
         HashOutTarget::try_from(self.to_results_tree_hash_raw()).unwrap()
@@ -195,6 +199,8 @@ impl PublicInputs<'_, Target> {
     }
 }
 
+// CHORE: Remove this when relevant PR is merged
+#[allow(dead_code)]
 impl PublicInputs<'_, F> {
     pub fn results_tree_hash(&self) -> HashOut<F> {
         HashOut::try_from(self.to_results_tree_hash_raw()).unwrap()
