@@ -5,7 +5,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
-        config::{AlgebraicHasher, GenericConfig, Hasher},
+        config::{AlgebraicHasher, GenericConfig},
     },
 };
 
@@ -74,7 +74,6 @@ pub(crate) fn build_data_for_universal_verifier<
 ) -> CommonCircuitData<F, D>
 where
     C::Hasher: AlgebraicHasher<F>,
-    [(); C::Hasher::HASH_SIZE]:,
 {
     let num_public_inputs =
         num_public_inputs + CircuitSetTarget::num_targets::<F, D>(config.clone());

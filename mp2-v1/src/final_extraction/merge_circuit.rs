@@ -41,7 +41,7 @@ pub struct MergeTableWires {
 }
 
 impl MergeTable {
-    pub fn build<'a>(
+    pub fn build(
         b: &mut CBuilder,
         block_pi: &[Target],
         contract_pi: &[Target],
@@ -106,12 +106,6 @@ pub(crate) struct MergeTableRecursiveWires {
 pub(crate) struct MergeCircuitInput {
     pub(crate) base: BaseCircuitProofInputs,
     pub(crate) merge: MergeTable,
-}
-
-impl MergeCircuitInput {
-    pub(crate) fn new(base: BaseCircuitProofInputs, merge: MergeTable) -> Self {
-        Self { base, merge }
-    }
 }
 
 impl CircuitLogicWires<F, D, 0> for MergeTableRecursiveWires {
@@ -198,10 +192,6 @@ mod test {
             wires.pis_a.assign(pw, &self.pis_a);
             pw.set_target_arr(&wires.pis_b, &self.pis_b);
         }
-    }
-
-    fn random_field_vector(n: usize) -> Vec<F> {
-        (0..n).map(|_| F::rand()).collect()
     }
 
     #[test]

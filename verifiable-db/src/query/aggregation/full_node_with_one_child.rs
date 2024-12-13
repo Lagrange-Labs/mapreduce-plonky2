@@ -214,7 +214,7 @@ mod tests {
                 tests::compute_output_item_value,
                 utils::tests::{unify_child_proof, unify_subtree_proof},
             },
-            PI_LEN,
+            pi_len,
         },
         test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
@@ -242,7 +242,7 @@ mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let proofs = array::from_fn(|_| {
-                b.add_virtual_target_arr::<{ PI_LEN::<MAX_NUM_RESULTS> }>()
+                b.add_virtual_target_arr::<{ pi_len::<MAX_NUM_RESULTS>() }>()
                     .to_vec()
             });
             let [subtree_pi, child_pi] =

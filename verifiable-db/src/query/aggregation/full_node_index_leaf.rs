@@ -134,7 +134,7 @@ impl<const MAX_NUM_RESULTS: usize> CircuitLogicWires<F, D, NUM_VERIFIED_PROOFS>
 mod tests {
     use super::*;
     use crate::{
-        query::{aggregation::utils::tests::unify_subtree_proof, PI_LEN},
+        query::{aggregation::utils::tests::unify_subtree_proof, pi_len},
         test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
     };
     use mp2_common::{utils::ToFields, C};
@@ -155,7 +155,7 @@ mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let subtree_proof = b
-                .add_virtual_target_arr::<{ PI_LEN::<MAX_NUM_RESULTS> }>()
+                .add_virtual_target_arr::<{ pi_len::<MAX_NUM_RESULTS>() }>()
                 .to_vec();
             let subtree_pi = PublicInputs::<Target, MAX_NUM_RESULTS>::from_slice(&subtree_proof);
 

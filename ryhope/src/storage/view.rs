@@ -24,10 +24,9 @@ pub struct StorageView<
 );
 
 impl<
-        's,
         T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + Send,
         S: EpochStorage<T> + Sync,
-    > TransactionalStorage for StorageView<'s, T, S>
+    > TransactionalStorage for StorageView<'_, T, S>
 where
     T: Send,
 {
@@ -41,10 +40,9 @@ where
 }
 
 impl<
-        's,
         T: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a> + Send,
         S: EpochStorage<T> + Sync,
-    > EpochStorage<T> for StorageView<'s, T, S>
+    > EpochStorage<T> for StorageView<'_, T, S>
 where
     T: Send,
 {
@@ -86,8 +84,8 @@ pub struct KvStorageAt<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>
     _p: PhantomData<T>,
 }
 
-impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
-    RoEpochKvStorage<T::Key, T::Node> for KvStorageAt<'a, T, S>
+impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStorage<T::Key, T::Node>
+    for KvStorageAt<'_, T, S>
 {
     fn initial_epoch(&self) -> Epoch {
         self.wrapped.initial_epoch()
@@ -136,8 +134,8 @@ impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
     }
 }
 
-impl<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync>
-    EpochKvStorage<T::Key, T::Node> for KvStorageAt<'a, T, S>
+impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> EpochKvStorage<T::Key, T::Node>
+    for KvStorageAt<'_, T, S>
 {
     async fn remove(&mut self, _: T::Key) -> Result<()> {
         unimplemented!("storage views are read only")

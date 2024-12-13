@@ -53,9 +53,9 @@ pub trait TreeInfo<K, V> {
         proof: Vec<u8>,
     ) -> Result<()>;
 
-    async fn load_or_prove_embedded<'a>(
+    async fn load_or_prove_embedded(
         &self,
-        planner: &mut QueryPlanner<'a>,
+        planner: &mut QueryPlanner<'_>,
         primary: BlockPrimaryIndex,
         k: &K,
         v: &V,
@@ -116,9 +116,9 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         ctx.storage.store_proof(proof_key, proof)
     }
 
-    async fn load_or_prove_embedded<'a>(
+    async fn load_or_prove_embedded(
         &self,
-        planner: &mut QueryPlanner<'a>,
+        planner: &mut QueryPlanner<'_>,
         primary: BlockPrimaryIndex,
         k: &RowTreeKey,
         _v: &RowPayload<BlockPrimaryIndex>,
@@ -166,7 +166,7 @@ impl<'a> RowInfo<'a> {
     }
 }
 
-impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
+impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'_> {
     fn is_row_tree(&self) -> bool {
         true
     }
@@ -210,9 +210,9 @@ impl<'b> TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'b> {
         ctx.storage.store_proof(proof_key, proof)
     }
 
-    async fn load_or_prove_embedded<'a>(
+    async fn load_or_prove_embedded(
         &self,
-        planner: &mut QueryPlanner<'a>,
+        planner: &mut QueryPlanner<'_>,
         primary: BlockPrimaryIndex,
         k: &RowTreeKey,
         _v: &RowPayload<BlockPrimaryIndex>,
@@ -284,9 +284,9 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         ctx.storage.store_proof(proof_key, proof)
     }
 
-    async fn load_or_prove_embedded<'a>(
+    async fn load_or_prove_embedded(
         &self,
-        planner: &mut QueryPlanner<'a>,
+        planner: &mut QueryPlanner<'_>,
         primary: BlockPrimaryIndex,
         k: &BlockPrimaryIndex,
         v: &IndexNode<BlockPrimaryIndex>,
@@ -318,7 +318,7 @@ impl<'a> IndexInfo<'a> {
     }
 }
 
-impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo<'b> {
+impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo<'_> {
     fn is_row_tree(&self) -> bool {
         false
     }
@@ -355,9 +355,9 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
         ctx.storage.store_proof(proof_key, proof)
     }
 
-    async fn load_or_prove_embedded<'a>(
+    async fn load_or_prove_embedded(
         &self,
-        planner: &mut QueryPlanner<'a>,
+        planner: &mut QueryPlanner<'_>,
         primary: BlockPrimaryIndex,
         k: &BlockPrimaryIndex,
         v: &IndexNode<BlockPrimaryIndex>,
@@ -375,11 +375,10 @@ impl<'b> TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo
 }
 
 async fn load_or_prove_embedded_index<
-    'a,
     T: TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>,
 >(
     info: &T,
-    planner: &mut QueryPlanner<'a>,
+    planner: &mut QueryPlanner<'_>,
     primary: BlockPrimaryIndex,
     k: &BlockPrimaryIndex,
     v: &IndexNode<BlockPrimaryIndex>,

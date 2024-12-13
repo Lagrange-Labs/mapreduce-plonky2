@@ -110,7 +110,7 @@ impl TableColumns {
             .iter()
             .chain(once(&self.secondary))
             .find(|c| c.identifier() == identifier)
-            .expect(&format!("can't find cell from identifier {}", identifier))
+            .unwrap_or_else(|| panic!("can't find cell from identifier {}", identifier))
             .clone()
     }
     pub fn ordered_cells(
@@ -499,7 +499,7 @@ impl Table {
             .index
             .in_transaction(|t| {
                 async move {
-                    t.store(updates.added_index.0 as usize, updates.added_index.1)
+                    t.store(updates.added_index.0, updates.added_index.1)
                         .await?;
                     Ok(())
                 }

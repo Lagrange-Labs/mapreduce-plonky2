@@ -37,11 +37,11 @@ use crate::query::{
     computational_hash_ids::{
         ComputationalHashCache, HashPermutation, Operation, Output, PlaceholderIdentifier,
     },
+    pi_len,
     public_inputs::PublicInputs,
     universal_circuit::{
         basic_operation::BasicOperationInputs, universal_circuit_inputs::OutputItem,
     },
-    PI_LEN,
 };
 
 use super::{
@@ -967,14 +967,6 @@ fn dummy_placeholder(placeholders: &Placeholders) -> Placeholder {
     }
 }
 
-fn dummy_placeholder_from_query_bounds(query_bounds: &QueryBounds) -> Placeholder {
-    let placeholders = Placeholders::new_empty(
-        query_bounds.min_query_primary(),
-        query_bounds.max_query_primary(),
-    );
-    dummy_placeholder(&placeholders)
-}
-
 pub(crate) fn dummy_placeholder_id() -> PlaceholderId {
     PlaceholderIdentifier::default()
 }
@@ -1046,7 +1038,7 @@ where
         T,
     >;
 
-    const NUM_PUBLIC_INPUTS: usize = PI_LEN::<MAX_NUM_RESULTS>;
+    const NUM_PUBLIC_INPUTS: usize = pi_len::<MAX_NUM_RESULTS>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -1169,7 +1161,7 @@ mod tests {
         utils::gen_random_u256,
     };
     use plonky2::{
-        field::types::{Field, PrimeField64, Sample},
+        field::types::{PrimeField64, Sample},
         hash::hashing::hash_n_to_hash_no_pad,
         iop::witness::PartialWitness,
         plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},

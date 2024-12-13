@@ -1,0 +1,22 @@
+#!/bin/sh
+
+set -eu
+
+if cargo fmt --all -- --check
+then
+    echo "cargo fmt OK"
+else
+    echo "There are some code style issues."
+    echo "Run cargo fmt first."
+    exit 1
+fi
+
+if cargo clippy --all-targets -- -D warnings
+then
+    echo "cargo clippy OK"
+else
+    echo "There are some clippy issues."
+    exit 1
+fi
+
+exit 0
