@@ -797,17 +797,6 @@ pub(crate) fn unpack_u32_to_u8_targets<F: RichField + Extendable<D>, const D: us
         .collect()
 }
 
-/// Convert Uint32 targets to Uint8 targets.
-pub(crate) fn unpack_u32s_to_u8_targets<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    u32s: Vec<Target>,
-    endianness: Endianness,
-) -> Vec<Target> {
-    u32s.into_iter()
-        .flat_map(|u| unpack_u32_to_u8_targets(b, u, endianness))
-        .collect()
-}
-
 #[cfg(test)]
 mod test {
     use super::{bits_to_num, unpack_u32_to_u8_targets, Packer, TargetsConnector, ToFields};

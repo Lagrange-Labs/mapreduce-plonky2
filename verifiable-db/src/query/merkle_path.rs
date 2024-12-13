@@ -157,7 +157,6 @@ where
     pub fn new(
         path: &[(NodeInfo, ChildPosition)],
         siblings: &[Option<HashOutput>],
-        index_id: u64,
     ) -> Result<Self> {
         let num_real_nodes = path.len();
         ensure!(
@@ -186,9 +185,7 @@ where
             siblings
                 .get(i)
                 .and_then(|sibling| {
-                    sibling
-                        .clone()
-                        .and_then(|node_hash| Some(HashOut::from_bytes((&node_hash).into())))
+                    sibling.and_then(|node_hash| Some(HashOut::from_bytes(node_hash.as_ref())))
                 })
                 .unwrap_or(*empty_poseidon_hash())
         });
@@ -301,8 +298,8 @@ mod tests {
         utils::{gen_random_field_hash, gen_random_u256},
     };
     use plonky2::{
-        field::types::{PrimeField64, Sample},
-        hash::hash_types::{HashOut, HashOutTarget},
+        field::types::Sample,
+        hash::hash_types::HashOutTarget,
         iop::{
             target::Target,
             witness::{PartialWitness, WitnessWrite},
@@ -375,45 +372,43 @@ mod tests {
                 )
             };
 
-        let node_E = random_node(None, None); // it's a leaf node, so no children
-        let node_F = random_node(None, None);
-        let node_G = random_node(None, None);
-        let node_E_hash =
-            HashOutput::try_from(node_E.compute_node_hash(index_id).to_bytes()).unwrap();
-        let node_D = random_node(
-            Some(&node_E_hash),
-            Some(&HashOutput::try_from(node_F.compute_node_hash(index_id).to_bytes()).unwrap()),
+        let node_e = random_node(None, None); // it's a leaf node, so no children
+        let node_f = random_node(None, None);
+        let node_g = random_node(None, None);
+        let node_e_hash =
+            HashOutput::try_from(node_e.compute_node_hash(index_id).to_bytes()).unwrap();
+        let node_d = random_node(
+            Some(&node_e_hash),
+            Some(&HashOutput::try_from(node_f.compute_node_hash(index_id).to_bytes()).unwrap()),
         );
-        let node_B = random_node(
-            Some(&HashOutput::try_from(node_D.compute_node_hash(index_id).to_bytes()).unwrap()),
+        let node_b = random_node(
+            Some(&HashOutput::try_from(node_d.compute_node_hash(index_id).to_bytes()).unwrap()),
             None,
         );
-        let node_C = random_node(
+        let node_c = random_node(
             None,
-            Some(&HashOutput::try_from(node_G.compute_node_hash(index_id).to_bytes()).unwrap()),
+            Some(&HashOutput::try_from(node_g.compute_node_hash(index_id).to_bytes()).unwrap()),
         );
-        let node_B_hash =
-            HashOutput::try_from(node_B.compute_node_hash(index_id).to_bytes()).unwrap();
-        let node_C_hash =
-            HashOutput::try_from(node_C.compute_node_hash(index_id).to_bytes()).unwrap();
-        let node_A = random_node(Some(&node_B_hash), Some(&node_C_hash));
-        let root = node_A.compute_node_hash(index_id);
+        let node_b_hash =
+            HashOutput::try_from(node_b.compute_node_hash(index_id).to_bytes()).unwrap();
+        let node_c_hash =
+            HashOutput::try_from(node_c.compute_node_hash(index_id).to_bytes()).unwrap();
+        let node_a = random_node(Some(&node_b_hash), Some(&node_c_hash));
+        let root = node_a.compute_node_hash(index_id);
 
         // verify Merkle-path related to leaf F
         const MAX_DEPTH: usize = 10;
         let path = vec![
-            (node_D.clone(), ChildPosition::Right), // we start from the ancestor of the start node of the path
-            (node_B.clone(), ChildPosition::Left),
-            (node_A.clone(), ChildPosition::Left),
+            (node_d, ChildPosition::Right), // we start from the ancestor of the start node of the path
+            (node_b, ChildPosition::Left),
+            (node_a, ChildPosition::Left),
         ];
-        let siblings = vec![Some(node_E_hash), None, Some(node_C_hash.clone())];
-        let merkle_path_inputs =
-            MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings, index_id.to_canonical_u64())
-                .unwrap();
+        let siblings = vec![Some(node_e_hash), None, Some(node_c_hash)];
+        let merkle_path_inputs = MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings).unwrap();
 
         let circuit = TestMerklePathGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            start_node: node_F.clone(),
+            start_node: node_f,
             index_id,
         };
 
@@ -423,16 +418,14 @@ mod tests {
 
         // verify Merkle-path related to leaf G
         let path = vec![
-            (node_C.clone(), ChildPosition::Right),
-            (node_A.clone(), ChildPosition::Right),
+            (node_c, ChildPosition::Right),
+            (node_a, ChildPosition::Right),
         ];
-        let siblings = vec![None, Some(node_B_hash)];
-        let merkle_path_inputs =
-            MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings, index_id.to_canonical_u64())
-                .unwrap();
+        let siblings = vec![None, Some(node_b_hash)];
+        let merkle_path_inputs = MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings).unwrap();
         let circuit = TestMerklePathGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            start_node: node_G.clone(),
+            start_node: node_g,
             index_id,
         };
 
@@ -441,17 +434,12 @@ mod tests {
         assert_eq!(proof.public_inputs, root.to_vec());
 
         // Verify Merkle-path related to node D
-        let path = vec![
-            (node_B.clone(), ChildPosition::Left),
-            (node_A.clone(), ChildPosition::Left),
-        ];
-        let siblings = vec![None, Some(node_C_hash)];
-        let merkle_path_inputs =
-            MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings, index_id.to_canonical_u64())
-                .unwrap();
+        let path = vec![(node_b, ChildPosition::Left), (node_a, ChildPosition::Left)];
+        let siblings = vec![None, Some(node_c_hash)];
+        let merkle_path_inputs = MerklePathGadget::<MAX_DEPTH>::new(&path, &siblings).unwrap();
         let circuit = TestMerklePathGadget::<MAX_DEPTH> {
             merkle_path_inputs,
-            start_node: node_D.clone(),
+            start_node: node_d,
             index_id,
         };
 

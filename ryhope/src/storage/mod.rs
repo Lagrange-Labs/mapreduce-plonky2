@@ -1,3 +1,4 @@
+#![allow(clippy::await_holding_lock)]
 use anyhow::*;
 use futures::future::BoxFuture;
 use itertools::Itertools;

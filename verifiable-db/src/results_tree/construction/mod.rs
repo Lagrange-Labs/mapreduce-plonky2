@@ -1,5 +1,3 @@
-use mp2_common::F;
-
 pub(crate) mod leaf_node;
 pub(crate) mod node_with_one_child;
 pub(crate) mod node_with_two_children;
@@ -7,22 +5,24 @@ pub(crate) mod public_inputs;
 pub(crate) mod results_tree_with_duplicates;
 pub(crate) mod results_tree_without_duplicates;
 
-// Without this skipping config, the generic parameter was deleted when `cargo fmt`.
-#[rustfmt::skip]
-pub(crate) const PI_LEN<const S: usize>: usize = public_inputs::PublicInputs::<F, S>::total_len();
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use alloy::primitives::U256;
     use itertools::Itertools;
-    use mp2_common::utils::ToFields;
+    use mp2_common::{utils::ToFields, F};
     use mp2_test::utils::random_vector;
     use plonky2::field::types::{Field, Sample};
     use plonky2_ecgfp5::curve::curve::Point;
     use public_inputs::{PublicInputs, ResultsConstructionPublicInputs};
     use rand::{prelude::SliceRandom, thread_rng, Rng};
     use std::array;
+
+    /// Constant function that returns the length of [`PublicInputs`] based on
+    /// some constant value [`S`].
+    pub(crate) const fn pi_len<const S: usize>() -> usize {
+        public_inputs::PublicInputs::<F, S>::total_len()
+    }
 
     /// Generate S number of proof public input slices. The each returned proof public inputs
     /// could be constructed by `PublicInputs::from_slice` function.
@@ -42,7 +42,7 @@ pub(crate) mod tests {
         .map(PublicInputs::<F, S>::to_range);
 
         array::from_fn(|_| {
-            let mut pi = random_vector::<u32>(PI_LEN::<S>).to_fields();
+            let mut pi = random_vector::<u32>(pi_len::<S>()).to_fields();
 
             // Set no duplicates flag.
             pi[no_dup_range.clone()].copy_from_slice(&[no_dup_flag]);

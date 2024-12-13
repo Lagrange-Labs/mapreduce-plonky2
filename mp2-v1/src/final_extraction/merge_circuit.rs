@@ -45,7 +45,7 @@ pub struct MergeTableWires {
 }
 
 impl MergeTable {
-    pub fn build<'a>(
+    pub fn build(
         b: &mut CBuilder,
         block_pi: &[Target],
         contract_pi: &[Target],
@@ -125,12 +125,6 @@ pub(crate) struct MergeCircuitInput {
     pub(crate) merge: MergeTable,
 }
 
-impl MergeCircuitInput {
-    pub(crate) fn new(base: BaseCircuitProofInputs, merge: MergeTable) -> Self {
-        Self { base, merge }
-    }
-}
-
 impl CircuitLogicWires<F, D, 0> for MergeTableRecursiveWires {
     type CircuitBuilderParams = FinalExtractionBuilderParams;
 
@@ -171,16 +165,11 @@ mod test {
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
     use mp2_common::{
         digest::SplitDigestPoint,
-        group_hashing::{field_hashed_scalar_mul, map_to_curve_point, weierstrass_to_point as wp},
-        utils::ToFields,
+        group_hashing::{map_to_curve_point, weierstrass_to_point as wp},
         C, D, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{
-        field::types::Sample,
-        iop::witness::{PartialWitness, WitnessWrite},
-    };
-    use plonky2_ecgfp5::curve::curve::Point;
+    use plonky2::iop::witness::WitnessWrite;
 
     use super::MergeTableWires;
 
@@ -220,10 +209,6 @@ mod test {
             wires.pis_a.assign(pw, &self.pis_a);
             pw.set_target_arr(&wires.pis_b, &self.pis_b);
         }
-    }
-
-    fn random_field_vector(n: usize) -> Vec<F> {
-        (0..n).map(|_| F::rand()).collect()
     }
 
     #[test]
