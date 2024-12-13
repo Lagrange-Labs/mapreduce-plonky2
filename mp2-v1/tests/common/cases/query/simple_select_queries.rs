@@ -47,13 +47,13 @@ use crate::common::{
 
 use super::QueryCooking;
 
-pub(crate) async fn prove_query<'a>(
+pub(crate) async fn prove_query(
     mut parsed: Query,
     table_hash: &MetadataHash,
-    planner: &mut QueryPlanner<'a>,
+    planner: &mut QueryPlanner<'_>,
     results: Vec<PgSqlRow>,
 ) -> Result<()> {
-    let mut exec_query = generate_query_execution_with_keys(&mut parsed, &planner.settings)?;
+    let mut exec_query = generate_query_execution_with_keys(&mut parsed, planner.settings)?;
     let query_params = exec_query.convert_placeholders(&planner.query.placeholders);
     let res = execute_row_query(
         &planner.table.db_pool,
@@ -71,7 +71,7 @@ pub(crate) async fn prove_query<'a>(
             // all the other items are query results
             let result = (2..row.len())
                 .filter_map(|i| {
-                    SqlType::Numeric.extract(&row, i).map(|res| match res {
+                    SqlType::Numeric.extract(row, i).map(|res| match res {
                         SqlReturn::Numeric(uint) => uint,
                     })
                 })
@@ -101,7 +101,7 @@ pub(crate) async fn prove_query<'a>(
             &planner.columns,
             epoch as BlockPrimaryIndex,
             &key,
-            &planner.pis,
+            planner.pis,
             &planner.query,
         )
         .await?;
@@ -150,14 +150,14 @@ pub(crate) async fn prove_query<'a>(
     let pis = parsil::assembler::assemble_static(&parsed, planner.settings)?;
     check_final_outputs(
         final_proof,
-        &planner.ctx,
-        &planner.table,
+        planner.ctx,
+        planner.table,
         &planner.query,
         &pis,
         current_epoch,
         num_matching_rows,
         results,
-        table_hash.clone(),
+        *table_hash,
     )?;
     info!("Revelation done!");
     Ok(())

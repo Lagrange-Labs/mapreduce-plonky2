@@ -194,7 +194,7 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             acc: &input[Self::PI_RANGES[10].clone()],
         }
     }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         h: &'a [T],
         min_val: &'a [T],
@@ -223,6 +223,8 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         }
     }
 
+    // CHORE: Remove this when relevant PR is merged
+    #[allow(dead_code)]
     pub fn to_vec(&self) -> Vec<T> {
         self.h
             .iter()
@@ -315,6 +317,8 @@ impl<const S: usize> PublicInputs<'_, Target, S> {
     }
 }
 
+// CHORE: Remove this when relevant PR is merged
+#[allow(dead_code)]
 impl<const S: usize> PublicInputs<'_, F, S> {
     pub fn tree_hash(&self) -> HashOut<F> {
         HashOut::try_from(self.to_tree_hash_raw()).unwrap()

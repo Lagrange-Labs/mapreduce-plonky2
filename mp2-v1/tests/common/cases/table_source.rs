@@ -465,10 +465,9 @@ impl SingleValuesExtractionArgs {
                     debug!(
                         "[--] SINGLE FINAL ROOT HASH --> {:?} ",
                         hex::encode(
-                            &pi.root_hash()
+                            pi.root_hash()
                                 .into_iter()
-                                .map(|u| u.to_be_bytes())
-                                .flatten()
+                                .flat_map(|u| u.to_be_bytes())
                                 .collect::<Vec<_>>()
                         )
                     );
@@ -733,10 +732,9 @@ impl MappingValuesExtractionArgs {
                     debug!(
                         "[--] MAPPING FINAL ROOT HASH --> {:?} ",
                         hex::encode(
-                            &pi.root_hash()
+                            pi.root_hash()
                                 .into_iter()
-                                .map(|u| u.to_be_bytes())
-                                .flatten()
+                                .flat_map(|u| u.to_be_bytes())
                                 .collect::<Vec<_>>()
                         )
                     );
@@ -881,7 +879,7 @@ impl MergeSource {
         // now we merge all the cells change from the single contract to the mapping contract
         update_mapping
             .into_iter()
-            .map(|um| {
+            .flat_map(|um| {
                 let refm = &um;
                 // for each update from mapping, we "merge" all the updates from single, i.e. since
                 // single is the multiplier table
@@ -921,9 +919,7 @@ impl MergeSource {
                         TableRowUpdate::Insertion(cella,seca.clone())
                     }
                 }).collect::<Vec<_>>()
-            })
-            .flatten()
-            .collect()
+            }).collect()
     }
 
     pub async fn random_contract_update(
@@ -954,7 +950,7 @@ impl MergeSource {
                         .query_mpt_proof(&query, BlockNumberOrTag::Number(ctx.block_number().await))
                         .await;
                     let current_value = response.storage_proof[0].value;
-                    let current_key = U256::from_be_slice(&mk);
+                    let current_key = U256::from_be_slice(mk);
                     let entry = UniqueMappingEntry::new(&current_key, &current_value);
                     // create one update for each update of the first table (note again there
                     // should be only one update since it's single var)

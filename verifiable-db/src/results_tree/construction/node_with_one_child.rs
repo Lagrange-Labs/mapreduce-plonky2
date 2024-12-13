@@ -294,11 +294,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::results_tree::construction::{
-        tests::{
-            random_results_construction_public_inputs, unify_child_proof, unify_subtree_proof,
-        },
-        PI_LEN,
+    use crate::results_tree::construction::tests::{
+        pi_len, random_results_construction_public_inputs, unify_child_proof, unify_subtree_proof,
     };
     use mp2_common::{group_hashing::add_weierstrass_point, poseidon::H, utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};
@@ -319,7 +316,8 @@ mod tests {
         type Wires = (NodeWithOneChildWires<S>, Vec<Target>, Vec<Target>);
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let proofs = array::from_fn(|_| b.add_virtual_target_arr::<{ PI_LEN::<S> }>().to_vec());
+            let proofs =
+                array::from_fn(|_| b.add_virtual_target_arr::<{ pi_len::<S>() }>().to_vec());
             let [subtree_pi, child_pi] =
                 array::from_fn(|i| PublicInputs::<Target, S>::from_slice(&proofs[i]));
 

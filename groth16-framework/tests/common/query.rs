@@ -12,11 +12,9 @@ use mp2_common::{
 };
 use plonky2::field::types::PrimeField64;
 use verifiable_db::{
-    query::api::CircuitInput as QueryInput,
     revelation::{api::CircuitInput, PublicInputs as RevelationPI},
     test_utils::{
-        TestRevelationData, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
-        MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
+        TestRevelationData, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
     },
 };
 

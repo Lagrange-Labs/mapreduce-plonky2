@@ -15,7 +15,7 @@ mod go {
     extern "C" {
         /// Compile and generate the asset files from the circuit data to the
         /// specified dir. The generated files are `r1cs.bin`, `pk.bin`,
-        /// `vk.bin` and `verifier.sol`.
+        /// `vk.bin` and `Verifier.sol`.
         pub fn CompileAndGenerateAssets(
             common_circuit_data: *const c_char,
             verifier_only_circuit_data: *const c_char,

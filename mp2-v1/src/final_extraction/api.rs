@@ -245,15 +245,16 @@ mod tests {
 
     use crate::{
         final_extraction::{
-            base_circuit::{
-                test::ProofsPi, BLOCK_SET_NUM_IO, CONTRACT_SET_NUM_IO, VALUE_SET_NUM_IO,
-            },
+            base_circuit::{test::ProofsPi, CONTRACT_SET_NUM_IO, VALUE_SET_NUM_IO},
             lengthed_circuit::LENGTH_SET_NUM_IO,
         },
         length_extraction,
     };
 
     use super::{CircuitInput, PublicParameters};
+
+    pub(crate) const BLOCK_SET_NUM_IO: usize =
+        crate::block_extraction::public_inputs::PublicInputs::<F>::TOTAL_LEN;
 
     #[test]
     fn test_final_extraction_api() {
