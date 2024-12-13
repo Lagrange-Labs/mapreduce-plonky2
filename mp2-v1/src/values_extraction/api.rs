@@ -110,6 +110,7 @@ where
 
     /// Create a circuit input for proving a leaf MPT node of mappings where the
     /// value stored in a mapping entry is another mapping.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_mapping_of_mappings_leaf(
         node: Vec<u8>,
         slot: u8,

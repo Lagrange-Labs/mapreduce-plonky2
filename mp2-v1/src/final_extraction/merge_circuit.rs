@@ -152,7 +152,7 @@ mod test {
         C, D, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{field::types::Sample, iop::witness::WitnessWrite};
+    use plonky2::iop::witness::WitnessWrite;
 
     use super::MergeTableWires;
 

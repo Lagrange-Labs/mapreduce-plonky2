@@ -2,27 +2,24 @@
 
 use crate::cells_tree::{Cell, CellWire, PublicInputs as CellsPublicInputs};
 use derive_more::Constructor;
-use itertools::Itertools;
 use mp2_common::{
-    poseidon::{hash_to_int_target, hash_to_int_value, H},
+    poseidon::{hash_to_int_target, H},
     serialization::{deserialize, serialize},
     types::{CBuilder, CURVE_TARGET_LEN},
     u256::UInt256Target,
-    utils::{FromFields, ToFields, ToTargets},
+    utils::{FromFields, ToTargets},
     F,
 };
 use plonky2::{
-    field::types::Field,
     hash::hash_types::{HashOut, HashOutTarget},
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::config::Hasher,
 };
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
 use plonky2_ecgfp5::{
-    curve::{curve::Point, scalar_field::Scalar},
+    curve::curve::Point,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
 use serde::{Deserialize, Serialize};
@@ -74,15 +71,13 @@ impl SecondaryIndexCell {
         pw.set_hash_target(wires.row_unique_data, self.row_unique_data);
     }
 
-    pub fn is_individual(&self) -> bool {
-        self.cell.is_individual()
-    }
-
-    pub fn is_multiplier(&self) -> bool {
-        self.cell.is_multiplier()
-    }
-
+    #[cfg(test)]
     pub(crate) fn digest(&self, cells_pi: &CellsPublicInputs<F>) -> RowDigest {
+        use itertools::Itertools;
+        use mp2_common::{poseidon::hash_to_int_value, utils::ToFields, F};
+        use plonky2::{field::types::Field, plonk::config::Hasher};
+        use plonky2_ecgfp5::curve::scalar_field::Scalar;
+
         let values_digests = self
             .cell
             .split_and_accumulate_values_digest(cells_pi.split_values_digest_point());
@@ -210,7 +205,7 @@ pub(crate) mod tests {
         cells_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestRowCircuit<'a> {
+    impl UserCircuit<F, D> for TestRowCircuit<'_> {
         // Row wire + cells PI
         type Wires = (SecondaryIndexCellWire, Vec<Target>);
 

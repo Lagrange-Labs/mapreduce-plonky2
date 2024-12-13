@@ -112,6 +112,24 @@ impl TableInfo {
                     vec![],
                 )
             }
+            TableSource::MappingOfSingleValueMappings(args) => {
+                let slot_inputs = SlotInputs::MappingOfMappings(args.slot_inputs().to_vec());
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot_inputs,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
+            }
+            TableSource::MappingOfStructMappings(args) => {
+                let slot_inputs = SlotInputs::MappingOfMappings(args.slot_inputs().to_vec());
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot_inputs,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
+            }
             TableSource::Merge(source) => {
                 let single = SlotInputs::Simple(source.single.slot_inputs.clone());
                 let mapping = SlotInputs::Mapping(source.mapping.slot_inputs().to_vec());

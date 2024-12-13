@@ -155,7 +155,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
     }
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -168,7 +168,7 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     }
 }
 
-impl<'a> PublicInputs<'a, Target> {
+impl PublicInputs<'_, Target> {
     pub fn root_hash_target(&self) -> [Target; NUM_HASH_OUT_ELTS] {
         self.to_root_hash_raw().try_into().unwrap()
     }
@@ -194,7 +194,7 @@ impl<'a> PublicInputs<'a, Target> {
     }
 }
 
-impl<'a> PublicInputs<'a, F> {
+impl PublicInputs<'_, F> {
     pub fn root_hash(&self) -> HashOut<F> {
         HashOut::from_partial(self.h)
     }
@@ -236,7 +236,7 @@ pub(crate) mod tests {
     use rand::{thread_rng, Rng};
     use std::{array, slice};
 
-    impl<'a> PublicInputs<'a, F> {
+    impl PublicInputs<'_, F> {
         pub(crate) fn sample(
             multiplier_digest: Point,
             min: usize,
@@ -266,7 +266,7 @@ pub(crate) mod tests {
         exp_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPublicInputs<'a> {
+    impl UserCircuit<F, D> for TestPublicInputs<'_> {
         type Wires = Vec<Target>;
 
         fn build(b: &mut CBuilder) -> Self::Wires {

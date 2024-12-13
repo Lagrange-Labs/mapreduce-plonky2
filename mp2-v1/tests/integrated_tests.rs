@@ -115,6 +115,32 @@ async fn integrated_indexing() -> Result<()> {
     ];
     mapping.run(&mut ctx, genesis, changes).await?;
 
+    let (mut mapping_of_single_value_mappings, genesis) =
+        TableIndexing::mapping_of_single_value_mappings_test_case(&mut ctx).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
+        ChangeType::Silent,
+    ];
+    mapping_of_single_value_mappings
+        .run(&mut ctx, genesis, changes)
+        .await?;
+
+    let (mut mapping_of_struct_mappings, genesis) =
+        TableIndexing::mapping_of_struct_mappings_test_case(&mut ctx).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
+        ChangeType::Silent,
+    ];
+    mapping_of_struct_mappings
+        .run(&mut ctx, genesis, changes)
+        .await?;
+
     let (mut merged, genesis) = TableIndexing::merge_table_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Insertion,
