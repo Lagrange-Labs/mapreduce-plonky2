@@ -76,9 +76,9 @@ pub fn compute_final_digest(
 }
 
 /// Compute the final digest target.
-pub(crate) fn compute_final_digest_target<'a, E>(
+pub(crate) fn compute_final_digest_target<E>(
     b: &mut CBuilder,
-    extraction_pi: &E::PI<'a>,
+    extraction_pi: &E::PI<'_>,
     rows_tree_pi: &row_tree::PublicInputs<Target>,
 ) -> CurveTarget
 where
@@ -224,7 +224,7 @@ pub(crate) mod tests {
         rows_tree_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestFinalDigestCircuit<'a> {
+    impl UserCircuit<F, D> for TestFinalDigestCircuit<'_> {
         // Extraction PI + rows tree PI
         type Wires = (Vec<Target>, Vec<Target>);
 

@@ -464,6 +464,7 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
 }
 
 /// Compute the values digest for mapping of mappings leaf.
+#[allow(clippy::too_many_arguments)]
 pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: usize>(
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[u64],

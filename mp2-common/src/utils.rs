@@ -775,13 +775,12 @@ impl<F: RichField + Extendable<D>, const D: usize> SliceConnector for CircuitBui
 
 #[cfg(test)]
 mod test {
-    use super::{bits_to_num, Packer, TargetsConnector, ToFields};
-    use crate::types::CBuilder;
+    use super::{bits_to_num, Packer, ToFields};
     use crate::utils::{
         greater_than, greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits,
         Endianness, PackerTarget,
     };
-    use crate::{default_config, C, D, F};
+    use crate::{C, D, F};
     use alloy::primitives::Address;
     use anyhow::Result;
     use plonky2::field::goldilocks_field::GoldilocksField;
@@ -791,7 +790,6 @@ mod test {
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use rand::{thread_rng, Rng, RngCore};
-    use std::array;
 
     #[test]
     fn test_pack() {
