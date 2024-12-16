@@ -4,20 +4,25 @@ use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::{CBuilder, CURVE_TARGET_LEN},
-    u256::{UInt256Target, NUM_LIMBS},
+    types::CBuilder,
+    u256::UInt256Target,
     utils::{FromFields, FromTargets, TryIntoBool},
     F,
 };
 use plonky2::{
-    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+    hash::hash_types::{HashOut, HashOutTarget},
     iop::target::{BoolTarget, Target},
 };
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 
-use super::universal_circuit::universal_query_gadget::{
-    CurveOrU256Target, OutputValues, OutputValuesTarget,
+use crate::query::{
+    output_computation::compute_dummy_output_targets,
+    universal_circuit::universal_query_gadget::{
+        CurveOrU256Target, OutputValues, OutputValuesTarget, UniversalQueryOutputWires,
+    },
 };
+
+use super::row_chunk_gadgets::{BoundaryRowDataTarget, RowChunkDataTarget};
 
 /// Query circuits public inputs
 pub enum QueryPublicInputs {
@@ -33,22 +38,18 @@ pub enum QueryPublicInputs {
     /// `ops` : `[F; S]` Set of identifiers of the aggregation operations for each of the `S` items found in `V`
     /// (like "SUM", "MIN", "MAX", "COUNT" operations)
     OpIds,
-    /// `I` : `u256` value of the indexed column for the given node (meaningful only for rows tree nodes)
-    IndexValue,
-    /// `min` : `u256` Minimum value of the indexed column among all the records stored in the subtree rooted
-    /// in the current node; values of secondary indexed column are employed for rows tree nodes,
-    /// while values of primary indexed column are employed for index tree nodes
-    MinValue,
-    /// `max`` :  Maximum value of the indexed column among all the records stored in the subtree rooted
-    /// in the current node; values of secondary indexed column are employed for rows tree nodes,
-    /// while values of primary indexed column are employed for index tree nodes
-    MaxValue,
-    /// `index_ids`` : `[2]F` Identifiers of indexed columns
-    IndexIds,
-    /// `MIN_I`: `u256` Lower bound of the range of indexed column values specified in the query
-    MinQuery,
-    /// `MAX_I`: `u256` Upper bound of the range of indexed column values specified in the query
-    MaxQuery,
+    /// Data associated to the left boundary row of the row chunk being proven
+    LeftBoundaryRow,
+    /// Data associated to the right boundary row of the row chunk being proven
+    RightBoundaryRow,
+    /// `MIN_primary`: `u256` Lower bound of the range of primary indexed column values specified in the query
+    MinPrimary,
+    /// `MAX_primary`: `u256` Upper bound of the range of primary indexed column values specified in the query
+    MaxPrimary,
+    /// `MIN_secondary`: `u256` Lower bound of the range of secondary indexed column values specified in the query
+    MinSecondary,
+    /// `MAX_secondary`: `u256` Upper bound of the range of secondary indexed column values specified in the query
+    MaxSecondary,
     /// `overflow` : `bool` Flag specifying whether an overflow error has occurred in arithmetic
     Overflow,
     /// `C`: computational hash
@@ -57,18 +58,100 @@ pub enum QueryPublicInputs {
     PlaceholderHash,
 }
 
+/// Public inputs for the universal query circuit. They are mostly the same as `QueryPublicInputs`, the only
+/// difference is that the query range on secondary index is replaced by the value of the indexed columns for
+/// the columns being proven
+pub enum QueryPublicInputsUniversalCircuit {
+    /// `H`: Hash of the tree
+    TreeHash,
+    /// `V`: Set of `S` values representing the cumulative results of the query, where`S` is a parameter
+    /// specifying the maximum number of cumulative results we support;
+    /// the first value could be either a `u256` or a `CurveTarget`, depending on the query, and so we always
+    /// represent this value with `CURVE_TARGET_LEN` elements; all the other `S-1` values are always `u256`
+    OutputValues,
+    /// `count`: `F` Number of matching records in the query
+    NumMatching,
+    /// `ops` : `[F; S]` Set of identifiers of the aggregation operations for each of the `S` items found in `V`
+    /// (like "SUM", "MIN", "MAX", "COUNT" operations)
+    OpIds,
+    /// Data associated to the left boundary row of the row chunk being proven; it is dummy in case of universal query
+    /// circuit, it is just empoyed to re-use the same public inputs
+    LeftBoundaryRow,
+    /// Data associated to the right boundary row of the row chunk being proven; it is dummy in case of universal query
+    /// circuit, it is just empoyed to re-use the same public inputs
+    RightBoundaryRow,
+    /// `MIN_primary`: `u256` Lower bound of the range of primary indexed column values specified in the query
+    MinPrimary,
+    /// `MAX_primary`: `u256` Upper bound of the range of primary indexed column values specified in the query
+    MaxPrimary,
+    /// Value of secondary indexed column for the row being proven
+    SecondaryIndexValue,
+    /// Value of primary indexed column for the row being proven
+    PrimaryIndexValue,
+    /// `overflow` : `bool` Flag specifying whether an overflow error has occurred in arithmetic
+    Overflow,
+    /// `C`: computational hash
+    ComputationalHash,
+    /// `H_p` : placeholder hash
+    PlaceholderHash,
+}
+
+impl From<QueryPublicInputsUniversalCircuit> for QueryPublicInputs {
+    fn from(value: QueryPublicInputsUniversalCircuit) -> Self {
+        match value {
+            QueryPublicInputsUniversalCircuit::TreeHash => QueryPublicInputs::TreeHash,
+            QueryPublicInputsUniversalCircuit::OutputValues => QueryPublicInputs::OutputValues,
+            QueryPublicInputsUniversalCircuit::NumMatching => QueryPublicInputs::NumMatching,
+            QueryPublicInputsUniversalCircuit::OpIds => QueryPublicInputs::NumMatching,
+            QueryPublicInputsUniversalCircuit::LeftBoundaryRow => {
+                QueryPublicInputs::LeftBoundaryRow
+            }
+            QueryPublicInputsUniversalCircuit::RightBoundaryRow => {
+                QueryPublicInputs::RightBoundaryRow
+            }
+            QueryPublicInputsUniversalCircuit::MinPrimary => QueryPublicInputs::MinPrimary,
+            QueryPublicInputsUniversalCircuit::MaxPrimary => QueryPublicInputs::MaxPrimary,
+            QueryPublicInputsUniversalCircuit::SecondaryIndexValue => {
+                QueryPublicInputs::MinSecondary
+            }
+            QueryPublicInputsUniversalCircuit::PrimaryIndexValue => QueryPublicInputs::MaxSecondary,
+            QueryPublicInputsUniversalCircuit::Overflow => QueryPublicInputs::Overflow,
+            QueryPublicInputsUniversalCircuit::ComputationalHash => {
+                QueryPublicInputs::ComputationalHash
+            }
+            QueryPublicInputsUniversalCircuit::PlaceholderHash => {
+                QueryPublicInputs::PlaceholderHash
+            }
+        }
+    }
+}
+/// Public inputs for query circuits
+pub type PublicInputsQueryCircuits<'a, T, const S: usize> = PublicInputsFactory<'a, T, S, false>;
+/// Public inputs only for universal query circuit
+pub type PublicInputsUniversalCircuit<'a, T, const S: usize> = PublicInputsFactory<'a, T, S, true>;
+
+/// This is the data structure employed for both public inputs of generic query circuits
+/// and for public inputs of the universal circuit. Since the 2 public inputs are the
+/// same, except for the semantic of 2 U256 elements, they can be represented by the
+/// same data structure. The `UNIVERSAL_CIRCUIT` const generic is employed to
+/// define 2 type aliases: 1 for public inputs of generic query circuits, and 1 for
+/// public inputs of universal query circuit. The methods being common between the
+/// 2 public inputs are implemented for this data structure, while the methods that
+/// are specific to each public input type are implemented for the corresponding alias.
+/// In this way, the methods implemented for the type alias define the correct semantics
+/// of each of the items in both types of public inputs.
 #[derive(Clone, Debug)]
-pub struct PublicInputs<'a, T, const S: usize> {
+pub struct PublicInputsFactory<'a, T, const S: usize, const UNIVERSAL_CIRCUIT: bool> {
     h: &'a [T],
     v: &'a [T],
     ops: &'a [T],
     count: &'a T,
-    i: &'a [T],
-    min: &'a [T],
-    max: &'a [T],
-    ids: &'a [T],
-    min_q: &'a [T],
-    max_q: &'a [T],
+    left_row: &'a [T],
+    right_row: &'a [T],
+    min_p: &'a [T],
+    max_p: &'a [T],
+    min_s: &'a [T],
+    max_s: &'a [T],
     overflow: &'a T,
     ch: &'a [T],
     ph: &'a [T],
@@ -76,53 +159,55 @@ pub struct PublicInputs<'a, T, const S: usize> {
 
 const NUM_PUBLIC_INPUTS: usize = QueryPublicInputs::PlaceholderHash as usize + 1;
 
-impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
+impl<'a, T: Clone, const S: usize, const UNIVERSAL_CIRCUIT: bool>
+    PublicInputsFactory<'a, T, S, UNIVERSAL_CIRCUIT>
+{
     const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
-        Self::to_range(QueryPublicInputs::TreeHash),
-        Self::to_range(QueryPublicInputs::OutputValues),
-        Self::to_range(QueryPublicInputs::NumMatching),
-        Self::to_range(QueryPublicInputs::OpIds),
-        Self::to_range(QueryPublicInputs::IndexValue),
-        Self::to_range(QueryPublicInputs::MinValue),
-        Self::to_range(QueryPublicInputs::MaxValue),
-        Self::to_range(QueryPublicInputs::IndexIds),
-        Self::to_range(QueryPublicInputs::MinQuery),
-        Self::to_range(QueryPublicInputs::MaxQuery),
-        Self::to_range(QueryPublicInputs::Overflow),
-        Self::to_range(QueryPublicInputs::ComputationalHash),
-        Self::to_range(QueryPublicInputs::PlaceholderHash),
+        Self::to_range_internal(QueryPublicInputs::TreeHash),
+        Self::to_range_internal(QueryPublicInputs::OutputValues),
+        Self::to_range_internal(QueryPublicInputs::NumMatching),
+        Self::to_range_internal(QueryPublicInputs::OpIds),
+        Self::to_range_internal(QueryPublicInputs::LeftBoundaryRow),
+        Self::to_range_internal(QueryPublicInputs::RightBoundaryRow),
+        Self::to_range_internal(QueryPublicInputs::MinPrimary),
+        Self::to_range_internal(QueryPublicInputs::MaxPrimary),
+        Self::to_range_internal(QueryPublicInputs::MinSecondary),
+        Self::to_range_internal(QueryPublicInputs::MaxSecondary),
+        Self::to_range_internal(QueryPublicInputs::Overflow),
+        Self::to_range_internal(QueryPublicInputs::ComputationalHash),
+        Self::to_range_internal(QueryPublicInputs::PlaceholderHash),
     ];
 
     const SIZES: [usize; NUM_PUBLIC_INPUTS] = [
         // Tree hash
-        NUM_HASH_OUT_ELTS,
+        HashOutTarget::NUM_TARGETS,
         // Output values
-        CURVE_TARGET_LEN + NUM_LIMBS * (S - 1),
+        CurveTarget::NUM_TARGETS + UInt256Target::NUM_TARGETS * (S - 1),
         // Number of matching records
         1,
         // Operation identifiers
         S,
-        // Index column value
-        NUM_LIMBS,
-        // Minimum indexed column value
-        NUM_LIMBS,
-        // Maximum indexed column value
-        NUM_LIMBS,
-        // Indexed column IDs
-        2,
-        // Lower bound for indexed column specified in query
-        NUM_LIMBS,
-        // Upper bound for indexed column specified in query
-        NUM_LIMBS,
+        // Left boundary row
+        BoundaryRowDataTarget::NUM_TARGETS,
+        // Right boundary row
+        BoundaryRowDataTarget::NUM_TARGETS,
+        // Min primary index
+        UInt256Target::NUM_TARGETS,
+        // Max primary index
+        UInt256Target::NUM_TARGETS,
+        // Min secondary index
+        UInt256Target::NUM_TARGETS,
+        // Max secondary index
+        UInt256Target::NUM_TARGETS,
         // Overflow flag
         1,
         // Computational hash
-        NUM_HASH_OUT_ELTS,
+        HashOutTarget::NUM_TARGETS,
         // Placeholder hash
-        NUM_HASH_OUT_ELTS,
+        HashOutTarget::NUM_TARGETS,
     ];
 
-    pub const fn to_range(query_pi: QueryPublicInputs) -> PublicInputRange {
+    const fn to_range_internal(query_pi: QueryPublicInputs) -> PublicInputRange {
         let mut i = 0;
         let mut offset = 0;
         let pi_pos = query_pi as usize;
@@ -133,8 +218,12 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         offset..offset + Self::SIZES[pi_pos]
     }
 
+    pub fn to_range<Q: Into<QueryPublicInputs>>(query_pi: Q) -> PublicInputRange {
+        Self::to_range_internal(query_pi.into())
+    }
+
     pub(crate) const fn total_len() -> usize {
-        Self::to_range(QueryPublicInputs::PlaceholderHash).end
+        Self::to_range_internal(QueryPublicInputs::PlaceholderHash).end
     }
 
     pub(crate) fn to_hash_raw(&self) -> &[T] {
@@ -153,28 +242,28 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
         self.ops
     }
 
-    pub(crate) fn to_index_value_raw(&self) -> &[T] {
-        self.i
+    pub(crate) fn to_left_row_raw(&self) -> &[T] {
+        self.left_row
     }
 
-    pub(crate) fn to_min_value_raw(&self) -> &[T] {
-        self.min
+    pub(crate) fn to_right_row_raw(&self) -> &[T] {
+        self.right_row
     }
 
-    pub(crate) fn to_max_value_raw(&self) -> &[T] {
-        self.max
+    pub(crate) fn to_min_primary_raw(&self) -> &[T] {
+        self.min_p
     }
 
-    pub(crate) fn to_index_ids_raw(&self) -> &[T] {
-        self.ids
+    pub(crate) fn to_max_primary_raw(&self) -> &[T] {
+        self.max_p
     }
 
-    pub(crate) fn to_min_query_raw(&self) -> &[T] {
-        self.min_q
+    pub(crate) fn to_min_secondary_raw(&self) -> &[T] {
+        self.min_s
     }
 
-    pub(crate) fn to_max_query_raw(&self) -> &[T] {
-        self.max_q
+    pub(crate) fn to_max_secondary_raw(&self) -> &[T] {
+        self.max_s
     }
 
     pub(crate) fn to_overflow_raw(&self) -> &T {
@@ -200,29 +289,30 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             v: &input[Self::PI_RANGES[1].clone()],
             count: &input[Self::PI_RANGES[2].clone()][0],
             ops: &input[Self::PI_RANGES[3].clone()],
-            i: &input[Self::PI_RANGES[4].clone()],
-            min: &input[Self::PI_RANGES[5].clone()],
-            max: &input[Self::PI_RANGES[6].clone()],
-            ids: &input[Self::PI_RANGES[7].clone()],
-            min_q: &input[Self::PI_RANGES[8].clone()],
-            max_q: &input[Self::PI_RANGES[9].clone()],
+            left_row: &input[Self::PI_RANGES[4].clone()],
+            right_row: &input[Self::PI_RANGES[5].clone()],
+            min_p: &input[Self::PI_RANGES[6].clone()],
+            max_p: &input[Self::PI_RANGES[7].clone()],
+            min_s: &input[Self::PI_RANGES[8].clone()],
+            max_s: &input[Self::PI_RANGES[9].clone()],
             overflow: &input[Self::PI_RANGES[10].clone()][0],
             ch: &input[Self::PI_RANGES[11].clone()],
             ph: &input[Self::PI_RANGES[12].clone()],
         }
     }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         h: &'a [T],
         v: &'a [T],
         count: &'a [T],
         ops: &'a [T],
-        i: &'a [T],
-        min: &'a [T],
-        max: &'a [T],
-        ids: &'a [T],
-        min_q: &'a [T],
-        max_q: &'a [T],
+        left_row: &'a [T],
+        right_row: &'a [T],
+        min_p: &'a [T],
+        max_p: &'a [T],
+        min_s: &'a [T],
+        max_s: &'a [T],
         overflow: &'a [T],
         ch: &'a [T],
         ph: &'a [T],
@@ -232,12 +322,12 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             v,
             count: &count[0],
             ops,
-            i,
-            min,
-            max,
-            ids,
-            min_q,
-            max_q,
+            left_row,
+            right_row,
+            min_p,
+            max_p,
+            min_s,
+            max_s,
             overflow: &overflow[0],
             ch,
             ph,
@@ -250,12 +340,12 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
             .chain(self.v.iter())
             .chain(once(self.count))
             .chain(self.ops.iter())
-            .chain(self.i.iter())
-            .chain(self.min.iter())
-            .chain(self.max.iter())
-            .chain(self.ids.iter())
-            .chain(self.min_q.iter())
-            .chain(self.max_q.iter())
+            .chain(self.left_row.iter())
+            .chain(self.right_row.iter())
+            .chain(self.min_p.iter())
+            .chain(self.max_p.iter())
+            .chain(self.min_s.iter())
+            .chain(self.max_s.iter())
             .chain(once(self.overflow))
             .chain(self.ch.iter())
             .chain(self.ph.iter())
@@ -264,7 +354,9 @@ impl<'a, T: Clone, const S: usize> PublicInputs<'a, T, S> {
     }
 }
 
-impl<const S: usize> PublicInputCommon for PublicInputs<'_, Target, S> {
+impl<const S: usize, const UNIVERSAL_CIRCUIT: bool> PublicInputCommon
+    for PublicInputsFactory<'_, Target, S, UNIVERSAL_CIRCUIT>
+{
     const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -272,19 +364,21 @@ impl<const S: usize> PublicInputCommon for PublicInputs<'_, Target, S> {
         cb.register_public_inputs(self.v);
         cb.register_public_input(*self.count);
         cb.register_public_inputs(self.ops);
-        cb.register_public_inputs(self.i);
-        cb.register_public_inputs(self.min);
-        cb.register_public_inputs(self.max);
-        cb.register_public_inputs(self.ids);
-        cb.register_public_inputs(self.min_q);
-        cb.register_public_inputs(self.max_q);
+        cb.register_public_inputs(self.left_row);
+        cb.register_public_inputs(self.right_row);
+        cb.register_public_inputs(self.min_p);
+        cb.register_public_inputs(self.max_p);
+        cb.register_public_inputs(self.min_s);
+        cb.register_public_inputs(self.max_s);
         cb.register_public_input(*self.overflow);
         cb.register_public_inputs(self.ch);
         cb.register_public_inputs(self.ph);
     }
 }
 
-impl<const S: usize> PublicInputs<'_, Target, S> {
+impl<const S: usize, const UNIVERSAL_CIRCUIT: bool>
+    PublicInputsFactory<'_, Target, S, UNIVERSAL_CIRCUIT>
+{
     pub fn tree_hash_target(&self) -> HashOutTarget {
         HashOutTarget::try_from(self.to_hash_raw()).unwrap() // safe to unwrap as we know the slice has correct length
     }
@@ -321,28 +415,12 @@ impl<const S: usize> PublicInputs<'_, Target, S> {
         self.to_ops_raw().try_into().unwrap()
     }
 
-    pub fn index_value_target(&self) -> UInt256Target {
-        UInt256Target::from_targets(self.to_index_value_raw())
+    pub fn min_primary_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_min_primary_raw())
     }
 
-    pub fn min_value_target(&self) -> UInt256Target {
-        UInt256Target::from_targets(self.to_min_value_raw())
-    }
-
-    pub fn max_value_target(&self) -> UInt256Target {
-        UInt256Target::from_targets(self.to_max_value_raw())
-    }
-
-    pub fn index_ids_target(&self) -> [Target; 2] {
-        self.to_index_ids_raw().try_into().unwrap()
-    }
-
-    pub fn min_query_target(&self) -> UInt256Target {
-        UInt256Target::from_targets(self.to_min_query_raw())
-    }
-
-    pub fn max_query_target(&self) -> UInt256Target {
-        UInt256Target::from_targets(self.to_max_query_raw())
+    pub fn max_primary_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_max_primary_raw())
     }
 
     pub fn overflow_flag_target(&self) -> BoolTarget {
@@ -358,7 +436,86 @@ impl<const S: usize> PublicInputs<'_, Target, S> {
     }
 }
 
-impl<const S: usize> PublicInputs<'_, F, S>
+impl<const S: usize> PublicInputsQueryCircuits<'_, Target, S> {
+    pub(crate) fn left_boundary_row_target(&self) -> BoundaryRowDataTarget {
+        BoundaryRowDataTarget::from_targets(self.to_left_row_raw())
+    }
+
+    pub(crate) fn right_boundary_row_target(&self) -> BoundaryRowDataTarget {
+        BoundaryRowDataTarget::from_targets(self.to_right_row_raw())
+    }
+
+    pub(crate) fn to_row_chunk_target(&self) -> RowChunkDataTarget<S>
+    where
+        [(); S - 1]:,
+    {
+        RowChunkDataTarget::<S> {
+            left_boundary_row: self.left_boundary_row_target(),
+            right_boundary_row: self.right_boundary_row_target(),
+            chunk_outputs: UniversalQueryOutputWires {
+                tree_hash: self.tree_hash_target(),
+                values: OutputValuesTarget::from_targets(self.to_values_raw()),
+                count: self.num_matching_rows_target(),
+                num_overflows: self.overflow_flag_target().target,
+            },
+        }
+    }
+
+    /// Build an instance of `RowChunkDataTarget` from `self`; if `is_non_dummy_chunk` is
+    /// `false`, then build an instance of `RowChunkDataTarget` for a dummy chunk
+    pub(crate) fn to_dummy_row_chunk_target(
+        &self,
+        b: &mut CBuilder,
+        is_non_dummy_chunk: BoolTarget,
+    ) -> RowChunkDataTarget<S>
+    where
+        [(); S - 1]:,
+    {
+        let dummy_values = compute_dummy_output_targets(b, &self.operation_ids_target());
+        let output_values = self
+            .to_values_raw()
+            .iter()
+            .zip_eq(&dummy_values)
+            .map(|(&value, &dummy_value)| b.select(is_non_dummy_chunk, value, dummy_value))
+            .collect_vec();
+
+        RowChunkDataTarget::<S> {
+            left_boundary_row: self.left_boundary_row_target(),
+            right_boundary_row: self.right_boundary_row_target(),
+            chunk_outputs: UniversalQueryOutputWires {
+                tree_hash: self.tree_hash_target(),
+                values: OutputValuesTarget::from_targets(&output_values),
+                // `count` is zeroed if chunk is dummy
+                count: b.mul(self.num_matching_rows_target(), is_non_dummy_chunk.target),
+                num_overflows: self.overflow_flag_target().target,
+            },
+        }
+    }
+
+    pub fn min_secondary_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_min_secondary_raw())
+    }
+
+    pub fn max_secondary_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_max_secondary_raw())
+    }
+}
+
+impl<const S: usize> PublicInputsUniversalCircuit<'_, Target, S> {
+    pub fn secondary_index_value_target(&self) -> UInt256Target {
+        // secondary index value is found in `self.min_s` for
+        // `PublicInputsUniversalCircuit`
+        UInt256Target::from_targets(self.min_s)
+    }
+
+    pub fn primary_index_value_target(&self) -> UInt256Target {
+        // primary index value is found in `self.max_s` for
+        // `PublicInputsUniversalCircuit`
+        UInt256Target::from_targets(self.max_s)
+    }
+}
+
+impl<const S: usize, const UNIVERSAL_CIRCUIT: bool> PublicInputsFactory<'_, F, S, UNIVERSAL_CIRCUIT>
 where
     [(); S - 1]:,
 {
@@ -394,28 +551,12 @@ where
         self.to_ops_raw().try_into().unwrap()
     }
 
-    pub fn index_value(&self) -> U256 {
-        U256::from_fields(self.to_index_value_raw())
+    pub fn min_primary(&self) -> U256 {
+        U256::from_fields(self.to_min_primary_raw())
     }
 
-    pub fn min_value(&self) -> U256 {
-        U256::from_fields(self.to_min_value_raw())
-    }
-
-    pub fn max_value(&self) -> U256 {
-        U256::from_fields(self.to_max_value_raw())
-    }
-
-    pub fn index_ids(&self) -> [F; 2] {
-        self.to_index_ids_raw().try_into().unwrap()
-    }
-
-    pub fn min_query_value(&self) -> U256 {
-        U256::from_fields(self.to_min_query_raw())
-    }
-
-    pub fn max_query_value(&self) -> U256 {
-        U256::from_fields(self.to_max_query_raw())
+    pub fn max_primary(&self) -> U256 {
+        U256::from_fields(self.to_max_primary_raw())
     }
 
     pub fn overflow_flag(&self) -> bool {
@@ -433,9 +574,32 @@ where
     }
 }
 
-#[cfg(test)]
-mod tests {
+impl<const S: usize> PublicInputsQueryCircuits<'_, F, S> {
+    pub fn min_secondary(&self) -> U256 {
+        U256::from_fields(self.to_min_secondary_raw())
+    }
 
+    pub fn max_secondary(&self) -> U256 {
+        U256::from_fields(self.to_max_secondary_raw())
+    }
+}
+
+impl<const S: usize> PublicInputsUniversalCircuit<'_, F, S> {
+    pub fn secondary_index_value(&self) -> U256 {
+        // secondary index value is found in `self.min_s` for
+        // `PublicInputsUniversalCircuit`
+        U256::from_fields(self.min_s)
+    }
+
+    pub fn primary_index_value(&self) -> U256 {
+        // primary index value is found in `self.max_s` for
+        // `PublicInputsUniversalCircuit`
+        U256::from_fields(self.max_s)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
     use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields, C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
@@ -449,9 +613,7 @@ mod tests {
         plonk::circuit_builder::CircuitBuilder,
     };
 
-    use crate::query::public_inputs::QueryPublicInputs;
-
-    use super::PublicInputs;
+    use super::{PublicInputsQueryCircuits, QueryPublicInputs};
 
     const S: usize = 10;
     #[derive(Clone, Debug)]
@@ -463,8 +625,10 @@ mod tests {
         type Wires = Vec<Target>;
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let targets = c.add_virtual_target_arr::<{ PublicInputs::<Target, S>::total_len() }>();
-            let pi_targets = PublicInputs::<Target, S>::from_slice(targets.as_slice());
+            let targets = c
+                .add_virtual_target_arr::<{ PublicInputsQueryCircuits::<Target, S>::total_len() }>(
+                );
+            let pi_targets = PublicInputsQueryCircuits::<Target, S>::from_slice(targets.as_slice());
             pi_targets.register_args(c);
             pi_targets.to_vec()
         }
@@ -475,60 +639,65 @@ mod tests {
     }
 
     #[test]
-    fn test_query_public_inputs() {
-        let pis_raw: Vec<F> = random_vector::<u32>(PublicInputs::<F, S>::total_len()).to_fields();
-        let pis = PublicInputs::<F, S>::from_slice(pis_raw.as_slice());
+    fn test_batching_query_public_inputs() {
+        let pis_raw: Vec<F> =
+            random_vector::<u32>(PublicInputsQueryCircuits::<F, S>::total_len()).to_fields();
+        let pis = PublicInputsQueryCircuits::<F, S>::from_slice(pis_raw.as_slice());
         // check public inputs are constructed correctly
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::TreeHash)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::TreeHash)],
             pis.to_hash_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::OutputValues)],
             pis.to_values_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::NumMatching)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::NumMatching)],
             &[*pis.to_count_raw()],
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::OpIds)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::OpIds)],
             pis.to_ops_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::IndexValue)],
-            pis.to_index_value_raw(),
+            &pis_raw
+                [PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::LeftBoundaryRow)],
+            pis.to_left_row_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::MinValue)],
-            pis.to_min_value_raw(),
+            &pis_raw
+                [PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::RightBoundaryRow)],
+            pis.to_right_row_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::MaxValue)],
-            pis.to_max_value_raw(),
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::MinPrimary)],
+            pis.to_min_primary_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::MinQuery)],
-            pis.to_min_query_raw(),
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::MaxPrimary)],
+            pis.to_max_primary_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::MaxQuery)],
-            pis.to_max_query_raw(),
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::MinSecondary)],
+            pis.to_min_secondary_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::IndexIds)],
-            pis.to_index_ids_raw(),
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::MaxSecondary)],
+            pis.to_max_secondary_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::Overflow)],
+            &pis_raw[PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::Overflow)],
             &[*pis.to_overflow_raw()],
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::ComputationalHash)],
+            &pis_raw
+                [PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::ComputationalHash)],
             pis.to_computational_hash_raw(),
         );
         assert_eq!(
-            &pis_raw[PublicInputs::<F, S>::to_range(QueryPublicInputs::PlaceholderHash)],
+            &pis_raw
+                [PublicInputsQueryCircuits::<F, S>::to_range(QueryPublicInputs::PlaceholderHash)],
             pis.to_placeholder_hash_raw(),
         );
         // use public inputs in circuit

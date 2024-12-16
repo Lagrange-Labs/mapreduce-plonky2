@@ -10,34 +10,31 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::QueryBounds,
-    batching::{
-        public_inputs::PublicInputs,
-        row_chunk,
-        row_process_gadget::{RowProcessingGadgetInputWires, RowProcessingGadgetInputs},
-    },
     computational_hash_ids::ColumnIDs,
+    pi_len,
+    public_inputs::PublicInputsQueryCircuits,
+    row_chunk_gadgets::{
+        aggregate_chunks::aggregate_chunks,
+        row_process_gadget::{RowProcessingGadgetInputWires, RowProcessingGadgetInputs},
+        RowChunkDataTarget,
+    },
     universal_circuit::{
         universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure},
         universal_query_gadget::{
             OutputComponent, UniversalQueryHashInputWires, UniversalQueryHashInputs,
         },
     },
+    utils::QueryBounds,
 };
 
 use mp2_common::{
     public_inputs::PublicInputCommon,
     serialization::{deserialize_long_array, serialize_long_array},
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
     D, F,
 };
 
-use self::row_chunk::{aggregate_chunks::aggregate_chunks, RowChunkDataTarget};
-
 use anyhow::{ensure, Result};
-
-use super::api::num_io;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RowChunkProcessingWires<
@@ -67,8 +64,6 @@ pub struct RowChunkProcessingWires<
         MAX_NUM_RESULTS,
         T,
     >,
-    min_query_primary: UInt256Target,
-    max_query_primary: UInt256Target,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -193,15 +188,11 @@ where
         T,
     > {
         let query_input_wires = UniversalQueryHashInputs::build(b);
-        let [min_query_primary, max_query_primary] = b.add_virtual_u256_arr_unsafe(); // unsafe should be ok since
-                                                                                      // we are exposing these values as public inputs
         let first_row_wires = RowProcessingGadgetInputs::build(
             b,
             &query_input_wires.input_wires,
             &query_input_wires.min_secondary,
             &query_input_wires.max_secondary,
-            &min_query_primary,
-            &max_query_primary,
         );
         // enforce first row is non-dummy
         b.assert_one(
@@ -222,8 +213,6 @@ where
                 &query_input_wires.input_wires,
                 &query_input_wires.min_secondary,
                 &query_input_wires.max_secondary,
-                &min_query_primary,
-                &max_query_primary,
             );
             row_inputs.push(RowProcessingGadgetInputWires::from(&row_wires));
             let is_second_non_dummy = row_wires.value_wires.input_wires.is_non_dummy_row;
@@ -232,7 +221,10 @@ where
                 b,
                 &chunk,
                 &current_chunk,
-                (&min_query_primary, &max_query_primary),
+                (
+                    &query_input_wires.input_wires.min_query_primary,
+                    &query_input_wires.input_wires.max_query_primary,
+                ),
                 (
                     &query_input_wires.min_secondary,
                     &query_input_wires.max_secondary,
@@ -251,15 +243,15 @@ where
             b.is_not_equal(num_overflows, zero)
         };
 
-        PublicInputs::<Target, MAX_NUM_RESULTS>::new(
+        PublicInputsQueryCircuits::<Target, MAX_NUM_RESULTS>::new(
             &row_chunk.chunk_outputs.tree_hash.to_targets(),
             &row_chunk.chunk_outputs.values.to_targets(),
             &[row_chunk.chunk_outputs.count],
             &query_input_wires.agg_ops_ids,
             &row_chunk.left_boundary_row.to_targets(),
             &row_chunk.right_boundary_row.to_targets(),
-            &min_query_primary.to_targets(),
-            &max_query_primary.to_targets(),
+            &query_input_wires.input_wires.min_query_primary.to_targets(),
+            &query_input_wires.input_wires.max_query_primary.to_targets(),
             &query_input_wires.min_secondary.to_targets(),
             &query_input_wires.max_secondary.to_targets(),
             &[overflow.target],
@@ -271,8 +263,6 @@ where
         RowChunkProcessingWires {
             row_inputs: row_inputs.try_into().unwrap(),
             universal_query_inputs: query_input_wires.input_wires,
-            min_query_primary,
-            max_query_primary,
         }
     }
 
@@ -296,22 +286,6 @@ where
             .for_each(|(value, target)| value.assign(pw, target));
         self.universal_query_inputs
             .assign(pw, &wires.universal_query_inputs);
-        [
-            (self.min_query_primary, &wires.min_query_primary),
-            (self.max_query_primary, &wires.max_query_primary),
-        ]
-        .into_iter()
-        .for_each(|(value, target)| pw.set_u256_target(target, value));
-    }
-
-    /// This method returns the ids of the placeholders employed to compute the placeholder hash,
-    /// in the same order, so that those ids can be provided as input to other circuits that need
-    /// to recompute this hash
-    #[cfg(test)] // only used in test for now
-    pub(crate) fn ids_for_placeholder_hash(
-        &self,
-    ) -> Vec<crate::query::universal_circuit::universal_circuit_inputs::PlaceholderId> {
-        self.universal_query_inputs.ids_for_placeholder_hash()
     }
 }
 
@@ -354,7 +328,7 @@ where
         T,
     >;
 
-    const NUM_PUBLIC_INPUTS: usize = num_io::<MAX_NUM_RESULTS>();
+    const NUM_PUBLIC_INPUTS: usize = pi_len::<MAX_NUM_RESULTS>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -397,22 +371,18 @@ mod tests {
     use rand::thread_rng;
 
     use crate::query::{
-        aggregation::{
-            tests::aggregate_output_values, ChildPosition, QueryBoundSource, QueryBounds,
-        },
-        batching::{
-            circuits::{
-                row_chunk_processing::RowChunkProcessingCircuit,
-                tests::{build_test_tree, compute_output_values_for_row},
-            },
-            public_inputs::PublicInputs,
-            row_chunk::tests::{BoundaryRowData, BoundaryRowNodeInfo},
-            row_process_gadget::RowProcessingGadgetInputs,
+        circuits::{
+            row_chunk_processing::{RowChunkProcessingCircuit, UniversalQueryHashInputs},
+            tests::{build_test_tree, compute_output_values_for_row},
         },
         computational_hash_ids::{
             AggregationOperation, ColumnIDs, Identifiers, Operation, PlaceholderIdentifier,
         },
-        merkle_path::{tests::NeighborInfo, MerklePathWithNeighborsGadget},
+        merkle_path::{MerklePathWithNeighborsGadget, NeighborInfo},
+        public_inputs::PublicInputsQueryCircuits,
+        row_chunk_gadgets::{
+            row_process_gadget::RowProcessingGadgetInputs, BoundaryRowData, BoundaryRowNodeInfo,
+        },
         universal_circuit::{
             output_no_aggregation::Circuit as NoAggOutputCircuit,
             output_with_aggregation::Circuit as AggOutputCircuit,
@@ -424,6 +394,7 @@ mod tests {
             universal_query_gadget::CurveOrU256,
             ComputationalHash,
         },
+        utils::{tests::aggregate_output_values, ChildPosition, QueryBoundSource, QueryBounds},
     };
 
     use super::{OutputComponent, RowChunkProcessingWires};
@@ -792,13 +763,22 @@ mod tests {
         .unwrap();
 
         // compute placeholder hash for `circuit`
-        let placeholder_hash_ids = circuit.ids_for_placeholder_hash();
+        let placeholder_hash_ids = UniversalQueryHashInputs::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+            AggOutputCircuit<MAX_NUM_RESULTS>,
+        >::ids_for_placeholder_hash(
+            &predicate_operations, &results, &placeholders, &bounds
+        )
+        .unwrap();
         let placeholder_hash =
             placeholder_hash(&placeholder_hash_ids, &placeholders, &bounds).unwrap();
 
         let proof = run_circuit::<F, D, C, _>(circuit);
         // check public inputs
-        let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+        let pis = PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
 
         let root = node_1.node.compute_node_hash(primary_index);
         assert_eq!(root, pis.tree_hash(),);
@@ -1338,13 +1318,25 @@ mod tests {
         .unwrap();
 
         // compute placeholder hash for `circuit`
-        let placeholder_hash_ids = circuit.ids_for_placeholder_hash();
+        let placeholder_hash_ids = UniversalQueryHashInputs::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+            NoAggOutputCircuit<MAX_NUM_RESULTS>,
+        >::ids_for_placeholder_hash(
+            &predicate_operations,
+            &results,
+            &placeholders,
+            &query_bounds,
+        )
+        .unwrap();
         let placeholder_hash =
             placeholder_hash(&placeholder_hash_ids, &placeholders, &query_bounds).unwrap();
 
         let proof = run_circuit::<F, D, C, _>(circuit);
         // check public inputs
-        let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+        let pis = PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
 
         let root = node_1.node.compute_node_hash(primary_index);
         assert_eq!(root, pis.tree_hash(),);

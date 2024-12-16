@@ -1,14 +1,9 @@
 //! Module including the revelation circuits for query
 
-use crate::{ivc::NUM_IO, query::pi_len as query_pi_len};
+use crate::ivc::NUM_IO;
 use mp2_common::F;
 
-#[cfg(feature = "batching_circuits")]
-use crate::query::batching::circuits::api::num_io as num_batching_io;
-
 pub mod api;
-#[cfg(feature = "batching_circuits")]
-mod batching;
 pub(crate) mod placeholders_check;
 mod public_inputs;
 mod revelation_unproven_offset;
@@ -25,19 +20,6 @@ pub const fn pi_len<const L: usize, const S: usize, const PH: usize>() -> usize 
 }
 pub const NUM_PREPROCESSING_IO: usize = NUM_IO;
 
-#[cfg(feature = "batching_circuits")]
-pub const fn num_query_io_no_results_tree<const S: usize>() -> usize {
-    num_batching_io::<S>()
-}
-
-#[cfg(not(feature = "batching_circuits"))]
-pub const fn num_query_io_no_results_tree<const S: usize>() -> usize {
-    query_pi_len::<S>()
-}
-
-pub const fn num_query_io<const S: usize>() -> usize {
-    query_pi_len::<S>()
-}
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

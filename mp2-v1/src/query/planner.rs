@@ -19,8 +19,8 @@ use ryhope::{
 use std::{fmt::Debug, future::Future};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql, NoTls};
 use verifiable_db::query::{
-    aggregation::{ChildPosition, NodeInfo, QueryBounds},
-    batching::TreePathInputs,
+    api::TreePathInputs,
+    utils::{ChildPosition, NodeInfo, QueryBounds},
 };
 
 use crate::indexing::{
@@ -65,7 +65,7 @@ impl<'a, C: ContextProvider> NonExistenceInput<'a, C> {
         }
     }
 
-    pub(crate) async fn find_row_node_for_non_existence(
+    pub async fn find_row_node_for_non_existence(
         &self,
         primary: BlockPrimaryIndex,
     ) -> anyhow::Result<RowTreeKey> {
@@ -375,50 +375,6 @@ impl<
     }
 }
 
-/// Returns the proving plan to prove the non existence of node of the query in this row tree at
-/// the epoch primary. It also returns the leaf node chosen.
-///
-/// The row tree is given and specialized to psql storage since that is the only official storage
-/// supported.
-/// The  `table_name` must be the one given to parsil settings, it is the human friendly table
-/// name, i.e. the vTable name.
-/// The pool is to issue specific query
-/// Primary is indicating the primary index over which this row tree is looked at.
-/// Settings are the parsil settings corresponding to the current SQL and current table looked at.
-/// Pis contain the bounds and placeholders values.
-/// TODO: we should extend ryhope to offer this API directly on the tree since it's very related.
-pub async fn proving_plan_for_non_existence<C>(
-    row_tree: &MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
-    table_name: String,
-    pool: &DBPool,
-    primary: BlockPrimaryIndex,
-    settings: &ParsilSettings<C>,
-    bounds: &QueryBounds,
-) -> anyhow::Result<(RowTreeKey, UpdateTree<RowTreeKey>)>
-where
-    C: ContextProvider,
-{
-    let to_be_proven_node = {
-        let input = NonExistenceInput {
-            row_tree,
-            table_name,
-            pool,
-            settings,
-            bounds: bounds.clone(),
-        };
-        input.find_row_node_for_non_existence(primary).await
-    }?;
-
-    let path = row_tree
-        // since the epoch starts at genesis we can directly give the block number !
-        .lineage_at(&to_be_proven_node, primary as Epoch)
-        .await
-        .expect("node doesn't have a lineage?")
-        .into_full_path()
-        .collect_vec();
-    let proving_tree = UpdateTree::from_paths([path], primary as Epoch);
-    Ok((to_be_proven_node.clone(), proving_tree))
-}
 /// Fetch a key `k` from a tree, assuming that the key is in the
 /// tree. Therefore, it handles differently the case when `k` is not found:
 /// - If `T::WIDE_LINEAGE` is true, then `k` might not be found because the

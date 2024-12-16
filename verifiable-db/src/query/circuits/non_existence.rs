@@ -22,20 +22,19 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::{output_computation::compute_dummy_output_targets, QueryBounds},
-    batching::{
-        public_inputs::PublicInputs,
-        row_chunk::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget},
-    },
+    api::TreePathInputs,
     merkle_path::{
         MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs, NeighborInfoTarget,
     },
+    output_computation::compute_dummy_output_targets,
+    pi_len,
+    public_inputs::PublicInputsQueryCircuits,
+    row_chunk_gadgets::{BoundaryRowDataTarget, BoundaryRowNodeInfoTarget},
     universal_circuit::{
         ComputationalHash, ComputationalHashTarget, PlaceholderHash, PlaceholderHashTarget,
     },
+    utils::QueryBounds,
 };
-
-use super::api::{num_io, TreePathInputs};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NonExistenceWires<const INDEX_TREE_MAX_DEPTH: usize, const MAX_NUM_RESULTS: usize>
@@ -190,7 +189,7 @@ where
         // can be dummy values since they are un-used in this circuit
         let min_secondary = b.zero_u256();
         let max_secondary = b.constant_u256(U256::MAX);
-        PublicInputs::<Target, MAX_NUM_RESULTS>::new(
+        PublicInputsQueryCircuits::<Target, MAX_NUM_RESULTS>::new(
             &index_path.root.to_targets(),
             &outputs,
             &[zero], // there are no matching rows
@@ -254,7 +253,7 @@ where
 
     type Inputs = NonExistenceCircuit<INDEX_TREE_MAX_DEPTH, MAX_NUM_RESULTS>;
 
-    const NUM_PUBLIC_INPUTS: usize = num_io::<MAX_NUM_RESULTS>();
+    const NUM_PUBLIC_INPUTS: usize = pi_len::<MAX_NUM_RESULTS>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -289,18 +288,15 @@ mod tests {
 
     use crate::{
         query::{
-            aggregation::{
-                output_computation::tests::compute_dummy_output_values, ChildPosition, QueryBounds,
-            },
-            batching::{
-                circuits::api::TreePathInputs,
-                public_inputs::{tests::gen_values_in_range, PublicInputs},
-                row_chunk::tests::{BoundaryRowData, BoundaryRowNodeInfo},
-            },
-            merkle_path::tests::{generate_test_tree, NeighborInfo},
+            api::TreePathInputs,
+            merkle_path::{tests::generate_test_tree, NeighborInfo},
+            output_computation::tests::compute_dummy_output_values,
+            public_inputs::PublicInputsQueryCircuits,
+            row_chunk_gadgets::{BoundaryRowData, BoundaryRowNodeInfo},
             universal_circuit::universal_circuit_inputs::Placeholders,
+            utils::{ChildPosition, QueryBounds},
         },
-        test_utils::random_aggregation_operations,
+        test_utils::{gen_values_in_range, random_aggregation_operations},
     };
 
     use super::{NonExistenceCircuit, NonExistenceWires};
@@ -364,7 +360,8 @@ mod tests {
                                    expected_index_node_info: BoundaryRowNodeInfo,
                                    expected_query_bounds: &QueryBounds,
                                    test_name: &str| {
-            let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+            let pis =
+                PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
             assert_eq!(
                 pis.tree_hash(),
                 expected_root,

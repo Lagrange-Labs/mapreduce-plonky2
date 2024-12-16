@@ -22,11 +22,10 @@ use plonky2::{
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
-use crate::query::batching::{
-    public_inputs::PublicInputs, row_chunk::aggregate_chunks::aggregate_chunks,
+use crate::query::{
+    pi_len, public_inputs::PublicInputsQueryCircuits,
+    row_chunk_gadgets::aggregate_chunks::aggregate_chunks,
 };
-
-use super::api::num_io;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkAggregationWires<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize> {
@@ -50,7 +49,7 @@ impl<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize>
 {
     pub(crate) fn build(
         b: &mut CircuitBuilder<F, D>,
-        chunk_proofs: &[PublicInputs<Target, MAX_NUM_RESULTS>; NUM_CHUNKS],
+        chunk_proofs: &[PublicInputsQueryCircuits<Target, MAX_NUM_RESULTS>; NUM_CHUNKS],
     ) -> ChunkAggregationWires<NUM_CHUNKS, MAX_NUM_RESULTS>
     where
         [(); MAX_NUM_RESULTS - 1]:,
@@ -114,7 +113,7 @@ impl<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS: usize>
             b.is_not_equal(row_chunk.chunk_outputs.num_overflows, zero)
         };
 
-        PublicInputs::<Target, MAX_NUM_RESULTS>::new(
+        PublicInputsQueryCircuits::<Target, MAX_NUM_RESULTS>::new(
             &row_chunk.chunk_outputs.tree_hash.to_targets(),
             &row_chunk.chunk_outputs.values.to_targets(),
             &[row_chunk.chunk_outputs.count],
@@ -156,14 +155,15 @@ where
 
     type Inputs = ChunkAggregationCircuit<NUM_CHUNKS, MAX_NUM_RESULTS>;
 
-    const NUM_PUBLIC_INPUTS: usize = num_io::<MAX_NUM_RESULTS>();
+    const NUM_PUBLIC_INPUTS: usize = pi_len::<MAX_NUM_RESULTS>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
         verified_proofs: [&ProofWithPublicInputsTarget<D>; NUM_CHUNKS],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let pis = verified_proofs.map(|proof| PublicInputs::from_slice(&proof.public_inputs));
+        let pis = verified_proofs
+            .map(|proof| PublicInputsQueryCircuits::from_slice(&proof.public_inputs));
         ChunkAggregationCircuit::build(builder, &pis)
     }
 
@@ -200,10 +200,10 @@ mod tests {
 
     use crate::{
         query::{
-            aggregation::tests::aggregate_output_values,
-            batching::public_inputs::PublicInputs,
             computational_hash_ids::{AggregationOperation, Identifiers},
+            public_inputs::PublicInputsQueryCircuits,
             universal_circuit::universal_query_gadget::OutputValues,
+            utils::tests::aggregate_output_values,
         },
         test_utils::random_aggregation_operations,
     };
@@ -251,11 +251,13 @@ mod tests {
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let raw_pis = array::from_fn(|_| {
-                c.add_virtual_targets(PublicInputs::<Target, MAX_NUM_RESULTS>::total_len())
+                c.add_virtual_targets(
+                    PublicInputsQueryCircuits::<Target, MAX_NUM_RESULTS>::total_len(),
+                )
             });
             let pis = raw_pis
                 .iter()
-                .map(|pi| PublicInputs::from_slice(pi))
+                .map(|pi| PublicInputsQueryCircuits::from_slice(pi))
                 .collect_vec()
                 .try_into()
                 .unwrap();
@@ -285,9 +287,13 @@ mod tests {
             // if we test with dummy chunks to be aggregated, we generate `ACTUAL_NUM_CHUNKS <= NUM_CHUNKS`
             // inputs, so that the remaining `NUM_CHUNKS - ACTUAL_NUM_CHUNKS` input slots are dummies
             const NUM_ACTUAL_CHUNKS: usize = 3;
-            PublicInputs::<F, MAX_NUM_RESULTS>::sample_from_ops::<NUM_ACTUAL_CHUNKS>(&ops).to_vec()
+            PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::sample_from_ops::<NUM_ACTUAL_CHUNKS>(
+                &ops,
+            )
+            .to_vec()
         } else {
-            PublicInputs::<F, MAX_NUM_RESULTS>::sample_from_ops::<NUM_CHUNKS>(&ops).to_vec()
+            PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::sample_from_ops::<NUM_CHUNKS>(&ops)
+                .to_vec()
         };
 
         let circuit = TestChunkAggregationCircuit::<NUM_CHUNKS, MAX_NUM_RESULTS>::new(&raw_pis);
@@ -296,7 +302,7 @@ mod tests {
 
         let input_pis = raw_pis
             .iter()
-            .map(|pi| PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(pi))
+            .map(|pi| PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::from_slice(pi))
             .collect_vec();
 
         let (expected_outputs, expected_overflow) = {
@@ -328,7 +334,8 @@ mod tests {
         let expected_left_row = input_pis[0].to_left_row_raw();
         let expected_right_row = input_pis.last().unwrap().to_right_row_raw();
 
-        let result_pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
+        let result_pis =
+            PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
 
         // check public inputs
         assert_eq!(

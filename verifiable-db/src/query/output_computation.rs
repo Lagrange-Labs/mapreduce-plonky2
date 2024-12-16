@@ -2,11 +2,9 @@
 
 use crate::query::{
     computational_hash_ids::{AggregationOperation, Identifiers},
-    public_inputs::PublicInputs,
     universal_circuit::universal_query_gadget::{CurveOrU256Target, OutputValuesTarget},
 };
 use alloy::primitives::U256;
-use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     group_hashing::CircuitBuilderGroupHashing,
@@ -153,42 +151,18 @@ where
     }
 }
 
-/// Compute the node output item at the specified index by the proofs,
-/// and return the output item with the overflow number.
-pub(crate) fn compute_output_item<const S: usize>(
-    b: &mut CBuilder,
-    i: usize,
-    proofs: &[&PublicInputs<Target, S>],
-) -> (Vec<Target>, Target)
-where
-    [(); S - 1]:,
-{
-    let proof0 = &proofs[0];
-    let op = proof0.operation_ids_target()[i];
-
-    // Check that the all proofs are employing the same aggregation operation.
-    proofs[1..]
-        .iter()
-        .for_each(|p| b.connect(p.operation_ids_target()[i], op));
-
-    let outputs = proofs
-        .iter()
-        .map(|p| OutputValuesTarget::from_targets(p.to_values_raw()))
-        .collect_vec();
-
-    OutputValuesTarget::aggregate_outputs(b, &outputs, op, i)
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::{
         query::{
-            aggregation::tests::compute_output_item_value, pi_len,
+            pi_len, public_inputs::PublicInputsQueryCircuits,
             universal_circuit::universal_query_gadget::CurveOrU256,
+            utils::tests::compute_output_item_value,
         },
-        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
+        test_utils::random_aggregation_operations,
     };
+    use itertools::Itertools;
     use mp2_common::{types::CURVE_TARGET_LEN, u256::NUM_LIMBS, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
@@ -197,6 +171,32 @@ pub(crate) mod tests {
     };
     use plonky2_ecgfp5::curve::curve::Point;
     use std::array;
+
+    /// Compute the node output item at the specified index by the proofs,
+    /// and return the output item with the overflow number.
+    pub(crate) fn compute_output_item<const S: usize>(
+        b: &mut CBuilder,
+        i: usize,
+        proofs: &[&PublicInputsQueryCircuits<Target, S>],
+    ) -> (Vec<Target>, Target)
+    where
+        [(); S - 1]:,
+    {
+        let proof0 = &proofs[0];
+        let op = proof0.operation_ids_target()[i];
+
+        // Check that the all proofs are employing the same aggregation operation.
+        proofs[1..]
+            .iter()
+            .for_each(|p| b.connect(p.operation_ids_target()[i], op));
+
+        let outputs = proofs
+            .iter()
+            .map(|p| OutputValuesTarget::from_targets(p.to_values_raw()))
+            .collect_vec();
+
+        OutputValuesTarget::aggregate_outputs(b, &outputs, op, i)
+    }
 
     /// Compute the dummy values for each of the `S` values to be returned as output.
     /// It's the test function corresponding to `compute_dummy_output_targets`.
@@ -271,7 +271,8 @@ pub(crate) mod tests {
             });
 
             // Build the public inputs.
-            let pis = [0; PROOF_NUM].map(|i| PublicInputs::<Target, S>::from_slice(&proofs[i]));
+            let pis = [0; PROOF_NUM]
+                .map(|i| PublicInputsQueryCircuits::<Target, S>::from_slice(&proofs[i]));
             let pis = [0; PROOF_NUM].map(|i| &pis[i]);
 
             // Check if the outputs as expected.
@@ -308,7 +309,8 @@ pub(crate) mod tests {
         [(); S - 1]:,
     {
         fn new(proofs: [Vec<F>; PROOF_NUM]) -> Self {
-            let pis = [0; PROOF_NUM].map(|i| PublicInputs::<F, S>::from_slice(&proofs[i]));
+            let pis =
+                [0; PROOF_NUM].map(|i| PublicInputsQueryCircuits::<F, S>::from_slice(&proofs[i]));
             let pis = [0; PROOF_NUM].map(|i| &pis[i]);
 
             let exp_outputs = array::from_fn(|i| {
@@ -333,7 +335,7 @@ pub(crate) mod tests {
         let ops: [_; S] = random_aggregation_operations();
 
         // Build the input proofs.
-        let inputs = random_aggregation_public_inputs(&ops);
+        let inputs = PublicInputsQueryCircuits::<F, S>::sample_from_ops(&ops);
 
         // Construct the test circuit.
         let test_circuit = TestOutputComputationCircuit::<S, PROOF_NUM>::new(inputs);
@@ -354,7 +356,7 @@ pub(crate) mod tests {
         ops[0] = Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field();
 
         // Build the input proofs.
-        let inputs = random_aggregation_public_inputs(&ops);
+        let inputs = PublicInputsQueryCircuits::<F, S>::sample_from_ops(&ops);
 
         // Construct the test circuit.
         let test_circuit = TestOutputComputationCircuit::<S, PROOF_NUM>::new(inputs);
