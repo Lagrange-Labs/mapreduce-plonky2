@@ -191,11 +191,17 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA: usize>
                 4 => event_contract.testTwoData().into_transaction_request(),
                 _ => unreachable!(),
             };
+            let random_two = match (0..5).sample_single(&mut rng) {
+                0 => event_contract.testEmit().into_transaction_request(),
+                1 => event_contract.testTwoIndexed().into_transaction_request(),
+                2 => event_contract.testThreeIndexed().into_transaction_request(),
+                3 => event_contract.testOneData().into_transaction_request(),
+                4 => event_contract.testTwoData().into_transaction_request(),
+                _ => unreachable!(),
+            };
             let tx_req = match i % 4 {
                 0 => random,
-                1 => event_contract
-                    .twoEmits(U256::from((0..5).sample_single(&mut rng)))
-                    .into_transaction_request(),
+                1 => random_two,
                 2 => other_contract.otherEmit().into_transaction_request(),
                 3 => other_contract.twoEmits().into_transaction_request(),
                 _ => unreachable!(),
@@ -219,31 +225,33 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA: usize>
             pending_tx_builders.push(rpc.send_transaction(tx_req_final).await.unwrap());
         }
 
-        // Finally we guarantee at least one of the event we are going to query for
-        let queried_event_req = match (NO_TOPICS, MAX_DATA) {
-            (1, 0) => event_contract.testEmit().into_transaction_request(),
-            (2, 0) => event_contract.testTwoIndexed().into_transaction_request(),
-            (3, 0) => event_contract.testThreeIndexed().into_transaction_request(),
-            (3, 1) => event_contract.testOneData().into_transaction_request(),
-            (3, 2) => event_contract.testTwoData().into_transaction_request(),
-            _ => unreachable!(),
-        };
+        // Finally we guarantee at least three of the event we are going to query for
+        for _ in 0..3 {
+            let queried_event_req = match (NO_TOPICS, MAX_DATA) {
+                (1, 0) => event_contract.testEmit().into_transaction_request(),
+                (2, 0) => event_contract.testTwoIndexed().into_transaction_request(),
+                (3, 0) => event_contract.testThreeIndexed().into_transaction_request(),
+                (3, 1) => event_contract.testOneData().into_transaction_request(),
+                (3, 2) => event_contract.testTwoData().into_transaction_request(),
+                _ => unreachable!(),
+            };
 
-        let sender_address = Address::random();
-        let funding = U256::from(1e18 as u64);
-        rpc.anvil_set_balance(sender_address, funding)
-            .await
-            .unwrap();
-        rpc.anvil_auto_impersonate_account(true).await.unwrap();
-        let new_req = queried_event_req.with_from(sender_address);
-        let tx_req_final = rpc
-            .fill(new_req)
-            .await
-            .unwrap()
-            .as_builder()
-            .unwrap()
-            .clone();
-        pending_tx_builders.push(rpc.send_transaction(tx_req_final).await.unwrap());
+            let sender_address = Address::random();
+            let funding = U256::from(1e18 as u64);
+            rpc.anvil_set_balance(sender_address, funding)
+                .await
+                .unwrap();
+            rpc.anvil_auto_impersonate_account(true).await.unwrap();
+            let new_req = queried_event_req.with_from(sender_address);
+            let tx_req_final = rpc
+                .fill(new_req)
+                .await
+                .unwrap()
+                .as_builder()
+                .unwrap()
+                .clone();
+            pending_tx_builders.push(rpc.send_transaction(tx_req_final).await.unwrap());
+        }
 
         // Mine a block, it should include all the transactions created above.
         rpc.anvil_mine(Some(U256::from(1u8)), None).await.unwrap();
