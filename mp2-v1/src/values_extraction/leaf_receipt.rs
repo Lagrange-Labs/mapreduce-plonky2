@@ -362,7 +362,6 @@ where
                         .topics()
                         .contains(&B256::from(query.event.event_signature))
                 {
-                    println!("relevant offset: {}", logs_offset + log_off);
                     Some(logs_offset + log_off)
                 } else {
                     Some(0usize)
@@ -716,6 +715,7 @@ mod tests {
         circuit::{run_circuit, UserCircuit},
         mpt_sequential::generate_receipt_test_info,
     };
+
     #[derive(Clone, Debug)]
     struct TestReceiptLeafCircuit<const NODE_LEN: usize> {
         c: ReceiptLeafCircuit<NODE_LEN>,
@@ -739,13 +739,27 @@ mod tests {
     #[test]
     fn test_leaf_circuit() {
         const NODE_LEN: usize = 512;
+        test_leaf_circuit_helper::<1, 0, NODE_LEN>();
+        test_leaf_circuit_helper::<2, 0, NODE_LEN>();
+        test_leaf_circuit_helper::<3, 0, NODE_LEN>();
+        test_leaf_circuit_helper::<3, 1, NODE_LEN>();
+        test_leaf_circuit_helper::<3, 2, NODE_LEN>();
+    }
 
-        let receipt_proof_infos = generate_receipt_test_info();
+    fn test_leaf_circuit_helper<
+        const NO_TOPICS: usize,
+        const MAX_DATA: usize,
+        const NODE_LEN: usize,
+    >()
+    where
+        [(); PAD_LEN(NODE_LEN)]:,
+    {
+        let receipt_proof_infos = generate_receipt_test_info::<NO_TOPICS, MAX_DATA>();
         let proofs = receipt_proof_infos.proofs();
         let info = proofs.first().unwrap();
         let query = receipt_proof_infos.query();
 
-        let c = ReceiptLeafCircuit::<NODE_LEN>::new(info, query).unwrap();
+        let c = ReceiptLeafCircuit::<NODE_LEN>::new::<NO_TOPICS, MAX_DATA>(info, query).unwrap();
         let test_circuit = TestReceiptLeafCircuit { c };
 
         let node = info.mpt_proof.last().unwrap().clone();

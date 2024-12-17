@@ -209,9 +209,8 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> EventLogInfo<NO_TOPICS, MAX_
         // The event signature offset is after the header, the address and the topics list header.
         let sig_rel_offset = header_size + address_size + topics_header_len + 1;
 
-        let topics: [usize; NO_TOPICS] = create_array(|i| {
-            header_size + address_size + topics_header_len + (i + 1) * ENCODED_TOPIC_SIZE + 1
-        });
+        let topics: [usize; NO_TOPICS] =
+            create_array(|i| sig_rel_offset + (i + 1) * ENCODED_TOPIC_SIZE);
 
         let data: [usize; MAX_DATA] = create_array(|i| {
             header_size + address_size + topics_size + data_header_len + (i * MAX_DATA_SIZE)
@@ -737,8 +736,16 @@ mod test {
 
     #[test]
     fn test_receipt_query() -> Result<()> {
+        test_receipt_query_helper::<1, 0>()?;
+        test_receipt_query_helper::<2, 0>()?;
+        test_receipt_query_helper::<3, 0>()?;
+        test_receipt_query_helper::<3, 1>()?;
+        test_receipt_query_helper::<3, 2>()
+    }
+
+    fn test_receipt_query_helper<const NO_TOPICS: usize, const MAX_DATA: usize>() -> Result<()> {
         // Now for each transaction we fetch the block, then get the MPT Trie proof that the receipt is included and verify it
-        let test_info = generate_receipt_test_info();
+        let test_info = generate_receipt_test_info::<NO_TOPICS, MAX_DATA>();
         let proofs = test_info.proofs();
         let query = test_info.query();
         for proof in proofs.iter() {
