@@ -1,7 +1,9 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
-use anyhow::Result;
+use std::iter::once;
+
+use anyhow::{ensure, Result};
 use log::{debug, info};
 use mp2_v1::{
     contract_extraction,
@@ -14,6 +16,7 @@ use mp2_v1::{
     values_extraction::identifier_block_column,
 };
 use ryhope::storage::RoEpochKvStorage;
+use serde::{Deserialize, Serialize};
 
 use crate::common::{
     bindings::simple::Simple::{self, MappingChange, MappingOperation},
@@ -22,8 +25,8 @@ use crate::common::{
         identifier_for_mapping_key_column, identifier_for_mapping_value_column,
         identifier_single_var_column,
         table_source::{
-            LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs, MergeSource,
-            SingleValuesExtractionArgs, DEFAULT_ADDRESS,
+            ColumnInfo, LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs,
+            MergeSource, OffChainDataArgs, SingleValuesExtractionArgs, DEFAULT_ADDRESS,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
@@ -183,10 +186,10 @@ impl TableIndexing {
                 value_column,
                 source: source.clone(),
                 table,
-                contract,
-                contract_extraction: ContractExtractionArgs {
+                contract: Some(contract),
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
             },
             genesis_change,
         ))
@@ -267,10 +270,10 @@ impl TableIndexing {
                 value_column: "".to_string(),
                 source: source.clone(),
                 table,
-                contract,
-                contract_extraction: ContractExtractionArgs {
+                contract: Some(contract),
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
             },
             genesis_updates,
         ))
@@ -368,14 +371,91 @@ impl TableIndexing {
         Ok((
             Self {
                 value_column,
-                contract_extraction: ContractExtractionArgs {
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
-                contract,
+                }),
+                contract: Some(contract),
                 source,
                 table,
             },
             table_row_updates,
+        ))
+    }
+
+    pub(crate) async fn off_chain_test_case(
+        ctx: &mut TestContext,
+    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+        // build a table with the following columns:
+        // - "total_supply"
+        // - "conversion_rate"
+        // - "owner"
+        // - "token_id"
+        // where "owner" is the secondary index column and the pair of
+        // columns "(owner, token_id)" can be a primary key, that is
+        // they are sufficient to uniquely identify a row
+        const TABLE_NAME: &str = "Token Collection";
+        const SECONDARY_INDEX_COLUMN: &str = "owner";
+        const TOKEN_ID_COLUMN: &str = "token_id";
+        const REMAINING_COLUMN_NAMES: [&str; 2] = ["total_supply", "conversion_rate"];
+        let secondary_index_column = ColumnInfo::PrimaryKey(SECONDARY_INDEX_COLUMN.to_string());
+        let non_indexed_columns = [
+            ColumnInfo::PrimaryKey(TOKEN_ID_COLUMN.to_string()),
+            ColumnInfo::NoPrimaryKey(REMAINING_COLUMN_NAMES[0].to_string()),
+            ColumnInfo::NoPrimaryKey(REMAINING_COLUMN_NAMES[1].to_string()),
+        ];
+        let mut off_chain_data_args = OffChainDataArgs::new(
+            TABLE_NAME.to_string(),
+            secondary_index_column,
+            non_indexed_columns.to_vec(),
+        );
+        let genesis_updates = off_chain_data_args.init_data();
+        // Defining the columns structure of the table
+        let columns = TableColumns {
+            primary: TableColumn {
+                name: BLOCK_COLUMN_NAME.to_string(),
+                identifier: identifier_block_column(),
+                index: IndexType::Primary,
+                multiplier: false,
+            },
+            secondary: TableColumn {
+                name: SECONDARY_INDEX_COLUMN.to_string(),
+                identifier: off_chain_data_args.secondary_index_column_id(),
+                index: IndexType::Secondary,
+                // here important to put false since these are not coming from any "merged" table
+                multiplier: false,
+            },
+            rest: off_chain_data_args
+                .non_indexed_columns
+                .iter()
+                .map(|column_info| TableColumn {
+                    name: column_info.column_name().to_string(),
+                    identifier: off_chain_data_args.compute_column_id(column_info),
+                    index: IndexType::None,
+                    // here important to put false since these are not coming from any "merged" table
+                    multiplier: false,
+                })
+                .collect(),
+        };
+
+        let source = TableSource::OffChain(off_chain_data_args);
+        let index_genesis_epoch = source.latest_epoch(ctx).await;
+        let value_column = columns.rest[0].name.clone();
+        let table = Table::new(
+            index_genesis_epoch as u64,
+            "off_chain_table".to_string(),
+            columns,
+        )
+        .await;
+
+        Ok((
+            Self {
+                value_column,
+                contract_extraction: None,
+                contract: None,
+                source,
+                table,
+            },
+            genesis_updates,
         ))
     }
 
@@ -387,7 +467,7 @@ impl TableIndexing {
     ) -> Result<()> {
         // Call the contract function to set the test data.
         log::info!("Applying initial updates to contract done");
-        let bn = ctx.block_number().await as BlockPrimaryIndex;
+        let bn = self.source.latest_epoch(ctx).await;
 
         // we first run the initial preprocessing and db creation.
         let metadata_hash = self.run_mpt_preprocessing(ctx, bn).await?;
@@ -402,7 +482,7 @@ impl TableIndexing {
                 .source
                 .random_contract_update(ctx, &self.contract, ut)
                 .await;
-            let bn = ctx.block_number().await as BlockPrimaryIndex;
+            let bn = self.source.latest_epoch(ctx).await;
             log::info!("Applying follow up updates to contract done - now at block {bn}",);
             // we first run the initial preprocessing and db creation.
             // NOTE: we don't show copy on write here - the fact of only reproving what has been
@@ -426,7 +506,7 @@ impl TableIndexing {
         updates: Vec<TableRowUpdate<BlockPrimaryIndex>>,
         expected_metadata_hash: &HashOutput,
     ) -> Result<()> {
-        let current_block = ctx.block_number().await as BlockPrimaryIndex;
+        let current_block = self.source.latest_epoch(ctx).await as BlockPrimaryIndex;
         // apply the new cells to the trees
         // NOTE ONLY the rest of the cells, not including the secondary one !
         let mut rows_update = Vec::new();
@@ -561,70 +641,78 @@ impl TableIndexing {
         ctx: &mut TestContext,
         bn: BlockPrimaryIndex,
     ) -> Result<HashOutput> {
-        let contract_proof_key = ProofKey::ContractExtraction((self.contract.address, bn));
-        let contract_proof = match ctx.storage.get_proof_exact(&contract_proof_key) {
-            Ok(proof) => {
-                info!(
-                    "Loaded Contract Extraction (C.3) proof for block number {}",
-                    bn
-                );
-                proof
-            }
-            Err(_) => {
-                let contract_proof = ctx
-                    .prove_contract_extraction(
-                        &self.contract.address,
-                        self.contract_extraction.slot.clone(),
-                        bn,
-                    )
-                    .await;
-                ctx.storage
-                    .store_proof(contract_proof_key, contract_proof.clone())?;
-                info!(
-                    "Generated Contract Extraction (C.3) proof for block number {}",
-                    bn
-                );
-                {
-                    let pvk = ProofWithVK::deserialize(&contract_proof)?;
-                    let pis =
-                        contract_extraction::PublicInputs::from_slice(&pvk.proof().public_inputs);
-                    debug!(
-                        " CONTRACT storage root pis.storage_root() {:?}",
-                        hex::encode(
-                            pis.root_hash_field()
-                                .into_iter()
-                                .flat_map(|u| u.to_be_bytes())
-                                .collect::<Vec<_>>()
-                        )
+        // generate contract proof and block proof, unless we are in off-chain data test case, where those
+        // proofs are unnecessary
+        let (contract_proof, block_proof) = if let TableSource::OffChain(_) = &self.source {
+            (vec![], vec![]) // dummy buffers, we don't need these proofs in this case
+        } else {
+            let contract_proof_key =
+                ProofKey::ContractExtraction((self.contract.as_ref().unwrap().address, bn));
+            let contract_proof = match ctx.storage.get_proof_exact(&contract_proof_key) {
+                Ok(proof) => {
+                    info!(
+                        "Loaded Contract Extraction (C.3) proof for block number {}",
+                        bn
                     );
+                    proof
                 }
-                contract_proof
-            }
-        };
-
-        // We look if block proof has already been generated for this block
-        // since it is the same between proofs
-        let block_proof_key = ProofKey::BlockExtraction(bn as BlockPrimaryIndex);
-        let block_proof = match ctx.storage.get_proof_exact(&block_proof_key) {
-            Ok(proof) => {
-                info!(
-                    "Loaded Block Extraction (C.4) proof for block number {}",
-                    bn
-                );
-                proof
-            }
-            Err(_) => {
-                let proof = ctx
-                    .prove_block_extraction(bn as BlockPrimaryIndex)
-                    .await
-                    .unwrap();
-                ctx.storage.store_proof(block_proof_key, proof.clone())?;
-                info!(
-                    "Generated Block Extraction (C.4) proof for block number {}",
-                    bn
-                );
-                proof
-            }
+                Err(_) => {
+                    let contract_proof = ctx
+                        .prove_contract_extraction(
+                            &self.contract.as_ref().unwrap().address,
+                            self.contract_extraction.as_ref().unwrap().slot.clone(),
+                            bn,
+                        )
+                        .await;
+                    ctx.storage
+                        .store_proof(contract_proof_key, contract_proof.clone())?;
+                    info!(
+                        "Generated Contract Extraction (C.3) proof for block number {}",
+                        bn
+                    );
+                    {
+                        let pvk = ProofWithVK::deserialize(&contract_proof)?;
+                        let pis = contract_extraction::PublicInputs::from_slice(
+                            &pvk.proof().public_inputs,
+                        );
+                        debug!(
+                            " CONTRACT storage root pis.storage_root() {:?}",
+                            hex::encode(
+                                pis.root_hash_field()
+                                    .into_iter()
+                                    .flat_map(|u| u.to_be_bytes())
+                                    .collect::<Vec<_>>()
+                            )
+                        );
+                    }
+                    contract_proof
+                }
+            };
+            // We look if block proof has already been generated for this block
+            // since it is the same between proofs
+            let block_proof_key = ProofKey::BlockExtraction(bn as BlockPrimaryIndex);
+            let block_proof = match ctx.storage.get_proof_exact(&block_proof_key) {
+                Ok(proof) => {
+                    info!(
+                        "Loaded Block Extraction (C.4) proof for block number {}",
+                        bn
+                    );
+                    proof
+                }
+                Err(_) => {
+                    let proof = ctx
+                        .prove_block_extraction(bn as BlockPrimaryIndex)
+                        .await
+                        .unwrap();
+                    ctx.storage.store_proof(block_proof_key, proof.clone())?;
+                    info!(
+                        "Generated Block Extraction (C.4) proof for block number {}",
+                        bn
+                    );
+                    proof
+                }
+            };
+            (contract_proof, block_proof)
         };
 
         let table_id = &self.table.public_name.clone();
@@ -784,7 +872,7 @@ pub enum UpdateType {
 
 /// Represents in a generic way the value present in a row from a table
 /// TODO: add the first index in generic way as well for CSV
-#[derive(Default, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TableRowValues<PrimaryIndex> {
     // cells without the secondary index
     pub current_cells: Vec<Cell>,
@@ -869,6 +957,35 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex
     }
 }
 
+impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TryFrom<&TableRowValues<PrimaryIndex>>
+    for CellCollection<PrimaryIndex>
+{
+    type Error = anyhow::Error;
+
+    fn try_from(value: &TableRowValues<PrimaryIndex>) -> Result<Self, Self::Error> {
+        ensure!(
+            value.current_secondary.is_some(),
+            "trying to convert TableRowValues with no secondary cell to CellCollection"
+        );
+        Ok(Self(
+            value
+                .current_cells
+                .iter()
+                .chain(once(&value.current_secondary.as_ref().unwrap().cell()))
+                .map(|cell| {
+                    (
+                        cell.identifier(),
+                        CellInfo {
+                            value: cell.value(),
+                            primary: value.primary.clone(),
+                        },
+                    )
+                })
+                .collect(),
+        ))
+    }
+}
+
 /// The structure representing the updates that have happened on a table
 /// This is computed from the update of a contract in the case of the current test, but
 /// should be given directly in case of CSV file.
@@ -941,9 +1058,17 @@ impl TableIndexing {
         TableInfo {
             public_name: self.table.public_name.clone(),
             value_column: self.value_column.clone(),
-            chain_id: self.contract.chain_id,
+            chain_id: self
+                .contract
+                .as_ref()
+                .map(|c| c.chain_id)
+                .unwrap_or_default(),
             columns: self.table.columns.clone(),
-            contract_address: self.contract.address,
+            contract_address: self
+                .contract
+                .as_ref()
+                .map(|c| c.address)
+                .unwrap_or_default(),
             source: self.source.clone(),
         }
     }

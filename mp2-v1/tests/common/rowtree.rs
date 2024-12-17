@@ -20,6 +20,7 @@ use ryhope::{
     },
     MerkleTreeKvDb,
 };
+use serde::{Deserialize, Serialize};
 use verifiable_db::{cells_tree, row_tree::extract_hash_from_proof};
 
 use crate::common::row_tree_proof_to_hash;
@@ -34,7 +35,7 @@ pub type RowTreeKeyNonce = Vec<u8>;
 
 /// Simply a struct useful to transmit around when dealing with the secondary index value, since
 /// the unique nonce must be kept around as well. It is not saved anywhere nor proven.
-#[derive(PartialEq, Eq, Default, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Default, Debug, Clone, Hash)]
 pub struct SecondaryIndexCell(Cell, RowTreeKeyNonce);
 impl SecondaryIndexCell {
     pub fn new_from<T: ToNonce>(c: Cell, nonce: T) -> Self {
