@@ -41,7 +41,7 @@ use rlp::Encodable;
 use serde::{Deserialize, Serialize};
 use std::{array::from_fn, iter};
 /// Maximum number of logs per transaction we can process
-const MAX_LOGS_PER_TX: usize = 2;
+const MAX_LOGS_PER_TX: usize = 1;
 
 /// The number of bytes that `gas_used` could take up in the receipt.
 /// We set a max of 3 here because this would be over half the gas in the block for Ethereum.
@@ -243,6 +243,7 @@ impl EventWires {
 
                 // Pack the data and get the digest
                 let packed_data = data_bytes.arr.pack(b, Endianness::Big);
+
                 let data_digest = b.map_to_curve_point(
                     &std::iter::once(log_column.column_id)
                         .chain(packed_data)
@@ -764,6 +765,7 @@ mod tests {
 
         let node = info.mpt_proof.last().unwrap().clone();
 
+        assert!(node.len() <= NODE_LEN);
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::new(&proof.public_inputs);
 
