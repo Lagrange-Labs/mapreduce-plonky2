@@ -907,7 +907,7 @@ mod tests {
     }
     #[test]
     fn test_receipt_api() {
-        let receipt_proof_infos = generate_receipt_test_info();
+        let receipt_proof_infos = generate_receipt_test_info::<1, 0>();
         let receipt_proofs = receipt_proof_infos.proofs();
         let query = receipt_proof_infos.query();
         // We check that we have enough receipts and then take the second and third info
