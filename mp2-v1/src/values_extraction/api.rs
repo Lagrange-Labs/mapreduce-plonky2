@@ -4,14 +4,16 @@ use super::{
     branch::{BranchCircuit, BranchWires},
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
+    leaf_receipt::{ReceiptLeafCircuit, ReceiptLeafWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
 };
-use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
+use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN, MAX_RECEIPT_LEAF_NODE_LEN};
 use anyhow::{bail, ensure, Result};
 use log::debug;
 use mp2_common::{
     default_config,
+    eth::{ReceiptProofInfo, ReceiptQuery},
     mpt_sequential::PAD_LEN,
     proof::{ProofInputSerialized, ProofWithVK},
     storage_key::{MappingSlot, SimpleSlot},
@@ -32,6 +34,7 @@ use std::array;
 
 type LeafSingleWire = LeafSingleWires<MAX_LEAF_NODE_LEN>;
 type LeafMappingWire = LeafMappingWires<MAX_LEAF_NODE_LEN>;
+type LeafReceiptWire = ReceiptLeafWires<MAX_RECEIPT_LEAF_NODE_LEN>;
 type ExtensionInput = ProofInputSerialized<InputNode>;
 type BranchInput = ProofInputSerialized<InputNode>;
 const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
@@ -42,6 +45,7 @@ const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 pub enum CircuitInput {
     LeafSingle(LeafSingleCircuit<MAX_LEAF_NODE_LEN>),
     LeafMapping(LeafMappingCircuit<MAX_LEAF_NODE_LEN>),
+    LeafReceipt(ReceiptLeafCircuit<MAX_RECEIPT_LEAF_NODE_LEN>),
     Extension(ExtensionInput),
     BranchSingle(BranchInput),
     BranchMapping(BranchInput),
@@ -71,6 +75,16 @@ impl CircuitInput {
             key_id,
             value_id,
         })
+    }
+
+    /// Create a circuit input for proving a leaf MPT node of a transaction receipt.
+    pub fn new_receipt_leaf<const NO_TOPICS: usize, const MAX_DATA: usize>(
+        info: &ReceiptProofInfo,
+        query: &ReceiptQuery<NO_TOPICS, MAX_DATA>,
+    ) -> Self {
+        CircuitInput::LeafReceipt(
+            ReceiptLeafCircuit::new(info, query).expect("Could not construct Receipt Leaf Circuit"),
+        )
     }
 
     /// Create a circuit input for proving an extension MPT node.
@@ -106,6 +120,7 @@ impl CircuitInput {
 pub struct PublicParameters {
     leaf_single: CircuitWithUniversalVerifier<F, C, D, 0, LeafSingleWire>,
     leaf_mapping: CircuitWithUniversalVerifier<F, C, D, 0, LeafMappingWire>,
+    leaf_receipt: CircuitWithUniversalVerifier<F, C, D, 0, LeafReceiptWire>,
     extension: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionNodeWires>,
     #[cfg(not(test))]
     branches: BranchCircuits,
@@ -285,8 +300,8 @@ impl_branch_circuits!(BranchCircuits, 2, 9, 16);
 impl_branch_circuits!(TestBranchCircuits, 1, 4, 9);
 
 /// Number of circuits in the set
-/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping
-const MAPPING_CIRCUIT_SET_SIZE: usize = 6;
+/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 leaf receipt
+const MAPPING_CIRCUIT_SET_SIZE: usize = 7;
 
 impl PublicParameters {
     /// Generates the circuit parameters for the MPT circuits.
@@ -311,6 +326,10 @@ impl PublicParameters {
         let leaf_mapping =
             circuit_builder.build_circuit::<C, 0, LeafMappingWires<MAX_LEAF_NODE_LEN>>(());
 
+        debug!("Building leaf receipt circuit");
+        let leaf_receipt =
+            circuit_builder.build_circuit::<C, 0, ReceiptLeafWires<MAX_RECEIPT_LEAF_NODE_LEN>>(());
+
         debug!("Building extension circuit");
         let extension = circuit_builder.build_circuit::<C, 1, ExtensionNodeWires>(());
 
@@ -323,6 +342,7 @@ impl PublicParameters {
         let mut circuits_set = vec![
             leaf_single.get_verifier_data().circuit_digest,
             leaf_mapping.get_verifier_data().circuit_digest,
+            leaf_receipt.get_verifier_data().circuit_digest,
             extension.get_verifier_data().circuit_digest,
         ];
         circuits_set.extend(branches.circuit_set());
@@ -331,6 +351,7 @@ impl PublicParameters {
         PublicParameters {
             leaf_single,
             leaf_mapping,
+            leaf_receipt,
             extension,
             branches,
             #[cfg(not(test))]
@@ -349,6 +370,9 @@ impl PublicParameters {
             CircuitInput::LeafMapping(leaf) => set
                 .generate_proof(&self.leaf_mapping, [], [], leaf)
                 .map(|p| (p, self.leaf_mapping.get_verifier_data().clone()).into()),
+            CircuitInput::LeafReceipt(leaf) => set
+                .generate_proof(&self.leaf_receipt, [], [], leaf)
+                .map(|p| (p, self.leaf_receipt.get_verifier_data().clone()).into()),
 
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
@@ -410,7 +434,10 @@ mod tests {
         mpt_sequential::utils::bytes_to_nibbles,
         types::{GFp, ADDRESS_LEN},
     };
-    use mp2_test::{mpt_sequential::generate_random_storage_mpt, utils::random_vector};
+    use mp2_test::{
+        mpt_sequential::{generate_random_storage_mpt, generate_receipt_test_info},
+        utils::random_vector,
+    };
     use plonky2::field::types::Field;
     use plonky2_ecgfp5::curve::curve::Point;
     use serial_test::serial;
@@ -676,6 +703,69 @@ mod tests {
                 vec![leaf_proof1, leaf_proof2],
             )
         };
+        let now = std::time::Instant::now();
+        generate_proof(&params, branch_input).unwrap();
+        println!(
+            "Proof for branch node generated in {} ms",
+            now.elapsed().as_millis()
+        );
+    }
+
+    #[test]
+    fn test_receipt_api() {
+        let receipt_proof_infos = generate_receipt_test_info::<1, 0>();
+        let receipt_proofs = receipt_proof_infos.proofs();
+        let query = receipt_proof_infos.query();
+        // We check that we have enough receipts and then take the second and third info
+        // (the MPT proof for the first node is different).
+        // Then check that the node above both is a branch.
+        assert!(receipt_proofs.len() > 3);
+        let second_info = &receipt_proofs[1];
+        let third_info = &receipt_proofs[2];
+
+        let proof_length_1 = second_info.mpt_proof.len();
+        let proof_length_2 = third_info.mpt_proof.len();
+
+        let list_one = rlp::decode_list::<Vec<u8>>(&second_info.mpt_proof[proof_length_1 - 2]);
+        let list_two = rlp::decode_list::<Vec<u8>>(&third_info.mpt_proof[proof_length_2 - 2]);
+
+        assert!(list_one == list_two);
+        assert!(list_one.len() == 17);
+
+        println!("Generating params...");
+        let params = build_circuits_params();
+
+        println!("Proving leaf 1...");
+        let leaf_input_1 = CircuitInput::new_receipt_leaf(second_info, query);
+        let now = std::time::Instant::now();
+        let leaf_proof1 = generate_proof(&params, leaf_input_1).unwrap();
+        {
+            let lp = ProofWithVK::deserialize(&leaf_proof1).unwrap();
+            let pub1 = PublicInputs::new(&lp.proof.public_inputs);
+            let (_, ptr) = pub1.mpt_key_info();
+            println!("pointer: {}", ptr);
+        }
+        println!(
+            "Proof for leaf 1 generated in {} ms",
+            now.elapsed().as_millis()
+        );
+
+        println!("Proving leaf 2...");
+        let leaf_input_2 = CircuitInput::new_receipt_leaf(third_info, query);
+        let now = std::time::Instant::now();
+        let leaf_proof2 = generate_proof(&params, leaf_input_2).unwrap();
+        println!(
+            "Proof for leaf 2 generated in {} ms",
+            now.elapsed().as_millis()
+        );
+
+        // The branch case for receipts is identical to that of a mapping so we use the same api.
+        println!("Proving branch...");
+        let branch_input = CircuitInput::new_mapping_variable_branch(
+            second_info.mpt_proof[proof_length_1 - 2].clone(),
+            vec![leaf_proof1, leaf_proof2],
+        );
+
         let now = std::time::Instant::now();
         generate_proof(&params, branch_input).unwrap();
         println!(

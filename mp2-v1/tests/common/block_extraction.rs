@@ -1,7 +1,7 @@
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
-    eth::BlockUtil,
+    eth::Rlpable,
     proof::deserialize_proof,
     utils::{Endianness, Packer, ToFields},
     C, D, F,

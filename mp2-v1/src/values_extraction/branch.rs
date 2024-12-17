@@ -5,9 +5,9 @@ use anyhow::Result;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
-    mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
+    mpt_sequential::{advance_key_branch, MPTKeyWire, NIBBLES_TO_BYTES, PAD_LEN},
     public_inputs::PublicInputCommon,
-    rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
+    rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
     serialization::{deserialize, serialize},
     types::{CBuilder, GFp},
     utils::{less_than, Endianness, PackerTarget},
@@ -60,7 +60,10 @@ where
     pub fn build(
         b: &mut CBuilder,
         inputs: &[PublicInputs<Target>; N_CHILDREN],
-    ) -> BranchWires<NODE_LEN> {
+    ) -> BranchWires<NODE_LEN>
+    where
+        [(); NIBBLES_TO_BYTES(MAX_KEY_NIBBLE_LEN)]:,
+    {
         let zero = b.zero();
         let one = b.one();
         let ttrue = b._true();
@@ -129,7 +132,7 @@ where
 
             let child_key = proof_inputs.mpt_key();
             let (_, hash, is_valid, nibble) =
-                MPTCircuit::<1, NODE_LEN>::advance_key_branch(b, &node.arr, &child_key, &headers);
+                advance_key_branch(b, &node.arr, &child_key, &headers);
 
             // We always enforce it's a branch node, i.e. that it has 17 entries.
             b.connect(is_valid.target, ttrue.target);
