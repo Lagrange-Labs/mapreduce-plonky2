@@ -58,7 +58,7 @@ impl ReceiptExtractionCircuit {
         b: &mut CircuitBuilder<GoldilocksField, 2>,
         block_pi: &[Target],
         value_pi: &[Target],
-    ) -> ReceiptExtractionWires {
+    ) {
         // TODO: homogeinize the public inputs structs
         let block_pi =
             block_extraction::public_inputs::PublicInputs::<Target>::from_slice(block_pi);
@@ -85,14 +85,6 @@ impl ReceiptExtractionCircuit {
             &[b._false().target],
         )
         .register_args(b);
-
-        ReceiptExtractionWires {
-            dm: value_pi.metadata_digest_target(),
-            dv: value_pi.values_digest_target(),
-            bh: block_pi.block_hash_raw().try_into().unwrap(), // safe to unwrap as we give as input the slice of the expected length
-            prev_bh: block_pi.prev_block_hash_raw().try_into().unwrap(), // safe to unwrap as we give as input the slice of the expected length
-            bn: block_pi.block_number(),
-        }
     }
 }
 
@@ -102,8 +94,6 @@ impl ReceiptExtractionCircuit {
 pub(crate) struct ReceiptRecursiveWires {
     /// Wires containing the block and value proof
     verification: ReceiptCircuitProofWires,
-    /// Wires information to check that the value corresponds to the block
-    consistency: ReceiptExtractionWires,
 }
 
 impl CircuitLogicWires<F, D, 0> for ReceiptRecursiveWires {
@@ -120,15 +110,12 @@ impl CircuitLogicWires<F, D, 0> for ReceiptRecursiveWires {
     ) -> Self {
         // value proof for table a and value proof for table b = 2
         let verification = ReceiptCircuitProofInputs::build(builder, &builder_parameters);
-        let consistency = ReceiptExtractionCircuit::build(
+        ReceiptExtractionCircuit::build(
             builder,
             verification.get_block_public_inputs(),
             verification.get_value_public_inputs(),
         );
-        Self {
-            verification,
-            consistency,
-        }
+        Self { verification }
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
@@ -231,14 +218,13 @@ impl ReceiptCircuitProofWires {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use std::iter::once;
 
     use crate::final_extraction::{base_circuit::test::ProofsPi, PublicInputs};
 
     use super::*;
     use alloy::primitives::U256;
     use anyhow::Result;
-    use itertools::Itertools;
+
     use mp2_common::{
         keccak::PACKED_HASH_LEN,
         utils::{Endianness, Packer, ToFields},
@@ -269,7 +255,7 @@ pub(crate) mod test {
         type Wires = TestReceiptWires;
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let proofs_pi = ReceiptsProofsPiTarget::new(c);
-            let _ = ReceiptExtractionCircuit::build(c, &proofs_pi.blocks_pi, &proofs_pi.values_pi);
+            ReceiptExtractionCircuit::build(c, &proofs_pi.blocks_pi, &proofs_pi.values_pi);
             TestReceiptWires { pis: proofs_pi }
         }
         fn prove(&self, pw: &mut PartialWitness<GoldilocksField>, wires: &Self::Wires) {
@@ -316,16 +302,21 @@ pub(crate) mod test {
             let (k, t) = original.mpt_key_info();
             let new_value_digest = Point::rand();
             let new_metadata_digest = Point::rand();
-            let new_values_pi = block_pi
-                .receipt_root_raw()
-                .iter()
-                .chain(k.iter())
-                .chain(once(&t))
-                .chain(new_value_digest.to_weierstrass().to_fields().iter())
-                .chain(new_metadata_digest.to_weierstrass().to_fields().iter())
-                .chain(once(&original.n()))
-                .cloned()
-                .collect_vec();
+            let new_values_pi = new_extraction_public_inputs(
+                &block_pi
+                    .receipt_root_raw()
+                    .iter()
+                    .map(|byte| byte.to_canonical_u64() as u32)
+                    .collect::<Vec<u32>>(),
+                &k.iter()
+                    .map(|byte| byte.to_canonical_u64() as u8)
+                    .collect::<Vec<u8>>(),
+                t.to_canonical_u64() as usize,
+                &new_value_digest.to_weierstrass(),
+                &new_metadata_digest.to_weierstrass(),
+                original.n().to_canonical_u64() as usize,
+            );
+
             Self {
                 blocks_pi: base_info.blocks_pi.clone(),
                 values_pi: new_values_pi,
@@ -340,10 +331,6 @@ pub(crate) mod test {
             values_extraction::PublicInputs::new(&self.values_pi)
         }
 
-        /// check public inputs of the proof match with the ones in `self`.
-        /// `compound_type` is a flag to specify whether `proof` is generated for a simple or compound type
-        /// `length_dm` is the metadata digest of a length proof, which is provided only for proofs related
-        /// to a compound type with a length slot
         pub(crate) fn check_proof_public_inputs(&self, proof: &ProofWithPublicInputs<F, C, D>) {
             let proof_pis = PublicInputs::from_slice(&proof.public_inputs);
             let block_pi = self.block_inputs();
@@ -410,8 +397,9 @@ pub(crate) mod test {
     #[test]
     fn final_simple_value() -> Result<()> {
         let pis = ReceiptsProofsPi::random();
-        let test_circuit = TestReceiptCircuit { pis };
-        run_circuit::<F, D, C, _>(test_circuit);
+        let test_circuit = TestReceiptCircuit { pis: pis.clone() };
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+        pis.check_proof_public_inputs(&proof);
         Ok(())
     }
 }
