@@ -221,7 +221,13 @@ interface Simple {
   }
 ]
 ```*/
-#[allow(non_camel_case_types, non_snake_case, clippy::style)]
+#[allow(
+    non_camel_case_types,
+    non_snake_case,
+    clippy::pub_underscore_fields,
+    clippy::style,
+    clippy::empty_structs_with_brackets
+)]
 pub mod Simple {
     use super::*;
     use alloy::sol_types as alloy_sol_types;
@@ -245,7 +251,7 @@ pub mod Simple {
     pub static DEPLOYED_BYTECODE: alloy_sol_types::private::Bytes = alloy_sol_types::private::Bytes::from_static(
         b"`\x80`@R4\x80\x15a\0\x0FW_\x80\xFD[P`\x046\x10a\0\xA6W_5`\xE0\x1C\x80cl\xC0\x14\xDE\x11a\0nW\x80cl\xC0\x14\xDE\x14a\x01KW\x80c\xA3\x14\x15\x0F\x14a\x01gW\x80c\xA5\xD6f\xA9\x14a\x01pW\x80c\xC8\xAF:\xA6\x14a\x01\x85W\x80c\xD1^\xC8Q\x14a\x01\x98W\x80c\xF2]T\xF5\x14a\x01\xDAW_\x80\xFD[\x80c\x02\0\"\\\x14a\0\xAAW\x80c\x0C\x16\x16\xC9\x14a\0\xBFW\x80c\x1C\x13C\x15\x14a\0\xD2W\x80c*\xE4&\x86\x14a\0\xE5W\x80ci\x87\xB1\xFB\x14a\x01*W[_\x80\xFD[a\0\xBDa\0\xB86`\x04a\x04\xD3V[a\x01\xEDV[\0[a\0\xBDa\0\xCD6`\x04a\x05\x92V[a\x021V[a\0\xBDa\0\xE06`\x04a\x06rV[a\x03rV[a\x01\ra\0\xF36`\x04a\x06\x9CV[`\x04` R_\x90\x81R`@\x90 T`\x01`\x01`\xA0\x1B\x03\x16\x81V[`@Q`\x01`\x01`\xA0\x1B\x03\x90\x91\x16\x81R` \x01[`@Q\x80\x91\x03\x90\xF3[a\x01=a\x0186`\x04a\x06\x9CV[a\x03\x9FV[`@Q\x90\x81R` \x01a\x01!V[_Ta\x01W\x90`\xFF\x16\x81V[`@Q\x90\x15\x15\x81R` \x01a\x01!V[a\x01=`\x01T\x81V[a\x01xa\x03\xBEV[`@Qa\x01!\x91\x90a\x06\xB3V[`\x03Ta\x01\r\x90`\x01`\x01`\xA0\x1B\x03\x16\x81V[a\0\xBDa\x01\xA66`\x04a\x06\x9CV[`\x05\x80T`\x01\x81\x01\x82U_\x91\x90\x91R\x7F\x03kc\x84\xB5\xEC\xA7\x91\xC6'a\x15-\x0Cy\xBB\x06\x04\xC1\x04\xA5\xFBoN\xB0p?1T\xBB=\xB0\x01UV[a\0\xBDa\x01\xE86`\x04a\x06\x9CV[`\x01UV[_\x80T`\xFF\x19\x16\x85\x15\x15\x17\x90U`\x01\x83\x90U`\x02a\x02\x0B\x83\x82a\x07\x83V[P`\x03\x80T`\x01`\x01`\xA0\x1B\x03\x19\x16`\x01`\x01`\xA0\x1B\x03\x92\x90\x92\x16\x91\x90\x91\x17\x90UPPPV[_[\x81Q\x81\x10\x15a\x03nW_\x82\x82\x81Q\x81\x10a\x02OWa\x02Oa\x08WV[` \x02` \x01\x01Q`@\x01Q`\x02\x81\x11\x15a\x02lWa\x02la\x08CV[\x03a\x02\xB3W`\x04_\x83\x83\x81Q\x81\x10a\x02\x86Wa\x02\x86a\x08WV[` \x90\x81\x02\x91\x90\x91\x01\x81\x01QQ\x82R\x81\x01\x91\x90\x91R`@\x01_ \x80T`\x01`\x01`\xA0\x1B\x03\x19\x16\x90Ua\x03fV[`\x02\x82\x82\x81Q\x81\x10a\x02\xC7Wa\x02\xC7a\x08WV[` \x02` \x01\x01Q`@\x01Q`\x02\x81\x11\x15a\x02\xE4Wa\x02\xE4a\x08CV[\x14\x80a\x03\x1EWP`\x01\x82\x82\x81Q\x81\x10a\x02\xFFWa\x02\xFFa\x08WV[` \x02` \x01\x01Q`@\x01Q`\x02\x81\x11\x15a\x03\x1CWa\x03\x1Ca\x08CV[\x14[\x15a\x03fWa\x03f\x82\x82\x81Q\x81\x10a\x038Wa\x038a\x08WV[` \x02` \x01\x01Q_\x01Q\x83\x83\x81Q\x81\x10a\x03UWa\x03Ua\x08WV[` \x02` \x01\x01Q` \x01Qa\x03rV[`\x01\x01a\x023V[PPV[_\x91\x82R`\x04` R`@\x90\x91 \x80T`\x01`\x01`\xA0\x1B\x03\x19\x16`\x01`\x01`\xA0\x1B\x03\x90\x92\x16\x91\x90\x91\x17\x90UV[`\x05\x81\x81T\x81\x10a\x03\xAEW_\x80\xFD[_\x91\x82R` \x90\x91 \x01T\x90P\x81V[`\x02\x80Ta\x03\xCB\x90a\x06\xFFV[\x80`\x1F\x01` \x80\x91\x04\x02` \x01`@Q\x90\x81\x01`@R\x80\x92\x91\x90\x81\x81R` \x01\x82\x80Ta\x03\xF7\x90a\x06\xFFV[\x80\x15a\x04BW\x80`\x1F\x10a\x04\x19Wa\x01\0\x80\x83T\x04\x02\x83R\x91` \x01\x91a\x04BV[\x82\x01\x91\x90_R` _ \x90[\x81T\x81R\x90`\x01\x01\x90` \x01\x80\x83\x11a\x04%W\x82\x90\x03`\x1F\x16\x82\x01\x91[PPPPP\x81V[cNH{q`\xE0\x1B_R`A`\x04R`$_\xFD[`@Q``\x81\x01g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11\x82\x82\x10\x17\x15a\x04\x81Wa\x04\x81a\x04JV[`@R\x90V[`@Q`\x1F\x82\x01`\x1F\x19\x16\x81\x01g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11\x82\x82\x10\x17\x15a\x04\xB0Wa\x04\xB0a\x04JV[`@R\x91\x90PV[\x805`\x01`\x01`\xA0\x1B\x03\x81\x16\x81\x14a\x04\xCEW_\x80\xFD[\x91\x90PV[_\x80_\x80`\x80\x85\x87\x03\x12\x15a\x04\xE6W_\x80\xFD[\x845\x80\x15\x15\x81\x14a\x04\xF5W_\x80\xFD[\x93P` \x85\x81\x015\x93P`@\x86\x015g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x80\x82\x11\x15a\x05\x19W_\x80\xFD[\x81\x88\x01\x91P\x88`\x1F\x83\x01\x12a\x05,W_\x80\xFD[\x815\x81\x81\x11\x15a\x05>Wa\x05>a\x04JV[a\x05P`\x1F\x82\x01`\x1F\x19\x16\x85\x01a\x04\x87V[\x91P\x80\x82R\x89\x84\x82\x85\x01\x01\x11\x15a\x05eW_\x80\xFD[\x80\x84\x84\x01\x85\x84\x017_\x84\x82\x84\x01\x01RP\x80\x94PPPPa\x05\x87``\x86\x01a\x04\xB8V[\x90P\x92\x95\x91\x94P\x92PV[_` \x80\x83\x85\x03\x12\x15a\x05\xA3W_\x80\xFD[\x825g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x80\x82\x11\x15a\x05\xBAW_\x80\xFD[\x81\x85\x01\x91P\x85`\x1F\x83\x01\x12a\x05\xCDW_\x80\xFD[\x815\x81\x81\x11\x15a\x05\xDFWa\x05\xDFa\x04JV[a\x05\xED\x84\x82`\x05\x1B\x01a\x04\x87V[\x81\x81R\x84\x81\x01\x92P``\x91\x82\x02\x84\x01\x85\x01\x91\x88\x83\x11\x15a\x06\x0BW_\x80\xFD[\x93\x85\x01\x93[\x82\x85\x10\x15a\x06fW\x80\x85\x8A\x03\x12\x15a\x06&W_\x80\xFD[a\x06.a\x04^V[\x855\x81Ra\x06=\x87\x87\x01a\x04\xB8V[\x87\x82\x01R`@\x80\x87\x015`\x03\x81\x10a\x06SW_\x80\xFD[\x90\x82\x01R\x84R\x93\x84\x01\x93\x92\x85\x01\x92a\x06\x10V[P\x97\x96PPPPPPPV[_\x80`@\x83\x85\x03\x12\x15a\x06\x83W_\x80\xFD[\x825\x91Pa\x06\x93` \x84\x01a\x04\xB8V[\x90P\x92P\x92\x90PV[_` \x82\x84\x03\x12\x15a\x06\xACW_\x80\xFD[P5\x91\x90PV[_` \x80\x83R\x83Q\x80` \x85\x01R_[\x81\x81\x10\x15a\x06\xDFW\x85\x81\x01\x83\x01Q\x85\x82\x01`@\x01R\x82\x01a\x06\xC3V[P_`@\x82\x86\x01\x01R`@`\x1F\x19`\x1F\x83\x01\x16\x85\x01\x01\x92PPP\x92\x91PPV[`\x01\x81\x81\x1C\x90\x82\x16\x80a\x07\x13W`\x7F\x82\x16\x91P[` \x82\x10\x81\x03a\x071WcNH{q`\xE0\x1B_R`\"`\x04R`$_\xFD[P\x91\x90PV[`\x1F\x82\x11\x15a\x07~W\x80_R` _ `\x1F\x84\x01`\x05\x1C\x81\x01` \x85\x10\x15a\x07\\WP\x80[`\x1F\x84\x01`\x05\x1C\x82\x01\x91P[\x81\x81\x10\x15a\x07{W_\x81U`\x01\x01a\x07hV[PP[PPPV[\x81Qg\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11\x15a\x07\x9DWa\x07\x9Da\x04JV[a\x07\xB1\x81a\x07\xAB\x84Ta\x06\xFFV[\x84a\x077V[` \x80`\x1F\x83\x11`\x01\x81\x14a\x07\xE4W_\x84\x15a\x07\xCDWP\x85\x83\x01Q[_\x19`\x03\x86\x90\x1B\x1C\x19\x16`\x01\x85\x90\x1B\x17\x85Ua\x08;V[_\x85\x81R` \x81 `\x1F\x19\x86\x16\x91[\x82\x81\x10\x15a\x08\x12W\x88\x86\x01Q\x82U\x94\x84\x01\x94`\x01\x90\x91\x01\x90\x84\x01a\x07\xF3V[P\x85\x82\x10\x15a\x08/W\x87\x85\x01Q_\x19`\x03\x88\x90\x1B`\xF8\x16\x1C\x19\x16\x81U[PP`\x01\x84`\x01\x1B\x01\x85U[PPPPPPV[cNH{q`\xE0\x1B_R`!`\x04R`$_\xFD[cNH{q`\xE0\x1B_R`2`\x04R`$_\xFD\xFE\xA2dipfsX\"\x12 \xE0\x959\x7F\xFD\xC7\xD1\xEB{\"\xEEI,\x14\x95*$01F_\x1C\xC6\xF6\x90RO\xECF\xFC\xC6;dsolcC\0\x08\x18\x003",
     );
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct MappingOperation(u8);
     const _: () = {
@@ -357,14 +363,19 @@ pub mod Simple {
     /**```solidity
     struct MappingChange { uint256 key; address value; MappingOperation operation; }
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct MappingChange {
-        pub key: alloy::sol_types::private::U256,
+        pub key: alloy::sol_types::private::primitives::aliases::U256,
         pub value: alloy::sol_types::private::Address,
         pub operation: <MappingOperation as alloy::sol_types::SolType>::RustType,
     }
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         #[doc(hidden)]
@@ -375,7 +386,7 @@ pub mod Simple {
         );
         #[doc(hidden)]
         type UnderlyingRustTuple<'a> = (
-            alloy::sol_types::private::U256,
+            alloy::sol_types::private::primitives::aliases::U256,
             alloy::sol_types::private::Address,
             <MappingOperation as alloy::sol_types::SolType>::RustType,
         );
@@ -559,23 +570,28 @@ pub mod Simple {
     ```solidity
     function addToArray(uint256 value) external;
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct addToArrayCall {
-        pub value: alloy::sol_types::private::U256,
+        pub value: alloy::sol_types::private::primitives::aliases::U256,
     }
     ///Container type for the return parameters of the [`addToArray(uint256)`](addToArrayCall) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct addToArrayReturn {}
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
             #[doc(hidden)]
             type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
             #[doc(hidden)]
-            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::U256,);
+            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::primitives::aliases::U256,);
             #[cfg(test)]
             #[allow(dead_code, unreachable_patterns)]
             fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
@@ -668,25 +684,30 @@ pub mod Simple {
     ```solidity
     function arr1(uint256) external view returns (uint256);
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct arr1Call {
-        pub _0: alloy::sol_types::private::U256,
+        pub _0: alloy::sol_types::private::primitives::aliases::U256,
     }
     ///Container type for the return parameters of the [`arr1(uint256)`](arr1Call) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct arr1Return {
-        pub _0: alloy::sol_types::private::U256,
+        pub _0: alloy::sol_types::private::primitives::aliases::U256,
     }
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
             #[doc(hidden)]
             type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
             #[doc(hidden)]
-            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::U256,);
+            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::primitives::aliases::U256,);
             #[cfg(test)]
             #[allow(dead_code, unreachable_patterns)]
             fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
@@ -715,7 +736,7 @@ pub mod Simple {
             #[doc(hidden)]
             type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
             #[doc(hidden)]
-            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::U256,);
+            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::primitives::aliases::U256,);
             #[cfg(test)]
             #[allow(dead_code, unreachable_patterns)]
             fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
@@ -779,17 +800,22 @@ pub mod Simple {
     ```solidity
     function changeMapping(MappingChange[] memory changes) external;
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct changeMappingCall {
         pub changes:
             alloy::sol_types::private::Vec<<MappingChange as alloy::sol_types::SolType>::RustType>,
     }
     ///Container type for the return parameters of the [`changeMapping((uint256,address,uint8)[])`](changeMappingCall) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct changeMappingReturn {}
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
@@ -893,25 +919,30 @@ pub mod Simple {
     ```solidity
     function m1(uint256) external view returns (address);
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct m1Call {
-        pub _0: alloy::sol_types::private::U256,
+        pub _0: alloy::sol_types::private::primitives::aliases::U256,
     }
     ///Container type for the return parameters of the [`m1(uint256)`](m1Call) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct m1Return {
         pub _0: alloy::sol_types::private::Address,
     }
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
             #[doc(hidden)]
             type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
             #[doc(hidden)]
-            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::U256,);
+            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::primitives::aliases::U256,);
             #[cfg(test)]
             #[allow(dead_code, unreachable_patterns)]
             fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
@@ -1004,16 +1035,21 @@ pub mod Simple {
     ```solidity
     function s1() external view returns (bool);
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct s1Call {}
     ///Container type for the return parameters of the [`s1()`](s1Call) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct s1Return {
         pub _0: bool,
     }
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
@@ -1109,16 +1145,21 @@ pub mod Simple {
     ```solidity
     function s2() external view returns (uint256);
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct s2Call {}
     ///Container type for the return parameters of the [`s2()`](s2Call) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct s2Return {
-        pub _0: alloy::sol_types::private::U256,
+        pub _0: alloy::sol_types::private::primitives::aliases::U256,
     }
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
@@ -1154,7 +1195,7 @@ pub mod Simple {
             #[doc(hidden)]
             type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
             #[doc(hidden)]
-            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::U256,);
+            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::primitives::aliases::U256,);
             #[cfg(test)]
             #[allow(dead_code, unreachable_patterns)]
             fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
@@ -1214,16 +1255,21 @@ pub mod Simple {
     ```solidity
     function s3() external view returns (string memory);
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct s3Call {}
     ///Container type for the return parameters of the [`s3()`](s3Call) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct s3Return {
         pub _0: alloy::sol_types::private::String,
     }
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
@@ -1319,16 +1365,21 @@ pub mod Simple {
     ```solidity
     function s4() external view returns (address);
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct s4Call {}
     ///Container type for the return parameters of the [`s4()`](s4Call) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct s4Return {
         pub _0: alloy::sol_types::private::Address,
     }
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
@@ -1424,17 +1475,22 @@ pub mod Simple {
     ```solidity
     function setMapping(uint256 key, address value) external;
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct setMappingCall {
-        pub key: alloy::sol_types::private::U256,
+        pub key: alloy::sol_types::private::primitives::aliases::U256,
         pub value: alloy::sol_types::private::Address,
     }
     ///Container type for the return parameters of the [`setMapping(uint256,address)`](setMappingCall) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct setMappingReturn {}
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
@@ -1445,7 +1501,7 @@ pub mod Simple {
             );
             #[doc(hidden)]
             type UnderlyingRustTuple<'a> = (
-                alloy::sol_types::private::U256,
+                alloy::sol_types::private::primitives::aliases::U256,
                 alloy::sol_types::private::Address,
             );
             #[cfg(test)]
@@ -1549,23 +1605,28 @@ pub mod Simple {
     ```solidity
     function setS2(uint256 newS2) external;
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct setS2Call {
-        pub newS2: alloy::sol_types::private::U256,
+        pub newS2: alloy::sol_types::private::primitives::aliases::U256,
     }
     ///Container type for the return parameters of the [`setS2(uint256)`](setS2Call) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct setS2Return {}
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
             #[doc(hidden)]
             type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
             #[doc(hidden)]
-            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::U256,);
+            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::primitives::aliases::U256,);
             #[cfg(test)]
             #[allow(dead_code, unreachable_patterns)]
             fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
@@ -1658,19 +1719,24 @@ pub mod Simple {
     ```solidity
     function setSimples(bool newS1, uint256 newS2, string memory newS3, address newS4) external;
     ```*/
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct setSimplesCall {
         pub newS1: bool,
-        pub newS2: alloy::sol_types::private::U256,
+        pub newS2: alloy::sol_types::private::primitives::aliases::U256,
         pub newS3: alloy::sol_types::private::String,
         pub newS4: alloy::sol_types::private::Address,
     }
     ///Container type for the return parameters of the [`setSimples(bool,uint256,string,address)`](setSimplesCall) function.
-    #[allow(non_camel_case_types, non_snake_case)]
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
     #[derive(Clone)]
     pub struct setSimplesReturn {}
-    #[allow(non_camel_case_types, non_snake_case, clippy::style)]
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
     const _: () = {
         use alloy::sol_types as alloy_sol_types;
         {
@@ -1684,7 +1750,7 @@ pub mod Simple {
             #[doc(hidden)]
             type UnderlyingRustTuple<'a> = (
                 bool,
-                alloy::sol_types::private::U256,
+                alloy::sol_types::private::primitives::aliases::U256,
                 alloy::sol_types::private::String,
                 alloy::sol_types::private::Address,
             );
@@ -1861,7 +1927,7 @@ pub mod Simple {
             Self::SELECTORS.binary_search(&selector).is_ok()
         }
         #[inline]
-        #[allow(unsafe_code, non_snake_case)]
+        #[allow(non_snake_case)]
         fn abi_decode_raw(
             selector: [u8; 4],
             data: &[u8],
@@ -1966,7 +2032,7 @@ pub mod Simple {
                     selector,
                 ));
             };
-            (unsafe { DECODE_SHIMS.get_unchecked(idx) })(data, validate)
+            DECODE_SHIMS[idx](data, validate)
         }
         #[inline]
         fn abi_encoded_size(&self) -> usize {
@@ -2191,14 +2257,14 @@ pub mod Simple {
         ///Creates a new call builder for the [`addToArray`] function.
         pub fn addToArray(
             &self,
-            value: alloy::sol_types::private::U256,
+            value: alloy::sol_types::private::primitives::aliases::U256,
         ) -> alloy_contract::SolCallBuilder<T, &P, addToArrayCall, N> {
             self.call_builder(&addToArrayCall { value })
         }
         ///Creates a new call builder for the [`arr1`] function.
         pub fn arr1(
             &self,
-            _0: alloy::sol_types::private::U256,
+            _0: alloy::sol_types::private::primitives::aliases::U256,
         ) -> alloy_contract::SolCallBuilder<T, &P, arr1Call, N> {
             self.call_builder(&arr1Call { _0 })
         }
@@ -2214,7 +2280,7 @@ pub mod Simple {
         ///Creates a new call builder for the [`m1`] function.
         pub fn m1(
             &self,
-            _0: alloy::sol_types::private::U256,
+            _0: alloy::sol_types::private::primitives::aliases::U256,
         ) -> alloy_contract::SolCallBuilder<T, &P, m1Call, N> {
             self.call_builder(&m1Call { _0 })
         }
@@ -2237,7 +2303,7 @@ pub mod Simple {
         ///Creates a new call builder for the [`setMapping`] function.
         pub fn setMapping(
             &self,
-            key: alloy::sol_types::private::U256,
+            key: alloy::sol_types::private::primitives::aliases::U256,
             value: alloy::sol_types::private::Address,
         ) -> alloy_contract::SolCallBuilder<T, &P, setMappingCall, N> {
             self.call_builder(&setMappingCall { key, value })
@@ -2245,7 +2311,7 @@ pub mod Simple {
         ///Creates a new call builder for the [`setS2`] function.
         pub fn setS2(
             &self,
-            newS2: alloy::sol_types::private::U256,
+            newS2: alloy::sol_types::private::primitives::aliases::U256,
         ) -> alloy_contract::SolCallBuilder<T, &P, setS2Call, N> {
             self.call_builder(&setS2Call { newS2 })
         }
@@ -2253,7 +2319,7 @@ pub mod Simple {
         pub fn setSimples(
             &self,
             newS1: bool,
-            newS2: alloy::sol_types::private::U256,
+            newS2: alloy::sol_types::private::primitives::aliases::U256,
             newS3: alloy::sol_types::private::String,
             newS4: alloy::sol_types::private::Address,
         ) -> alloy_contract::SolCallBuilder<T, &P, setSimplesCall, N> {
