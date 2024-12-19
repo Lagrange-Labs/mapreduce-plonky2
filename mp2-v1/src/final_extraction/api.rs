@@ -57,7 +57,7 @@ pub struct PublicParameters {
     circuit_set: RecursiveCircuits<F, C, D>,
 }
 
-const FINAL_EXTRACTION_CIRCUIT_SET_SIZE: usize = 2;
+const FINAL_EXTRACTION_CIRCUIT_SET_SIZE: usize = 4;
 pub(super) const NUM_IO: usize = PublicInputs::<Target>::TOTAL_LEN;
 
 impl PublicParameters {
