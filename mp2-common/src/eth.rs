@@ -4,7 +4,7 @@ use alloy::{
     consensus::{ReceiptEnvelope as CRE, ReceiptWithBloom},
     eips::BlockNumberOrTag,
     network::{eip2718::Encodable2718, BlockResponse},
-    primitives::{Address, B256},
+    primitives::{Address, B256, U256},
     providers::{Provider, RootProvider},
     rlp::{Decodable, Encodable as AlloyEncodable},
     rpc::types::{
@@ -157,7 +157,7 @@ pub struct ReceiptProofInfo {
 }
 
 /// Contains all the information for an [`Event`] in rlp form
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA: usize> {
     /// Size in bytes of the whole log rlp encoded
     pub size: usize,

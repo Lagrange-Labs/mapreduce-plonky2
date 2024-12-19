@@ -672,10 +672,13 @@ where
 }
 
 /// Num of children = 0
-impl CircuitLogicWires<GFp, D, 0> for ReceiptLeafWires<MAX_RECEIPT_LEAF_NODE_LEN> {
+impl<const NODE_LEN: usize> CircuitLogicWires<GFp, D, 0> for ReceiptLeafWires<NODE_LEN>
+where
+    [(); PAD_LEN(NODE_LEN)]:,
+{
     type CircuitBuilderParams = ();
 
-    type Inputs = ReceiptLeafCircuit<MAX_RECEIPT_LEAF_NODE_LEN>;
+    type Inputs = ReceiptLeafCircuit<NODE_LEN>;
 
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
 

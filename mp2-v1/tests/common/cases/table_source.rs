@@ -2,7 +2,7 @@ use std::{
     array,
     assert_matches::assert_matches,
     collections::{BTreeSet, HashMap},
-    marker::PhantomData,
+    future::Future,
     str::FromStr,
     sync::atomic::{AtomicU64, AtomicUsize},
 };
@@ -16,12 +16,15 @@ use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
-    eth::{ProofQuery, StorageSlot, StorageSlotNode},
+    eth::{EventLogInfo, ProofQuery, StorageSlot, StorageSlotNode},
     proof::ProofWithVK,
     types::HashOutput,
 };
 use mp2_v1::{
-    api::{compute_table_info, merge_metadata_hash, metadata_hash, SlotInput, SlotInputs},
+    api::{
+        compute_table_info, merge_metadata_hash, metadata_hash as metadata_hash_function,
+        SlotInput, SlotInputs,
+    },
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
@@ -39,25 +42,36 @@ use rand::{
     rngs::StdRng,
     Rng, SeedableRng,
 };
-use serde::{Deserialize, Serialize};
 
 use crate::common::{
     final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
-    TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
+    Deserialize, MetadataHash, Serialize, TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
 };
 
 use super::{
-    contract::{Contract, ContractController, MappingUpdate, SimpleSingleValues},
+    contract::{Contract, ContractController, MappingUpdate, SimpleSingleValues, TestContract},
     indexing::{
         ChangeType, TableRowUpdate, TableRowValues, UpdateType, SINGLE_SLOTS, SINGLE_STRUCT_SLOT,
     },
-    slot_info::{
-        LargeStruct, MappingKey, MappingOfMappingsKey, StorageSlotMappingKey, StorageSlotValue,
-    },
+    slot_info::{LargeStruct, MappingInfo, StorageSlotMappingKey, StorageSlotValue, StructMapping},
 };
+
+fn metadata_hash(
+    slot_input: SlotInputs,
+    contract_address: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+) -> MetadataHash {
+    metadata_hash_function::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+        slot_input,
+        contract_address,
+        chain_id,
+        extra,
+    )
+}
 
 /// Save the columns information of same slot and EVM word.
 #[derive(Debug)]
@@ -308,126 +322,126 @@ impl<K: StorageSlotMappingKey, V: StorageSlotValue> UniqueMappingEntry<K, V> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Hash, Clone, PartialEq, Eq)]
-pub(crate) enum TableSource {
-    /// Test arguments for simple slots which stores both single values and Struct values
-    Single(SingleExtractionArgs),
-    /// Test arguments for mapping slots which stores single values
-    MappingValues(
-        MappingExtractionArgs<MappingKey, Address>,
-        Option<LengthExtractionArgs>,
-    ),
-    /// Test arguments for mapping slots which stores the Struct values
-    MappingStruct(
-        MappingExtractionArgs<MappingKey, LargeStruct>,
-        Option<LengthExtractionArgs>,
-    ),
-    /// Test arguments for mapping of mappings slot which stores single values
-    MappingOfSingleValueMappings(MappingExtractionArgs<MappingOfMappingsKey, U256>),
-    /// Test arguments for mapping of mappings slot which stores the Struct values
-    MappingOfStructMappings(MappingExtractionArgs<MappingOfMappingsKey, LargeStruct>),
-    /// Test arguments for the merge source of both simple and mapping values
-    Merge(MergeSource),
+pub(crate) trait TableSource {
+    type Metadata;
+
+    fn get_data(&self) -> Self::Metadata;
+
+    fn init_contract_data<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>>;
+
+    fn generate_extraction_proof_inputs(
+        &self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        value_key: ProofKey,
+    ) -> impl Future<Output = Result<(ExtractionProofInput, HashOutput)>>;
+
+    fn random_contract_update<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+        c: ChangeType,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>>;
+
+    fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash;
+
+    fn can_query(&self) -> bool;
 }
 
-impl TableSource {
-    pub async fn generate_extraction_proof_inputs(
+impl TableSource for SingleExtractionArgs {
+    type Metadata = SlotInputs;
+
+    fn get_data(&self) -> SlotInputs {
+        SlotInputs::Simple(self.slot_inputs.clone())
+    }
+
+    fn init_contract_data<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move { SingleExtractionArgs::init_contract_data(self, ctx, contract).await }.boxed()
+    }
+
+    async fn generate_extraction_proof_inputs(
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
         value_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
-        match self {
-            TableSource::Single(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
-                    .await
-            }
-            TableSource::MappingValues(ref args, _) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
-                    .await
-            }
-            TableSource::MappingStruct(ref args, _) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
-                    .await
-            }
-            TableSource::MappingOfSingleValueMappings(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
-                    .await
-            }
-            TableSource::MappingOfStructMappings(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
-                    .await
-            }
-            TableSource::Merge(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
-                    .await
-            }
-        }
+        SingleExtractionArgs::generate_extraction_proof_inputs(self, ctx, contract, value_key).await
     }
 
-    #[allow(elided_named_lifetimes)]
-    pub fn init_contract_data<'a>(
+    fn random_contract_update<'a>(
         &'a mut self,
         ctx: &'a mut TestContext,
         contract: &'a Contract,
-    ) -> BoxFuture<Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        async move {
-            match self {
-                TableSource::Single(ref mut args) => args.init_contract_data(ctx, contract).await,
-                TableSource::MappingValues(ref mut args, _) => {
-                    args.init_contract_data(ctx, contract).await
-                }
-                TableSource::MappingStruct(ref mut args, _) => {
-                    args.init_contract_data(ctx, contract).await
-                }
-                TableSource::MappingOfSingleValueMappings(ref mut args) => {
-                    args.init_contract_data(ctx, contract).await
-                }
-                TableSource::MappingOfStructMappings(ref mut args) => {
-                    args.init_contract_data(ctx, contract).await
-                }
-                TableSource::Merge(ref mut args) => args.init_contract_data(ctx, contract).await,
-            }
-        }
-        .boxed()
+        c: ChangeType,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move { SingleExtractionArgs::random_contract_update(self, ctx, contract, c).await }
+            .boxed()
     }
 
-    #[allow(elided_named_lifetimes)]
-    pub fn random_contract_update<'a>(
+    fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash {
+        let slot = self.get_data();
+        metadata_hash(slot, &contract_address, chain_id, vec![])
+    }
+
+    fn can_query(&self) -> bool {
+        false
+    }
+}
+
+impl TableSource for MergeSource {
+    type Metadata = (SlotInputs, SlotInputs);
+    fn get_data(&self) -> Self::Metadata {
+        (self.single.get_data(), self.mapping.get_data())
+    }
+
+    fn init_contract_data<'a>(
         &'a mut self,
         ctx: &'a mut TestContext,
         contract: &'a Contract,
-        change_type: ChangeType,
-    ) -> BoxFuture<Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        async move {
-            match self {
-                TableSource::Single(ref args) => {
-                    args.random_contract_update(ctx, contract, change_type)
-                        .await
-                }
-                TableSource::MappingValues(ref mut args, _) => {
-                    args.random_contract_update(ctx, contract, change_type)
-                        .await
-                }
-                TableSource::MappingStruct(ref mut args, _) => {
-                    args.random_contract_update(ctx, contract, change_type)
-                        .await
-                }
-                TableSource::MappingOfSingleValueMappings(ref mut args) => {
-                    args.random_contract_update(ctx, contract, change_type)
-                        .await
-                }
-                TableSource::MappingOfStructMappings(ref mut args) => {
-                    args.random_contract_update(ctx, contract, change_type)
-                        .await
-                }
-                TableSource::Merge(ref mut args) => {
-                    args.random_contract_update(ctx, contract, change_type)
-                        .await
-                }
-            }
-        }
-        .boxed()
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move { self.init_contract_data(ctx, contract).await }.boxed()
+    }
+
+    async fn generate_extraction_proof_inputs(
+        &self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        value_key: ProofKey,
+    ) -> Result<(ExtractionProofInput, HashOutput)> {
+        self.generate_extraction_proof_inputs(ctx, contract, value_key)
+            .await
+    }
+
+    fn random_contract_update<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+        c: ChangeType,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move { self.random_contract_update(ctx, contract, c).await }.boxed()
+    }
+
+    fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash {
+        let (single, mapping) = self.get_data();
+        merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+            contract_address,
+            chain_id,
+            vec![],
+            single,
+            mapping,
+        )
+    }
+
+    fn can_query(&self) -> bool {
+        true
     }
 }
 
@@ -437,72 +451,15 @@ pub struct MergeSource {
     // Extending to full merge between any table is not far - it requires some quick changes in
     // circuit but quite a lot of changes in integrated test.
     pub(crate) single: SingleExtractionArgs,
-    pub(crate) mapping: MappingExtractionArgs<MappingKey, LargeStruct>,
+    pub(crate) mapping: MappingExtractionArgs<StructMapping>,
 }
 
 impl MergeSource {
     pub fn new(
         single: SingleExtractionArgs,
-        mapping: MappingExtractionArgs<MappingKey, LargeStruct>,
+        mapping: MappingExtractionArgs<StructMapping>,
     ) -> Self {
         Self { single, mapping }
-    }
-
-    #[allow(elided_named_lifetimes)]
-    pub fn generate_extraction_proof_inputs<'a>(
-        &'a self,
-        ctx: &'a mut TestContext,
-        contract: &'a Contract,
-        proof_key: ProofKey,
-    ) -> BoxFuture<Result<(ExtractionProofInput, HashOutput)>> {
-        async move {
-            let ProofKey::ValueExtraction((id, bn)) = proof_key else {
-                bail!("key wrong");
-            };
-            let id_a = id.clone() + "_a";
-            let id_b = id + "_b";
-            // generate the value extraction proof for the both table individually
-            let (extract_single, _) = self
-                .single
-                .generate_extraction_proof_inputs(
-                    ctx,
-                    contract,
-                    ProofKey::ValueExtraction((id_a, bn)),
-                )
-                .await?;
-            let ExtractionProofInput::Single(extract_a) = extract_single else {
-                bail!("can't merge non single tables")
-            };
-            let (extract_mappping, _) = self
-                .mapping
-                .generate_extraction_proof_inputs(
-                    ctx,
-                    contract,
-                    ProofKey::ValueExtraction((id_b, bn)),
-                )
-                .await?;
-            let ExtractionProofInput::Single(extract_b) = extract_mappping else {
-                bail!("can't merge non single tables")
-            };
-
-            // add the metadata hashes together - this is mostly for debugging
-            let md = merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-                contract.address,
-                contract.chain_id,
-                vec![],
-                SlotInputs::Simple(self.single.slot_inputs.clone()),
-                SlotInputs::Mapping(self.mapping.slot_inputs.clone()),
-            );
-            assert!(extract_a != extract_b);
-            Ok((
-                ExtractionProofInput::Merge(MergeExtractionProof {
-                    single: extract_a,
-                    mapping: extract_b,
-                }),
-                md,
-            ))
-        }
-        .boxed()
     }
 
     pub async fn init_contract_data(
@@ -645,15 +602,82 @@ impl MergeSource {
             }
         }
     }
+
+    #[allow(elided_named_lifetimes)]
+    pub fn generate_extraction_proof_inputs<'a>(
+        &'a self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+        proof_key: ProofKey,
+    ) -> BoxFuture<Result<(ExtractionProofInput, HashOutput)>> {
+        async move {
+            let ProofKey::ValueExtraction((id, bn)) = proof_key else {
+                bail!("key wrong");
+            };
+            let id_a = id.clone() + "_a";
+            let id_b = id + "_b";
+            // generate the value extraction proof for the both table individually
+            let (extract_single, _) = self
+                .single
+                .generate_extraction_proof_inputs(
+                    ctx,
+                    contract,
+                    ProofKey::ValueExtraction((id_a, bn)),
+                )
+                .await?;
+            let ExtractionProofInput::Single(extract_a) = extract_single else {
+                bail!("can't merge non single tables")
+            };
+            let (extract_mappping, _) = self
+                .mapping
+                .generate_extraction_proof_inputs(
+                    ctx,
+                    contract,
+                    ProofKey::ValueExtraction((id_b, bn)),
+                )
+                .await?;
+            let ExtractionProofInput::Single(extract_b) = extract_mappping else {
+                bail!("can't merge non single tables")
+            };
+
+            // add the metadata hashes together - this is mostly for debugging
+            let (simple, mapping) = self.get_data();
+            let md = merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                contract.address,
+                contract.chain_id,
+                vec![],
+                simple,
+                mapping,
+            );
+            assert!(extract_a != extract_b);
+            Ok((
+                ExtractionProofInput::Merge(MergeExtractionProof {
+                    single: extract_a,
+                    mapping: extract_b,
+                }),
+                md,
+            ))
+        }
+        .boxed()
+    }
 }
 
 /// Length extraction arguments (C.2)
-#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub(crate) struct LengthExtractionArgs {
     /// Length slot
     pub(crate) slot: u8,
     /// Length value
     pub(crate) value: u8,
+}
+
+/// Receipt extraction arguments
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone, Copy)]
+pub(crate) struct ReceiptExtractionArgs<const NO_TOPICS: usize, const MAX_DATA: usize> {
+    /// The event data
+    pub(crate) event: EventLogInfo<NO_TOPICS, MAX_DATA>,
+    /// column that will be the secondary index
+    pub(crate) index: u64,
 }
 
 /// Contract extraction arguments (C.3)
@@ -668,7 +692,7 @@ static ROTATOR: AtomicUsize = AtomicUsize::new(0);
 
 use lazy_static::lazy_static;
 lazy_static! {
-    pub(crate) static ref BASE_VALUE: U256 = U256::from(10);
+    pub(crate) static ref BASE_VALUE: U256 = U256::from(10u8);
     pub static ref DEFAULT_ADDRESS: Address =
         Address::from_str("0xBA401cdAc1A3B6AEede21c9C4A483bE6c29F88C4").unwrap();
 }
@@ -762,12 +786,8 @@ impl SingleExtractionArgs {
             }
         };
         let slot_inputs = SlotInputs::Simple(self.slot_inputs.clone());
-        let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-            slot_inputs,
-            &contract.address,
-            contract.chain_id,
-            vec![],
-        );
+        let metadata_hash =
+            metadata_hash(slot_inputs, &contract.address, contract.chain_id, vec![]);
         let input = ExtractionProofInput::Single(ExtractionTableProof {
             value_proof,
             length_proof: None,
@@ -980,9 +1000,33 @@ impl SingleExtractionArgs {
     }
 }
 
-/// Mapping extraction arguments
+// /// Mapping extraction arguments
+// #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
+// pub(crate) struct MappingExtractionArgs<K, V>
+// where
+//     K: StorageSlotMappingKey,
+//     V: StorageSlotValue,
+// {
+//     /// Mapping slot number
+//     slot: u8,
+//     /// Mapping index type
+//     index: MappingIndex,
+//     /// Slot input information
+//     slot_inputs: Vec<SlotInput>,
+//     /// Mapping keys: they are useful for two things:
+//     ///     * doing some controlled changes on the smart contract, since if we want to do an update we
+//     /// need to know an existing key
+//     ///     * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
+//     /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
+//     mapping_keys: BTreeSet<K>,
+//     /// The optional length extraction parameters
+//     length_args: Option<LengthExtractionArgs>,
+//     /// Phantom
+//     _phantom: PhantomData<(K, V)>,
+// }
+
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
-pub(crate) struct MappingExtractionArgs<K: StorageSlotMappingKey, V: StorageSlotValue> {
+pub(crate) struct MappingExtractionArgs<T: MappingInfo> {
     /// Mapping slot number
     slot: u8,
     /// Mapping index type
@@ -994,208 +1038,60 @@ pub(crate) struct MappingExtractionArgs<K: StorageSlotMappingKey, V: StorageSlot
     /// need to know an existing key
     ///     * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
     /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
-    mapping_keys: BTreeSet<K>,
-    /// Phantom
-    _phantom: PhantomData<(K, V)>,
+    mapping_keys: BTreeSet<T>,
+    /// The optional length extraction parameters
+    length_args: Option<LengthExtractionArgs>,
 }
 
-impl<K, V> MappingExtractionArgs<K, V>
+impl<T> TableSource for MappingExtractionArgs<T>
 where
-    K: StorageSlotMappingKey,
-    V: StorageSlotValue,
-    Vec<MappingUpdate<K, V>>: ContractController,
+    T: MappingInfo,
+    Vec<MappingUpdate<T, T::Value>>: ContractController,
 {
-    pub fn new(slot: u8, index: MappingIndex, slot_inputs: Vec<SlotInput>) -> Self {
-        Self {
-            slot,
-            index,
-            slot_inputs,
-            mapping_keys: BTreeSet::new(),
-            _phantom: Default::default(),
+    type Metadata = SlotInputs;
+
+    fn get_data(&self) -> Self::Metadata {
+        if let Some(l_args) = self.length_args.as_ref() {
+            T::slot_inputs(self.slot_inputs.clone(), Some(l_args.slot))
+        } else {
+            T::slot_inputs(self.slot_inputs.clone(), None)
         }
     }
 
-    pub fn slot_inputs(&self) -> &[SlotInput] {
-        &self.slot_inputs
-    }
+    fn init_contract_data<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async {
+            let init_key_and_value: [_; 3] =
+                array::from_fn(|_| (T::sample_key(), <T as MappingInfo>::Value::sample_value()));
+            // Save the mapping keys.
+            self.mapping_keys
+                .extend(init_key_and_value.iter().map(|u| u.0.clone()).collect_vec());
+            let updates = init_key_and_value
+                .into_iter()
+                .map(|(key, value)| MappingUpdate::Insertion(key, value))
+                .collect_vec();
 
-    pub async fn init_contract_data(
-        &mut self,
-        ctx: &mut TestContext,
-        contract: &Contract,
-    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        let init_key_and_value: [_; 3] = array::from_fn(|_| (K::sample_key(), V::sample_value()));
-        // Save the mapping keys.
-        self.mapping_keys
-            .extend(init_key_and_value.iter().map(|u| u.0.clone()).collect_vec());
-        let updates = init_key_and_value
-            .into_iter()
-            .map(|(key, value)| MappingUpdate::Insertion(key, value))
-            .collect_vec();
+            updates.update_contract(ctx, contract).await;
 
-        updates.update_contract(ctx, contract).await;
-
-        let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-        self.mapping_to_table_update(new_block_number, contract, &updates)
-    }
-
-    async fn random_contract_update(
-        &mut self,
-        ctx: &mut TestContext,
-        contract: &Contract,
-        c: ChangeType,
-    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        // NOTE 1: The first part is just trying to construct the right input to simulate any
-        // changes on a mapping. This is mostly irrelevant for dist system but needs to manually
-        // construct our test cases here. The second part is more interesting as it looks at
-        // "what to do when receiving an update from scrapper". The core of the function is in
-        // `mapping_to_table_update`
-        //
-        // NOTE 2: This implementation tries to emulate as much as possible what happens in dist
-        // system. To compute the set of updates, it first simulate an update on the contract
-        // and creates the signal "MappingUpdate" corresponding to the update. From that point
-        // onwards, the table row updates are manually created.
-        // Note this can actually lead to more work than necessary in some cases.
-        // Take an example where the mapping is storing (10->A), (11->A), and where the
-        // secondary index value is the value, i.e. A.
-        // Our table initially looks like `A | 10`, `A | 11`.
-        // Imagine an update where we want to change the first row to `A | 12`. In the "table"
-        // world, this is only a simple update of a simple cell, no index even involved. But
-        // from the perspective of mapping, the "scrapper" can only tells us :
-        // * Key 10 has been deleted
-        // * Key 12 has been added with value A
-        // In the backend, we translate that in the "table world" to a deletion and an insertion.
-        // Having such optimization could be done later on, need to properly evaluate the cost
-        // of it.
-        let current_key = self.mapping_keys.first().unwrap();
-        let current_value = self.query_value(ctx, contract, current_key).await;
-        let new_key = K::sample_key();
-        let updates = match c {
-            ChangeType::Silent => vec![],
-            ChangeType::Insertion => {
-                vec![MappingUpdate::Insertion(new_key, V::sample_value())]
-            }
-            ChangeType::Deletion => {
-                vec![MappingUpdate::Deletion(current_key.clone(), current_value)]
-            }
-            ChangeType::Update(u) => {
-                match u {
-                    UpdateType::Rest => {
-                        let new_value = V::sample_value();
-                        match self.index {
-                            MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => {
-                                // we simply change the mapping value since the key is the secondary index
-                                vec![MappingUpdate::Update(
-                                    current_key.clone(),
-                                    current_value,
-                                    new_value,
-                                )]
-                            }
-                            MappingIndex::Value(_) => {
-                                // TRICKY: in this case, the mapping key must change. But from the
-                                // onchain perspective, it means a transfer mapping(old_key -> new_key,value)
-                                vec![
-                                    MappingUpdate::Deletion(
-                                        current_key.clone(),
-                                        current_value.clone(),
-                                    ),
-                                    MappingUpdate::Insertion(new_key, current_value),
-                                ]
-                            }
-                            MappingIndex::None => {
-                                // a random update of the mapping, we don't care which since it is
-                                // not impacting the secondary index of the table since the mapping
-                                // doesn't contain the column which is the secondary index, in case
-                                // of the merge table case.
-                                vec![MappingUpdate::Update(
-                                    current_key.clone(),
-                                    current_value,
-                                    new_value,
-                                )]
-                            }
-                        }
-                    }
-                    UpdateType::SecondaryIndex => {
-                        match self.index {
-                            MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => {
-                                // TRICKY: if the mapping key changes, it's a deletion then
-                                // insertion from onchain perspective
-                                vec![
-                                    MappingUpdate::Deletion(
-                                        current_key.clone(),
-                                        current_value.clone(),
-                                    ),
-                                    // we insert the same value but with a new mapping key
-                                    MappingUpdate::Insertion(new_key, current_value),
-                                ]
-                            }
-                            MappingIndex::Value(secondary_value_id) => {
-                                // We only update the second index value here.
-                                let slot_input_to_update = self
-                                    .slot_inputs
-                                    .iter()
-                                    .find(|slot_input| {
-                                        identifier_for_value_column(
-                                            slot_input,
-                                            &contract.address,
-                                            contract.chain_id,
-                                            vec![],
-                                        ) == secondary_value_id
-                                    })
-                                    .unwrap();
-                                let mut new_value = current_value.clone();
-                                new_value.random_update(slot_input_to_update);
-                                // if the value changes, it's a simple update in mapping
-                                vec![MappingUpdate::Update(
-                                    current_key.clone(),
-                                    current_value,
-                                    new_value,
-                                )]
-                            }
-                            MappingIndex::None => {
-                                // empty vec since this table has no secondary index so it should
-                                // give no updates
-                                vec![]
-                            }
-                        }
-                    }
-                }
-            }
-        };
-        // small iteration to always have a good updated list of mapping keys
-        for update in &updates {
-            match update {
-                MappingUpdate::Deletion(key_to_delete, _) => {
-                    info!("Removing key {key_to_delete:?} from tracking mapping keys");
-                    self.mapping_keys.retain(|u| u != key_to_delete);
-                }
-                MappingUpdate::Insertion(key_to_insert, _) => {
-                    info!("Inserting key {key_to_insert:?} to tracking mapping keys");
-                    self.mapping_keys.insert(key_to_insert.clone());
-                }
-                // the mapping key doesn't change here so no need to update the list
-                MappingUpdate::Update(_, _, _) => {}
-            }
+            let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
+            self.mapping_to_table_update(new_block_number, contract, &updates)
         }
-        updates.update_contract(ctx, contract).await;
-
-        let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
-        // NOTE HERE is the interesting bit for dist system as this is the logic to execute
-        // on receiving updates from scapper. This only needs to have the relevant
-        // information from update and it will translate that to changes in the tree.
-        self.mapping_to_table_update(new_block_number, contract, &updates)
+        .boxed()
     }
 
-    pub async fn generate_extraction_proof_inputs(
+    async fn generate_extraction_proof_inputs(
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
-        proof_key: ProofKey,
+        value_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
-        let ProofKey::ValueExtraction((_, bn)) = proof_key.clone() else {
+        let ProofKey::ValueExtraction((_, bn)) = value_key.clone() else {
             bail!("invalid proof key");
         };
-        let mapping_root_proof = match ctx.storage.get_proof_exact(&proof_key) {
+        let mapping_root_proof = match ctx.storage.get_proof_exact(&value_key) {
             Ok(p) => p,
             Err(_) => {
                 let storage_slot_info = self.all_storage_slot_info(contract);
@@ -1207,7 +1103,7 @@ where
                     )
                     .await;
                 ctx.storage
-                    .store_proof(proof_key, mapping_values_proof.clone())?;
+                    .store_proof(value_key, mapping_values_proof.clone())?;
                 info!("Generated Values Extraction proof for mapping slot");
                 {
                     let pproof = ProofWithVK::deserialize(&mapping_values_proof).unwrap();
@@ -1230,12 +1126,7 @@ where
                 mapping_values_proof
             }
         };
-        let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-            K::slot_inputs(self.slot_inputs.clone()),
-            &contract.address,
-            contract.chain_id,
-            vec![],
-        );
+        let metadata_hash = self.metadata_hash(contract.address(), contract.chain_id());
         // it's a compoound value type of proof since we're not using the length
         let input = ExtractionProofInput::Single(ExtractionTableProof {
             value_proof: mapping_root_proof,
@@ -1244,12 +1135,189 @@ where
         Ok((input, metadata_hash))
     }
 
+    fn random_contract_update<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+        c: ChangeType,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async {
+            // NOTE 1: The first part is just trying to construct the right input to simulate any
+            // changes on a mapping. This is mostly irrelevant for dist system but needs to manually
+            // construct our test cases here. The second part is more interesting as it looks at
+            // "what to do when receiving an update from scrapper". The core of the function is in
+            // `mapping_to_table_update`
+            //
+            // NOTE 2: This implementation tries to emulate as much as possible what happens in dist
+            // system. To compute the set of updates, it first simulate an update on the contract
+            // and creates the signal "MappingUpdate" corresponding to the update. From that point
+            // onwards, the table row updates are manually created.
+            // Note this can actually lead to more work than necessary in some cases.
+            // Take an example where the mapping is storing (10->A), (11->A), and where the
+            // secondary index value is the value, i.e. A.
+            // Our table initially looks like `A | 10`, `A | 11`.
+            // Imagine an update where we want to change the first row to `A | 12`. In the "table"
+            // world, this is only a simple update of a simple cell, no index even involved. But
+            // from the perspective of mapping, the "scrapper" can only tells us :
+            // * Key 10 has been deleted
+            // * Key 12 has been added with value A
+            // In the backend, we translate that in the "table world" to a deletion and an insertion.
+            // Having such optimization could be done later on, need to properly evaluate the cost
+            // of it.
+            let current_key = self.mapping_keys.first().unwrap();
+            let current_value = self.query_value(ctx, contract, current_key).await;
+            let new_key = T::sample_key();
+            let updates = match c {
+                ChangeType::Silent => vec![],
+                ChangeType::Insertion => {
+                    vec![MappingUpdate::Insertion(
+                        new_key,
+                        <T as MappingInfo>::Value::sample_value(),
+                    )]
+                }
+                ChangeType::Deletion => {
+                    vec![MappingUpdate::Deletion(current_key.clone(), current_value)]
+                }
+                ChangeType::Update(u) => {
+                    match u {
+                        UpdateType::Rest => {
+                            let new_value = <T as MappingInfo>::Value::sample_value();
+                            match self.index {
+                                MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => {
+                                    // we simply change the mapping value since the key is the secondary index
+                                    vec![MappingUpdate::Update(
+                                        current_key.clone(),
+                                        current_value,
+                                        new_value,
+                                    )]
+                                }
+                                MappingIndex::Value(_) => {
+                                    // TRICKY: in this case, the mapping key must change. But from the
+                                    // onchain perspective, it means a transfer mapping(old_key -> new_key,value)
+                                    vec![
+                                        MappingUpdate::Deletion(
+                                            current_key.clone(),
+                                            current_value.clone(),
+                                        ),
+                                        MappingUpdate::Insertion(new_key, current_value),
+                                    ]
+                                }
+                                MappingIndex::None => {
+                                    // a random update of the mapping, we don't care which since it is
+                                    // not impacting the secondary index of the table since the mapping
+                                    // doesn't contain the column which is the secondary index, in case
+                                    // of the merge table case.
+                                    vec![MappingUpdate::Update(
+                                        current_key.clone(),
+                                        current_value,
+                                        new_value,
+                                    )]
+                                }
+                            }
+                        }
+                        UpdateType::SecondaryIndex => {
+                            match self.index {
+                                MappingIndex::OuterKey(_) | MappingIndex::InnerKey(_) => {
+                                    // TRICKY: if the mapping key changes, it's a deletion then
+                                    // insertion from onchain perspective
+                                    vec![
+                                        MappingUpdate::Deletion(
+                                            current_key.clone(),
+                                            current_value.clone(),
+                                        ),
+                                        // we insert the same value but with a new mapping key
+                                        MappingUpdate::Insertion(new_key, current_value),
+                                    ]
+                                }
+                                MappingIndex::Value(secondary_value_id) => {
+                                    // We only update the second index value here.
+                                    let slot_input_to_update = self
+                                        .slot_inputs
+                                        .iter()
+                                        .find(|slot_input| {
+                                            identifier_for_value_column(
+                                                slot_input,
+                                                &contract.address,
+                                                contract.chain_id,
+                                                vec![],
+                                            ) == secondary_value_id
+                                        })
+                                        .unwrap();
+                                    let mut new_value = current_value.clone();
+                                    new_value.random_update(slot_input_to_update);
+                                    // if the value changes, it's a simple update in mapping
+                                    vec![MappingUpdate::Update(
+                                        current_key.clone(),
+                                        current_value,
+                                        new_value,
+                                    )]
+                                }
+                                MappingIndex::None => {
+                                    // empty vec since this table has no secondary index so it should
+                                    // give no updates
+                                    vec![]
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+            // small iteration to always have a good updated list of mapping keys
+            for update in &updates {
+                match update {
+                    MappingUpdate::Deletion(key_to_delete, _) => {
+                        info!("Removing key {key_to_delete:?} from tracking mapping keys");
+                        self.mapping_keys.retain(|u| u != key_to_delete);
+                    }
+                    MappingUpdate::Insertion(key_to_insert, _) => {
+                        info!("Inserting key {key_to_insert:?} to tracking mapping keys");
+                        self.mapping_keys.insert(key_to_insert.clone());
+                    }
+                    // the mapping key doesn't change here so no need to update the list
+                    MappingUpdate::Update(_, _, _) => {}
+                }
+            }
+            updates.update_contract(ctx, contract).await;
+
+            let new_block_number = ctx.block_number().await as BlockPrimaryIndex;
+            // NOTE HERE is the interesting bit for dist system as this is the logic to execute
+            // on receiving updates from scapper. This only needs to have the relevant
+            // information from update and it will translate that to changes in the tree.
+            self.mapping_to_table_update(new_block_number, contract, &updates)
+        }
+        .boxed()
+    }
+
+    fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash {
+        metadata_hash(self.get_data(), &contract_address, chain_id, vec![])
+    }
+
+    fn can_query(&self) -> bool {
+        true
+    }
+}
+
+impl<T: MappingInfo> MappingExtractionArgs<T> {
+    pub fn new(
+        slot: u8,
+        index: MappingIndex,
+        slot_inputs: Vec<SlotInput>,
+        length_args: Option<LengthExtractionArgs>,
+    ) -> Self {
+        Self {
+            slot,
+            index,
+            slot_inputs,
+            mapping_keys: BTreeSet::new(),
+            length_args,
+        }
+    }
     /// The generic parameter `V` could be set to an Uint256 as single value or a Struct.
     pub fn mapping_to_table_update(
         &self,
         block_number: BlockPrimaryIndex,
         contract: &Contract,
-        updates: &[MappingUpdate<K, V>],
+        updates: &[MappingUpdate<T, T::Value>],
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         updates
             .iter()
@@ -1352,7 +1420,7 @@ where
         &self,
         evm_word: u32,
         table_info: Vec<ColumnInfo>,
-        mapping_key: &K,
+        mapping_key: &T,
     ) -> StorageSlotInfo {
         let storage_slot = mapping_key.storage_slot(self.slot, evm_word);
 
@@ -1373,7 +1441,12 @@ where
     }
 
     /// Query a storage slot value by a mapping key.
-    async fn query_value(&self, ctx: &mut TestContext, contract: &Contract, mapping_key: &K) -> V {
+    async fn query_value(
+        &self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        mapping_key: &T,
+    ) -> T::Value {
         let mut extracted_values = vec![];
         let evm_word_cols = self.evm_word_column_info(contract);
         for evm_word_col in evm_word_cols {
@@ -1398,7 +1471,7 @@ where
             });
         }
 
-        V::from_u256_slice(&extracted_values)
+        <T as MappingInfo>::Value::from_u256_slice(&extracted_values)
     }
 
     fn table_info(&self, contract: &Contract) -> Vec<ColumnInfo> {

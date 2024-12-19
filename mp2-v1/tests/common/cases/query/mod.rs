@@ -25,7 +25,7 @@ use verifiable_db::query::{
 
 use crate::common::{cases::planner::QueryPlanner, table::Table, TableInfo, TestContext};
 
-use super::table_source::TableSource;
+use super::TableSource;
 
 pub mod aggregated_queries;
 pub mod simple_select_queries;
@@ -78,17 +78,23 @@ pub struct QueryCooking {
     pub(crate) offset: Option<u32>,
 }
 
-pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
-    match &t.source {
-        TableSource::MappingValues(_, _) | TableSource::Merge(_) => {
-            query_mapping(ctx, &table, &t).await?
-        }
-        _ => unimplemented!("yet"),
+pub async fn test_query<T: TableSource>(
+    ctx: &mut TestContext,
+    table: Table,
+    t: TableInfo<T>,
+) -> Result<()> {
+    match &t.source.can_query() {
+        true => query_mapping(ctx, &table, &t).await?,
+        false => unimplemented!("yet"),
     }
     Ok(())
 }
 
-async fn query_mapping(ctx: &mut TestContext, table: &Table, info: &TableInfo) -> Result<()> {
+async fn query_mapping<T: TableSource>(
+    ctx: &mut TestContext,
+    table: &Table,
+    info: &TableInfo<T>,
+) -> Result<()> {
     let table_hash = info.metadata_hash();
     let query_info = cook_query_between_blocks(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;

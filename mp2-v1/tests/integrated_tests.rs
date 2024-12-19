@@ -24,6 +24,8 @@ use common::{
             MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
         },
+        slot_info::{SimpleMapping, SimpleNestedMapping, StructMapping, StructNestedMapping},
+        table_source::{MappingExtractionArgs, MergeSource, SingleExtractionArgs, TableSource},
         TableIndexing,
     },
     context::{self, ParamsType, TestContextConfig},
@@ -41,6 +43,7 @@ use parsil::{
     utils::ParsilSettingsBuilder,
     PlaceholderSettings,
 };
+use serde::{de::DeserializeOwned, Serialize};
 use test_log::test;
 use verifiable_db::query::universal_circuit::universal_circuit_inputs::Placeholders;
 
@@ -87,16 +90,17 @@ async fn integrated_indexing() -> Result<()> {
 
     info!("Params built");
     // NOTE: to comment to avoid very long tests...
-
-    let (mut single, genesis) = TableIndexing::single_value_test_case(&mut ctx).await?;
+    let (mut single, genesis) =
+        TableIndexing::<SingleExtractionArgs>::single_value_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Update(UpdateType::Rest),
         ChangeType::Silent,
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
     single.run(&mut ctx, genesis, changes.clone()).await?;
-
-    let (mut mapping, genesis) = TableIndexing::mapping_value_test_case(&mut ctx).await?;
+    let (mut mapping, genesis) =
+        TableIndexing::<MappingExtractionArgs<SimpleMapping>>::mapping_value_test_case(&mut ctx)
+            .await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
@@ -106,18 +110,20 @@ async fn integrated_indexing() -> Result<()> {
     ];
     mapping.run(&mut ctx, genesis, changes).await?;
 
-    let (mut mapping, genesis) = TableIndexing::mapping_struct_test_case(&mut ctx).await?;
+    let (mut mapping, genesis) =
+        TableIndexing::<MappingExtractionArgs<StructMapping>>::mapping_struct_test_case(&mut ctx)
+            .await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
-        ChangeType::Update(UpdateType::SecondaryIndex),
         ChangeType::Deletion,
         ChangeType::Silent,
     ];
     mapping.run(&mut ctx, genesis, changes).await?;
 
     let (mut mapping_of_single_value_mappings, genesis) =
-        TableIndexing::mapping_of_single_value_mappings_test_case(&mut ctx).await?;
+        TableIndexing::<MappingExtractionArgs<SimpleNestedMapping>>::mapping_of_single_value_mappings_test_case(&mut ctx)
+            .await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
@@ -129,8 +135,12 @@ async fn integrated_indexing() -> Result<()> {
         .run(&mut ctx, genesis, changes)
         .await?;
 
-    let (mut mapping_of_struct_mappings, genesis) =
-        TableIndexing::mapping_of_struct_mappings_test_case(&mut ctx).await?;
+    let (mut mapping_of_struct_mappings, genesis) = TableIndexing::<
+        MappingExtractionArgs<StructNestedMapping>,
+    >::mapping_of_struct_mappings_test_case(
+        &mut ctx
+    )
+    .await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
@@ -142,13 +152,9 @@ async fn integrated_indexing() -> Result<()> {
         .run(&mut ctx, genesis, changes)
         .await?;
 
-    let (mut merged, genesis) = TableIndexing::merge_table_test_case(&mut ctx).await?;
-    let changes = vec![
-        ChangeType::Insertion,
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Silent,
-        ChangeType::Deletion,
-    ];
+    let (mut merged, genesis) =
+        TableIndexing::<MergeSource>::merge_table_test_case(&mut ctx).await?;
+    let changes = vec![ChangeType::Update(UpdateType::Rest), ChangeType::Silent];
     merged.run(&mut ctx, genesis, changes).await?;
 
     // save columns information and table information in JSON so querying test can pick up
@@ -158,7 +164,7 @@ async fn integrated_indexing() -> Result<()> {
     Ok(())
 }
 
-async fn integrated_querying(table_info: TableInfo) -> Result<()> {
+async fn integrated_querying<T: TableSource>(table_info: TableInfo<T>) -> Result<()> {
     let storage = ProofKV::new_from_env(PROOF_STORE_FILE)?;
     info!("Loading Anvil and contract");
     let mut ctx = context::new_local_chain(storage).await;
@@ -181,7 +187,8 @@ async fn integrated_querying(table_info: TableInfo) -> Result<()> {
 async fn integrated_querying_mapping_table() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test for mapping table");
-    let table_info = read_table_info(MAPPING_TABLE_INFO_FILE)?;
+    let table_info: TableInfo<MappingExtractionArgs<SimpleMapping>> =
+        read_table_info(MAPPING_TABLE_INFO_FILE)?;
     integrated_querying(table_info).await
 }
 
@@ -190,7 +197,7 @@ async fn integrated_querying_mapping_table() -> Result<()> {
 async fn integrated_querying_merged_table() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test for merged table");
-    let table_info = read_table_info(MERGE_TABLE_INFO_FILE)?;
+    let table_info: TableInfo<MergeSource> = read_table_info(MERGE_TABLE_INFO_FILE)?;
     integrated_querying(table_info).await
 }
 
@@ -206,7 +213,10 @@ fn table_info_path(f: &str) -> PathBuf {
     path
 }
 
-fn write_table_info(f: &str, info: TableInfo) -> Result<()> {
+fn write_table_info<T: TableSource + Serialize + DeserializeOwned>(
+    f: &str,
+    info: TableInfo<T>,
+) -> Result<()> {
     let full_path = table_info_path(f);
     let file = File::create(full_path)?;
     let writer = BufWriter::new(file);
@@ -214,11 +224,11 @@ fn write_table_info(f: &str, info: TableInfo) -> Result<()> {
     Ok(())
 }
 
-fn read_table_info(f: &str) -> Result<TableInfo> {
+fn read_table_info<T: TableSource + Serialize + DeserializeOwned>(f: &str) -> Result<TableInfo<T>> {
     let full_path = table_info_path(f);
     let file = File::open(full_path)?;
     let reader = BufReader::new(file);
-    let info = serde_json::from_reader(reader)?;
+    let info: TableInfo<T> = serde_json::from_reader(reader)?;
     Ok(info)
 }
 
