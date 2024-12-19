@@ -1,5 +1,6 @@
 use std::{
     assert_matches::assert_matches,
+    future::Future,
     str::FromStr,
     sync::atomic::{AtomicU64, AtomicUsize},
 };
@@ -7,19 +8,19 @@ use std::{
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
-    providers::Provider,
+    providers::{Provider, ProviderBuilder},
 };
 use anyhow::{bail, Result};
 use futures::{future::BoxFuture, FutureExt};
 use log::{debug, info};
 use mp2_common::{
     digest::TableDimension,
-    eth::{ProofQuery, StorageSlot},
+    eth::{EventLogInfo, ProofQuery, StorageSlot},
     proof::ProofWithVK,
     types::HashOutput,
 };
 use mp2_v1::{
-    api::{merge_metadata_hash, metadata_hash, SlotInputs},
+    api::{merge_metadata_hash, metadata_hash, MetadataHash, SlotInputs},
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
@@ -43,7 +44,7 @@ use crate::common::{
 };
 
 use super::{
-    contract::Contract,
+    contract::{Contract, SimpleContract, TestContract},
     indexing::{ChangeType, TableRowUpdate, UpdateSimpleStorage, UpdateType},
 };
 
@@ -182,87 +183,163 @@ impl UniqueMappingEntry {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Hash, Clone, PartialEq, Eq)]
-pub(crate) enum TableSource {
-    /// Test arguments for single values extraction (C.1)
-    SingleValues(SingleValuesExtractionArgs),
-    /// Test arguments for mapping values extraction (C.1)
-    /// We can test with and without the length
-    Mapping((MappingValuesExtractionArgs, Option<LengthExtractionArgs>)),
-    Merge(MergeSource),
-}
+pub(crate) trait TableSource: Serialize + for<'de> Deserialize<'de> {
+    type Metadata;
 
-impl TableSource {
-    pub fn slot_input(&self) -> SlotInputs {
-        match self {
-            TableSource::SingleValues(single) => SlotInputs::Simple(single.slots.clone()),
-            TableSource::Mapping((m, _)) => SlotInputs::Mapping(m.slot),
-            TableSource::Merge(_) => panic!("can't call slot inputs on merge table"),
-        }
-    }
+    fn get_data(&self) -> Self::Metadata;
 
-    #[allow(elided_named_lifetimes)]
-    pub fn init_contract_data<'a>(
+    fn init_contract_data<'a>(
         &'a mut self,
         ctx: &'a mut TestContext,
         contract: &'a Contract,
-    ) -> BoxFuture<Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        async move {
-            match self {
-                TableSource::SingleValues(ref mut s) => s.init_contract_data(ctx, contract).await,
-                TableSource::Mapping((ref mut m, _)) => m.init_contract_data(ctx, contract).await,
-                TableSource::Merge(ref mut merge) => merge.init_contract_data(ctx, contract).await,
-            }
-        }
-        .boxed()
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>>;
+
+    fn generate_extraction_proof_inputs(
+        &self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        value_key: ProofKey,
+    ) -> impl Future<Output = Result<(ExtractionProofInput, HashOutput)>>;
+
+    fn random_contract_update<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+        c: ChangeType,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>>;
+
+    fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash;
+
+    fn can_query(&self) -> bool;
+}
+
+impl TableSource for SingleValuesExtractionArgs {
+    type Metadata = SlotInputs;
+
+    fn get_data(&self) -> SlotInputs {
+        SlotInputs::Simple(self.slots.clone())
     }
 
-    pub async fn generate_extraction_proof_inputs(
+    fn init_contract_data<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move { self.init_contract_data(ctx, contract).await }.boxed()
+    }
+
+    async fn generate_extraction_proof_inputs(
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
         value_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
-        match self {
-            // first lets do without length
-            TableSource::Mapping((ref mapping, _)) => {
-                mapping
-                    .generate_extraction_proof_inputs(ctx, contract, value_key)
-                    .await
-            }
-            TableSource::SingleValues(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
-                    .await
-            }
-            TableSource::Merge(ref merge) => {
-                merge
-                    .generate_extraction_proof_inputs(ctx, contract, value_key)
-                    .await
-            }
-        }
+        self.generate_extraction_proof_inputs(ctx, contract, value_key)
+            .await
     }
 
-    #[allow(elided_named_lifetimes)]
-    pub fn random_contract_update<'a>(
+    fn random_contract_update<'a>(
         &'a mut self,
         ctx: &'a mut TestContext,
         contract: &'a Contract,
         c: ChangeType,
-    ) -> BoxFuture<Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        async move {
-            match self {
-                TableSource::Mapping((ref mut mapping, _)) => {
-                    mapping.random_contract_update(ctx, contract, c).await
-                }
-                TableSource::SingleValues(ref v) => {
-                    v.random_contract_update(ctx, contract, c).await
-                }
-                TableSource::Merge(ref mut merge) => {
-                    merge.random_contract_update(ctx, contract, c).await
-                }
-            }
-        }
-        .boxed()
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move { SingleValuesExtractionArgs::random_contract_update(self, ctx, contract, c).await }.boxed()
+    }
+
+    fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash {
+        let slot = self.get_data();
+        metadata_hash(slot, &contract_address, chain_id, vec![])
+    }
+
+    fn can_query(&self) -> bool {
+        false
+    }
+}
+
+impl TableSource for MappingValuesExtractionArgs {
+    type Metadata = SlotInputs;
+    fn get_data(&self) -> SlotInputs {
+        SlotInputs::Mapping(self.slot)
+    }
+
+    fn init_contract_data<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move { self.init_contract_data(ctx, contract).await }.boxed()
+    }
+
+    async fn generate_extraction_proof_inputs(
+        &self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        value_key: ProofKey,
+    ) -> Result<(ExtractionProofInput, HashOutput)> {
+        self.generate_extraction_proof_inputs(ctx, contract, value_key)
+            .await
+    }
+
+    fn random_contract_update<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+        c: ChangeType,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move { self.random_contract_update(ctx, contract, c).await }.boxed()
+    }
+
+    fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash {
+        let slot = self.get_data();
+        metadata_hash(slot, &contract_address, chain_id, vec![])
+    }
+
+    fn can_query(&self) -> bool {
+        true
+    }
+}
+
+impl TableSource for MergeSource {
+    type Metadata = (SlotInputs, SlotInputs);
+    fn get_data(&self) -> Self::Metadata {
+        (self.single.get_data(), self.mapping.get_data())
+    }
+
+    fn init_contract_data<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move { self.init_contract_data(ctx, contract).await }.boxed()
+    }
+
+    async fn generate_extraction_proof_inputs(
+        &self,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        value_key: ProofKey,
+    ) -> Result<(ExtractionProofInput, HashOutput)> {
+        self.generate_extraction_proof_inputs(ctx, contract, value_key)
+            .await
+    }
+
+    fn random_contract_update<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+        c: ChangeType,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move { self.random_contract_update(ctx, contract, c).await }.boxed()
+    }
+
+    fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash {
+        let (single, mapping) = self.get_data();
+        merge_metadata_hash(contract_address, chain_id, vec![], single, mapping)
+    }
+
+    fn can_query(&self) -> bool {
+        true
     }
 }
 
@@ -291,7 +368,13 @@ impl SingleValuesExtractionArgs {
         // diff with the new updated contract storage, the logic will detect it's an initialization
         // phase
         let old_table_values = TableRowValues::default();
-        contract
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let simple = SimpleContract::new(contract.address(), provider.root());
+        simple
             .apply_update(ctx, &UpdateSimpleStorage::Single(contract_update))
             .await
             .unwrap();
@@ -320,8 +403,14 @@ impl SingleValuesExtractionArgs {
         // we can take the first one since we're asking for single value and there is only
         // one row
         let old_table_values = &old_table_values[0];
-        let mut current_values = contract
-            .current_single_values(ctx)
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let simple = SimpleContract::new(contract.address(), provider.root());
+        let mut current_values = simple
+            .current_single_values()
             .await
             .expect("can't get current values");
         match c {
@@ -341,7 +430,7 @@ impl SingleValuesExtractionArgs {
         };
 
         let contract_update = UpdateSimpleStorage::Single(current_values);
-        contract.apply_update(ctx, &contract_update).await.unwrap();
+        simple.apply_update(ctx, &contract_update).await.unwrap();
         let new_table_values = self.current_table_row_values(ctx, contract).await;
         assert!(
             new_table_values.len() == 1,
@@ -462,6 +551,8 @@ pub(crate) struct MappingValuesExtractionArgs {
     ///     * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
     /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
     pub(crate) mapping_keys: Vec<Vec<u8>>,
+    /// Optional length extraction arguments
+    pub(crate) length_extraction_args: Option<LengthExtractionArgs>,
 }
 
 impl MappingValuesExtractionArgs {
@@ -490,7 +581,14 @@ impl MappingValuesExtractionArgs {
             .map(|u| MappingUpdate::Insertion(u.0, u.1.into_word().into()))
             .collect::<Vec<_>>();
 
-        contract
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let simple = SimpleContract::new(contract.address(), provider.root());
+
+        simple
             .apply_update(ctx, &UpdateSimpleStorage::Mapping(mapping_updates.clone()))
             .await
             .unwrap();
@@ -621,7 +719,14 @@ impl MappingValuesExtractionArgs {
             }
         }
 
-        contract
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let simple = SimpleContract::new(contract.address(), provider.root());
+
+        simple
             .apply_update(ctx, &UpdateSimpleStorage::Mapping(mapping_updates.clone()))
             .await
             .unwrap();
@@ -977,13 +1082,9 @@ impl MergeSource {
             };
 
             // add the metadata hashes together - this is mostly for debugging
-            let md = merge_metadata_hash(
-                contract.address,
-                contract.chain_id,
-                vec![],
-                TableSource::SingleValues(self.single.clone()).slot_input(),
-                TableSource::Mapping((self.mapping.clone(), None)).slot_input(),
-            );
+            let (simple, mapping) = self.get_data();
+            let md =
+                merge_metadata_hash(contract.address, contract.chain_id, vec![], simple, mapping);
             assert!(extract_a != extract_b);
             Ok((
                 ExtractionProofInput::Merge(MergeExtractionProof {
@@ -1003,6 +1104,15 @@ pub(crate) struct LengthExtractionArgs {
     pub(crate) slot: u8,
     /// Length value
     pub(crate) value: u8,
+}
+
+/// Receipt extraction arguments
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
+pub(crate) struct ReceiptExtractionArgs<const NO_TOPICS: usize, const MAX_DATA: usize> {
+    /// The event data
+    pub(crate) event: EventLogInfo<NO_TOPICS, MAX_DATA>,
+    /// column that will be the secondary index
+    pub(crate) index: u64,
 }
 
 /// Contract extraction arguments (C.3)

@@ -1,6 +1,8 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
+use std::future::Future;
+
 use anyhow::Result;
 use log::{debug, info};
 use mp2_v1::{
@@ -41,8 +43,9 @@ use super::{
 };
 use alloy::{
     contract::private::{Network, Provider, Transport},
+    network::Ethereum,
     primitives::{Address, U256},
-    providers::ProviderBuilder,
+    providers::{ProviderBuilder, RootProvider},
 };
 use mp2_common::{eth::StorageSlot, proof::ProofWithVK, types::HashOutput};
 
@@ -68,10 +71,13 @@ pub(crate) const BLOCK_COLUMN_NAME: &str = "block_number";
 pub(crate) const MAPPING_VALUE_COLUMN: &str = "map_value";
 pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
 
-impl TableIndexing {
+impl<T: TableSource> TableIndexing<T> {
     pub(crate) async fn merge_table_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> Result<(
+        TableIndexing<MergeSource>,
+        Vec<TableRowUpdate<BlockPrimaryIndex>>,
+    )> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -85,10 +91,7 @@ impl TableIndexing {
         );
         let contract_address = contract.address();
         let chain_id = ctx.rpc.get_chain_id().await.unwrap();
-        let contract = Contract {
-            address: *contract_address,
-            chain_id,
-        };
+        let contract = Contract::new(*contract_address, chain_id);
         let single_source = SingleValuesExtractionArgs {
             // this test puts the mapping value as secondary index so there is no index for the
             // single variable slots.
@@ -113,8 +116,9 @@ impl TableIndexing {
             // NOTE: This array is a convenience to handle smart contract updates
             // manually, but does not need to be stored explicitely by dist system.
             mapping_keys: vec![],
+            length_extraction_args: None,
         };
-        let mut source = TableSource::Merge(MergeSource::new(single_source, mapping_source));
+        let mut source = MergeSource::new(single_source, mapping_source);
         let genesis_change = source.init_contract_data(ctx, &contract).await;
         let single_columns = SINGLE_SLOTS
             .iter()
@@ -179,14 +183,14 @@ impl TableIndexing {
         let indexing_genesis_block = ctx.block_number().await;
         let table = Table::new(indexing_genesis_block, "merged_table".to_string(), columns).await;
         Ok((
-            Self {
+            TableIndexing::<MergeSource> {
                 value_column,
-                source: source.clone(),
+                source,
                 table,
                 contract,
-                contract_extraction: ContractExtractionArgs {
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
             },
             genesis_change,
         ))
@@ -194,7 +198,10 @@ impl TableIndexing {
 
     pub(crate) async fn single_value_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> Result<(
+        TableIndexing<SingleValuesExtractionArgs>,
+        Vec<TableRowUpdate<BlockPrimaryIndex>>,
+    )> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -213,10 +220,10 @@ impl TableIndexing {
             chain_id,
         };
 
-        let mut source = TableSource::SingleValues(SingleValuesExtractionArgs {
+        let mut source = SingleValuesExtractionArgs {
             index_slot: Some(INDEX_SLOT),
             slots: SINGLE_SLOTS.to_vec(),
-        });
+        };
         let genesis_updates = source.init_contract_data(ctx, &contract).await;
 
         let indexing_genesis_block = ctx.block_number().await;
@@ -263,14 +270,14 @@ impl TableIndexing {
         };
         let table = Table::new(indexing_genesis_block, "single_table".to_string(), columns).await;
         Ok((
-            Self {
+            TableIndexing::<SingleValuesExtractionArgs> {
                 value_column: "".to_string(),
-                source: source.clone(),
+                source,
                 table,
                 contract,
-                contract_extraction: ContractExtractionArgs {
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
             },
             genesis_updates,
         ))
@@ -278,7 +285,10 @@ impl TableIndexing {
 
     pub(crate) async fn mapping_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> Result<(
+        TableIndexing<MappingValuesExtractionArgs>,
+        Vec<TableRowUpdate<BlockPrimaryIndex>>,
+    )> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -303,22 +313,19 @@ impl TableIndexing {
             false => (key_id, MappingIndex::Key(key_id), value_id),
         };
 
-        let mapping_args = MappingValuesExtractionArgs {
+        let mut source = MappingValuesExtractionArgs {
             slot: MAPPING_SLOT,
             index: mapping_index,
             // at the beginning there is no mapping key inserted
             // NOTE: This array is a convenience to handle smart contract updates
             // manually, but does not need to be stored explicitely by dist system.
             mapping_keys: vec![],
-        };
-
-        let mut source = TableSource::Mapping((
-            mapping_args,
-            Some(LengthExtractionArgs {
+            length_extraction_args: Some(LengthExtractionArgs {
                 slot: LENGTH_SLOT,
                 value: LENGTH_VALUE,
             }),
-        ));
+        };
+
         let contract = Contract {
             address: *contract_address,
             chain_id,
@@ -366,11 +373,11 @@ impl TableIndexing {
         let table = Table::new(index_genesis_block, "mapping_table".to_string(), columns).await;
 
         Ok((
-            Self {
+            TableIndexing::<MappingValuesExtractionArgs> {
                 value_column,
-                contract_extraction: ContractExtractionArgs {
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
                 contract,
                 source,
                 table,
@@ -571,34 +578,39 @@ impl TableIndexing {
                 proof
             }
             Err(_) => {
-                let contract_proof = ctx
-                    .prove_contract_extraction(
-                        &self.contract.address,
-                        self.contract_extraction.slot.clone(),
-                        bn,
-                    )
-                    .await;
-                ctx.storage
-                    .store_proof(contract_proof_key, contract_proof.clone())?;
-                info!(
-                    "Generated Contract Extraction (C.3) proof for block number {}",
-                    bn
-                );
-                {
-                    let pvk = ProofWithVK::deserialize(&contract_proof)?;
-                    let pis =
-                        contract_extraction::PublicInputs::from_slice(&pvk.proof().public_inputs);
-                    debug!(
-                        " CONTRACT storage root pis.storage_root() {:?}",
-                        hex::encode(
-                            pis.root_hash_field()
-                                .into_iter()
-                                .flat_map(|u| u.to_be_bytes())
-                                .collect::<Vec<_>>()
+                if let Some(contract_extraction) = &self.contract_extraction {
+                    let contract_proof = ctx
+                        .prove_contract_extraction(
+                            &self.contract.address,
+                            contract_extraction.slot.clone(),
+                            bn,
                         )
+                        .await;
+                    ctx.storage
+                        .store_proof(contract_proof_key, contract_proof.clone())?;
+                    info!(
+                        "Generated Contract Extraction (C.3) proof for block number {}",
+                        bn
                     );
+                    {
+                        let pvk = ProofWithVK::deserialize(&contract_proof)?;
+                        let pis = contract_extraction::PublicInputs::from_slice(
+                            &pvk.proof().public_inputs,
+                        );
+                        debug!(
+                            " CONTRACT storage root pis.storage_root() {:?}",
+                            hex::encode(
+                                pis.root_hash_field()
+                                    .into_iter()
+                                    .flat_map(|u| u.to_be_bytes())
+                                    .collect::<Vec<_>>()
+                            )
+                        );
+                    }
+                    contract_proof
+                } else {
+                    vec![]
                 }
-                contract_proof
             }
         };
 
@@ -765,6 +777,26 @@ impl UpdateSimpleStorage {
             }
         }
         log::info!("Updated simple contract single values");
+    }
+}
+
+pub trait ContractUpdate<T>: std::fmt::Debug
+where
+    T: Transport + Clone,
+{
+    type Contract;
+
+    fn apply_to(&self, ctx: &TestContext, contract: &Self::Contract) -> impl Future<Output = ()>;
+}
+
+impl<T> ContractUpdate<T> for UpdateSimpleStorage
+where
+    T: Transport + Clone,
+{
+    type Contract = SimpleInstance<T, RootProvider<T, Ethereum>>;
+
+    async fn apply_to(&self, _ctx: &TestContext, contract: &Self::Contract) {
+        self.apply_to(contract).await
     }
 }
 
@@ -936,12 +968,12 @@ where
     }
 }
 
-impl TableIndexing {
-    pub fn table_info(&self) -> TableInfo {
+impl<T: TableSource + Clone> TableIndexing<T> {
+    pub fn table_info(&self) -> TableInfo<T> {
         TableInfo {
             public_name: self.table.public_name.clone(),
             value_column: self.value_column.clone(),
-            chain_id: self.contract.chain_id,
+            chain_id: self.contract.chain_id(),
             columns: self.table.columns.clone(),
             contract_address: self.contract.address,
             source: self.source.clone(),

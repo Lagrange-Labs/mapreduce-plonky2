@@ -155,7 +155,7 @@ pub struct ReceiptProofInfo {
 }
 
 /// Contains all the information for an [`Event`] in rlp form
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA: usize> {
     /// Size in bytes of the whole log rlp encoded
     pub size: usize,
