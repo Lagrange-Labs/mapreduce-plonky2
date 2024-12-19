@@ -407,7 +407,7 @@ impl TableSource for MergeSource {
         ctx: &'a mut TestContext,
         contract: &'a Contract,
     ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        async move { self.init_contract_data(ctx, contract).await }.boxed()
+        async move { MergeSource::init_contract_data(self, ctx, contract).await }.boxed()
     }
 
     async fn generate_extraction_proof_inputs(
@@ -416,8 +416,7 @@ impl TableSource for MergeSource {
         contract: &Contract,
         value_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
-        self.generate_extraction_proof_inputs(ctx, contract, value_key)
-            .await
+        MergeSource::generate_extraction_proof_inputs(self, ctx, contract, value_key).await
     }
 
     fn random_contract_update<'a>(
@@ -426,7 +425,7 @@ impl TableSource for MergeSource {
         contract: &'a Contract,
         c: ChangeType,
     ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        async move { self.random_contract_update(ctx, contract, c).await }.boxed()
+        async move { MergeSource::random_contract_update(self, ctx, contract, c).await }.boxed()
     }
 
     fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash {
