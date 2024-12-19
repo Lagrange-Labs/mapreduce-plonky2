@@ -5,7 +5,7 @@ use aggregated_queries::{
     cook_query_unique_secondary_index, prove_query as prove_aggregation_query,
 };
 use alloy::primitives::U256;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use itertools::Itertools;
 use log::info;
 use mp2_v1::{
@@ -31,7 +31,7 @@ use crate::common::{
     TableInfo, TestContext,
 };
 
-use super::table_source::TableSource;
+use super::TableSource;
 
 pub mod aggregated_queries;
 pub mod simple_select_queries;
@@ -103,19 +103,25 @@ pub(crate) struct QueryPlanner<'a> {
     pub(crate) columns: TableColumns,
 }
 
-pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
-    match &t.source {
-        TableSource::MappingValues(_, _)
-        | TableSource::Merge(_)
-        | TableSource::MappingStruct(_, _)
-        | TableSource::MappingOfSingleValueMappings(_)
-        | TableSource::MappingOfStructMappings(_) => query_mapping(ctx, &table, &t).await?,
-        _ => unimplemented!("yet"),
+pub async fn test_query<T: TableSource>(
+    ctx: &mut TestContext,
+    table: Table,
+    t: TableInfo<T>,
+) -> Result<()> {
+    if t.source.can_query() {
+        query_mapping(ctx, &table, &t).await?;
+    } else {
+        return Err(anyhow!("Can't query this type of table source yet"));
     }
+
     Ok(())
 }
 
-async fn query_mapping(ctx: &mut TestContext, table: &Table, info: &TableInfo) -> Result<()> {
+async fn query_mapping<T: TableSource>(
+    ctx: &mut TestContext,
+    table: &Table,
+    info: &TableInfo<T>,
+) -> Result<()> {
     let table_hash = info.metadata_hash();
     let query_info = cook_query_between_blocks(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;

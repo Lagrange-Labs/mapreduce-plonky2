@@ -57,7 +57,8 @@ pub enum CircuitInput<
     LeafSingle(LeafSingleCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
     LeafMapping(LeafMappingCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
     LeafMappingOfMappings(LeafMappingOfMappingsCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
-    LeafReceipt(ReceiptLeafCircuit<MAX_RECEIPT_LEAF_NODE_LEN>),
+    LeafReceipt(ReceiptLeafCircuit<NODE_LEN>),
+    Extension(ExtensionInput),
     Branch(BranchInput),
 }
 
@@ -144,7 +145,8 @@ where
         query: &ReceiptQuery<NO_TOPICS, MAX_DATA>,
     ) -> Self {
         CircuitInput::LeafReceipt(
-            ReceiptLeafCircuit::new(info, query).expect("Could not construct Receipt Leaf Circuit"),
+            ReceiptLeafCircuit::<NODE_LEN>::new::<NO_TOPICS, MAX_DATA>(info, query)
+                .expect("Could not construct Receipt Leaf Circuit"),
         )
     }
 
@@ -198,7 +200,7 @@ pub struct PublicParameters<
         0,
         LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
     >,
-    leaf_receipt: CircuitWithUniversalVerifier<F, C, D, 0, LeafReceiptWire>,
+    leaf_receipt: CircuitWithUniversalVerifier<F, C, D, 0, ReceiptLeafWires<NODE_LEN>>,
     extension: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionNodeWires>,
     #[cfg(not(test))]
     branches: BranchCircuits,
@@ -429,8 +431,7 @@ where
                         >(());
 
         debug!("Building leaf receipt circuit");
-        let leaf_receipt =
-            circuit_builder.build_circuit::<C, 0, ReceiptLeafWires<MAX_RECEIPT_LEAF_NODE_LEN>>(());
+        let leaf_receipt = circuit_builder.build_circuit::<C, 0, ReceiptLeafWires<NODE_LEN>>(());
 
         debug!("Building extension circuit");
         let extension = circuit_builder.build_circuit::<C, 1, ExtensionNodeWires>(());
@@ -955,7 +956,7 @@ mod tests {
 
         // The branch case for receipts is identical to that of a mapping so we use the same api.
         println!("Proving branch...");
-        let branch_input = CircuitInput::new_mapping_variable_branch(
+        let branch_input = CircuitInput::new_branch(
             second_info.mpt_proof[proof_length_1 - 2].clone(),
             vec![leaf_proof1, leaf_proof2],
         );
@@ -968,15 +969,6 @@ mod tests {
         );
     }
 
-    fn test_circuits(is_simple_aggregation: bool, num_children: usize) {
-        let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
-        let chain_id = 10;
-        let id = identifier_single_var_column(TEST_SLOT, &contract_address, chain_id, vec![]);
-        let key_id =
-            identifier_for_mapping_key_column(TEST_SLOT, &contract_address, chain_id, vec![]);
-        let value_id =
-            identifier_for_mapping_value_column(TEST_SLOT, &contract_address, chain_id, vec![]);
-    }
     /// Generate a leaf proof.
     fn prove_leaf(params: &PublicParameters, node: Vec<u8>, test_slot: StorageSlotInfo) -> Vec<u8> {
         // RLP(RLP(compact(partial_key_in_nibble)), RLP(value))
