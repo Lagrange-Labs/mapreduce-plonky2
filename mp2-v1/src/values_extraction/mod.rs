@@ -15,7 +15,7 @@ use mp2_common::{
     eth::{left_pad32, EventLogInfo, ReceiptProofInfo, StorageSlot},
     group_hashing::map_to_curve_point,
     poseidon::{empty_poseidon_hash, hash_to_int_value, H},
-    types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
+    types::{GFp, HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
     F,
 };
@@ -26,7 +26,7 @@ use plonky2::{
 };
 use plonky2_ecgfp5::curve::{curve::Point as Digest, scalar_field::Scalar};
 use serde::{Deserialize, Serialize};
-use std::iter::once;
+use std::iter::{self, once};
 
 pub mod api;
 mod branch;
@@ -755,7 +755,7 @@ pub fn compute_receipt_leaf_value_digest<const NO_TOPICS: usize, const MAX_DATA:
                     map_to_curve_point(&[log_number_column_id, GFp::from_canonical_usize(n)]);
                 let initial_digest = index_digest + gas_digest + log_no_digest;
 
-                let row_value = iter::once(initial_digest)
+                let row_value = std::iter::once(initial_digest)
                     .chain(topics_value_digest)
                     .chain(data_value_digest)
                     .fold(Digest::NEUTRAL, |acc, p| acc + p);

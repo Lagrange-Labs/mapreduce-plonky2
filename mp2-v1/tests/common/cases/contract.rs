@@ -1,7 +1,6 @@
-use super::{
-    slot_info::{LargeStruct, MappingKey, MappingOfMappingsKey, StorageSlotValue},
-    table_source::DEFAULT_ADDRESS,
-};
+use std::future::Future;
+
+use super::slot_info::{LargeStruct, MappingInfo, StorageSlotMappingKey, StorageSlotValue};
 use crate::common::{
     bindings::simple::{
         Simple,
@@ -14,11 +13,18 @@ use crate::common::{
 };
 use alloy::{
     contract::private::Provider,
+    network::Ethereum,
     primitives::{Address, U256},
-    providers::ProviderBuilder,
+    providers::{ProviderBuilder, RootProvider},
+    transports::Transport,
 };
+use anyhow::Result;
 use itertools::Itertools;
-use log::{debug, info};
+use log::info;
+
+use crate::common::bindings::simple::Simple::SimpleInstance;
+
+use super::indexing::ContractUpdate;
 
 pub struct Contract {
     pub address: Address,
@@ -40,6 +46,41 @@ impl Contract {
         let chain_id = ctx.rpc.get_chain_id().await.unwrap();
         Self { address, chain_id }
     }
+
+    /// Creates a new [`Contract`] from an [`Address`] and `chain_id`
+    pub fn new(address: Address, chain_id: u64) -> Contract {
+        Contract { address, chain_id }
+    }
+    /// Getter for `chain_id`
+    pub fn chain_id(&self) -> u64 {
+        self.chain_id
+    }
+    /// Getter for [`Address`]
+    pub fn address(&self) -> Address {
+        self.address
+    }
+}
+
+/// Trait implemented by any test contract.
+pub trait TestContract<T>
+where
+    T: Transport + Clone,
+{
+    /// How this implementor ingests updates.
+    type Update: ContractUpdate<T, Contract = Self::Contract>;
+    /// The actual contract instance.
+    type Contract;
+    /// Function that generates a new instance of self given a [`Provider`] and a `chain_id`
+    fn new(address: Address, provider: &RootProvider<T>) -> Self;
+    /// Get an instance of the contract.
+    fn get_instance(&self) -> &Self::Contract;
+    /// Apply an update to the contract.
+    async fn apply_update(&self, ctx: &TestContext, update: &Self::Update) -> Result<()> {
+        let contract = self.get_instance();
+        update.apply_to(ctx, contract).await;
+        info!("Updated contract with new values {:?}", update);
+        Ok(())
+    }
 }
 
 /// Common functions for a specific type to interact with the test contract
@@ -48,7 +89,11 @@ pub trait ContractController {
     async fn current_values(ctx: &TestContext, contract: &Contract) -> Self;
 
     /// Update the values to the contract.
-    async fn update_contract(&self, ctx: &TestContext, contract: &Contract);
+    fn update_contract(
+        &self,
+        ctx: &TestContext,
+        contract: &Contract,
+    ) -> impl Future<Output = ()> + Send;
 }
 
 /// Single values collection
@@ -112,7 +157,7 @@ impl ContractController for LargeStruct {
             .on_http(ctx.rpc_url.parse().unwrap());
         let simple_contract = Simple::new(contract.address, &provider);
 
-        let call = simple_contract.setSimpleStruct(self.field1, self.field2, self.field3);
+        let call = simple_contract.setSimpleStruct((*self).into());
         call.send().await.unwrap().watch().await.unwrap();
         // Sanity check
         {
@@ -133,6 +178,20 @@ pub enum MappingUpdate<K, V> {
     Update(K, V, V),
 }
 
+impl<K, V> MappingUpdate<K, V>
+where
+    K: StorageSlotMappingKey,
+    V: StorageSlotValue,
+{
+    pub fn to_tuple(&self) -> (K, V) {
+        match self {
+            MappingUpdate::Insertion(key, value)
+            | MappingUpdate::Deletion(key, value)
+            | MappingUpdate::Update(key, _, value) => (key.clone(), value.clone()),
+        }
+    }
+}
+
 impl<K, V> From<&MappingUpdate<K, V>> for MappingOperation {
     fn from(update: &MappingUpdate<K, V>) -> Self {
         Self::from(match update {
@@ -143,11 +202,10 @@ impl<K, V> From<&MappingUpdate<K, V>> for MappingOperation {
     }
 }
 
-impl ContractController for Vec<MappingUpdate<MappingKey, Address>> {
+impl<T: MappingInfo> ContractController for Vec<MappingUpdate<T, T::Value>> {
     async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
         unimplemented!("Unimplemented for fetching the all mapping values")
     }
-
     async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -155,241 +213,8 @@ impl ContractController for Vec<MappingUpdate<MappingKey, Address>> {
             .on_http(ctx.rpc_url.parse().unwrap());
         let contract = Simple::new(contract.address, &provider);
 
-        let changes = self
-            .iter()
-            .map(|tuple| {
-                let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
-                let (key, value) = match tuple {
-                    MappingUpdate::Deletion(k, _) => (*k, *DEFAULT_ADDRESS),
-                    MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => (*k, *v),
-                };
-                MappingChange {
-                    operation,
-                    key,
-                    value,
-                }
-            })
-            .collect_vec();
+        let changes = self.iter().map(T::to_call).collect_vec();
 
-        let call = contract.changeMapping(changes);
-        call.send().await.unwrap().watch().await.unwrap();
-        // Sanity check
-        for update in self.iter() {
-            match update {
-                MappingUpdate::Deletion(k, _) => {
-                    let res = contract.m1(*k).call().await.unwrap();
-                    let v: U256 = res._0.into_word().into();
-                    assert_eq!(v, U256::ZERO, "Key deletion is wrong on contract");
-                }
-                MappingUpdate::Insertion(k, v) => {
-                    let res = contract.m1(*k).call().await.unwrap();
-                    let new_value: U256 = res._0.into_word().into();
-                    let new_value = Address::from_u256_slice(&[new_value]);
-                    assert_eq!(&new_value, v, "Key insertion is wrong on contract");
-                }
-                MappingUpdate::Update(k, _, v) => {
-                    let res = contract.m1(*k).call().await.unwrap();
-                    let new_value: U256 = res._0.into_word().into();
-                    let new_value = Address::from_u256_slice(&[new_value]);
-                    assert_eq!(&new_value, v, "Key update is wrong on contract");
-                }
-            }
-        }
-        log::info!("Updated simple contract single values");
-    }
-}
-
-impl ContractController for Vec<MappingUpdate<MappingKey, LargeStruct>> {
-    async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
-        unimplemented!("Unimplemented for fetching the all mapping values")
-    }
-
-    async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
-        let contract = Simple::new(contract.address, &provider);
-
-        let changes = self
-            .iter()
-            .map(|tuple| {
-                let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
-                let (key, field1, field2, field3) = match tuple {
-                    MappingUpdate::Insertion(k, v)
-                    | MappingUpdate::Deletion(k, v)
-                    | MappingUpdate::Update(k, _, v) => (*k, v.field1, v.field2, v.field3),
-                };
-                MappingStructChange {
-                    operation,
-                    key,
-                    field1,
-                    field2,
-                    field3,
-                }
-            })
-            .collect_vec();
-
-        let call = contract.changeMappingStruct(changes);
-        call.send().await.unwrap().watch().await.unwrap();
-        // Sanity check
-        for update in self.iter() {
-            match update {
-                MappingUpdate::Deletion(k, _) => {
-                    let res = contract.structMapping(*k).call().await.unwrap();
-                    assert_eq!(
-                        LargeStruct::from(res),
-                        LargeStruct::new(U256::from(0), 0, 0)
-                    );
-                }
-                MappingUpdate::Insertion(k, v) | MappingUpdate::Update(k, _, v) => {
-                    let res = contract.structMapping(*k).call().await.unwrap();
-                    debug!("Set mapping struct: key = {k}, value = {v:?}");
-                    assert_eq!(&LargeStruct::from(res), v);
-                }
-            }
-        }
-        log::info!("Updated simple contract for mapping values of LargeStruct");
-    }
-}
-
-impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, U256>> {
-    async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
-        unimplemented!("Unimplemented for fetching the all mapping of mappings")
-    }
-
-    async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
-        let contract = Simple::new(contract.address, &provider);
-
-        let changes = self
-            .iter()
-            .map(|tuple| {
-                let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
-                let (k, v) = match tuple {
-                    MappingUpdate::Insertion(k, v)
-                    | MappingUpdate::Deletion(k, v)
-                    | MappingUpdate::Update(k, _, v) => (k, v),
-                };
-
-                MappingOfSingleValueMappingsChange {
-                    operation,
-                    outerKey: k.outer_key,
-                    innerKey: k.inner_key,
-                    value: *v,
-                }
-            })
-            .collect_vec();
-
-        let call = contract.changeMappingOfSingleValueMappings(changes);
-        call.send().await.unwrap().watch().await.unwrap();
-        // Sanity check
-        for update in self.iter() {
-            match update {
-                MappingUpdate::Insertion(k, v) => {
-                    let res = contract
-                        .mappingOfSingleValueMappings(k.outer_key, k.inner_key)
-                        .call()
-                        .await
-                        .unwrap();
-                    assert_eq!(&res._0, v, "Insertion is wrong on contract");
-                }
-                MappingUpdate::Deletion(k, _) => {
-                    let res = contract
-                        .mappingOfSingleValueMappings(k.outer_key, k.inner_key)
-                        .call()
-                        .await
-                        .unwrap();
-                    assert_eq!(res._0, U256::ZERO, "Deletion is wrong on contract");
-                }
-                MappingUpdate::Update(k, _, v) => {
-                    let res = contract
-                        .mappingOfSingleValueMappings(k.outer_key, k.inner_key)
-                        .call()
-                        .await
-                        .unwrap();
-                    assert_eq!(&res._0, v, "Update is wrong on contract");
-                }
-            }
-        }
-        log::info!("Updated simple contract for mapping of single value mappings");
-    }
-}
-
-impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, LargeStruct>> {
-    async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
-        unimplemented!("Unimplemented for fetching the all mapping of mappings")
-    }
-
-    async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
-        let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
-            .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
-        let contract = Simple::new(contract.address, &provider);
-
-        let changes = self
-            .iter()
-            .map(|tuple| {
-                let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
-                let (k, v) = match tuple {
-                    MappingUpdate::Insertion(k, v)
-                    | MappingUpdate::Deletion(k, v)
-                    | MappingUpdate::Update(k, _, v) => (k, v),
-                };
-
-                MappingOfStructMappingsChange {
-                    operation,
-                    outerKey: k.outer_key,
-                    innerKey: k.inner_key,
-                    field1: v.field1,
-                    field2: v.field2,
-                    field3: v.field3,
-                }
-            })
-            .collect_vec();
-
-        let call = contract.changeMappingOfStructMappings(changes);
-        call.send().await.unwrap().watch().await.unwrap();
-        // Sanity check
-        for update in self.iter() {
-            match update {
-                MappingUpdate::Insertion(k, v) => {
-                    let res = contract
-                        .mappingOfStructMappings(k.outer_key, k.inner_key)
-                        .call()
-                        .await
-                        .unwrap();
-                    let res = LargeStruct::from(res);
-                    assert_eq!(&res, v, "Insertion is wrong on contract");
-                }
-                MappingUpdate::Deletion(k, _) => {
-                    let res = contract
-                        .mappingOfStructMappings(k.outer_key, k.inner_key)
-                        .call()
-                        .await
-                        .unwrap();
-                    let res = LargeStruct::from(res);
-                    assert_eq!(res, LargeStruct::default(), "Deletion is wrong on contract");
-                }
-                MappingUpdate::Update(k, _, v) => {
-                    let res = contract
-                        .mappingOfStructMappings(k.outer_key, k.inner_key)
-                        .call()
-                        .await
-                        .unwrap();
-                    let res = LargeStruct::from(res);
-                    assert_eq!(&res, v, "Update is wrong on contract");
-                }
-            }
-        }
-        log::info!("Updated simple contract for mapping of LargeStruct mappings");
+        T::call_contract(&contract, changes).await
     }
 }

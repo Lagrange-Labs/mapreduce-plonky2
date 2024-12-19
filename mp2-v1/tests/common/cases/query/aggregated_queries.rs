@@ -3,15 +3,21 @@ use plonky2::{
 };
 use std::collections::HashMap;
 
-use crate::common::{
-    cases::{
-        indexing::BLOCK_COLUMN_NAME,
-        query::{QueryCooking, SqlReturn, SqlType, NUM_CHUNKS, NUM_ROWS},
-        table_source::BASE_VALUE,
+use crate::{
+    common::{
+        cases::{
+            indexing::BLOCK_COLUMN_NAME,
+            query::{QueryCooking, SqlReturn, SqlType, NUM_CHUNKS, NUM_ROWS},
+            table_source::BASE_VALUE,
+        },
+        proof_storage::{ProofKey, ProofStorage},
+        rowtree::MerkleRowTree,
+        table::Table,
+        TableInfo,
     },
     proof_storage::{ProofKey, ProofStorage},
     table::Table,
-    TableInfo,
+    TableInfo, TableSource,
 };
 
 use crate::context::TestContext;
@@ -434,9 +440,9 @@ pub(crate) fn check_final_outputs(
 
 type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
 
-pub(crate) async fn cook_query_between_blocks(
+pub(crate) async fn cook_query_between_blocks<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let max = table.row.current_epoch().await?;
     let min = max - 1;
@@ -461,9 +467,9 @@ pub(crate) async fn cook_query_between_blocks(
     })
 }
 
-pub(crate) async fn cook_query_secondary_index_nonexisting_placeholder(
+pub(crate) async fn cook_query_secondary_index_nonexisting_placeholder<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -509,9 +515,9 @@ pub(crate) async fn cook_query_secondary_index_nonexisting_placeholder(
 // cook up a SQL query on the secondary index and with a predicate on the non-indexed column.
 // we just iterate on mapping keys and take the one that exist for most blocks. We also choose
 // a value to filter over the non-indexed column
-pub(crate) async fn cook_query_secondary_index_placeholder(
+pub(crate) async fn cook_query_secondary_index_placeholder<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -554,9 +560,9 @@ pub(crate) async fn cook_query_secondary_index_placeholder(
 
 // cook up a SQL query on the secondary index. For that we just iterate on mapping keys and
 // take the one that exist for most blocks
-pub(crate) async fn cook_query_unique_secondary_index(
+pub(crate) async fn cook_query_unique_secondary_index<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -630,9 +636,9 @@ pub(crate) async fn cook_query_unique_secondary_index(
     })
 }
 
-pub(crate) async fn cook_query_partial_block_range(
+pub(crate) async fn cook_query_partial_block_range<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -666,9 +672,9 @@ pub(crate) async fn cook_query_partial_block_range(
     })
 }
 
-pub(crate) async fn cook_query_no_matching_entries(
+pub(crate) async fn cook_query_no_matching_entries<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let initial_epoch = table.row.initial_epoch().await;
     // choose query bounds outside of the range [initial_epoch, last_epoch]
@@ -698,9 +704,9 @@ pub(crate) async fn cook_query_no_matching_entries(
 
 /// Cook a query where there are no entries satisying the secondary query bounds only for some
 /// blocks of the primary index bounds (not for all the blocks)
-pub(crate) async fn cook_query_non_matching_entries_some_blocks(
+pub(crate) async fn cook_query_non_matching_entries_some_blocks<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, true).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());

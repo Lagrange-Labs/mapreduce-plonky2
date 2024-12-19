@@ -1,6 +1,8 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
+use std::future::Future;
+
 use anyhow::Result;
 use itertools::Itertools;
 use log::{debug, info};
@@ -24,6 +26,9 @@ use rand::{thread_rng, Rng};
 use ryhope::storage::RoEpochKvStorage;
 
 use crate::common::{
+    bindings::simple::Simple::{
+        m1Call, mappingOfSingleValueMappingsCall, mappingOfStructMappingsCall, structMappingCall,
+    },
     cases::{
         contract::Contract,
         identifier_for_mapping_key_column,
@@ -42,7 +47,16 @@ use crate::common::{
     TableInfo, TestContext,
 };
 
-use super::{ContractExtractionArgs, TableIndexing, TableSource};
+use super::{
+    super::bindings::simple::Simple::SimpleInstance,
+    slot_info::{SimpleMapping, SimpleNestedMapping, StructMapping, StructNestedMapping},
+    ContractExtractionArgs, TableIndexing, TableSource,
+};
+use alloy::{
+    contract::private::Transport,
+    network::Ethereum,
+    providers::{ProviderBuilder, RootProvider},
+};
 use mp2_common::{eth::StorageSlot, proof::ProofWithVK, types::HashOutput};
 
 /// Test slots for single values extraction
@@ -96,10 +110,13 @@ fn single_value_slot_inputs() -> Vec<SlotInput> {
     slot_inputs
 }
 
-impl TableIndexing {
+impl<T: TableSource> TableIndexing<T> {
     pub(crate) async fn merge_table_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> Result<(
+        TableIndexing<MergeSource>,
+        Vec<TableRowUpdate<BlockPrimaryIndex>>,
+    )> {
         // Deploy the simple contract.
         let contract = Contract::deploy_simple_contract(ctx).await;
         let contract_address = contract.address;
@@ -150,6 +167,7 @@ impl TableIndexing {
                 MAPPING_STRUCT_SLOT as u8,
                 mapping_index.clone(),
                 slot_inputs.clone(),
+                None,
             );
             // Construct the table columns.
             let (secondary_column, rest_columns) = match mapping_index {
@@ -218,7 +236,7 @@ impl TableIndexing {
 
             (secondary_column, rest_columns, row_unique_id, source)
         };
-        let mut source = TableSource::Merge(MergeSource::new(single_source, mapping_source));
+        let mut source = MergeSource::new(single_source, mapping_source);
         let genesis_change = source.init_contract_data(ctx, &contract).await;
         let value_column = mapping_rest_columns[0].name.clone();
         let all_columns = [single_columns.as_slice(), &mapping_rest_columns].concat();
@@ -249,14 +267,14 @@ impl TableIndexing {
         )
         .await?;
         Ok((
-            Self {
+            TableIndexing::<MergeSource> {
                 value_column,
                 source: source.clone(),
                 table,
                 contract,
-                contract_extraction: ContractExtractionArgs {
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
             },
             genesis_change,
         ))
@@ -265,7 +283,10 @@ impl TableIndexing {
     /// The single value test case includes the all single value slots and one single Struct slot.
     pub(crate) async fn single_value_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> Result<(
+        TableIndexing<SingleExtractionArgs>,
+        Vec<TableRowUpdate<BlockPrimaryIndex>>,
+    )> {
         let rng = &mut thread_rng();
 
         // Deploy the simple contract.
@@ -282,7 +303,6 @@ impl TableIndexing {
         let indexing_genesis_block = ctx.block_number().await;
         let secondary_index_slot_input = source.secondary_index_slot_input().unwrap();
         let rest_column_slot_inputs = source.rest_column_slot_inputs();
-        let source = TableSource::Single(source);
 
         // Defining the columns structure of the table from the source slots
         // This is depending on what is our data source, mappings and CSV both have their
@@ -339,14 +359,14 @@ impl TableIndexing {
         )
         .await?;
         Ok((
-            Self {
+            TableIndexing::<SingleExtractionArgs> {
                 value_column: "".to_string(),
                 source,
                 table,
                 contract,
-                contract_extraction: ContractExtractionArgs {
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
             },
             genesis_updates,
         ))
@@ -355,7 +375,10 @@ impl TableIndexing {
     /// The test case for mapping of single values
     pub(crate) async fn mapping_value_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> Result<(
+        TableIndexing<MappingExtractionArgs<SimpleMapping>>,
+        Vec<TableRowUpdate<BlockPrimaryIndex>>,
+    )> {
         // Deploy the simple contract.
         let contract = Contract::deploy_simple_contract(ctx).await;
         let contract_address = contract.address;
@@ -369,18 +392,21 @@ impl TableIndexing {
         // Switch the test index.
         // let mapping_index = MappingIndex::Value(value_id);
         let mapping_index = MappingIndex::OuterKey(key_id);
-        let args = MappingExtractionArgs::new(
+        let mut source = MappingExtractionArgs::<SimpleMapping>::new(
             MAPPING_SLOT,
             mapping_index.clone(),
             vec![slot_input.clone()],
-        );
-        let mut source = TableSource::MappingValues(
-            args,
             Some(LengthExtractionArgs {
                 slot: LENGTH_SLOT,
                 value: LENGTH_VALUE,
             }),
         );
+
+        let contract = Contract {
+            address: contract_address,
+            chain_id,
+        };
+
         let table_row_updates = source.init_contract_data(ctx, &contract).await;
 
         let table = build_mapping_table(
@@ -394,11 +420,11 @@ impl TableIndexing {
         let value_column = table.columns.rest[0].name.clone();
 
         Ok((
-            Self {
+            TableIndexing::<MappingExtractionArgs<SimpleMapping>> {
                 value_column,
-                contract_extraction: ContractExtractionArgs {
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
                 contract,
                 source,
                 table,
@@ -410,7 +436,10 @@ impl TableIndexing {
     /// The test case for mapping of Struct values
     pub(crate) async fn mapping_struct_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> Result<(
+        TableIndexing<MappingExtractionArgs<StructMapping>>,
+        Vec<TableRowUpdate<BlockPrimaryIndex>>,
+    )> {
         // Deploy the simple contract.
         let contract = Contract::deploy_simple_contract(ctx).await;
         let contract_address = contract.address;
@@ -432,23 +461,24 @@ impl TableIndexing {
         // Switch the test index.
         // let mapping_index = MappingIndex::OuterKey(key_id);
         let mapping_index = MappingIndex::Value(value_ids[1]);
-        let args = MappingExtractionArgs::new(
+        let mut source = MappingExtractionArgs::<StructMapping>::new(
             MAPPING_STRUCT_SLOT as u8,
             mapping_index.clone(),
             slot_inputs.clone(),
+            None,
         );
-        let mut source = TableSource::MappingStruct(args, None);
+
         let table_row_updates = source.init_contract_data(ctx, &contract).await;
 
         let table = build_mapping_table(ctx, &mapping_index, key_id, value_ids, slot_inputs).await;
         let value_column = table.columns.rest[0].name.clone();
 
         Ok((
-            Self {
+            TableIndexing::<MappingExtractionArgs<StructMapping>> {
                 value_column,
-                contract_extraction: ContractExtractionArgs {
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
                 contract,
                 source,
                 table,
@@ -459,7 +489,10 @@ impl TableIndexing {
 
     pub(crate) async fn mapping_of_single_value_mappings_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> Result<(
+        TableIndexing<MappingExtractionArgs<SimpleNestedMapping>>,
+        Vec<TableRowUpdate<BlockPrimaryIndex>>,
+    )> {
         // Deploy the simple contract.
         let contract = Contract::deploy_simple_contract(ctx).await;
         let contract_address = contract.address;
@@ -484,12 +517,13 @@ impl TableIndexing {
         // let index = MappingIndex::Value(value_id);
         // let index = MappingIndex::OuterKey(outer_key_id);
         let index = MappingIndex::InnerKey(inner_key_id);
-        let args = MappingExtractionArgs::new(
+        let mut source = MappingExtractionArgs::<SimpleNestedMapping>::new(
             MAPPING_OF_SINGLE_VALUE_MAPPINGS_SLOT,
             index.clone(),
             vec![slot_input.clone()],
+            None,
         );
-        let mut source = TableSource::MappingOfSingleValueMappings(args);
+
         let table_row_updates = source.init_contract_data(ctx, &contract).await;
 
         let table = build_mapping_of_mappings_table(
@@ -504,11 +538,11 @@ impl TableIndexing {
         let value_column = table.columns.rest[0].name.clone();
 
         Ok((
-            Self {
+            TableIndexing::<MappingExtractionArgs<SimpleNestedMapping>> {
                 value_column,
-                contract_extraction: ContractExtractionArgs {
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
                 contract,
                 source,
                 table,
@@ -519,7 +553,10 @@ impl TableIndexing {
 
     pub(crate) async fn mapping_of_struct_mappings_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> Result<(
+        TableIndexing<MappingExtractionArgs<StructNestedMapping>>,
+        Vec<TableRowUpdate<BlockPrimaryIndex>>,
+    )> {
         // Deploy the simple contract.
         let contract = Contract::deploy_simple_contract(ctx).await;
         let contract_address = contract.address;
@@ -548,12 +585,13 @@ impl TableIndexing {
         // let index = MappingIndex::OuterKey(outer_key_id);
         // let index = MappingIndex::InnerKey(inner_key_id);
         let index = MappingIndex::Value(value_ids[1]);
-        let args = MappingExtractionArgs::new(
+        let mut source = MappingExtractionArgs::<StructNestedMapping>::new(
             MAPPING_OF_STRUCT_MAPPINGS_SLOT,
             index.clone(),
             slot_inputs.clone(),
+            None,
         );
-        let mut source = TableSource::MappingOfStructMappings(args);
+
         let table_row_updates = source.init_contract_data(ctx, &contract).await;
 
         let table = build_mapping_of_mappings_table(
@@ -568,11 +606,11 @@ impl TableIndexing {
         let value_column = table.columns.rest[0].name.clone();
 
         Ok((
-            Self {
+            TableIndexing::<MappingExtractionArgs<StructNestedMapping>> {
                 value_column,
-                contract_extraction: ContractExtractionArgs {
+                contract_extraction: Some(ContractExtractionArgs {
                     slot: StorageSlot::Simple(CONTRACT_SLOT),
-                },
+                }),
                 contract,
                 source,
                 table,
@@ -781,34 +819,39 @@ impl TableIndexing {
                 proof
             }
             Err(_) => {
-                let contract_proof = ctx
-                    .prove_contract_extraction(
-                        &self.contract.address,
-                        self.contract_extraction.slot.clone(),
-                        bn,
-                    )
-                    .await;
-                ctx.storage
-                    .store_proof(contract_proof_key, contract_proof.clone())?;
-                info!(
-                    "Generated Contract Extraction (C.3) proof for block number {}",
-                    bn
-                );
-                {
-                    let pvk = ProofWithVK::deserialize(&contract_proof)?;
-                    let pis =
-                        contract_extraction::PublicInputs::from_slice(&pvk.proof().public_inputs);
-                    debug!(
-                        " CONTRACT storage root pis.storage_root() {:?}",
-                        hex::encode(
-                            pis.root_hash_field()
-                                .into_iter()
-                                .flat_map(|u| u.to_be_bytes())
-                                .collect::<Vec<_>>()
+                if let Some(contract_extraction) = &self.contract_extraction {
+                    let contract_proof = ctx
+                        .prove_contract_extraction(
+                            &self.contract.address,
+                            contract_extraction.slot.clone(),
+                            bn,
                         )
+                        .await;
+                    ctx.storage
+                        .store_proof(contract_proof_key, contract_proof.clone())?;
+                    info!(
+                        "Generated Contract Extraction (C.3) proof for block number {}",
+                        bn
                     );
+                    {
+                        let pvk = ProofWithVK::deserialize(&contract_proof)?;
+                        let pis = contract_extraction::PublicInputs::from_slice(
+                            &pvk.proof().public_inputs,
+                        );
+                        debug!(
+                            " CONTRACT storage root pis.storage_root() {:?}",
+                            hex::encode(
+                                pis.root_hash_field()
+                                    .into_iter()
+                                    .flat_map(|u| u.to_be_bytes())
+                                    .collect::<Vec<_>>()
+                            )
+                        );
+                    }
+                    contract_proof
+                } else {
+                    vec![]
                 }
-                contract_proof
             }
         };
 
@@ -1075,6 +1118,15 @@ async fn build_mapping_of_mappings_table(
     .unwrap()
 }
 
+pub trait ContractUpdate<T>: std::fmt::Debug
+where
+    T: Transport + Clone,
+{
+    type Contract;
+
+    fn apply_to(&self, ctx: &TestContext, contract: &Self::Contract) -> impl Future<Output = ()>;
+}
+
 #[derive(Clone, Debug)]
 pub enum ChangeType {
     Deletion,
@@ -1243,12 +1295,12 @@ where
     }
 }
 
-impl TableIndexing {
-    pub fn table_info(&self) -> TableInfo {
+impl<T: TableSource + Clone> TableIndexing<T> {
+    pub fn table_info(&self) -> TableInfo<T> {
         TableInfo {
             public_name: self.table.public_name.clone(),
             value_column: self.value_column.clone(),
-            chain_id: self.contract.chain_id,
+            chain_id: self.contract.chain_id(),
             columns: self.table.columns.clone(),
             contract_address: self.contract.address,
             source: self.source.clone(),
