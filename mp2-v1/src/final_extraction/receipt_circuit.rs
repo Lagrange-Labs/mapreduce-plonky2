@@ -108,7 +108,6 @@ impl CircuitLogicWires<F, D, 0> for ReceiptRecursiveWires {
         _verified_proofs: [&plonky2::plonk::proof::ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        // value proof for table a and value proof for table b = 2
         let verification = ReceiptCircuitProofInputs::build(builder, &builder_parameters);
         ReceiptExtractionCircuit::build(
             builder,
