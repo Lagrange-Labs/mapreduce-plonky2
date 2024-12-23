@@ -12,19 +12,19 @@ use crate::{
     values_extraction::{
         self, compute_id_with_prefix,
         gadgets::column_info::{ExtractedColumnInfo, InputColumnInfo},
-        identifier_block_column, identifier_for_inner_mapping_key_column,
-        identifier_for_mapping_key_column, identifier_for_outer_mapping_key_column,
-        identifier_for_value_column, ColumnMetadata, INNER_KEY_ID_PREFIX, KEY_ID_PREFIX,
-        OUTER_KEY_ID_PREFIX,
+        identifier_block_column, identifier_for_value_column, ColumnMetadata, INNER_KEY_ID_PREFIX,
+        KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
     },
     MAX_LEAF_VALUE_LEN, MAX_RECEIPT_LEAF_NODE_LEN,
 };
+
 use alloy::primitives::Address;
 use anyhow::Result;
 use itertools::Itertools;
 use log::debug;
 use mp2_common::{
     digest::Digest,
+    group_hashing::map_to_curve_point,
     poseidon::H,
     types::HashOutput,
     utils::{Fieldable, ToFields},

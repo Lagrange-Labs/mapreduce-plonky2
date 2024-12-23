@@ -1392,7 +1392,7 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex
                     .expect("missing cell");
                 if new.value() != current.value() {
                     // there is an update!
-                    Some(new.clone())
+                    Some(*new)
                 } else {
                     None
                 }

@@ -49,7 +49,7 @@ impl SecondaryIndexCell {
     }
 
     pub fn cell(&self) -> Cell {
-        self.0.clone()
+        self.0
     }
     pub fn rest(&self) -> RowTreeKeyNonce {
         self.1.clone()

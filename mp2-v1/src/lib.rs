@@ -35,6 +35,4 @@ pub mod values_extraction;
 pub(crate) mod tests {
     /// Testing maximum columns
     pub(crate) const TEST_MAX_COLUMNS: usize = 32;
-    /// Testing maximum fields for each EVM word
-    pub(crate) const TEST_MAX_FIELD_PER_EVM: usize = 32;
 }
