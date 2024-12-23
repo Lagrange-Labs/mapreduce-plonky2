@@ -488,7 +488,7 @@ impl ReceiptProofInfo {
             .verify_proof(self.mpt_root, &mpt_key, self.mpt_proof.clone())?
             .ok_or(anyhow!("No proof found when verifying"))?;
 
-        let rlp_receipt = rlp::Rlp::new(&valid[1..]);
+        let rlp_receipt = rlp::Rlp::new(&valid[..]);
         ReceiptWithBloom::decode(&mut rlp_receipt.as_raw())
             .map_err(|e| anyhow!("Could not decode receipt got: {}", e))
     }
@@ -1045,10 +1045,11 @@ mod test {
     #[tokio::test]
     async fn test_pidgy_pinguin_mapping_slot() -> Result<()> {
         // first pinguin holder https://dune.com/queries/2450476/4027653
-        // holder: 0x29469395eaf6f95920e59f858042f0e28d98a20b
+        // This was outdated so the following is the updated address
+        // holder: 0xee5ac9c6db07c26e71207a41e64df42e1a2b05cf
         // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
         let mapping_value =
-            Address::from_str("0x29469395eaf6f95920e59f858042f0e28d98a20b").unwrap();
+            Address::from_str("0xee5ac9c6db07c26e71207a41e64df42e1a2b05cf").unwrap();
         let nft_id: u32 = 1116;
         let mapping_key = left_pad32(&nft_id.to_be_bytes());
         let url = get_mainnet_url();
