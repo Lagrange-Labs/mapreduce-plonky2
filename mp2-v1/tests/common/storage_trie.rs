@@ -321,11 +321,19 @@ impl TrieNode {
             "[+] [+] MPT SLOT {} -> identifiers {:?} value {:?} value.digest() = {:?}",
             slot_info.slot().slot(),
             slot_info
-                .metadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>()
-                .extracted_table_info()
+                .table_columns(ctx.contract_address, ctx.chain_id, vec![])
+                .extracted_columns()
                 .iter()
-                .map(|info| info.identifier().to_canonical_u64())
-                .collect_vec(),
+                .filter_map(|column| {
+                    let check_one = column.extraction_id()[7].0 as u8 == slot_info.slot().slot();
+                    let check_two = column.location_offset().0 as u32 == slot_info.evm_word();
+                    if check_one && check_two {
+                        Some(column.identifier().to_canonical_u64())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<u64>>(),
             U256::from_be_slice(&value),
             pi.values_digest(),
         );

@@ -85,7 +85,7 @@ pub struct KeccakCircuit<const N: usize> {
 /// outside the circuit that requires the original input data.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct KeccakWires<const N: usize> {
-    input_array: VectorWire<Target, N>,
+    pub input_array: VectorWire<Target, N>,
     diff: Target,
     // 256/u32 = 8
     pub output_array: OutputHash,

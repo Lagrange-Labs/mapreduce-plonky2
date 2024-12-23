@@ -8,7 +8,7 @@
 #![feature(generic_arg_infer)]
 // stylistic feature
 #![feature(async_closure)]
-use mp2_common::mpt_sequential::PAD_LEN;
+use mp2_common::{array::L32, mpt_sequential::PAD_LEN};
 
 pub const MAX_BRANCH_NODE_LEN: usize = 532;
 pub const MAX_BRANCH_NODE_LEN_PADDED: usize = PAD_LEN(532);
@@ -17,6 +17,9 @@ pub const MAX_BRANCH_NODE_LEN_PADDED: usize = PAD_LEN(532);
 pub const MAX_EXTENSION_NODE_LEN: usize = 69;
 pub const MAX_EXTENSION_NODE_LEN_PADDED: usize = PAD_LEN(69);
 pub const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
+pub const MAX_LEAF_NODE_LEN_PADDED: usize = PAD_LEN(MAX_LEAF_NODE_LEN);
+pub const MAX_LEAF_VALUE_LEN: usize = 32;
+pub const L32_LEAF_VALUE_LEN: usize = L32(MAX_LEAF_VALUE_LEN);
 pub const MAX_RECEIPT_LEAF_NODE_LEN: usize = 512;
 
 pub mod api;
