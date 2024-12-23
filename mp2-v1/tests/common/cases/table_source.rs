@@ -2,7 +2,9 @@ use std::{
     array,
     assert_matches::assert_matches,
     collections::{BTreeSet, HashMap},
+    fmt::Debug,
     future::Future,
+    hash::Hash,
     str::FromStr,
     sync::atomic::{AtomicU64, AtomicUsize},
 };
@@ -10,6 +12,7 @@ use std::{
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
+    providers::{Provider, ProviderBuilder},
 };
 use anyhow::{bail, Result};
 use futures::{future::BoxFuture, FutureExt};
@@ -17,13 +20,14 @@ use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
     eth::{EventLogInfo, ProofQuery, StorageSlot, StorageSlotNode},
+    poseidon::H,
     proof::ProofWithVK,
-    types::HashOutput,
+    types::{GFp, HashOutput},
 };
 use mp2_v1::{
     api::{
-        compute_table_info, merge_metadata_hash, metadata_hash as metadata_hash_function,
-        SlotInput, SlotInputs,
+        combine_digest_and_block, compute_table_info, merge_metadata_hash,
+        metadata_hash as metadata_hash_function, SlotInput, SlotInputs,
     },
     indexing::{
         block::BlockPrimaryIndex,
@@ -31,7 +35,7 @@ use mp2_v1::{
         row::{RowTreeKey, ToNonce},
     },
     values_extraction::{
-        gadgets::{column_gadget::extract_value, column_info::ColumnInfo},
+        gadgets::{column_info::ExtractedColumnInfo, metadata_gadget::TableMetadata},
         identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
         identifier_for_outer_mapping_key_column, identifier_for_value_column, StorageSlotInfo,
     },
@@ -44,6 +48,10 @@ use rand::{
 };
 
 use crate::common::{
+    cases::{
+        contract::EventContract,
+        indexing::{ReceiptUpdate, TableRowValues, TX_INDEX_COLUMN},
+    },
     final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
@@ -53,9 +61,7 @@ use crate::common::{
 
 use super::{
     contract::{Contract, ContractController, MappingUpdate, SimpleSingleValues, TestContract},
-    indexing::{
-        ChangeType, TableRowUpdate, TableRowValues, UpdateType, SINGLE_SLOTS, SINGLE_STRUCT_SLOT,
-    },
+    indexing::{ChangeType, TableRowUpdate, UpdateType, SINGLE_SLOTS, SINGLE_STRUCT_SLOT},
     slot_info::{LargeStruct, MappingInfo, StorageSlotMappingKey, StorageSlotValue, StructMapping},
 };
 
@@ -65,46 +71,44 @@ fn metadata_hash(
     chain_id: u64,
     extra: Vec<u8>,
 ) -> MetadataHash {
-    metadata_hash_function::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-        slot_input,
-        contract_address,
-        chain_id,
-        extra,
-    )
+    metadata_hash_function(slot_input, contract_address, chain_id, extra)
 }
 
 /// Save the columns information of same slot and EVM word.
 #[derive(Debug)]
-struct SlotEvmWordColumns(Vec<ColumnInfo>);
+struct SlotEvmWordColumns(Vec<ExtractedColumnInfo>);
 
 impl SlotEvmWordColumns {
-    fn new(column_info: Vec<ColumnInfo>) -> Self {
+    fn new(column_info: Vec<ExtractedColumnInfo>) -> Self {
         // Ensure the column information should have the same slot and EVM word.
-        let slot = column_info[0].slot();
-        let evm_word = column_info[0].evm_word();
+
+        let slot = column_info[0].extraction_id()[0].0 as u8;
+        let evm_word = column_info[0].location_offset().0 as u32;
         column_info[1..].iter().for_each(|col| {
-            assert_eq!(col.slot(), slot);
-            assert_eq!(col.evm_word(), evm_word);
+            let col_slot = col.extraction_id()[0].0 as u8;
+            let col_word = col.location_offset().0 as u32;
+            assert_eq!(col_slot, slot);
+            assert_eq!(col_word, evm_word);
         });
 
         Self(column_info)
     }
     fn slot(&self) -> u8 {
         // The columns should have the same slot.
-        u8::try_from(self.0[0].slot().to_canonical_u64()).unwrap()
+        u8::try_from(self.0[0].extraction_id()[0].to_canonical_u64()).unwrap()
     }
     fn evm_word(&self) -> u32 {
         // The columns should have the same EVM word.
-        u32::try_from(self.0[0].evm_word().to_canonical_u64()).unwrap()
+        u32::try_from(self.0[0].location_offset().to_canonical_u64()).unwrap()
     }
-    fn column_info(&self) -> &[ColumnInfo] {
+    fn column_info(&self) -> &[ExtractedColumnInfo] {
         &self.0
     }
 }
 
 /// What is the secondary index chosen for the table in the mapping.
 /// Each entry contains the identifier of the column expected to store in our tree
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum MappingIndex {
     OuterKey(u64),
     InnerKey(u64),
@@ -398,6 +402,7 @@ impl TableSource for SingleExtractionArgs {
 
 impl TableSource for MergeSource {
     type Metadata = (SlotInputs, SlotInputs);
+
     fn get_data(&self) -> Self::Metadata {
         (self.single.get_data(), self.mapping.get_data())
     }
@@ -430,13 +435,7 @@ impl TableSource for MergeSource {
 
     fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash {
         let (single, mapping) = self.get_data();
-        merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-            contract_address,
-            chain_id,
-            vec![],
-            single,
-            mapping,
-        )
+        merge_metadata_hash(contract_address, chain_id, vec![], single, mapping)
     }
 
     fn can_query(&self) -> bool {
@@ -641,13 +640,8 @@ impl MergeSource {
 
             // add the metadata hashes together - this is mostly for debugging
             let (simple, mapping) = self.get_data();
-            let md = merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-                contract.address,
-                contract.chain_id,
-                vec![],
-                simple,
-                mapping,
-            );
+            let md =
+                merge_metadata_hash(contract.address, contract.chain_id, vec![], simple, mapping);
             assert!(extract_a != extract_b);
             Ok((
                 ExtractionProofInput::Merge(MergeExtractionProof {
@@ -670,13 +664,144 @@ pub(crate) struct LengthExtractionArgs {
     pub(crate) value: u8,
 }
 
-/// Receipt extraction arguments
-#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone, Copy)]
-pub(crate) struct ReceiptExtractionArgs<const NO_TOPICS: usize, const MAX_DATA: usize> {
-    /// The event data
-    pub(crate) event: EventLogInfo<NO_TOPICS, MAX_DATA>,
-    /// column that will be the secondary index
-    pub(crate) index: u64,
+pub trait ReceiptExtractionArgs:
+    Serialize + for<'de> Deserialize<'de> + Debug + Hash + Eq + PartialEq + Clone + Copy
+{
+    const NO_TOPICS: usize;
+    const MAX_DATA: usize;
+
+    fn new(address: Address, event_signature: &str) -> Self
+    where
+        Self: Sized;
+
+    fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>;
+
+    fn get_index(&self) -> u64;
+}
+
+impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptExtractionArgs
+    for EventLogInfo<NO_TOPICS, MAX_DATA>
+{
+    const MAX_DATA: usize = MAX_DATA;
+    const NO_TOPICS: usize = NO_TOPICS;
+
+    fn new(address: Address, event_signature: &str) -> Self
+    where
+        Self: Sized,
+    {
+        EventLogInfo::<NO_TOPICS, MAX_DATA>::new(address, event_signature)
+    }
+
+    fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>
+    where
+        [(); Self::NO_TOPICS]:,
+        [(); Self::MAX_DATA]:,
+    {
+        let topics: [usize; Self::NO_TOPICS] = self
+            .topics
+            .into_iter()
+            .collect::<Vec<usize>>()
+            .try_into()
+            .unwrap();
+        let data: [usize; Self::MAX_DATA] = self
+            .data
+            .into_iter()
+            .collect::<Vec<usize>>()
+            .try_into()
+            .unwrap();
+        EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA }> {
+            size: self.size,
+            address: self.address,
+            add_rel_offset: self.add_rel_offset,
+            event_signature: self.event_signature,
+            sig_rel_offset: self.sig_rel_offset,
+            topics,
+            data,
+        }
+    }
+
+    fn get_index(&self) -> u64 {
+        use plonky2::{
+            field::types::{Field, PrimeField64},
+            plonk::config::Hasher,
+        };
+
+        let tx_index_input = [
+            self.address.as_slice(),
+            self.event_signature.as_slice(),
+            TX_INDEX_COLUMN.as_bytes(),
+        ]
+        .concat()
+        .into_iter()
+        .map(GFp::from_canonical_u8)
+        .collect::<Vec<GFp>>();
+        H::hash_no_pad(&tx_index_input).elements[0].to_canonical_u64()
+    }
+}
+
+impl<R: ReceiptExtractionArgs> TableSource for R
+where
+    [(); <R as ReceiptExtractionArgs>::NO_TOPICS]:,
+    [(); <R as ReceiptExtractionArgs>::MAX_DATA]:,
+    [(); 7 - 2 - <R as ReceiptExtractionArgs>::NO_TOPICS - <R as ReceiptExtractionArgs>::MAX_DATA]:,
+{
+    type Metadata = EventLogInfo<{ R::NO_TOPICS }, { R::MAX_DATA }>;
+
+    fn can_query(&self) -> bool {
+        false
+    }
+
+    fn get_data(&self) -> Self::Metadata {
+        self.get_event()
+    }
+
+    fn init_contract_data<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move {
+            let contract_update =
+                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA as u8), 5, 15);
+
+            let provider = ProviderBuilder::new()
+                .with_recommended_fillers()
+                .wallet(ctx.wallet())
+                .on_http(ctx.rpc_url.parse().unwrap());
+
+            let event_emitter = EventContract::new(contract.address(), provider.root());
+            event_emitter
+                .apply_update(ctx, &contract_update)
+                .await
+                .unwrap();
+            vec![]
+        }
+        .boxed()
+    }
+
+    async fn generate_extraction_proof_inputs(
+        &self,
+        _ctx: &mut TestContext,
+        _contract: &Contract,
+        _value_key: ProofKey,
+    ) -> Result<(ExtractionProofInput, HashOutput)> {
+        todo!("Implement as part of CRY-25")
+    }
+
+    fn random_contract_update<'a>(
+        &'a mut self,
+        _ctx: &'a mut TestContext,
+        _contract: &'a Contract,
+        _c: ChangeType,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        todo!("Implement as part of CRY-25")
+    }
+
+    fn metadata_hash(&self, _contract_address: Address, _chain_id: u64) -> MetadataHash {
+        let table_metadata = TableMetadata::<7, 2>::from(self.get_event());
+        let digest = table_metadata.digest();
+        combine_digest_and_block(digest)
+    }
 }
 
 /// Contract extraction arguments (C.3)
@@ -811,9 +936,9 @@ impl SingleExtractionArgs {
                 .await
                 .storage_proof[0]
                 .value;
-            let value_bytes = value.to_be_bytes();
+            let value_bytes: [u8; 32] = value.to_be_bytes();
             evm_word_col.column_info().iter().for_each(|col_info| {
-                let extracted_value = extract_value(&value_bytes, col_info);
+                let extracted_value = col_info.extract_value(value_bytes.as_slice());
                 let extracted_value = U256::from_be_bytes(extracted_value);
                 let id = col_info.identifier().to_canonical_u64();
                 let cell = Cell::new(col_info.identifier().to_canonical_u64(), extracted_value);
@@ -838,7 +963,7 @@ impl SingleExtractionArgs {
         })
     }
 
-    fn table_info(&self, contract: &Contract) -> Vec<ColumnInfo> {
+    fn table_info(&self, contract: &Contract) -> Vec<ExtractedColumnInfo> {
         table_info(contract, self.slot_inputs.clone())
     }
 
@@ -1418,7 +1543,7 @@ impl<T: MappingInfo> MappingExtractionArgs<T> {
     fn storage_slot_info(
         &self,
         evm_word: u32,
-        table_info: Vec<ColumnInfo>,
+        table_info: Vec<ExtractedColumnInfo>,
         mapping_key: &T,
     ) -> StorageSlotInfo {
         let storage_slot = mapping_key.storage_slot(self.slot, evm_word);
@@ -1457,9 +1582,9 @@ impl<T: MappingInfo> MappingExtractionArgs<T> {
                 .storage_proof[0]
                 .value;
 
-            let value_bytes = value.to_be_bytes();
+            let value_bytes: [u8; 32] = value.to_be_bytes();
             evm_word_col.column_info().iter().for_each(|col_info| {
-                let bytes = extract_value(&value_bytes, col_info);
+                let bytes = col_info.extract_value(&value_bytes);
                 let value = U256::from_be_bytes(bytes);
                 debug!(
                     "Mapping extract value: column: {:?}, value = {}",
@@ -1473,7 +1598,7 @@ impl<T: MappingInfo> MappingExtractionArgs<T> {
         <T as MappingInfo>::Value::from_u256_slice(&extracted_values)
     }
 
-    fn table_info(&self, contract: &Contract) -> Vec<ColumnInfo> {
+    fn table_info(&self, contract: &Contract) -> Vec<ExtractedColumnInfo> {
         table_info(contract, self.slot_inputs.clone())
     }
 
@@ -1484,17 +1609,20 @@ impl<T: MappingInfo> MappingExtractionArgs<T> {
 }
 
 /// Contruct the table information by the contract and slot inputs.
-fn table_info(contract: &Contract, slot_inputs: Vec<SlotInput>) -> Vec<ColumnInfo> {
+fn table_info(contract: &Contract, slot_inputs: Vec<SlotInput>) -> Vec<ExtractedColumnInfo> {
     compute_table_info(slot_inputs, &contract.address, contract.chain_id, vec![])
 }
 
 /// Construct the column information for each slot and EVM word.
-fn evm_word_column_info(table_info: &[ColumnInfo]) -> Vec<SlotEvmWordColumns> {
+fn evm_word_column_info(table_info: &[ExtractedColumnInfo]) -> Vec<SlotEvmWordColumns> {
     // Initialize a mapping of `(slot, evm_word) -> column_Identifier`.
     let mut column_info_map = HashMap::new();
     table_info.iter().for_each(|col| {
         column_info_map
-            .entry((col.slot(), col.evm_word()))
+            .entry((
+                col.extraction_id()[7].0 as u8,
+                col.location_offset().0 as u32,
+            ))
             .and_modify(|cols: &mut Vec<_>| cols.push(col.clone()))
             .or_insert(vec![col.clone()]);
     });

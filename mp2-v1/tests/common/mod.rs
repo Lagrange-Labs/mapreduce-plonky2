@@ -36,7 +36,7 @@ pub(crate) const TEST_MAX_COLUMNS: usize = 32;
 pub(crate) const TEST_MAX_FIELD_PER_EVM: usize = 32;
 
 type ColumnIdentifier = u64;
-type PublicParameters = mp2_v1::api::PublicParameters<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
+type PublicParameters = mp2_v1::api::PublicParameters<TEST_MAX_COLUMNS>;
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
     let root_pi = ProofWithVK::deserialize(proof)

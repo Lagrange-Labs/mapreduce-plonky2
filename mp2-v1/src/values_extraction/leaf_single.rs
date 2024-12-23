@@ -1,10 +1,7 @@
 //! Module handling the single variable inside a storage trie
 
 use crate::values_extraction::{
-    gadgets::{
-        column_gadget::ColumnGadget,
-        metadata_gadget::{ColumnsMetadata, MetadataTarget},
-    },
+    gadgets::metadata_gadget::{TableMetadata, TableMetadataGadget, TableMetadataTarget},
     public_inputs::{PublicInputs, PublicInputsArgs},
 };
 use anyhow::Result;
@@ -18,98 +15,104 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleStructSlotWires},
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
-    utils::ToTargets,
+    u256::UInt256Target,
+    utils::{Endianness, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{
-    iop::{target::Target, witness::PartialWitness},
+    field::types::Field,
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::proof::ProofWithPublicInputsTarget,
 };
+
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter::once;
 
-use super::gadgets::metadata_gadget::MetadataGadget;
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct LeafSingleWires<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
-> where
-    [(); PAD_LEN(NODE_LEN)]:,
+pub struct LeafSingleWires<const MAX_COLUMNS: usize>
+where
+    [(); MAX_COLUMNS - 0]:,
 {
     /// Full node from the MPT proof
-    node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
+    node: VectorWire<Target, { PAD_LEN(69) }>,
     /// Leaf value
-    value: Array<Target, MAPPING_LEAF_VALUE_LEN>,
+    value: Array<Target, 32>,
     /// MPT root
-    root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
+    root: KeccakWires<{ PAD_LEN(69) }>,
     /// Storage single variable slot
     slot: SimpleStructSlotWires,
     /// MPT metadata
-    metadata: MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    metadata: TableMetadataTarget<MAX_COLUMNS, 0>,
+    /// Offset from the base slot,
+    offset: Target,
 }
 
 /// Circuit to prove the correct derivation of the MPT key from a simple slot
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LeafSingleCircuit<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
-> {
+pub struct LeafSingleCircuit<const MAX_COLUMNS: usize>
+where
+    [(); MAX_COLUMNS - 0]:,
+{
     pub(crate) node: Vec<u8>,
     pub(crate) slot: SimpleSlot,
-    pub(crate) metadata: ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    pub(crate) metadata: TableMetadata<MAX_COLUMNS, 0>,
+    pub(crate) offset: u32,
 }
 
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    LeafSingleCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+impl<const MAX_COLUMNS: usize> LeafSingleCircuit<MAX_COLUMNS>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); MAX_COLUMNS - 0]:,
 {
-    pub fn build(b: &mut CBuilder) -> LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM> {
-        let metadata = MetadataGadget::build(b);
-        let slot = SimpleSlot::build_struct(b, metadata.evm_word);
-
+    pub fn build(b: &mut CBuilder) -> LeafSingleWires<MAX_COLUMNS> {
+        let metadata = TableMetadataGadget::build(b);
+        let offset = b.add_virtual_target();
+        let slot = SimpleSlot::build_struct(b, offset);
+        let zero = b.zero();
         // Build the node wires.
-        let wires =
-            MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
-                b,
-                &slot.base.mpt_key,
-            );
+        let wires = MPTLeafOrExtensionNode::build_and_advance_key::<_, D, 69, MAX_LEAF_VALUE_LEN>(
+            b,
+            &slot.base.mpt_key,
+        );
         let node = wires.node;
         let root = wires.root;
 
+        let key_input_with_offset = slot.location_bytes.pack(b, Endianness::Big);
+
+        let u256_no_off = UInt256Target::new_from_target_unsafe(b, slot.base.slot);
+        let u256_loc =
+            UInt256Target::new_from_be_limbs(key_input_with_offset.arr.as_slice()).unwrap();
+
         // Left pad the leaf value.
-        let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
+        let value: Array<Target, 32> = left_pad_leaf_value(b, &wires.value);
 
-        // Compute the metadata digest and number of actual columns.
-        let (metadata_digest, num_actual_columns) = metadata.digest_info(b, slot.base.slot);
-
-        // Compute the values digest.
-        let values_digest = ColumnGadget::<MAX_FIELD_PER_EVM>::new(
-            &value.arr,
-            &metadata.table_info[..MAX_FIELD_PER_EVM],
-            &metadata.is_extracted_columns[..MAX_FIELD_PER_EVM],
-        )
-        .build(b);
+        // Compute the metadata digest and the value digest
+        let (metadata_digest, value_digest) = metadata.extracted_digests(
+            b,
+            &value,
+            &u256_no_off,
+            &u256_loc,
+            &[zero, zero, zero, zero, zero, zero, zero, slot.base.slot],
+        );
 
         // row_id = H2int(H("") || num_actual_columns)
         let empty_hash = b.constant_hash(*empty_poseidon_hash());
         let inputs = empty_hash
             .to_targets()
             .into_iter()
-            .chain(once(num_actual_columns))
+            .chain(once(metadata.num_actual_columns))
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         let row_id = hash_to_int_target(b, hash);
 
         // value_digest = value_digest * row_id
         let row_id = b.biguint_to_nonnative(&row_id);
-        let values_digest = b.curve_scalar_mul(values_digest, &row_id);
+        let values_digest = b.curve_scalar_mul(value_digest, &row_id);
 
         // Only one leaf in this node.
         let n = b.one();
@@ -130,36 +133,32 @@ where
             root,
             slot,
             metadata,
+            offset,
         }
     }
 
-    pub fn assign(
-        &self,
-        pw: &mut PartialWitness<GFp>,
-        wires: &LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    ) {
+    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &LeafSingleWires<MAX_COLUMNS>) {
         let padded_node =
-            Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(&self.node).expect("Invalid node");
+            Vector::<u8, { PAD_LEN(69) }>::from_vec(&self.node).expect("Invalid node");
         wires.node.assign(pw, &padded_node);
-        KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
+        KeccakCircuit::<{ PAD_LEN(69) }>::assign(
             pw,
             &wires.root,
             &InputData::Assigned(&padded_node),
         );
-        self.slot
-            .assign_struct(pw, &wires.slot, self.metadata.evm_word);
-        MetadataGadget::assign(pw, &self.metadata, &wires.metadata);
+        self.slot.assign_struct(pw, &wires.slot, self.offset);
+        TableMetadataGadget::assign(pw, &self.metadata, &wires.metadata);
+        pw.set_target(wires.offset, GFp::from_canonical_u32(self.offset));
     }
 }
 
 /// Num of children = 0
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    CircuitLogicWires<F, D, 0> for LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+impl<const MAX_COLUMNS: usize> CircuitLogicWires<F, D, 0> for LeafSingleWires<MAX_COLUMNS>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); MAX_COLUMNS - 0]:,
 {
     type CircuitBuilderParams = ();
-    type Inputs = LeafSingleCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>;
+    type Inputs = LeafSingleCircuit<MAX_COLUMNS>;
 
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
 
@@ -180,18 +179,15 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
-        values_extraction::compute_leaf_single_values_digest,
-        MAX_LEAF_NODE_LEN,
-    };
+    use crate::tests::TEST_MAX_COLUMNS;
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
         array::Array,
         eth::{StorageSlot, StorageSlotNode},
         mpt_sequential::utils::bytes_to_nibbles,
+        poseidon::{hash_to_int_value, H},
         rlp::MAX_KEY_NIBBLE_LEN,
-        utils::{keccak256, Endianness, Packer},
+        utils::{keccak256, Endianness, Packer, ToFields},
         C, D, F,
     };
     use mp2_test::{
@@ -202,11 +198,12 @@ mod tests {
     use plonky2::{
         field::types::Field,
         iop::{target::Target, witness::PartialWitness},
+        plonk::config::Hasher,
     };
+    use plonky2_ecgfp5::curve::scalar_field::Scalar;
 
-    type LeafCircuit =
-        LeafSingleCircuit<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
-    type LeafWires = LeafSingleWires<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
+    type LeafCircuit = LeafSingleCircuit<TEST_MAX_COLUMNS>;
+    type LeafWires = LeafSingleWires<TEST_MAX_COLUMNS>;
 
     #[derive(Clone, Debug)]
     struct TestLeafSingleCircuit {
@@ -248,23 +245,38 @@ mod tests {
 
         let slot = storage_slot.slot();
         let evm_word = storage_slot.evm_offset();
-        let metadata =
-            ColumnsMetadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
-        let metadata_digest = metadata.digest();
-        // Compute the values digest.
-        let table_info = metadata.actual_table_info().to_vec();
-        let extracted_column_identifiers = metadata.extracted_column_identifiers();
-        let values_digest = compute_leaf_single_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-            table_info,
-            &extracted_column_identifiers,
-            value.clone().try_into().unwrap(),
+        let table_metadata = TableMetadata::<TEST_MAX_COLUMNS, 0>::sample(
+            true,
+            &[],
+            &[slot],
+            F::from_canonical_u32(evm_word),
         );
+
+        let metadata_digest = table_metadata.digest();
+        let extracted_val_digest =
+            table_metadata.extracted_value_digest(&value, &[slot], F::from_canonical_u32(evm_word));
+
+        // row_id = H2int(row_unique_data || num_actual_columns)
+        let inputs = empty_poseidon_hash()
+            .to_fields()
+            .into_iter()
+            .chain(once(F::from_canonical_usize(
+                table_metadata.num_actual_columns,
+            )))
+            .collect::<Vec<F>>();
+        let hash = H::hash_no_pad(&inputs);
+        let row_id = hash_to_int_value(hash);
+
+        // values_digest = values_digest * row_id
+        let row_id = Scalar::from_noncanonical_biguint(row_id);
+        let values_digest = extracted_val_digest * row_id;
         let slot = SimpleSlot::new(slot);
         let c = LeafCircuit {
             node: node.clone(),
             slot,
-            metadata,
+            metadata: table_metadata,
+            offset: evm_word,
         };
         let test_circuit = TestLeafSingleCircuit {
             c,

@@ -200,8 +200,13 @@ const INDEX_INFO_FILE: &str = "index.info";
 
 impl TestContext {
     pub(crate) fn wallet(&self) -> EthereumWallet {
-        let signer: PrivateKeySigner = self.local_node.as_ref().unwrap().keys()[0].clone().into();
-        EthereumWallet::from(signer)
+        let keys = self.local_node.as_ref().unwrap().keys();
+        let signer: PrivateKeySigner = keys[0].clone().into();
+        let mut wallet = EthereumWallet::from(signer);
+        keys.iter().skip(1).for_each(|key| {
+            wallet.register_signer::<PrivateKeySigner>(key.clone().into());
+        });
+        wallet
     }
     /// Build the parameters.
     ///

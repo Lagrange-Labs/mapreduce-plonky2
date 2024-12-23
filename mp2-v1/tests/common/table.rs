@@ -56,7 +56,7 @@ impl IndexType {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TableColumn {
     pub name: String,
-    pub info: ColumnInfo,
+    pub identifier: u64,
     pub index: IndexType,
     /// multiplier means if this columns come from a "merged" table, then it either come from a
     /// table a or table b. One of these table is the "multiplier" table, the other is not.
@@ -65,7 +65,7 @@ pub struct TableColumn {
 
 impl TableColumn {
     pub fn identifier(&self) -> ColumnID {
-        self.info.identifier().to_canonical_u64()
+        self.identifier
     }
 }
 
@@ -80,6 +80,7 @@ pub enum TableRowUniqueID {
     Single,
     Mapping(ColumnID),
     MappingOfMappings(ColumnID, ColumnID),
+    Receipt(ColumnID, ColumnID),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
