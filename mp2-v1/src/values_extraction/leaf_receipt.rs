@@ -14,7 +14,7 @@ use alloy::{
 use anyhow::{anyhow, Result};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
-    eth::{EventLogInfo, ReceiptProofInfo, ReceiptQuery},
+    eth::{EventLogInfo, ReceiptProofInfo},
     group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, MPTReceiptLeafNode, PAD_LEN},
@@ -319,10 +319,10 @@ impl<const NODE_LEN: usize> ReceiptLeafCircuit<NODE_LEN>
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    /// Create a new [`ReceiptLeafCircuit`] from a [`ReceiptProofInfo`] and a [`ReceiptQuery`]
+    /// Create a new [`ReceiptLeafCircuit`] from a [`ReceiptProofInfo`] and a [`EventLogInfo`]
     pub fn new<const NO_TOPICS: usize, const MAX_DATA: usize>(
         proof_info: &ReceiptProofInfo,
-        query: &ReceiptQuery<NO_TOPICS, MAX_DATA>,
+        event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
     ) -> Result<Self> {
         // Since the compact encoding of the key is stored first plus an additional list header and
         // then the first element in the receipt body is the transaction type we calculate the offset to that point
@@ -357,11 +357,11 @@ where
                 let mut bytes = log_rlp.as_raw();
                 let log = Log::decode(&mut bytes).ok()?;
 
-                if log.address == query.contract
+                if log.address == event.address
                     && log
                         .data
                         .topics()
-                        .contains(&B256::from(query.event.event_signature))
+                        .contains(&B256::from(event.event_signature))
                 {
                     Some(logs_offset + log_off)
                 } else {
@@ -379,7 +379,7 @@ where
             sig_rel_offset,
             topics,
             data,
-        } = query.event;
+        } = *event;
 
         // We need a fixed number of topics for the circuit so we use dummies to pad to the correct length.
         let mut final_topics = [LogDataInfo::default(); MAX_TOPICS];
@@ -760,7 +760,8 @@ mod tests {
         let info = proofs.first().unwrap();
         let query = receipt_proof_infos.query();
 
-        let c = ReceiptLeafCircuit::<NODE_LEN>::new::<NO_TOPICS, MAX_DATA>(info, query).unwrap();
+        let c =
+            ReceiptLeafCircuit::<NODE_LEN>::new::<NO_TOPICS, MAX_DATA>(info, &query.event).unwrap();
         let test_circuit = TestReceiptLeafCircuit { c };
 
         let node = info.mpt_proof.last().unwrap().clone();

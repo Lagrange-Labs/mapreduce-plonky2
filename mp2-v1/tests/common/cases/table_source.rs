@@ -1,5 +1,6 @@
 use std::{
     assert_matches::assert_matches,
+    collections::HashMap,
     fmt::Debug,
     future::Future,
     hash::Hash,
@@ -8,6 +9,7 @@ use std::{
 };
 
 use alloy::{
+    consensus::TxReceipt,
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
     providers::{Provider, ProviderBuilder},
@@ -17,7 +19,7 @@ use futures::{future::BoxFuture, FutureExt};
 use log::{debug, info};
 use mp2_common::{
     digest::TableDimension,
-    eth::{EventLogInfo, ProofQuery, StorageSlot},
+    eth::{EventLogInfo, ProofQuery, ReceiptProofInfo, ReceiptQuery, StorageSlot},
     poseidon::H,
     proof::ProofWithVK,
     types::{GFp, HashOutput},
@@ -30,10 +32,12 @@ use mp2_v1::{
         row::{RowTreeKey, ToNonce},
     },
     values_extraction::{
-        compute_receipt_leaf_metadata_digest, identifier_for_mapping_key_column,
-        identifier_for_mapping_value_column, identifier_single_var_column,
+        compute_all_receipt_coulmn_ids, compute_receipt_leaf_metadata_digest,
+        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
+        identifier_single_var_column,
     },
 };
+use plonky2::field::types::PrimeField64;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
@@ -1132,6 +1136,96 @@ pub trait ReceiptExtractionArgs:
     fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>;
 
     fn get_index(&self) -> u64;
+
+    fn to_table_rows<PrimaryIndex: Copy>(
+        proof_infos: &[ReceiptProofInfo],
+        event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>,
+        block: PrimaryIndex,
+    ) -> Vec<TableRowUpdate<PrimaryIndex>> {
+        let column_ids = HashMap::<String, u64>::from_iter(
+            compute_all_receipt_coulmn_ids(event)
+                .into_iter()
+                .map(|(name, field)| (name, field.to_canonical_u64())),
+        );
+
+        proof_infos
+            .iter()
+            .flat_map(|info| {
+                let receipt_with_bloom = info.to_receipt().unwrap();
+
+                let tx_index_cell = Cell::new(
+                    *column_ids.get("tx index").unwrap(),
+                    U256::from(info.tx_index),
+                );
+
+                let gas_used_cell = Cell::new(
+                    *column_ids.get("gas used").unwrap(),
+                    U256::from(receipt_with_bloom.receipt.cumulative_gas_used),
+                );
+
+                receipt_with_bloom
+                    .logs()
+                    .iter()
+                    .filter_map(|log| {
+                        if log.address == event.address
+                            && log.topics()[0].0 == event.event_signature
+                        {
+                            Some(log.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .enumerate()
+                    .map(|(log_no, log)| {
+                        let log_no_cell = Cell::new(
+                            *column_ids.get("log number").unwrap(),
+                            U256::from(log_no as u8 + 1),
+                        );
+
+                        let (topics, data) = log.data.split();
+                        let topics_cells = topics
+                            .into_iter()
+                            .enumerate()
+                            .skip(1)
+                            .map(|(j, topic)| {
+                                Cell::new(
+                                    *column_ids.get(&format!("topic_{}", j)).unwrap(),
+                                    topic.into(),
+                                )
+                            })
+                            .collect::<Vec<Cell>>();
+
+                        let data_cells = data
+                            .chunks(32)
+                            .enumerate()
+                            .map(|(j, data_slice)| {
+                                Cell::new(
+                                    *column_ids.get(&format!("data_{}", j + 1)).unwrap(),
+                                    U256::from_be_slice(data_slice),
+                                )
+                            })
+                            .collect::<Vec<Cell>>();
+
+                        let secondary = SecondaryIndexCell::new_from(tx_index_cell, log_no + 1);
+
+                        let collection = CellsUpdate::<PrimaryIndex> {
+                            previous_row_key: RowTreeKey::default(),
+                            new_row_key: RowTreeKey::from(&secondary),
+                            updated_cells: [
+                                vec![log_no_cell, gas_used_cell],
+                                topics_cells,
+                                data_cells,
+                            ]
+                            .concat(),
+                            primary: block,
+                        };
+
+                        TableRowUpdate::<PrimaryIndex>::Insertion(collection, secondary)
+                    })
+                    .collect::<Vec<TableRowUpdate<PrimaryIndex>>>()
+            })
+            .collect::<Vec<TableRowUpdate<PrimaryIndex>>>()
+    }
 }
 
 impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptExtractionArgs
@@ -1214,6 +1308,7 @@ where
         ctx: &'a mut TestContext,
         contract: &'a Contract,
     ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        let event = self.get_event();
         async move {
             let contract_update =
                 ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA as u8), 5, 15);
@@ -1228,7 +1323,21 @@ where
                 .apply_update(ctx, &contract_update)
                 .await
                 .unwrap();
-            vec![]
+
+            let block_number = ctx.block_number().await;
+            let new_block_number = block_number as BlockPrimaryIndex;
+
+            let query = ReceiptQuery::<{ R::NO_TOPICS }, { R::MAX_DATA }> {
+                contract: contract.address(),
+                event,
+            };
+
+            let proof_infos = query
+                .query_receipt_proofs(provider.root(), block_number.into())
+                .await
+                .unwrap();
+
+            R::to_table_rows(&proof_infos, &event, new_block_number)
         }
         .boxed()
     }
