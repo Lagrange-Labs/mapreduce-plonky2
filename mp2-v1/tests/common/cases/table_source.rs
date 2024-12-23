@@ -10,6 +10,7 @@ use std::{
 };
 
 use alloy::{
+    consensus::TxReceipt,
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
     providers::{Provider, ProviderBuilder},
@@ -19,7 +20,7 @@ use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
-    eth::{EventLogInfo, ProofQuery, StorageSlot, StorageSlotNode},
+    eth::{EventLogInfo, ProofQuery, ReceiptProofInfo, ReceiptQuery, StorageSlot, StorageSlotNode},
     poseidon::H,
     proof::ProofWithVK,
     types::{GFp, HashOutput},
@@ -677,6 +678,90 @@ pub trait ReceiptExtractionArgs:
     fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>;
 
     fn get_index(&self) -> u64;
+
+    fn to_table_rows<PrimaryIndex: Copy>(
+        proof_infos: &[ReceiptProofInfo],
+        event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>,
+        block: PrimaryIndex,
+    ) -> Vec<TableRowUpdate<PrimaryIndex>>
+    where
+        [(); 7 - 2 - Self::NO_TOPICS - Self::MAX_DATA]:,
+    {
+        let metadata = TableMetadata::<7, 2>::from(*event);
+
+        let (_, row_id) = metadata.input_value_digest(&[&[0u8; 32]; 2]);
+        let input_columns_ids = metadata
+            .input_columns()
+            .iter()
+            .map(|col| col.identifier().0)
+            .collect::<Vec<u64>>();
+        let extracted_column_ids = metadata
+            .extracted_columns()
+            .iter()
+            .map(|col| col.identifier().0)
+            .collect::<Vec<u64>>();
+
+        proof_infos
+            .iter()
+            .flat_map(|info| {
+                let receipt_with_bloom = info.to_receipt().unwrap();
+
+                let tx_index_cell = Cell::new(input_columns_ids[0], U256::from(info.tx_index));
+
+                let gas_used_cell = Cell::new(
+                    input_columns_ids[1],
+                    U256::from(receipt_with_bloom.receipt.cumulative_gas_used),
+                );
+
+                receipt_with_bloom
+                    .logs()
+                    .iter()
+                    .filter_map(|log| {
+                        if log.address == event.address
+                            && log.topics()[0].0 == event.event_signature
+                        {
+                            Some(log.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .map(|log| {
+                        let (topics, data) = log.data.split();
+                        let topics_cells = topics
+                            .into_iter()
+                            .skip(1)
+                            .enumerate()
+                            .map(|(j, topic)| Cell::new(extracted_column_ids[j], topic.into()))
+                            .collect::<Vec<Cell>>();
+
+                        let data_start = topics_cells.len();
+                        let data_cells = data
+                            .chunks(32)
+                            .enumerate()
+                            .map(|(j, data_slice)| {
+                                Cell::new(
+                                    extracted_column_ids[data_start + j],
+                                    U256::from_be_slice(data_slice),
+                                )
+                            })
+                            .collect::<Vec<Cell>>();
+
+                        let secondary =
+                            SecondaryIndexCell::new_from(tx_index_cell, row_id.0.to_vec());
+
+                        let collection = CellsUpdate::<PrimaryIndex> {
+                            previous_row_key: RowTreeKey::default(),
+                            new_row_key: RowTreeKey::from(&secondary),
+                            updated_cells: [vec![gas_used_cell], topics_cells, data_cells].concat(),
+                            primary: block,
+                        };
+
+                        TableRowUpdate::<PrimaryIndex>::Insertion(collection, secondary)
+                    })
+                    .collect::<Vec<TableRowUpdate<PrimaryIndex>>>()
+            })
+            .collect::<Vec<TableRowUpdate<PrimaryIndex>>>()
+    }
 }
 
 impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptExtractionArgs
@@ -760,6 +845,7 @@ where
         ctx: &'a mut TestContext,
         contract: &'a Contract,
     ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        let event = self.get_event();
         async move {
             let contract_update =
                 ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA as u8), 5, 15);
@@ -774,7 +860,21 @@ where
                 .apply_update(ctx, &contract_update)
                 .await
                 .unwrap();
-            vec![]
+
+            let block_number = ctx.block_number().await;
+            let new_block_number = block_number as BlockPrimaryIndex;
+
+            let query = ReceiptQuery::<{ R::NO_TOPICS }, { R::MAX_DATA }> {
+                contract: contract.address(),
+                event,
+            };
+
+            let proof_infos = query
+                .query_receipt_proofs(provider.root(), block_number.into())
+                .await
+                .unwrap();
+
+            R::to_table_rows(&proof_infos, &event, new_block_number)
         }
         .boxed()
     }

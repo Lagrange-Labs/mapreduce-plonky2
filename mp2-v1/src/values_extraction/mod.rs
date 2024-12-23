@@ -10,17 +10,18 @@ use itertools::Itertools;
 use alloy::primitives::Address;
 use mp2_common::{
     eth::{left_pad32, EventLogInfo, StorageSlot},
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::{empty_poseidon_hash, hash_to_int_value, H},
     types::{GFp, HashOutput},
     utils::{Endianness, Packer, ToFields},
     F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
+    hash::hash_types::HashOut,
     plonk::config::Hasher,
 };
 
-use plonky2_ecgfp5::curve::curve::Point;
+use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
 
 use serde::{Deserialize, Serialize};
 use std::iter::once;
@@ -33,6 +34,7 @@ mod leaf_mapping;
 mod leaf_mapping_of_mappings;
 mod leaf_receipt;
 mod leaf_single;
+pub mod planner;
 pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
@@ -203,6 +205,47 @@ impl ColumnMetadata {
         &self.extracted_columns
     }
 
+    /// Computes storage values digest
+    pub fn storage_values_digest(
+        &self,
+        input_vals: &[&[u8; 32]],
+        value: &[u8],
+        extraction_id: &[u8],
+        location_offset: F,
+    ) -> Point {
+        let (input_vd, row_unique) = self.input_value_digest(input_vals);
+
+        let extract_vd = self.extracted_value_digest(value, extraction_id, location_offset);
+
+        let inputs = if self.input_columns().is_empty() {
+            empty_poseidon_hash()
+                .to_fields()
+                .into_iter()
+                .chain(once(F::from_canonical_usize(
+                    self.input_columns().len() + self.extracted_columns().len(),
+                )))
+                .collect_vec()
+        } else {
+            HashOut::from(row_unique)
+                .to_fields()
+                .into_iter()
+                .chain(once(F::from_canonical_usize(
+                    self.input_columns().len() + self.extracted_columns().len(),
+                )))
+                .collect_vec()
+        };
+        let hash = H::hash_no_pad(&inputs);
+        let row_id = hash_to_int_value(hash);
+
+        // values_digest = values_digest * row_id
+        let row_id = Scalar::from_noncanonical_biguint(row_id);
+        if location_offset.0 == 0 {
+            (extract_vd + input_vd) * row_id
+        } else {
+            extract_vd * row_id
+        }
+    }
+
     /// Computes the value digest for a provided value array and the unique row_id
     pub fn input_value_digest(&self, input_vals: &[&[u8; 32]]) -> (Point, HashOutput) {
         let point = self
@@ -318,11 +361,8 @@ const DATA_NAME: &str = "data";
 
 /// Prefix for transaction index
 const TX_INDEX_PREFIX: &[u8] = b"tx index";
-
-/// Prefix for log number
-const LOG_NUMBER_PREFIX: &[u8] = b"log number";
-/// [`LOG_NUMBER_PREFIX`] as a [`str`]
-const LOG_NUMBER_NAME: &str = "log number";
+/// [`TX_INDEX_PREFIX`] as a [`str`]
+const TX_INDEX_NAME: &str = "tx index";
 
 /// Prefix for gas used
 const GAS_USED_PREFIX: &[u8] = b"gas used";
@@ -568,4 +608,27 @@ pub fn compute_non_indexed_receipt_column_ids<const NO_TOPICS: usize, const MAX_
         data_ids,
     ]
     .concat()
+}
+
+pub fn compute_all_receipt_coulmn_ids<const NO_TOPICS: usize, const MAX_DATA: usize>(
+    event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
+) -> Vec<(String, GFp)> {
+    let tx_index_input = [
+        event.address.as_slice(),
+        event.event_signature.as_slice(),
+        TX_INDEX_PREFIX,
+    ]
+    .concat()
+    .into_iter()
+    .map(GFp::from_canonical_u8)
+    .collect::<Vec<GFp>>();
+    let tx_index_column_id = (
+        TX_INDEX_NAME.to_string(),
+        H::hash_no_pad(&tx_index_input).elements[0],
+    );
+
+    let mut other_ids = compute_non_indexed_receipt_column_ids(event);
+    other_ids.insert(0, tx_index_column_id);
+
+    other_ids
 }

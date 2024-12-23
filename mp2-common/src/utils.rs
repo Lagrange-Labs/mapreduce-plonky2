@@ -804,6 +804,41 @@ impl<F: RichField + Extendable<D>, const D: usize> SliceConnector for CircuitBui
     }
 }
 
+/// Convert an Uint32 target to Uint8 targets.
+pub fn unpack_u32_to_u8_targets<F: RichField + Extendable<D>, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    u: Target,
+    endianness: Endianness,
+) -> Vec<Target> {
+    let zero = b.zero();
+    let mut bits = b.split_le(u, u32::BITS as usize);
+    match endianness {
+        Endianness::Big => bits.reverse(),
+        Endianness::Little => (),
+    };
+    bits.chunks(8)
+        .map(|chunk| {
+            // let bits: Box<dyn Iterator<Item = &BoolTarget>> = match endianness {
+            let bits: Box<dyn Iterator<Item = _>> = match endianness {
+                Endianness::Big => Box::new(chunk.iter()),
+                Endianness::Little => Box::new(chunk.iter().rev()),
+            };
+            bits.fold(zero, |acc, bit| b.mul_const_add(F::TWO, acc, bit.target))
+        })
+        .collect()
+}
+
+/// Convert Uint32 targets to Uint8 targets.
+pub fn unpack_u32s_to_u8_targets<F: RichField + Extendable<D>, const D: usize>(
+    b: &mut CircuitBuilder<F, D>,
+    u32s: Vec<Target>,
+    endianness: Endianness,
+) -> Vec<Target> {
+    u32s.into_iter()
+        .flat_map(|u| unpack_u32_to_u8_targets(b, u, endianness))
+        .collect()
+}
+
 #[cfg(test)]
 mod test {
     use super::{bits_to_num, Packer, ToFields};

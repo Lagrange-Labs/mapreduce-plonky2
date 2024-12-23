@@ -9,7 +9,6 @@ use mp2_common::{
     mpt_sequential::{advance_key_branch, MPTKeyWire, NIBBLES_TO_BYTES, PAD_LEN},
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
-    serialization::{deserialize, serialize},
     types::{CBuilder, GFp},
     utils::{less_than, Endianness, PackerTarget},
     D,

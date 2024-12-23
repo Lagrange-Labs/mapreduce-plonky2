@@ -12,7 +12,7 @@ use alloy::{
 use anyhow::{anyhow, Result};
 use mp2_common::{
     array::{Array, Targetable, Vector, VectorWire},
-    eth::{EventLogInfo, ReceiptProofInfo, ReceiptQuery},
+    eth::{EventLogInfo, ReceiptProofInfo},
     group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, MPTReceiptLeafNode, PAD_LEN},
@@ -125,10 +125,10 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
     [(); MAX_COLUMNS - 2]:,
 {
-    /// Create a new [`ReceiptLeafCircuit`] from a [`ReceiptProofInfo`] and a [`ReceiptQuery`]
+    /// Create a new [`ReceiptLeafCircuit`] from a [`ReceiptProofInfo`] and a [`EventLogInfo`]
     pub fn new<const NO_TOPICS: usize, const MAX_DATA: usize>(
         proof_info: &ReceiptProofInfo,
-        query: &ReceiptQuery<NO_TOPICS, MAX_DATA>,
+        event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
     ) -> Result<Self>
     where
         [(); MAX_COLUMNS - 2 - NO_TOPICS - MAX_DATA]:,
@@ -166,11 +166,11 @@ where
                 let mut bytes = log_rlp.as_raw();
                 let log = Log::decode(&mut bytes).ok()?;
 
-                if log.address == query.contract
+                if log.address == event.address
                     && log
                         .data
                         .topics()
-                        .contains(&B256::from(query.event.event_signature))
+                        .contains(&B256::from(event.event_signature))
                 {
                     Some(logs_offset + log_off)
                 } else {
@@ -186,10 +186,10 @@ where
             event_signature,
             sig_rel_offset,
             ..
-        } = query.event;
+        } = *event;
 
         // Construct the table metadata from the event
-        let metadata = TableMetadata::<MAX_COLUMNS, 2>::from(query.event);
+        let metadata = TableMetadata::<MAX_COLUMNS, 2>::from(*event);
 
         Ok(Self {
             node: last_node.clone(),
@@ -543,7 +543,8 @@ mod tests {
         let info = proofs.first().unwrap();
         let query = receipt_proof_infos.query();
 
-        let c = ReceiptLeafCircuit::<NODE_LEN, 7>::new::<NO_TOPICS, MAX_DATA>(info, query).unwrap();
+        let c = ReceiptLeafCircuit::<NODE_LEN, 7>::new::<NO_TOPICS, MAX_DATA>(info, &query.event)
+            .unwrap();
         let metadata = c.metadata.clone();
         let test_circuit = TestReceiptLeafCircuit { c };
 

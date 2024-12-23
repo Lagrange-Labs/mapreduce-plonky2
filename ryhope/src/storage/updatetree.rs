@@ -36,6 +36,7 @@ pub struct UpdateTreeNode<K: Clone + Hash + Eq> {
     /// Whether this node is a leaf of an update path
     is_path_end: bool,
 }
+
 impl<K: Debug + Clone + Hash + Eq> UpdateTreeNode<K> {
     fn is_leaf(&self) -> bool {
         self.children.is_empty()
