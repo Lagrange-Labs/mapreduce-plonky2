@@ -10,13 +10,14 @@ use crate::{
         self, compute_metadata_digest as length_metadata_digest, LengthCircuitInput,
     },
     values_extraction::{
-        self, compute_leaf_mapping_metadata_digest,
-        compute_leaf_mapping_of_mappings_metadata_digest, compute_leaf_single_metadata_digest,
-        gadgets::column_info::ColumnInfo, identifier_block_column,
-        identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
-        identifier_for_outer_mapping_key_column, identifier_for_value_column,
+        self, compute_id_with_prefix,
+        gadgets::column_info::{ExtractedColumnInfo, InputColumnInfo},
+        identifier_block_column, identifier_for_inner_mapping_key_column,
+        identifier_for_mapping_key_column, identifier_for_outer_mapping_key_column,
+        identifier_for_value_column, ColumnMetadata, INNER_KEY_ID_PREFIX, KEY_ID_PREFIX,
+        OUTER_KEY_ID_PREFIX,
     },
-    MAX_LEAF_NODE_LEN,
+    MAX_LEAF_VALUE_LEN, MAX_RECEIPT_LEAF_NODE_LEN,
 };
 use alloy::primitives::Address;
 use anyhow::Result;
@@ -24,13 +25,11 @@ use itertools::Itertools;
 use log::debug;
 use mp2_common::{
     digest::Digest,
-    group_hashing::map_to_curve_point,
     poseidon::H,
     types::HashOutput,
     utils::{Fieldable, ToFields},
 };
 use plonky2::{
-    field::types::PrimeField64,
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };
@@ -44,23 +43,28 @@ pub struct InputNode {
 
 // TODO: Specify `NODE_LEN = MAX_LEAF_NODE_LEN` in the generic parameter,
 // but it could not work for using `MAPPING_LEAF_NODE_LEN` constant directly.
-type ValuesExtractionInput<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> =
-    values_extraction::CircuitInput<69, MAX_COLUMNS, MAX_FIELD_PER_EVM>;
-type ValuesExtractionParameters<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> =
-    values_extraction::PublicParameters<69, MAX_COLUMNS, MAX_FIELD_PER_EVM>;
+type ValuesExtractionInput<const MAX_COLUMNS: usize> =
+    values_extraction::CircuitInput<512, MAX_COLUMNS>;
+type ValuesExtractionParameters<const MAX_COLUMNS: usize> =
+    values_extraction::PublicParameters<512, MAX_COLUMNS>;
 fn sanity_check() {
-    assert_eq!(MAX_LEAF_NODE_LEN, 69);
+    assert_eq!(MAX_RECEIPT_LEAF_NODE_LEN, 512);
 }
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the
 /// pre-processing stage of LPN
-pub enum CircuitInput<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
+pub enum CircuitInput<const MAX_COLUMNS: usize>
+where
+    [(); MAX_COLUMNS - 2]:,
+    [(); MAX_COLUMNS - 1]:,
+    [(); MAX_COLUMNS - 0]:,
+{
     /// Contract extraction input
     ContractExtraction(contract_extraction::CircuitInput),
     /// Length extraction input
     LengthExtraction(LengthCircuitInput),
     /// Values extraction input
-    ValuesExtraction(ValuesExtractionInput<MAX_COLUMNS, MAX_FIELD_PER_EVM>),
+    ValuesExtraction(ValuesExtractionInput<MAX_COLUMNS>),
     /// Block extraction necessary input
     BlockExtraction(block_extraction::CircuitInput),
     /// Final extraction input
@@ -77,17 +81,25 @@ pub enum CircuitInput<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> 
 
 #[derive(Serialize, Deserialize)]
 /// Parameters defining all the circuits employed for the pre-processing stage of LPN
-pub struct PublicParameters<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
+pub struct PublicParameters<const MAX_COLUMNS: usize>
+where
+    [(); MAX_COLUMNS - 2]:,
+    [(); MAX_COLUMNS - 1]:,
+    [(); MAX_COLUMNS - 0]:,
+{
     contract_extraction: contract_extraction::PublicParameters,
     length_extraction: length_extraction::PublicParameters,
-    values_extraction: ValuesExtractionParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    values_extraction: ValuesExtractionParameters<MAX_COLUMNS>,
     block_extraction: block_extraction::PublicParameters,
     final_extraction: final_extraction::PublicParameters,
     tree_creation:
         verifiable_db::api::PublicParameters<final_extraction::PublicInputs<'static, Target>>,
 }
-impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    PublicParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM>
+impl<const MAX_COLUMNS: usize> PublicParameters<MAX_COLUMNS>
+where
+    [(); MAX_COLUMNS - 2]:,
+    [(); MAX_COLUMNS - 1]:,
+    [(); MAX_COLUMNS - 0]:,
 {
     pub fn get_params_info(&self) -> Result<Vec<u8>> {
         self.tree_creation.get_params_info()
@@ -101,8 +113,12 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
-pub fn build_circuits_params<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-) -> PublicParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
+pub fn build_circuits_params<const MAX_COLUMNS: usize>() -> PublicParameters<MAX_COLUMNS>
+where
+    [(); MAX_COLUMNS - 2]:,
+    [(); MAX_COLUMNS - 1]:,
+    [(); MAX_COLUMNS - 0]:,
+{
     log::info!("Building contract_extraction parameters...");
     let contract_extraction = contract_extraction::build_circuits_params();
     log::info!("Building length_extraction parameters...");
@@ -135,10 +151,15 @@ pub fn build_circuits_params<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: 
 /// Generate a proof for a circuit in the set of circuits employed in the
 /// pre-processing stage of LPN, employing `CircuitInput` to specify for which
 /// circuit the proof should be generated
-pub fn generate_proof<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-    params: &PublicParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    input: CircuitInput<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-) -> Result<Vec<u8>> {
+pub fn generate_proof<const MAX_COLUMNS: usize>(
+    params: &PublicParameters<MAX_COLUMNS>,
+    input: CircuitInput<MAX_COLUMNS>,
+) -> Result<Vec<u8>>
+where
+    [(); MAX_COLUMNS - 2]:,
+    [(); MAX_COLUMNS - 1]:,
+    [(); MAX_COLUMNS - 0]:,
+{
     match input {
         CircuitInput::ContractExtraction(input) => {
             contract_extraction::generate_proof(&params.contract_extraction, input)
@@ -198,7 +219,7 @@ pub fn generate_proof<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
 pub type MetadataHash = HashOutput;
 
 /// Enumeration to be employed to provide input slots for metadata hash computation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SlotInputs {
     /// Slots of a set of simple variables or Struct
     /// The slot number should be same for the fields of one Struct.
@@ -216,7 +237,70 @@ pub enum SlotInputs {
     MappingWithLength(Vec<SlotInput>, u8),
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
+impl SlotInputs {
+    pub fn to_column_metadata(
+        &self,
+        contract_address: &Address,
+        chain_id: u64,
+        extra: Vec<u8>,
+    ) -> ColumnMetadata {
+        let (slot, extracted_columns) = match self {
+            SlotInputs::Simple(ref inner)
+            | SlotInputs::Mapping(ref inner)
+            | SlotInputs::MappingOfMappings(ref inner)
+            | SlotInputs::MappingWithLength(ref inner, ..) => (
+                inner[0].slot,
+                compute_table_info(inner.to_vec(), contract_address, chain_id, extra.clone()),
+            ),
+        };
+
+        let num_mapping_keys = match self {
+            SlotInputs::Simple(..) => 0usize,
+            SlotInputs::Mapping(..) | SlotInputs::MappingWithLength(..) => 1,
+            SlotInputs::MappingOfMappings(..) => 2,
+        };
+
+        let input_columns = match num_mapping_keys {
+            0 => vec![],
+            1 => {
+                let identifier = compute_id_with_prefix(
+                    KEY_ID_PREFIX,
+                    slot,
+                    contract_address,
+                    chain_id,
+                    extra.clone(),
+                );
+                let input_column = InputColumnInfo::new(&[slot], identifier, KEY_ID_PREFIX, 32);
+                vec![input_column]
+            }
+            2 => {
+                let outer_identifier = compute_id_with_prefix(
+                    OUTER_KEY_ID_PREFIX,
+                    slot,
+                    contract_address,
+                    chain_id,
+                    extra.clone(),
+                );
+                let inner_identifier = compute_id_with_prefix(
+                    INNER_KEY_ID_PREFIX,
+                    slot,
+                    contract_address,
+                    chain_id,
+                    extra.clone(),
+                );
+                vec![
+                    InputColumnInfo::new(&[slot], outer_identifier, OUTER_KEY_ID_PREFIX, 32),
+                    InputColumnInfo::new(&[slot], inner_identifier, INNER_KEY_ID_PREFIX, 32),
+                ]
+            }
+            _ => vec![],
+        };
+
+        ColumnMetadata::new(input_columns, extracted_columns)
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize, Copy)]
 pub struct SlotInput {
     /// Slot information of the variable
     pub(crate) slot: u8,
@@ -230,14 +314,31 @@ pub struct SlotInput {
     pub(crate) evm_word: u32,
 }
 
-impl From<&ColumnInfo> for SlotInput {
-    fn from(column_info: &ColumnInfo) -> Self {
-        let slot = u8::try_from(column_info.slot.to_canonical_u64()).unwrap();
-        let [byte_offset, length] = [column_info.byte_offset, column_info.length]
-            .map(|f| usize::try_from(f.to_canonical_u64()).unwrap());
-        let evm_word = u32::try_from(column_info.evm_word.to_canonical_u64()).unwrap();
+impl From<ExtractedColumnInfo> for SlotInput {
+    fn from(value: ExtractedColumnInfo) -> Self {
+        let extraction_id = value.extraction_id();
+        let slot = extraction_id[0].0 as u8;
 
-        SlotInput::new(slot, byte_offset, length, evm_word)
+        SlotInput {
+            slot,
+            byte_offset: value.byte_offset().0 as usize,
+            length: value.length().0 as usize,
+            evm_word: value.location_offset().0 as u32,
+        }
+    }
+}
+
+impl From<&ExtractedColumnInfo> for SlotInput {
+    fn from(value: &ExtractedColumnInfo) -> Self {
+        let extraction_id = value.extraction_id();
+        let slot = extraction_id[0].0 as u8;
+
+        SlotInput {
+            slot,
+            byte_offset: value.byte_offset().0 as usize,
+            length: value.length().0 as usize,
+            evm_word: value.location_offset().0 as u32,
+        }
     }
 }
 
@@ -270,21 +371,15 @@ impl SlotInput {
 
 /// Compute metadata hash for a "merge" table. Right now it supports only merging tables from the
 /// same address.
-pub fn merge_metadata_hash<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+pub fn merge_metadata_hash(
     contract: Address,
     chain_id: u64,
     extra: Vec<u8>,
     table_a: SlotInputs,
     table_b: SlotInputs,
 ) -> MetadataHash {
-    let md_a = value_metadata::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-        table_a,
-        &contract,
-        chain_id,
-        extra.clone(),
-    );
-    let md_b =
-        value_metadata::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(table_b, &contract, chain_id, extra);
+    let md_a = value_metadata(table_a, &contract, chain_id, extra.clone());
+    let md_b = value_metadata(table_b, &contract, chain_id, extra);
     let combined = map_to_curve_point(&md_a.to_fields()) + map_to_curve_point(&md_b.to_fields());
     let contract_digest = contract_metadata_digest(&contract);
     // the block id is only added at the index tree level, the rest is combined at the final
@@ -294,36 +389,22 @@ pub fn merge_metadata_hash<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: us
 
 // NOTE: the block id is added at the end of the digest computation only once - this returns only
 // the part without the block id
-fn value_metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-    inputs: SlotInputs,
-    contract: &Address,
-    chain_id: u64,
-    extra: Vec<u8>,
-) -> Digest {
-    match inputs {
-        SlotInputs::Simple(inputs) => metadata_digest_simple::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-            inputs, contract, chain_id, extra,
-        ),
-        SlotInputs::Mapping(inputs) => metadata_digest_mapping::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-            inputs, contract, chain_id, extra,
-        ),
-        SlotInputs::MappingOfMappings(inputs) => metadata_digest_mapping_of_mappings::<
-            MAX_COLUMNS,
-            MAX_FIELD_PER_EVM,
-        >(inputs, contract, chain_id, extra),
+fn value_metadata(inputs: SlotInputs, contract: &Address, chain_id: u64, extra: Vec<u8>) -> Digest {
+    let column_metadata = inputs.to_column_metadata(contract, chain_id, extra.clone());
+
+    let md = column_metadata.digest();
+
+    let length_digest = match inputs {
+        SlotInputs::Simple(..) | SlotInputs::Mapping(..) | SlotInputs::MappingOfMappings(..) => {
+            Digest::NEUTRAL
+        }
         SlotInputs::MappingWithLength(mapping_inputs, length_slot) => {
             assert!(!mapping_inputs.is_empty());
             let mapping_slot = mapping_inputs[0].slot;
-            let mapping_digest = metadata_digest_mapping::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-                mapping_inputs,
-                contract,
-                chain_id,
-                extra,
-            );
-            let length_digest = length_metadata_digest(length_slot, mapping_slot);
-            mapping_digest + length_digest
+            length_metadata_digest(length_slot, mapping_slot)
         }
-    }
+    };
+    md + length_digest
 }
 
 /// Compute the table information for the value columns.
@@ -332,17 +413,16 @@ pub fn compute_table_info(
     address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
-) -> Vec<ColumnInfo> {
+) -> Vec<ExtractedColumnInfo> {
     inputs
         .into_iter()
         .map(|input| {
             let id = identifier_for_value_column(&input, address, chain_id, extra.clone());
 
-            ColumnInfo::new(
-                input.slot,
+            ExtractedColumnInfo::new(
+                &[input.slot],
                 id,
                 input.byte_offset,
-                0, // bit_offset
                 input.length,
                 input.evm_word,
             )
@@ -350,60 +430,7 @@ pub fn compute_table_info(
         .collect_vec()
 }
 
-fn metadata_digest_simple<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-    inputs: Vec<SlotInput>,
-    contract: &Address,
-    chain_id: u64,
-    extra: Vec<u8>,
-) -> Digest {
-    let table_info = compute_table_info(inputs, contract, chain_id, extra);
-    compute_leaf_single_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(table_info)
-}
-
-fn metadata_digest_mapping<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-    inputs: Vec<SlotInput>,
-    contract: &Address,
-    chain_id: u64,
-    extra: Vec<u8>,
-) -> Digest {
-    assert!(!inputs.is_empty());
-    let slot = inputs[0].slot;
-
-    // Ensure the slot numbers must be same for mapping type.
-    let slots_equal = inputs[1..].iter().all(|input| input.slot == slot);
-    assert!(slots_equal);
-
-    let table_info = compute_table_info(inputs, contract, chain_id, extra.clone());
-    let key_id = identifier_for_mapping_key_column(slot, contract, chain_id, extra);
-    compute_leaf_mapping_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(table_info, slot, key_id)
-}
-
-fn metadata_digest_mapping_of_mappings<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-    inputs: Vec<SlotInput>,
-    contract: &Address,
-    chain_id: u64,
-    extra: Vec<u8>,
-) -> Digest {
-    assert!(!inputs.is_empty());
-    let slot = inputs[0].slot;
-
-    // Ensure the slot numbers must be same for mapping type.
-    let slots_equal = inputs[1..].iter().all(|input| input.slot == slot);
-    assert!(slots_equal);
-
-    let table_info = compute_table_info(inputs, contract, chain_id, extra.clone());
-    let outer_key_id =
-        identifier_for_outer_mapping_key_column(slot, contract, chain_id, extra.clone());
-    let inner_key_id = identifier_for_inner_mapping_key_column(slot, contract, chain_id, extra);
-    compute_leaf_mapping_of_mappings_metadata_digest::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-        table_info,
-        slot,
-        outer_key_id,
-        inner_key_id,
-    )
-}
-
-fn combine_digest_and_block(digest: Digest) -> HashOutput {
+pub fn combine_digest_and_block(digest: Digest) -> HashOutput {
     let block_id = identifier_block_column();
     let inputs = digest
         .to_fields()
@@ -414,19 +441,14 @@ fn combine_digest_and_block(digest: Digest) -> HashOutput {
 }
 /// Compute metadata hash for a table related to the provided inputs slots of the contract with
 /// address `contract_address`
-pub fn metadata_hash<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+pub fn metadata_hash(
     slot_input: SlotInputs,
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
 ) -> MetadataHash {
     // closure to compute the metadata digest associated to a mapping variable
-    let value_digest = value_metadata::<MAX_COLUMNS, MAX_FIELD_PER_EVM>(
-        slot_input,
-        contract_address,
-        chain_id,
-        extra,
-    );
+    let value_digest = value_metadata(slot_input, contract_address, chain_id, extra);
     // Correspond to the computation of final extraction base circuit.
     let value_digest = map_to_curve_point(&value_digest.to_fields());
     // add contract digest

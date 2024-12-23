@@ -2,13 +2,17 @@ use std::future::Future;
 
 use super::slot_info::{LargeStruct, MappingInfo, StorageSlotMappingKey, StorageSlotValue};
 use crate::common::{
-    bindings::simple::{
-        Simple,
-        Simple::{
-            MappingChange, MappingOfSingleValueMappingsChange, MappingOfStructMappingsChange,
-            MappingOperation, MappingStructChange,
+    bindings::{
+        eventemitter::EventEmitter::{self, EventEmitterInstance},
+        simple::{
+            Simple,
+            Simple::{
+                MappingChange, MappingOfSingleValueMappingsChange, MappingOfStructMappingsChange,
+                MappingOperation, MappingStructChange,
+            },
         },
     },
+    cases::indexing::ReceiptUpdate,
     TestContext,
 };
 use alloy::{
@@ -21,8 +25,6 @@ use alloy::{
 use anyhow::Result;
 use itertools::Itertools;
 use log::info;
-
-use crate::common::bindings::simple::Simple::SimpleInstance;
 
 use super::indexing::ContractUpdate;
 
@@ -216,5 +218,23 @@ impl<T: MappingInfo> ContractController for Vec<MappingUpdate<T, T::Value>> {
         let changes = self.iter().map(T::to_call).collect_vec();
 
         T::call_contract(&contract, changes).await
+    }
+}
+pub struct EventContract<T: Transport + Clone> {
+    pub instance: EventEmitterInstance<T, RootProvider<T, Ethereum>, Ethereum>,
+}
+
+impl<T: Transport + Clone> TestContract<T> for EventContract<T> {
+    type Update = ReceiptUpdate;
+    type Contract = EventEmitterInstance<T, RootProvider<T, Ethereum>>;
+
+    fn new(address: Address, provider: &RootProvider<T>) -> Self {
+        Self {
+            instance: EventEmitter::new(address, provider.clone()),
+        }
+    }
+
+    fn get_instance(&self) -> &Self::Contract {
+        &self.instance
     }
 }

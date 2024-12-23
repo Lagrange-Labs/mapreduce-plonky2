@@ -1,6 +1,9 @@
 //! Custom types
 
-use crate::{array::Array, D, F};
+use crate::{
+    array::{Array, L32},
+    D, F,
+};
 use anyhow::ensure;
 use derive_more::Deref;
 use plonky2::{
@@ -75,6 +78,8 @@ pub const MAX_BLOCK_LEN: usize = 650;
 /// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
 /// value **not** RLP encoded,i.e. without the 1-byte RLP header.
 pub const MAPPING_LEAF_VALUE_LEN: usize = 32;
+
+pub const MAPPING_LEAF_VALUE_LEN_PACKED: usize = L32(MAPPING_LEAF_VALUE_LEN);
 
 /// The length of an EVM word
 pub const EVM_WORD_LEN: usize = 32;
