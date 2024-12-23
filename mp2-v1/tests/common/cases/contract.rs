@@ -5,11 +5,14 @@ use anyhow::Result;
 use log::info;
 
 use crate::common::{
-    bindings::simple::Simple::{self, SimpleInstance},
+    bindings::{
+        eventemitter::EventEmitter::{self, EventEmitterInstance},
+        simple::Simple::{self, SimpleInstance},
+    },
     TestContext,
 };
 
-use super::indexing::{ContractUpdate, SimpleSingleValue, UpdateSimpleStorage};
+use super::indexing::{ContractUpdate, ReceiptUpdate, SimpleSingleValue, UpdateSimpleStorage};
 
 pub struct Contract {
     pub address: Address,
@@ -87,5 +90,24 @@ where
             s3: contract.s3().call().await.unwrap()._0,
             s4: contract.s4().call().await.unwrap()._0,
         })
+    }
+}
+
+pub struct EventContract<T: Transport + Clone> {
+    pub instance: EventEmitterInstance<T, RootProvider<T, Ethereum>, Ethereum>,
+}
+
+impl<T: Transport + Clone> TestContract<T> for EventContract<T> {
+    type Update = ReceiptUpdate;
+    type Contract = EventEmitterInstance<T, RootProvider<T, Ethereum>>;
+
+    fn new(address: Address, provider: &RootProvider<T>) -> Self {
+        Self {
+            instance: EventEmitter::new(address, provider.clone()),
+        }
+    }
+
+    fn get_instance(&self) -> &Self::Contract {
+        &self.instance
     }
 }

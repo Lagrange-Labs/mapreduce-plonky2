@@ -37,6 +37,7 @@ use common::{
 use envconfig::Envconfig;
 use log::info;
 
+use mp2_common::eth::EventLogInfo;
 use parsil::{
     assembler::DynamicCircuitPis,
     parse_and_validate,
@@ -89,6 +90,10 @@ async fn integrated_indexing() -> Result<()> {
     ctx.build_params(ParamsType::Indexing).unwrap();
 
     info!("Params built");
+    // For now we test that we can start a receipt case only.
+    let (_receipt, _genesis) =
+        TableIndexing::<EventLogInfo<0, 0>>::receipt_test_case(0, 0, &mut ctx).await?;
+
     // NOTE: to comment to avoid very long tests...
     let (mut single, genesis) =
         TableIndexing::<SingleValuesExtractionArgs>::single_value_test_case(&mut ctx).await?;

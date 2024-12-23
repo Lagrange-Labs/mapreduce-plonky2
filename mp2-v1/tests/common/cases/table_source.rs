@@ -1,6 +1,8 @@
 use std::{
     assert_matches::assert_matches,
+    fmt::Debug,
     future::Future,
+    hash::Hash,
     str::FromStr,
     sync::atomic::{AtomicU64, AtomicUsize},
 };
@@ -16,26 +18,32 @@ use log::{debug, info};
 use mp2_common::{
     digest::TableDimension,
     eth::{EventLogInfo, ProofQuery, StorageSlot},
+    poseidon::H,
     proof::ProofWithVK,
-    types::HashOutput,
+    types::{GFp, HashOutput},
 };
 use mp2_v1::{
-    api::{merge_metadata_hash, metadata_hash, MetadataHash, SlotInputs},
+    api::{combine_digest_and_block, merge_metadata_hash, metadata_hash, MetadataHash, SlotInputs},
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
         row::{RowTreeKey, ToNonce},
     },
     values_extraction::{
-        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column,
+        compute_receipt_leaf_metadata_digest, identifier_for_mapping_key_column,
+        identifier_for_mapping_value_column, identifier_single_var_column,
     },
 };
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    cases::indexing::{MappingUpdate, SimpleSingleValue, TableRowValues},
+    cases::{
+        contract::EventContract,
+        indexing::{
+            MappingUpdate, ReceiptUpdate, SimpleSingleValue, TableRowValues, TX_INDEX_COLUMN,
+        },
+    },
     final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
@@ -67,7 +75,7 @@ impl From<(U256, U256)> for UniqueMappingEntry {
 
 /// What is the secondary index chosen for the table in the mapping.
 /// Each entry contains the identifier of the column expected to store in our tree
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum MappingIndex {
     Key(u64),
     Value(u64),
@@ -260,6 +268,7 @@ impl TableSource for SingleValuesExtractionArgs {
 
 impl TableSource for MappingValuesExtractionArgs {
     type Metadata = SlotInputs;
+
     fn get_data(&self) -> SlotInputs {
         SlotInputs::Mapping(self.slot)
     }
@@ -306,6 +315,7 @@ impl TableSource for MappingValuesExtractionArgs {
 
 impl TableSource for MergeSource {
     type Metadata = (SlotInputs, SlotInputs);
+
     fn get_data(&self) -> Self::Metadata {
         (self.single.get_data(), self.mapping.get_data())
     }
@@ -564,7 +574,7 @@ impl MappingValuesExtractionArgs {
         ctx: &mut TestContext,
         contract: &Contract,
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
-        let index = self.index.clone();
+        let index = self.index;
         let slot = self.slot;
         let init_pair = (next_value(), next_address());
         // NOTE: here is the same address but for different mapping key (10,11)
@@ -630,7 +640,7 @@ impl MappingValuesExtractionArgs {
         let idx = 0;
         let mkey = &self.mapping_keys[idx].clone();
         let slot = self.slot as usize;
-        let index_type = self.index.clone();
+        let index_type = self.index;
         let address = &contract.address.clone();
         let query = ProofQuery::new_mapping_slot(*address, slot, mkey.to_owned());
         let response = ctx
@@ -1101,7 +1111,7 @@ impl MergeSource {
     }
 }
 /// Length extraction arguments (C.2)
-#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub(crate) struct LengthExtractionArgs {
     /// Length slot
     pub(crate) slot: u8,
@@ -1109,13 +1119,144 @@ pub(crate) struct LengthExtractionArgs {
     pub(crate) value: u8,
 }
 
-/// Receipt extraction arguments
-#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
-pub(crate) struct ReceiptExtractionArgs<const NO_TOPICS: usize, const MAX_DATA: usize> {
-    /// The event data
-    pub(crate) event: EventLogInfo<NO_TOPICS, MAX_DATA>,
-    /// column that will be the secondary index
-    pub(crate) index: u64,
+pub trait ReceiptExtractionArgs:
+    Serialize + for<'de> Deserialize<'de> + Debug + Hash + Eq + PartialEq + Clone + Copy
+{
+    const NO_TOPICS: usize;
+    const MAX_DATA: usize;
+
+    fn new(address: Address, event_signature: &str) -> Self
+    where
+        Self: Sized;
+
+    fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>;
+
+    fn get_index(&self) -> u64;
+}
+
+impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptExtractionArgs
+    for EventLogInfo<NO_TOPICS, MAX_DATA>
+{
+    const MAX_DATA: usize = MAX_DATA;
+    const NO_TOPICS: usize = NO_TOPICS;
+
+    fn new(address: Address, event_signature: &str) -> Self
+    where
+        Self: Sized,
+    {
+        EventLogInfo::<NO_TOPICS, MAX_DATA>::new(address, event_signature)
+    }
+
+    fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>
+    where
+        [(); Self::NO_TOPICS]:,
+        [(); Self::MAX_DATA]:,
+    {
+        let topics: [usize; Self::NO_TOPICS] = self
+            .topics
+            .into_iter()
+            .collect::<Vec<usize>>()
+            .try_into()
+            .unwrap();
+        let data: [usize; Self::MAX_DATA] = self
+            .data
+            .into_iter()
+            .collect::<Vec<usize>>()
+            .try_into()
+            .unwrap();
+        EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA }> {
+            size: self.size,
+            address: self.address,
+            add_rel_offset: self.add_rel_offset,
+            event_signature: self.event_signature,
+            sig_rel_offset: self.sig_rel_offset,
+            topics,
+            data,
+        }
+    }
+
+    fn get_index(&self) -> u64 {
+        use plonky2::{
+            field::types::{Field, PrimeField64},
+            plonk::config::Hasher,
+        };
+
+        let tx_index_input = [
+            self.address.as_slice(),
+            self.event_signature.as_slice(),
+            TX_INDEX_COLUMN.as_bytes(),
+        ]
+        .concat()
+        .into_iter()
+        .map(GFp::from_canonical_u8)
+        .collect::<Vec<GFp>>();
+        H::hash_no_pad(&tx_index_input).elements[0].to_canonical_u64()
+    }
+}
+
+impl<R: ReceiptExtractionArgs> TableSource for R
+where
+    [(); <R as ReceiptExtractionArgs>::NO_TOPICS]:,
+    [(); <R as ReceiptExtractionArgs>::MAX_DATA]:,
+{
+    type Metadata = EventLogInfo<{ R::NO_TOPICS }, { R::MAX_DATA }>;
+
+    fn can_query(&self) -> bool {
+        false
+    }
+
+    fn get_data(&self) -> Self::Metadata {
+        self.get_event()
+    }
+
+    fn init_contract_data<'a>(
+        &'a mut self,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        async move {
+            let contract_update =
+                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA as u8), 5, 15);
+
+            let provider = ProviderBuilder::new()
+                .with_recommended_fillers()
+                .wallet(ctx.wallet())
+                .on_http(ctx.rpc_url.parse().unwrap());
+
+            let event_emitter = EventContract::new(contract.address(), provider.root());
+            event_emitter
+                .apply_update(ctx, &contract_update)
+                .await
+                .unwrap();
+            vec![]
+        }
+        .boxed()
+    }
+
+    async fn generate_extraction_proof_inputs(
+        &self,
+        _ctx: &mut TestContext,
+        _contract: &Contract,
+        _value_key: ProofKey,
+    ) -> Result<(ExtractionProofInput, HashOutput)> {
+        todo!("Implement as part of CRY-25")
+    }
+
+    fn random_contract_update<'a>(
+        &'a mut self,
+        _ctx: &'a mut TestContext,
+        _contract: &'a Contract,
+        _c: ChangeType,
+    ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        todo!("Implement as part of CRY-25")
+    }
+
+    fn metadata_hash(&self, _contract_address: Address, _chain_id: u64) -> MetadataHash {
+        let digest = compute_receipt_leaf_metadata_digest::<{ R::NO_TOPICS }, { R::MAX_DATA }>(
+            &self.get_event(),
+        );
+        combine_digest_and_block(digest)
+    }
 }
 
 /// Contract extraction arguments (C.3)

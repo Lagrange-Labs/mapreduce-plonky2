@@ -222,7 +222,7 @@ fn metadata_digest_mapping(address: &Address, chain_id: u64, extra: Vec<u8>, slo
     compute_leaf_mapping_metadata_digest(key_id, value_id, slot)
 }
 
-fn combine_digest_and_block(digest: Digest) -> HashOutput {
+pub fn combine_digest_and_block(digest: Digest) -> HashOutput {
     let block_id = identifier_block_column();
     let inputs = digest
         .to_fields()

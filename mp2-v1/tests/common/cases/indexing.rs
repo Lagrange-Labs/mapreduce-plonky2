@@ -13,12 +13,17 @@ use mp2_v1::{
         row::{CellCollection, CellInfo, Row, RowTreeKey},
         ColumnID,
     },
-    values_extraction::identifier_block_column,
+    values_extraction::{compute_non_indexed_receipt_column_ids, identifier_block_column},
 };
+use plonky2::field::types::PrimeField64;
+
 use ryhope::storage::RoEpochKvStorage;
 
 use crate::common::{
-    bindings::simple::Simple::{self, MappingChange, MappingOperation},
+    bindings::{
+        eventemitter::EventEmitter::{self, EventEmitterInstance},
+        simple::Simple::{self, MappingChange, MappingOperation},
+    },
     cases::{
         contract::Contract,
         identifier_for_mapping_key_column, identifier_for_mapping_value_column,
@@ -38,14 +43,15 @@ use crate::common::{
 };
 
 use super::{
-    super::bindings::simple::Simple::SimpleInstance, ContractExtractionArgs, TableIndexing,
-    TableSource,
+    super::bindings::simple::Simple::SimpleInstance, table_source::ReceiptExtractionArgs,
+    ContractExtractionArgs, TableIndexing, TableSource,
 };
 use alloy::{
     contract::private::{Network, Provider, Transport},
-    network::Ethereum,
+    network::{Ethereum, TransactionBuilder},
     primitives::{Address, U256},
-    providers::{ProviderBuilder, RootProvider},
+    providers::{ext::AnvilApi, ProviderBuilder, RootProvider},
+    sol_types::SolEvent,
 };
 use mp2_common::{eth::StorageSlot, proof::ProofWithVK, types::HashOutput};
 
@@ -70,6 +76,7 @@ const CONTRACT_SLOT: usize = 1;
 pub(crate) const BLOCK_COLUMN_NAME: &str = "block_number";
 pub(crate) const MAPPING_VALUE_COLUMN: &str = "map_value";
 pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
+pub(crate) const TX_INDEX_COLUMN: &str = "tx index";
 
 impl<T: TableSource> TableIndexing<T> {
     pub(crate) async fn merge_table_test_case(
@@ -383,6 +390,98 @@ impl<T: TableSource> TableIndexing<T> {
                 table,
             },
             table_row_updates,
+        ))
+    }
+
+    pub(crate) async fn receipt_test_case(
+        no_topics: usize,
+        no_data: usize,
+        ctx: &mut TestContext,
+    ) -> Result<(TableIndexing<T>, Vec<TableRowUpdate<BlockPrimaryIndex>>)>
+    where
+        T: ReceiptExtractionArgs,
+        [(); <T as ReceiptExtractionArgs>::NO_TOPICS]:,
+        [(); <T as ReceiptExtractionArgs>::MAX_DATA]:,
+    {
+        // Create a provider with the wallet for contract deployment and interaction.
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let contract = EventEmitter::deploy(&provider).await.unwrap();
+        info!(
+            "Deployed EventEmitter contract at address: {}",
+            contract.address()
+        );
+        let contract_address = contract.address();
+        let chain_id = ctx.rpc.get_chain_id().await.unwrap();
+        let contract = Contract {
+            address: *contract_address,
+            chain_id,
+        };
+
+        // Retrieve the event signature `str` based on `no_topics` and `no_data`
+        let event_signature = match (no_topics, no_data) {
+            (0, 0) => EventEmitter::noIndexed::SIGNATURE,
+            (0, 1) => EventEmitter::noIOneD::SIGNATURE,
+            (0, 2) => EventEmitter::noITwoD::SIGNATURE,
+            (1, 0) => EventEmitter::oneIndexed::SIGNATURE,
+            (1, 1) => EventEmitter::oneIOneD::SIGNATURE,
+            (1, 2) => EventEmitter::oneITwoD::SIGNATURE,
+            (2, 0) => EventEmitter::twoIndexed::SIGNATURE,
+            (2, 1) => EventEmitter::twoIOneD::SIGNATURE,
+            (2, 2) => EventEmitter::twoITwoD::SIGNATURE,
+            (3, 0) => EventEmitter::threeIndexed::SIGNATURE,
+            (3, 1) => EventEmitter::oneData::SIGNATURE,
+            (3, 2) => EventEmitter::twoData::SIGNATURE,
+            _ => panic!(
+                "Events with {} topics and {} additional pieces of data not supported",
+                no_topics, no_data
+            ),
+        };
+
+        let mut source = T::new(contract.address(), event_signature);
+        let genesis_updates = source.init_contract_data(ctx, &contract).await;
+
+        let indexing_genesis_block = ctx.block_number().await;
+        // Defining the columns structure of the table from the source event
+        // This is depending on what is our data source, mappings and CSV both have their o
+        // own way of defining their table.
+        let columns = TableColumns {
+            primary: TableColumn {
+                name: BLOCK_COLUMN_NAME.to_string(),
+                identifier: identifier_block_column(),
+                index: IndexType::Primary,
+                multiplier: false,
+            },
+            secondary: TableColumn {
+                name: TX_INDEX_COLUMN.to_string(),
+                identifier: source.get_index(),
+                index: IndexType::Secondary,
+                // here we put false always since these are not coming from a "merged" table
+                multiplier: false,
+            },
+            rest: compute_non_indexed_receipt_column_ids(&source.get_event())
+                .into_iter()
+                .map(|(name, identifier)| TableColumn {
+                    name,
+                    identifier: identifier.to_canonical_u64(),
+                    index: IndexType::None,
+                    multiplier: false,
+                })
+                .collect::<Vec<TableColumn>>(),
+        };
+        let table = Table::new(indexing_genesis_block, "receipt_table".to_string(), columns).await;
+        Ok((
+            TableIndexing::<T> {
+                value_column: "".to_string(),
+                source,
+                table,
+                contract,
+                contract_extraction: None,
+            },
+            genesis_updates,
         ))
     }
 
@@ -780,6 +879,128 @@ impl UpdateSimpleStorage {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ReceiptUpdate {
+    pub event_type: (u8, u8),
+    pub no_relevant: usize,
+    pub no_others: usize,
+}
+
+impl ReceiptUpdate {
+    /// Create a new [`ReceiptUpdate`]
+    pub fn new(event_type: (u8, u8), no_relevant: usize, no_others: usize) -> ReceiptUpdate {
+        ReceiptUpdate {
+            event_type,
+            no_relevant,
+            no_others,
+        }
+    }
+
+    /// Apply an update to an [`EventEmitterInstance`].
+    pub async fn apply_update<T: Transport + Clone, P: Provider<T, Ethereum>>(
+        &self,
+        ctx: &TestContext,
+        contract: &EventEmitterInstance<T, P, Ethereum>,
+    ) {
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let addresses = ctx.local_node.as_ref().unwrap().addresses();
+
+        provider.anvil_set_auto_mine(false).await.unwrap();
+
+        provider.anvil_auto_impersonate_account(true).await.unwrap();
+        // Send a bunch of transactions, some of which are related to the event we are testing for.
+        let mut pending_tx_builders = vec![];
+
+        for j in 0..(self.no_relevant + self.no_others) {
+            let (tx_req, address_index) = {
+                let first_random = rand::random::<u8>() % 5;
+                let second_random = rand::random::<u8>() % 5;
+                let tx_req = if j < self.no_relevant {
+                    self.select_event(contract)
+                } else {
+                    let random = match first_random {
+                        0 => contract.testNoIndexed().into_transaction_request(),
+                        1 => contract.testTwoIndexed().into_transaction_request(),
+                        2 => contract.testThreeIndexed().into_transaction_request(),
+                        3 => contract.testOneData().into_transaction_request(),
+                        4 => contract.testTwoData().into_transaction_request(),
+                        _ => unreachable!(),
+                    };
+
+                    let random_two = match second_random {
+                        0 => contract.testOneIOneD().into_transaction_request(),
+                        1 => contract.testTwoIOneD().into_transaction_request(),
+                        2 => contract.testTwoITwoD().into_transaction_request(),
+                        3 => contract.testNoIOneD().into_transaction_request(),
+                        4 => contract.testNoITwoD().into_transaction_request(),
+                        _ => unreachable!(),
+                    };
+                    match j % 2 {
+                        0 => random,
+                        1 => random_two,
+                        _ => unreachable!(),
+                    }
+                };
+                let address_index = rand::random::<usize>() % addresses.len();
+                (tx_req, address_index)
+            };
+            let sender_address = addresses[address_index];
+
+            let funding = U256::from(1e18 as u64);
+
+            provider
+                .anvil_set_balance(sender_address, funding)
+                .await
+                .unwrap();
+
+            let new_req = tx_req.with_from(sender_address);
+            let tx_req_final = provider
+                .fill(new_req)
+                .await
+                .unwrap()
+                .as_envelope()
+                .cloned()
+                .unwrap();
+            pending_tx_builders.push(provider.send_tx_envelope(tx_req_final).await.unwrap());
+        }
+
+        provider
+            .anvil_auto_impersonate_account(false)
+            .await
+            .unwrap();
+        provider.anvil_set_auto_mine(true).await.unwrap();
+
+        for pending_tx in pending_tx_builders {
+            pending_tx.watch().await.unwrap();
+        }
+    }
+
+    fn select_event<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+        &self,
+        contract: &EventEmitterInstance<T, P, N>,
+    ) -> N::TransactionRequest {
+        match self.event_type {
+            (0, 0) => contract.testNoIndexed().into_transaction_request(),
+            (1, 0) => contract.testOneIndexed().into_transaction_request(),
+            (2, 0) => contract.testTwoIndexed().into_transaction_request(),
+            (3, 0) => contract.testThreeIndexed().into_transaction_request(),
+            (0, 1) => contract.testNoIOneD().into_transaction_request(),
+            (0, 2) => contract.testNoITwoD().into_transaction_request(),
+            (1, 1) => contract.testOneIOneD().into_transaction_request(),
+            (1, 2) => contract.testOneITwoD().into_transaction_request(),
+            (2, 1) => contract.testTwoIOneD().into_transaction_request(),
+            (2, 2) => contract.testTwoITwoD().into_transaction_request(),
+            (3, 1) => contract.testOneData().into_transaction_request(),
+            (3, 2) => contract.testTwoData().into_transaction_request(),
+            _ => contract.testNoIndexed().into_transaction_request(),
+        }
+    }
+}
+
 pub trait ContractUpdate<T>: std::fmt::Debug
 where
     T: Transport + Clone,
@@ -800,6 +1021,16 @@ where
     }
 }
 
+impl<T> ContractUpdate<T> for ReceiptUpdate
+where
+    T: Transport + Clone,
+{
+    type Contract = EventEmitterInstance<T, RootProvider<T, Ethereum>>;
+
+    async fn apply_to(&self, ctx: &TestContext, contract: &Self::Contract) {
+        self.apply_update(ctx, contract).await
+    }
+}
 #[derive(Clone, Debug)]
 pub enum ChangeType {
     Deletion,

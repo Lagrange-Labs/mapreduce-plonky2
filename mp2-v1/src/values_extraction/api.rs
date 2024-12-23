@@ -716,27 +716,41 @@ mod tests {
         let receipt_proof_infos = generate_receipt_test_info::<1, 0>();
         let receipt_proofs = receipt_proof_infos.proofs();
         let query = receipt_proof_infos.query();
-        // We check that we have enough receipts and then take the second and third info
-        // (the MPT proof for the first node is different).
-        // Then check that the node above both is a branch.
-        assert!(receipt_proofs.len() > 3);
-        let second_info = &receipt_proofs[1];
-        let third_info = &receipt_proofs[2];
+        // We need two nodes that are children of the same branch so we compare the last but two nodes for each of them until we find a case that works
+        let (info_one, info_two) = if let Some((one, two)) = receipt_proofs
+            .iter()
+            .enumerate()
+            .find_map(|(i, current_proof)| {
+                let current_node_second_to_last =
+                    current_proof.mpt_proof[current_proof.mpt_proof.len() - 2].clone();
+                receipt_proofs
+                    .iter()
+                    .skip(i + 1)
+                    .find(|find_info| {
+                        find_info.mpt_proof[find_info.mpt_proof.len() - 2].clone()
+                            == current_node_second_to_last
+                    })
+                    .map(|matching| (current_proof, matching))
+            }) {
+            (one, two)
+        } else {
+            panic!("No relevant events with same branch node parent")
+        };
 
-        let proof_length_1 = second_info.mpt_proof.len();
-        let proof_length_2 = third_info.mpt_proof.len();
+        let proof_length_1 = info_one.mpt_proof.len();
+        let proof_length_2 = info_two.mpt_proof.len();
 
-        let list_one = rlp::decode_list::<Vec<u8>>(&second_info.mpt_proof[proof_length_1 - 2]);
-        let list_two = rlp::decode_list::<Vec<u8>>(&third_info.mpt_proof[proof_length_2 - 2]);
+        let list_one = rlp::decode_list::<Vec<u8>>(&info_one.mpt_proof[proof_length_1 - 2]);
+        let list_two = rlp::decode_list::<Vec<u8>>(&info_two.mpt_proof[proof_length_2 - 2]);
 
-        assert!(list_one == list_two);
+        assert_eq!(list_one, list_two);
         assert!(list_one.len() == 17);
 
         println!("Generating params...");
         let params = build_circuits_params();
 
         println!("Proving leaf 1...");
-        let leaf_input_1 = CircuitInput::new_receipt_leaf(second_info, query);
+        let leaf_input_1 = CircuitInput::new_receipt_leaf(info_one, query);
         let now = std::time::Instant::now();
         let leaf_proof1 = generate_proof(&params, leaf_input_1).unwrap();
         {
@@ -751,7 +765,7 @@ mod tests {
         );
 
         println!("Proving leaf 2...");
-        let leaf_input_2 = CircuitInput::new_receipt_leaf(third_info, query);
+        let leaf_input_2 = CircuitInput::new_receipt_leaf(info_two, query);
         let now = std::time::Instant::now();
         let leaf_proof2 = generate_proof(&params, leaf_input_2).unwrap();
         println!(
@@ -762,7 +776,7 @@ mod tests {
         // The branch case for receipts is identical to that of a mapping so we use the same api.
         println!("Proving branch...");
         let branch_input = CircuitInput::new_mapping_variable_branch(
-            second_info.mpt_proof[proof_length_1 - 2].clone(),
+            info_one.mpt_proof[proof_length_1 - 2].clone(),
             vec![leaf_proof1, leaf_proof2],
         );
 
