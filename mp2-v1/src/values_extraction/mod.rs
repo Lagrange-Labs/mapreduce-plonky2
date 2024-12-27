@@ -37,18 +37,26 @@ pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
 /// Prefix used for making a topic column id.
 const TOPIC_PREFIX: &[u8] = b"topic";
+/// [`TOPIC_PREFIX`] as a [`str`]
+const TOPIC_NAME: &str = "topic";
 
 /// Prefix used for making a data column id.
 const DATA_PREFIX: &[u8] = b"data";
+/// [`DATA_PREFIX`] as a [`str`]
+const DATA_NAME: &str = "data";
 
 /// Prefix for transaction index
 const TX_INDEX_PREFIX: &[u8] = b"tx index";
 
 /// Prefix for log number
 const LOG_NUMBER_PREFIX: &[u8] = b"log number";
+/// [`LOG_NUMBER_PREFIX`] as a [`str`]
+const LOG_NUMBER_NAME: &str = "log number";
 
 /// Prefix for gas used
-const GAS_USED_PREFIX: &[u8] = b" gas used";
+const GAS_USED_PREFIX: &[u8] = b"gas used";
+/// [`GAS_USED_PREFIX`] as a [`str`]
+const GAS_USED_NAME: &str = "gas used";
 
 pub fn identifier_block_column() -> u64 {
     let inputs: Vec<F> = BLOCK_ID_DST.to_fields();
@@ -400,4 +408,85 @@ pub fn compute_receipt_leaf_value_digest<const NO_TOPICS: usize, const MAX_DATA:
             }
         })
         .fold(Digest::NEUTRAL, |acc, p| acc + p)
+}
+
+/// Function that computes the column identifiers for the non-indexed columns together with their names as [`String`]s.
+pub fn compute_non_indexed_receipt_column_ids<const NO_TOPICS: usize, const MAX_DATA: usize>(
+    event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
+) -> Vec<(String, GFp)> {
+    let log_number_input = [
+        event.address.as_slice(),
+        event.event_signature.as_slice(),
+        LOG_NUMBER_PREFIX,
+    ]
+    .concat()
+    .into_iter()
+    .map(GFp::from_canonical_u8)
+    .collect::<Vec<GFp>>();
+    let log_number_column_id = H::hash_no_pad(&log_number_input).elements[0];
+
+    let gas_used_input = [
+        event.address.as_slice(),
+        event.event_signature.as_slice(),
+        GAS_USED_PREFIX,
+    ]
+    .concat()
+    .into_iter()
+    .map(GFp::from_canonical_u8)
+    .collect::<Vec<GFp>>();
+    let gas_used_column_id = H::hash_no_pad(&gas_used_input).elements[0];
+
+    let topic_ids = event
+        .topics
+        .iter()
+        .enumerate()
+        .map(|(j, _)| {
+            let input = [
+                event.address.as_slice(),
+                event.event_signature.as_slice(),
+                TOPIC_PREFIX,
+                &[j as u8 + 1],
+            ]
+            .concat()
+            .into_iter()
+            .map(GFp::from_canonical_u8)
+            .collect::<Vec<GFp>>();
+            (
+                format!("{}_{}", TOPIC_NAME, j + 1),
+                H::hash_no_pad(&input).elements[0],
+            )
+        })
+        .collect::<Vec<(String, GFp)>>();
+
+    let data_ids = event
+        .data
+        .iter()
+        .enumerate()
+        .map(|(j, _)| {
+            let input = [
+                event.address.as_slice(),
+                event.event_signature.as_slice(),
+                DATA_PREFIX,
+                &[j as u8 + 1],
+            ]
+            .concat()
+            .into_iter()
+            .map(GFp::from_canonical_u8)
+            .collect::<Vec<GFp>>();
+            (
+                format!("{}_{}", DATA_NAME, j + 1),
+                H::hash_no_pad(&input).elements[0],
+            )
+        })
+        .collect::<Vec<(String, GFp)>>();
+
+    [
+        vec![
+            (LOG_NUMBER_NAME.to_string(), log_number_column_id),
+            (GAS_USED_NAME.to_string(), gas_used_column_id),
+        ],
+        topic_ids,
+        data_ids,
+    ]
+    .concat()
 }
