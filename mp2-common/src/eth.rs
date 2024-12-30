@@ -488,7 +488,7 @@ impl ReceiptProofInfo {
             .verify_proof(self.mpt_root, &mpt_key, self.mpt_proof.clone())?
             .ok_or(anyhow!("No proof found when verifying"))?;
 
-        let rlp_receipt = rlp::Rlp::new(&valid[..]);
+        let rlp_receipt = rlp::Rlp::new(&valid[1..]);
         ReceiptWithBloom::decode(&mut rlp_receipt.as_raw())
             .map_err(|e| anyhow!("Could not decode receipt got: {}", e))
     }
