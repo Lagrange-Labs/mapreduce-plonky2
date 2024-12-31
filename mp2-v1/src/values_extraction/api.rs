@@ -13,7 +13,7 @@ use anyhow::{bail, ensure, Result};
 use log::debug;
 use mp2_common::{
     default_config,
-    eth::{ReceiptProofInfo, ReceiptQuery},
+    eth::{EventLogInfo, ReceiptProofInfo},
     mpt_sequential::PAD_LEN,
     proof::{ProofInputSerialized, ProofWithVK},
     storage_key::{MappingSlot, SimpleSlot},
@@ -80,10 +80,10 @@ impl CircuitInput {
     /// Create a circuit input for proving a leaf MPT node of a transaction receipt.
     pub fn new_receipt_leaf<const NO_TOPICS: usize, const MAX_DATA: usize>(
         info: &ReceiptProofInfo,
-        query: &ReceiptQuery<NO_TOPICS, MAX_DATA>,
+        event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
     ) -> Self {
         CircuitInput::LeafReceipt(
-            ReceiptLeafCircuit::new(info, query).expect("Could not construct Receipt Leaf Circuit"),
+            ReceiptLeafCircuit::new(info, event).expect("Could not construct Receipt Leaf Circuit"),
         )
     }
 
@@ -750,7 +750,7 @@ mod tests {
         let params = build_circuits_params();
 
         println!("Proving leaf 1...");
-        let leaf_input_1 = CircuitInput::new_receipt_leaf(info_one, query);
+        let leaf_input_1 = CircuitInput::new_receipt_leaf(info_one, &query.event);
         let now = std::time::Instant::now();
         let leaf_proof1 = generate_proof(&params, leaf_input_1).unwrap();
         {
@@ -765,7 +765,7 @@ mod tests {
         );
 
         println!("Proving leaf 2...");
-        let leaf_input_2 = CircuitInput::new_receipt_leaf(info_two, query);
+        let leaf_input_2 = CircuitInput::new_receipt_leaf(info_two, &query.event);
         let now = std::time::Instant::now();
         let leaf_proof2 = generate_proof(&params, leaf_input_2).unwrap();
         println!(

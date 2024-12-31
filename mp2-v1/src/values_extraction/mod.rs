@@ -23,6 +23,7 @@ mod extension;
 mod leaf_mapping;
 mod leaf_receipt;
 mod leaf_single;
+pub mod planner;
 pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
@@ -47,6 +48,8 @@ const DATA_NAME: &str = "data";
 
 /// Prefix for transaction index
 const TX_INDEX_PREFIX: &[u8] = b"tx index";
+/// [`TX_INDEX_PREFIX`] as a [`str`]
+const TX_INDEX_NAME: &str = "tx index";
 
 /// Prefix for log number
 const LOG_NUMBER_PREFIX: &[u8] = b"log number";
@@ -489,4 +492,27 @@ pub fn compute_non_indexed_receipt_column_ids<const NO_TOPICS: usize, const MAX_
         data_ids,
     ]
     .concat()
+}
+
+pub fn compute_all_receipt_coulmn_ids<const NO_TOPICS: usize, const MAX_DATA: usize>(
+    event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
+) -> Vec<(String, GFp)> {
+    let tx_index_input = [
+        event.address.as_slice(),
+        event.event_signature.as_slice(),
+        TX_INDEX_PREFIX,
+    ]
+    .concat()
+    .into_iter()
+    .map(GFp::from_canonical_u8)
+    .collect::<Vec<GFp>>();
+    let tx_index_column_id = (
+        TX_INDEX_NAME.to_string(),
+        H::hash_no_pad(&tx_index_input).elements[0],
+    );
+
+    let mut other_ids = compute_non_indexed_receipt_column_ids(event);
+    other_ids.insert(0, tx_index_column_id);
+
+    other_ids
 }
