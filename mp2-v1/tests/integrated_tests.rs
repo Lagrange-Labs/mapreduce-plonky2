@@ -91,9 +91,15 @@ async fn integrated_indexing() -> Result<()> {
     ctx.build_params(ParamsType::Indexing).unwrap();
 
     info!("Params built");
-    // For now we test that we can start a receipt case only.
-    let (_receipt, _genesis) =
+
+    let (mut receipt, genesis) =
         TableIndexing::<EventLogInfo<0, 0>>::receipt_test_case(0, 0, &mut ctx).await?;
+    let changes = vec![
+        ChangeType::Receipt(1, 10),
+        ChangeType::Receipt(10, 1),
+        ChangeType::Receipt(0, 10),
+    ];
+    receipt.run(&mut ctx, genesis, changes.clone()).await?;
 
     // NOTE: to comment to avoid very long tests...
     let (mut single, genesis) =

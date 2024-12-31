@@ -38,7 +38,9 @@ use mp2_v1::{
     values_extraction::{
         gadgets::{column_info::ExtractedColumnInfo, metadata_gadget::TableMetadata},
         identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
-        identifier_for_outer_mapping_key_column, identifier_for_value_column, StorageSlotInfo,
+        identifier_for_outer_mapping_key_column, identifier_for_value_column,
+        planner::Extractable,
+        StorageSlotInfo,
     },
 };
 use plonky2::field::types::PrimeField64;
@@ -881,20 +883,76 @@ where
 
     async fn generate_extraction_proof_inputs(
         &self,
-        _ctx: &mut TestContext,
-        _contract: &Contract,
-        _value_key: ProofKey,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        value_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
-        todo!("Implement as part of CRY-25")
+        let event = self.get_event();
+
+        let ProofKey::ValueExtraction((_, bn)) = value_key else {
+            bail!("key wrong");
+        };
+
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let value_proof = event
+            .prove_value_extraction(
+                contract.address(),
+                bn as u64,
+                ctx.params().get_value_extraction_params(),
+                provider.root(),
+            )
+            .await?;
+        Ok((
+            ExtractionProofInput::Receipt(value_proof),
+            self.metadata_hash(contract.address(), contract.chain_id()),
+        ))
     }
 
     fn random_contract_update<'a>(
         &'a mut self,
-        _ctx: &'a mut TestContext,
-        _contract: &'a Contract,
-        _c: ChangeType,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+        c: ChangeType,
     ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        todo!("Implement as part of CRY-25")
+        let event = self.get_event();
+        async move {
+            let ChangeType::Receipt(relevant, others) = c else {
+                panic!("Need ChangeType::Receipt, got: {:?}", c);
+            };
+            let contract_update =
+                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA as u8), relevant, others);
+
+            let provider = ProviderBuilder::new()
+                .with_recommended_fillers()
+                .wallet(ctx.wallet())
+                .on_http(ctx.rpc_url.parse().unwrap());
+
+            let event_emitter = EventContract::new(contract.address(), provider.root());
+            event_emitter
+                .apply_update(ctx, &contract_update)
+                .await
+                .unwrap();
+
+            let block_number = ctx.block_number().await;
+            let new_block_number = block_number as BlockPrimaryIndex;
+
+            let query = ReceiptQuery::<{ R::NO_TOPICS }, { R::MAX_DATA }> {
+                contract: contract.address(),
+                event,
+            };
+
+            let proof_infos = query
+                .query_receipt_proofs(provider.root(), block_number.into())
+                .await
+                .unwrap();
+
+            R::to_table_rows(&proof_infos, &event, new_block_number)
+        }
+        .boxed()
     }
 
     fn metadata_hash(&self, _contract_address: Address, _chain_id: u64) -> MetadataHash {
@@ -1156,6 +1214,9 @@ impl SingleExtractionArgs {
         // We can take the first one since we're asking for single value and there is only one row.
         let old_table_values = &old_table_values[0];
         match change_type {
+            ChangeType::Receipt(..) => {
+                panic!("Can't add a new receipt change for storage variable")
+            }
             ChangeType::Silent => {}
             ChangeType::Insertion => {
                 panic!("Can't add a new row for blockchain data over single values")
@@ -1392,6 +1453,9 @@ where
             let current_value = self.query_value(ctx, contract, current_key).await;
             let new_key = T::sample_key();
             let updates = match c {
+                ChangeType::Receipt(..) => {
+                    panic!("Can't add a new receipt change for storage variable")
+                }
                 ChangeType::Silent => vec![],
                 ChangeType::Insertion => {
                     vec![MappingUpdate::Insertion(
