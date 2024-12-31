@@ -11,10 +11,10 @@ use alloy::{
     primitives::{Address, Log, B256},
     rlp::Decodable,
 };
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
-    eth::{EventLogInfo, ReceiptProofInfo},
+    eth::EventLogInfo,
     group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, MPTReceiptLeafNode, PAD_LEN},
@@ -321,17 +321,10 @@ where
 {
     /// Create a new [`ReceiptLeafCircuit`] from a [`ReceiptProofInfo`] and a [`EventLogInfo`]
     pub fn new<const NO_TOPICS: usize, const MAX_DATA: usize>(
-        proof_info: &ReceiptProofInfo,
+        last_node: &[u8],
+        tx_index: u64,
         event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
     ) -> Result<Self> {
-        // Since the compact encoding of the key is stored first plus an additional list header and
-        // then the first element in the receipt body is the transaction type we calculate the offset to that point
-
-        let last_node = proof_info
-            .mpt_proof
-            .last()
-            .ok_or(anyhow!("Could not get last node in receipt trie proof"))?;
-
         // Convert to Rlp form so we can use provided methods.
         let node_rlp = rlp::Rlp::new(last_node);
 
@@ -429,8 +422,8 @@ where
         });
 
         Ok(Self {
-            node: last_node.clone(),
-            tx_index: proof_info.tx_index,
+            node: last_node.to_vec(),
+            tx_index,
             size,
             address,
             rel_add_offset: add_rel_offset,
@@ -760,8 +753,12 @@ mod tests {
         let info = proofs.first().unwrap();
         let query = receipt_proof_infos.query();
 
-        let c =
-            ReceiptLeafCircuit::<NODE_LEN>::new::<NO_TOPICS, MAX_DATA>(info, &query.event).unwrap();
+        let c = ReceiptLeafCircuit::<NODE_LEN>::new::<NO_TOPICS, MAX_DATA>(
+            info.mpt_proof.last().unwrap(),
+            info.tx_index,
+            &query.event,
+        )
+        .unwrap();
         let test_circuit = TestReceiptLeafCircuit { c };
 
         let node = info.mpt_proof.last().unwrap().clone();

@@ -738,7 +738,7 @@ impl<T: TableSource> TableIndexing<T> {
             }
         };
 
-        let table_id = &self.table.public_name.clone();
+        let table_id = &self.table.public_name;
         // we construct the proof key for both mappings and single variable in the same way since
         // it is derived from the table id which should be different for any tables we create.
         let value_key = ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));
