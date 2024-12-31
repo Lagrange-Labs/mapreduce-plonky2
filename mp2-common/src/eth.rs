@@ -1201,7 +1201,16 @@ mod test {
                     .get_block_with_txs(blockid)
                     .await?
                     .expect("should have been a block");
-                let receipts = provider.get_block_receipts(block.number.unwrap()).await?;
+                let receipts = provider
+                    .get_block_receipts(
+                        block
+                            .number
+                            .ok_or(anyhow::anyhow!("Couldn't unwrap block number"))?,
+                    )
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!("Couldn't get ethers block receipts with error: {:?}", e)
+                    })?;
 
                 let tx_with_receipt = block
                     .transactions
