@@ -1332,15 +1332,16 @@ where
         self.apply_update(ctx, contract).await
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub enum ChangeType {
     Deletion,
     Insertion,
     Update(UpdateType),
     Silent,
+    Receipt(usize, usize),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub enum UpdateType {
     SecondaryIndex,
     Rest,
