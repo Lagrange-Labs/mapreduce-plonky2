@@ -41,9 +41,13 @@ impl<K: Debug + Clone + Hash + Eq> UpdateTreeNode<K> {
     fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
+
+    pub fn k(&self) -> K {
+        self.k.clone()
+    }
 }
 
-impl<K: Clone + Hash + Eq> UpdateTree<K> {
+impl<K: Clone + Hash + Eq + Debug> UpdateTree<K> {
     pub fn root(&self) -> &K {
         &self.nodes[0].k
     }
@@ -54,6 +58,17 @@ impl<K: Clone + Hash + Eq> UpdateTree<K> {
 
     fn node_mut(&mut self, i: usize) -> &mut UpdateTreeNode<K> {
         &mut self.nodes[i]
+    }
+
+    pub fn get_node(&self, key: &K) -> Option<&UpdateTreeNode<K>> {
+        self.idx.get(key).map(|idx| self.node(*idx))
+    }
+
+    pub fn get_child_keys(&self, node: &UpdateTreeNode<K>) -> Vec<K> {
+        node.children
+            .iter()
+            .map(|idx| self.node(*idx).k())
+            .collect()
     }
 }
 
