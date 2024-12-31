@@ -41,9 +41,13 @@ impl<K: Debug + Clone + Hash + Eq> UpdateTreeNode<K> {
     fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
+
+    pub fn k(&self) -> K {
+        self.k.clone()
+    }
 }
 
-impl<K: Clone + Hash + Eq> UpdateTree<K> {
+impl<K: Clone + Hash + Eq + Debug> UpdateTree<K> {
     pub fn root(&self) -> &K {
         &self.nodes[0].k
     }
@@ -64,6 +68,16 @@ impl<K: Clone + Hash + Eq> UpdateTree<K> {
     /// Return an iterator over the key contained in this `UpdateTree`.
     pub fn nodes(&self) -> impl Iterator<Item = &K> {
         self.nodes.iter().map(|n| &n.k)
+    }
+    pub fn get_node(&self, key: &K) -> Option<&UpdateTreeNode<K>> {
+        self.idx.get(key).map(|idx| self.node(*idx))
+    }
+
+    pub fn get_child_keys(&self, node: &UpdateTreeNode<K>) -> Vec<K> {
+        node.children
+            .iter()
+            .map(|idx| self.node(*idx).k())
+            .collect()
     }
 }
 

@@ -74,6 +74,44 @@ pub fn extract_child_hashes(rlp_data: &[u8]) -> Vec<Vec<u8>> {
     hashes
 }
 
+/// Enum used to distinguish between different types of node in an MPT.
+#[derive(Clone, Debug, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NodeType {
+    Branch,
+    Extension,
+    Leaf,
+}
+
+/// Function that returns the [`NodeType`] of an RLP encoded MPT node
+pub fn node_type(rlp_data: &[u8]) -> Result<NodeType> {
+    let rlp = Rlp::new(rlp_data);
+
+    let item_count = rlp.item_count()?;
+
+    if item_count == 17 {
+        Ok(NodeType::Branch)
+    } else if item_count == 2 {
+        // The first item is the encoded path, if it begins with a 2 or 3 it is a leaf, else it is an extension node
+        let first_item = rlp.at(0)?;
+
+        // We want the first byte
+        let first_byte = first_item.as_raw()[0];
+
+        // The we divide by 16 to get the first nibble
+        match first_byte / 16 {
+            0 | 1 => Ok(NodeType::Extension),
+            2 | 3 => Ok(NodeType::Leaf),
+            _ => Err(anyhow!(
+                "Expected compact encoding beginning with 0,1,2 or 3"
+            )),
+        }
+    } else {
+        Err(anyhow!(
+            "RLP encoded Node item count was {item_count}, expected either 17 or 2"
+        ))
+    }
+}
+
 pub fn left_pad32(slice: &[u8]) -> [u8; 32] {
     left_pad::<32>(slice)
 }
