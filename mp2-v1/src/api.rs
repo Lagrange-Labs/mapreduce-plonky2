@@ -109,6 +109,9 @@ where
     pub fn empty_cell_tree_proof(&self) -> Result<Vec<u8>> {
         self.tree_creation.empty_cell_tree_proof()
     }
+    pub fn get_value_extraction_params(&self) -> &ValuesExtractionParameters<MAX_COLUMNS> {
+        &self.values_extraction
+    }
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
