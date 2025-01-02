@@ -323,9 +323,7 @@ impl MappingInfo for StructMapping {
 /// Abstract for the mapping key of the storage slot.
 /// It could be a normal mapping key, or a pair of keys which identifies the
 /// mapping of mapppings key.
-pub(crate) trait StorageSlotMappingKey:
-    Clone + Debug + PartialOrd + Ord + Send + Sync
-{
+pub trait StorageSlotMappingKey: Clone + Debug + PartialOrd + Ord + Send + Sync {
     /// This is what the keys actually look like.
     type Key;
 

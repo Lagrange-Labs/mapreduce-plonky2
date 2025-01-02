@@ -16,11 +16,11 @@ use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTKeyWire, MPTReceiptLeafNode, PAD_LEN},
-    poseidon::{hash_to_int_target, H},
+    poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp},
-    utils::{less_than, less_than_or_equal_to_unsafe, Endianness, ToTargets},
+    utils::{less_than, less_than_or_equal_to_unsafe, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{
@@ -29,7 +29,7 @@ use plonky2::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, config::Hasher},
+    plonk::circuit_builder::CircuitBuilder,
 };
 
 use plonky2_crypto::u32::arithmetic_u32::{CircuitBuilderU32, U32Target};
@@ -170,7 +170,9 @@ where
                     Some(0usize)
                 }
             })
-            .ok_or(anyhow!("There were no relevant logs in this transaction"))?;
+            .ok_or(anyhow::anyhow!(
+                "There were no relevant logs in this transaction"
+            ))?;
 
         let EventLogInfo::<NO_TOPICS, MAX_DATA> {
             size,
@@ -482,15 +484,15 @@ mod tests {
 
     use mp2_common::{
         eth::left_pad32,
-        poseidon::hash_to_int_value,
-        utils::{keccak256, Packer, ToFields},
+        poseidon::{hash_to_int_value, H},
+        utils::{keccak256, Endianness, Packer, ToFields},
         C,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         mpt_sequential::generate_receipt_test_info,
     };
-    use plonky2::hash::hash_types::HashOut;
+    use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::scalar_field::Scalar;
     #[derive(Clone, Debug)]
     struct TestReceiptLeafCircuit<const NODE_LEN: usize> {

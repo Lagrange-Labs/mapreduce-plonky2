@@ -4,13 +4,7 @@ use super::slot_info::{LargeStruct, MappingInfo, StorageSlotMappingKey, StorageS
 use crate::common::{
     bindings::{
         eventemitter::EventEmitter::{self, EventEmitterInstance},
-        simple::{
-            Simple,
-            Simple::{
-                MappingChange, MappingOfSingleValueMappingsChange, MappingOfStructMappingsChange,
-                MappingOperation, MappingStructChange,
-            },
-        },
+        simple::{Simple, Simple::MappingOperation},
     },
     cases::indexing::ReceiptUpdate,
     TestContext,
@@ -50,6 +44,7 @@ impl Contract {
     }
 
     /// Creates a new [`Contract`] from an [`Address`] and `chain_id`
+    #[allow(dead_code)]
     pub fn new(address: Address, chain_id: u64) -> Contract {
         Contract { address, chain_id }
     }

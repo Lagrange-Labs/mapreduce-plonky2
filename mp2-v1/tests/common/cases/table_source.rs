@@ -59,7 +59,7 @@ use crate::common::{
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
-    Deserialize, MetadataHash, Serialize, TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
+    Deserialize, MetadataHash, Serialize, TestContext,
 };
 
 use super::{
@@ -681,7 +681,7 @@ pub trait ReceiptExtractionArgs:
 
     fn get_index(&self) -> u64;
 
-    fn to_table_rows<PrimaryIndex: Copy>(
+    fn to_table_rows<PrimaryIndex: Clone>(
         proof_infos: &[ReceiptProofInfo],
         event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>,
         block: PrimaryIndex,
@@ -728,6 +728,7 @@ pub trait ReceiptExtractionArgs:
                         }
                     })
                     .map(|log| {
+                        let log = log.clone();
                         let (topics, data) = log.data.split();
                         let topics_cells = topics
                             .into_iter()
@@ -755,7 +756,7 @@ pub trait ReceiptExtractionArgs:
                             previous_row_key: RowTreeKey::default(),
                             new_row_key: RowTreeKey::from(&secondary),
                             updated_cells: [vec![gas_used_cell], topics_cells, data_cells].concat(),
-                            primary: block,
+                            primary: block.clone(),
                         };
 
                         TableRowUpdate::<PrimaryIndex>::Insertion(collection, secondary)
@@ -899,7 +900,7 @@ where
             .on_http(ctx.rpc_url.parse().unwrap());
 
         let value_proof = event
-            .prove_value_extraction(
+            .prove_value_extraction::<32, _>(
                 contract.address(),
                 bn as u64,
                 ctx.params().get_value_extraction_params(),
@@ -1010,8 +1011,7 @@ impl SingleExtractionArgs {
     }
 
     pub(crate) fn secondary_index_slot_input(&self) -> Option<SlotInput> {
-        self.secondary_index
-            .map(|idx| self.slot_inputs[idx].clone())
+        self.secondary_index.map(|idx| self.slot_inputs[idx])
     }
 
     pub(crate) fn rest_column_slot_inputs(&self) -> Vec<SlotInput> {
@@ -1426,7 +1426,7 @@ where
         contract: &'a Contract,
         c: ChangeType,
     ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        async {
+        async move {
             // NOTE 1: The first part is just trying to construct the right input to simulate any
             // changes on a mapping. This is mostly irrelevant for dist system but needs to manually
             // construct our test cases here. The second part is more interesting as it looks at
@@ -1787,8 +1787,8 @@ fn evm_word_column_info(table_info: &[ExtractedColumnInfo]) -> Vec<SlotEvmWordCo
                 col.extraction_id()[7].0 as u8,
                 col.location_offset().0 as u32,
             ))
-            .and_modify(|cols: &mut Vec<_>| cols.push(col.clone()))
-            .or_insert(vec![col.clone()]);
+            .and_modify(|cols: &mut Vec<_>| cols.push(*col))
+            .or_insert(vec![*col]);
     });
 
     column_info_map

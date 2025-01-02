@@ -5,10 +5,9 @@
 use crate::values_extraction::{
     gadgets::metadata_gadget::{TableMetadataGadget, TableMetadataTarget},
     public_inputs::{PublicInputs, PublicInputsArgs},
-    INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
 };
 use anyhow::Result;
-use itertools::Itertools;
+
 use mp2_common::{
     array::{Array, Targetable, Vector, VectorWire, L32},
     group_hashing::CircuitBuilderGroupHashing,
@@ -17,7 +16,7 @@ use mp2_common::{
     poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
     storage_key::{MappingOfMappingsSlotWires, MappingSlot},
-    types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
+    types::{CBuilder, GFp},
     u256::UInt256Target,
     utils::{Endianness, ToTargets},
     CHasher, D, F,
@@ -32,7 +31,7 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
-use plonky2_ecgfp5::{curve::scalar_field::Scalar, gadgets::curve::CircuitBuilderEcGFp5};
+use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter::once;
@@ -228,7 +227,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::TEST_MAX_COLUMNS;
+    use crate::{
+        tests::TEST_MAX_COLUMNS,
+        values_extraction::{INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX},
+    };
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
         array::Array,
@@ -236,6 +238,7 @@ mod tests {
         mpt_sequential::utils::bytes_to_nibbles,
         poseidon::{hash_to_int_value, H},
         rlp::MAX_KEY_NIBBLE_LEN,
+        types::MAPPING_LEAF_VALUE_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
         C, D, F,
     };
@@ -250,6 +253,9 @@ mod tests {
         iop::{target::Target, witness::PartialWitness},
         plonk::config::Hasher,
     };
+
+    use plonky2_ecgfp5::curve::scalar_field::Scalar;
+
     use rand::{thread_rng, Rng};
     use std::array;
 
@@ -321,7 +327,7 @@ mod tests {
             .chain(once(F::from_canonical_usize(
                 table_metadata.num_actual_columns,
             )))
-            .collect_vec();
+            .collect::<Vec<F>>();
         let hash = H::hash_no_pad(&inputs);
         let row_id = hash_to_int_value(hash);
 

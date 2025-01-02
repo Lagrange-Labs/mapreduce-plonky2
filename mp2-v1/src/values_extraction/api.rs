@@ -1,5 +1,5 @@
 //! Values extraction APIs
-
+#![allow(clippy::identity_op)]
 use super::{
     branch::{BranchCircuit, BranchWires},
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},

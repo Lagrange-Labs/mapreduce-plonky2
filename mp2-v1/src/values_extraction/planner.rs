@@ -1,4 +1,5 @@
 //! This code returns an [`UpdateTree`] used to plan how we prove a series of values was extracted from a Merkle Patricia Trie.
+#![allow(clippy::identity_op)]
 use alloy::{
     network::Ethereum,
     primitives::{keccak256, Address, B256},
@@ -22,13 +23,17 @@ pub trait Extractable {
         provider: &RootProvider<T, Ethereum>,
     ) -> impl Future<Output = Result<UpdateTree<B256>>>;
 
-    fn prove_value_extraction<T: Transport + Clone>(
+    fn prove_value_extraction<const MAX_COLUMNS: usize, T: Transport + Clone>(
         &self,
         contract: Address,
         epoch: u64,
-        pp: &PublicParameters,
+        pp: &PublicParameters<512, MAX_COLUMNS>,
         provider: &RootProvider<T, Ethereum>,
-    ) -> impl Future<Output = Result<Vec<u8>>>;
+    ) -> impl Future<Output = Result<Vec<u8>>>
+    where
+        [(); MAX_COLUMNS - 2]:,
+        [(); MAX_COLUMNS - 1]:,
+        [(); MAX_COLUMNS - 0]:;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -52,6 +57,8 @@ impl ProofData {
 
 impl<const NO_TOPICS: usize, const MAX_DATA: usize> Extractable
     for EventLogInfo<NO_TOPICS, MAX_DATA>
+where
+    [(); 7 - 2 - NO_TOPICS - MAX_DATA]:,
 {
     async fn create_update_tree<T: Transport + Clone>(
         &self,
@@ -76,13 +83,18 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> Extractable
         Ok(UpdateTree::<B256>::from_paths(key_paths, epoch as i64))
     }
 
-    async fn prove_value_extraction<T: Transport + Clone>(
+    async fn prove_value_extraction<const MAX_COLUMNS: usize, T: Transport + Clone>(
         &self,
         contract: Address,
         epoch: u64,
-        pp: &PublicParameters,
+        pp: &PublicParameters<512, MAX_COLUMNS>,
         provider: &RootProvider<T, Ethereum>,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Vec<u8>>
+    where
+        [(); MAX_COLUMNS - 2]:,
+        [(); MAX_COLUMNS - 1]:,
+        [(); MAX_COLUMNS - 0]:,
+    {
         let query = ReceiptQuery::<NO_TOPICS, MAX_DATA> {
             contract,
             event: *self,
@@ -207,10 +219,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> Extractable
                                 "No ProofData found for key: {:?}",
                                 work_plan_item.k()
                             ))?;
-                    let input = CircuitInput::new_mapping_variable_branch(
-                        proof_data.node.clone(),
-                        child_proofs,
-                    );
+                    let input = CircuitInput::new_branch(proof_data.node.clone(), child_proofs);
                     let proof = generate_proof(pp, input)?;
                     proof_data.proof = Some(proof);
                     update_plan.done(&work_plan_item)?;
@@ -237,16 +246,19 @@ pub mod tests {
     use eth_trie::Trie;
     use mp2_common::{
         digest::Digest,
-        eth::BlockUtil,
+        eth::{left_pad32, BlockUtil},
+        poseidon::{hash_to_int_value, H},
         proof::ProofWithVK,
-        utils::{Endianness, Packer},
+        types::GFp,
+        utils::{Endianness, Packer, ToFields},
     };
     use mp2_test::eth::get_mainnet_url;
+    use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::Hasher};
+    use plonky2_ecgfp5::curve::scalar_field::Scalar;
     use std::str::FromStr;
 
     use crate::values_extraction::{
-        api::build_circuits_params, compute_receipt_leaf_metadata_digest,
-        compute_receipt_leaf_value_digest, PublicInputs,
+        api::build_circuits_params, gadgets::metadata_gadget::TableMetadata, PublicInputs,
     };
 
     use super::*;
@@ -285,7 +297,7 @@ pub mod tests {
         // get some tx and receipt
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
-        let pp = build_circuits_params();
+        let pp = build_circuits_params::<512, 7>();
         let final_proof_bytes = event_info
             .prove_value_extraction(contract, epoch, &pp, &provider)
             .await?;
@@ -296,14 +308,55 @@ pub mod tests {
             event: event_info,
         };
 
-        let metadata_digest = compute_receipt_leaf_metadata_digest(&event_info);
+        let metadata = TableMetadata::<7, 2>::from(event_info);
+
+        let metadata_digest = metadata.digest();
 
         let value_digest = query
             .query_receipt_proofs(&provider, epoch.into())
             .await?
             .iter()
             .fold(Digest::NEUTRAL, |acc, info| {
-                acc + compute_receipt_leaf_value_digest(info, &event_info)
+                let node = info.mpt_proof.last().unwrap().clone();
+
+                let mut tx_index_input = [0u8; 32];
+                tx_index_input[31] = info.tx_index as u8;
+
+                let node_rlp = rlp::Rlp::new(&node);
+                // The actual receipt data is item 1 in the list
+                let receipt_rlp = node_rlp.at(1).unwrap();
+
+                // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
+                let receipt_list = rlp::Rlp::new(&receipt_rlp.data().unwrap()[1..]);
+
+                // The logs themselves start are the item at index 3 in this list
+                let gas_used_rlp = receipt_list.at(1).unwrap();
+
+                let gas_used_bytes = left_pad32(gas_used_rlp.data().unwrap());
+
+                let (input_vd, row_unique_data) =
+                    metadata.input_value_digest(&[&tx_index_input, &gas_used_bytes]);
+                let extracted_vd = metadata.extracted_receipt_value_digest(&node, &event_info);
+
+                let total = input_vd + extracted_vd;
+
+                // row_id = H2int(row_unique_data || num_actual_columns)
+                let inputs = HashOut::from(row_unique_data)
+                    .to_fields()
+                    .into_iter()
+                    .chain(std::iter::once(GFp::from_canonical_usize(
+                        metadata.num_actual_columns,
+                    )))
+                    .collect::<Vec<GFp>>();
+                let hash = H::hash_no_pad(&inputs);
+                let row_id = hash_to_int_value(hash);
+
+                // values_digest = values_digest * row_id
+                let row_id = Scalar::from_noncanonical_biguint(row_id);
+
+                let exp_digest = total * row_id;
+
+                acc + exp_digest
             });
 
         let pi = PublicInputs::new(&final_proof.proof.public_inputs);
