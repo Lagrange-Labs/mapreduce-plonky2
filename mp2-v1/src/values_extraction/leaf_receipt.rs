@@ -22,6 +22,7 @@ use mp2_common::{
     public_inputs::PublicInputCommon,
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp},
+    u256::UInt256Target,
     utils::{less_than, less_than_or_equal_to_unsafe, Endianness, PackerTarget, ToTargets},
     D, F,
 };
@@ -205,9 +206,20 @@ impl EventWires {
             b.mul(tmp, scalar)
         });
 
-        // Map the gas used to a curve point for the value digest, gas used is the first column so use one as its column id.
-        let gas_digest = b.map_to_curve_point(&[gas_used_column_id, gas_used]);
-        let tx_index_digest = b.map_to_curve_point(&[tx_index_column_id, tx_index]);
+        // Convert gas into a UInt256Target as we know it fits into a u32 (We summed 3 bytes, there are 4 bytes in a u32)
+        let gas_used_u256 = UInt256Target::new_from_target_unsafe(b, gas_used);
+
+        let gas_values = iter::once(gas_used_column_id)
+            .chain(gas_used_u256.to_targets())
+            .collect::<Vec<Target>>();
+        let gas_digest = b.map_to_curve_point(&gas_values);
+
+        // For transaction index digest we know the transaction index will always fit in a u32
+        let tx_index_uint256 = UInt256Target::new_from_target_unsafe(b, tx_index);
+        let tx_index_values = iter::once(tx_index_column_id)
+            .chain(tx_index_uint256.to_targets())
+            .collect::<Vec<Target>>();
+        let tx_index_digest = b.map_to_curve_point(&tx_index_values);
 
         let initial_row_digest = b.add_curve_point(&[gas_digest, tx_index_digest]);
         // We also keep track of the number of real logs we process as each log forms a row in our table
@@ -263,7 +275,12 @@ impl EventWires {
             // We also keep track of which log this is in the receipt to avoid having identical rows in the table in the case
             // that the event we are tracking can be emitted multiple times in the same transaction but has no topics or data.
             let log_number = b.constant(F::from_canonical_usize(index + 1));
-            let log_no_digest = b.map_to_curve_point(&[log_number_column_id, log_number]);
+            // This number will always fit into a u32 so we can directly call `UInt256Target::from_target_unsafe`
+            let log_number_uint256 = UInt256Target::new_from_target_unsafe(b, log_number);
+            let log_no_values = iter::once(log_number_column_id)
+                .chain(log_number_uint256.to_targets())
+                .collect::<Vec<Target>>();
+            let log_no_digest = b.map_to_curve_point(&log_no_values);
             points.push(log_no_digest);
 
             let increment = b.select(dummy, zero, one);

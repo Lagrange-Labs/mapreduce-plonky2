@@ -1,6 +1,6 @@
 use alloy::{
     consensus::TxReceipt,
-    primitives::{Address, IntoLogData},
+    primitives::{Address, IntoLogData, B256, U256},
 };
 use mp2_common::{
     eth::{left_pad32, EventLogInfo, ReceiptProofInfo},
@@ -297,7 +297,7 @@ pub fn compute_receipt_leaf_value_digest<const NO_TOPICS: usize, const MAX_DATA:
 ) -> Digest {
     let receipt = receipt_proof_info.to_receipt().unwrap();
     let gas_used = receipt.cumulative_gas_used();
-
+    let gas_used_u256: B256 = U256::from(gas_used).into();
     // Only use events that we are indexing
     let address = event.address;
     let sig = event.event_signature;
@@ -336,13 +336,26 @@ pub fn compute_receipt_leaf_value_digest<const NO_TOPICS: usize, const MAX_DATA:
     .collect::<Vec<GFp>>();
     let gas_used_column_id = H::hash_no_pad(&gas_used_input).elements[0];
 
-    let index_digest = map_to_curve_point(&[
-        tx_index_column_id,
-        GFp::from_canonical_u64(receipt_proof_info.tx_index),
-    ]);
+    let index_256: B256 = U256::from(receipt_proof_info.tx_index).into();
+    let index_values = iter::once(tx_index_column_id)
+        .chain(
+            index_256
+                .0
+                .pack(mp2_common::utils::Endianness::Big)
+                .to_fields(),
+        )
+        .collect::<Vec<GFp>>();
+    let index_digest = map_to_curve_point(&index_values);
 
-    let gas_digest =
-        map_to_curve_point(&[gas_used_column_id, GFp::from_noncanonical_u128(gas_used)]);
+    let gas_used_values = iter::once(gas_used_column_id)
+        .chain(
+            gas_used_u256
+                .0
+                .pack(mp2_common::utils::Endianness::Big)
+                .to_fields(),
+        )
+        .collect::<Vec<GFp>>();
+    let gas_digest = map_to_curve_point(&gas_used_values);
     let mut n = 0;
     receipt
         .logs()
@@ -396,8 +409,16 @@ pub fn compute_receipt_leaf_value_digest<const NO_TOPICS: usize, const MAX_DATA:
                         map_to_curve_point(&values)
                     })
                     .collect::<Vec<_>>();
-                let log_no_digest =
-                    map_to_curve_point(&[log_number_column_id, GFp::from_canonical_usize(n)]);
+                let log_no_256: B256 = U256::from(n).into();
+                let log_no_values = iter::once(log_number_column_id)
+                    .chain(
+                        log_no_256
+                            .0
+                            .pack(mp2_common::utils::Endianness::Big)
+                            .to_fields(),
+                    )
+                    .collect::<Vec<GFp>>();
+                let log_no_digest = map_to_curve_point(&log_no_values);
                 let initial_digest = index_digest + gas_digest + log_no_digest;
 
                 let row_value = iter::once(initial_digest)
