@@ -1193,7 +1193,7 @@ pub trait ReceiptExtractionArgs:
                             .skip(1)
                             .map(|(j, topic)| {
                                 Cell::new(
-                                    *column_ids.get(&format!("topic_{}", j)).unwrap(),
+                                    *column_ids.get(&format!("topic_{}", j + 1)).unwrap(),
                                     topic.into(),
                                 )
                             })
