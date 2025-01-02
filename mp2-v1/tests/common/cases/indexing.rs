@@ -508,7 +508,24 @@ impl<T: TableSource> TableIndexing<T> {
                 .source
                 .random_contract_update(ctx, &self.contract, ut)
                 .await;
+            // If we are dealing with receipts we need to remove everything already in the row tree
             let bn = ctx.block_number().await as BlockPrimaryIndex;
+
+            let table_row_updates = if let ChangeType::Receipt(..) = ut {
+                let current_row_epoch = self.table.row.current_epoch();
+                let current_row_keys = self
+                    .table
+                    .row
+                    .keys_at(current_row_epoch)
+                    .await
+                    .into_iter()
+                    .map(TableRowUpdate::<BlockPrimaryIndex>::Deletion)
+                    .collect::<Vec<_>>();
+                [current_row_keys, table_row_updates].concat()
+            } else {
+                table_row_updates
+            };
+
             log::info!("Applying follow up updates to contract done - now at block {bn}",);
             // we first run the initial preprocessing and db creation.
             // NOTE: we don't show copy on write here - the fact of only reproving what has been

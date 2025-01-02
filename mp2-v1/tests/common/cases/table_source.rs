@@ -1141,7 +1141,7 @@ pub trait ReceiptExtractionArgs:
 
     fn get_index(&self) -> u64;
 
-    fn to_table_rows<PrimaryIndex: Copy>(
+    fn to_table_rows<PrimaryIndex: Clone>(
         proof_infos: &[ReceiptProofInfo],
         event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>,
         block: PrimaryIndex,
@@ -1221,7 +1221,7 @@ pub trait ReceiptExtractionArgs:
                                 data_cells,
                             ]
                             .concat(),
-                            primary: block,
+                            primary: block.clone(),
                         };
 
                         TableRowUpdate::<PrimaryIndex>::Insertion(collection, secondary)
