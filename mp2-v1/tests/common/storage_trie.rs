@@ -1,14 +1,11 @@
 //! Storage trie for proving tests
 
-use super::{
-    benchmarker::Benchmarker, PublicParameters, TestContext, TEST_MAX_COLUMNS,
-    TEST_MAX_FIELD_PER_EVM,
-};
+use super::{benchmarker::Benchmarker, PublicParameters, TestContext};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
 };
-use itertools::Itertools;
+
 use log::debug;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot, StorageSlotNode},

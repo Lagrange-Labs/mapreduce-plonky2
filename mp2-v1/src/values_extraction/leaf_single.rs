@@ -1,5 +1,5 @@
 //! Module handling the single variable inside a storage trie
-
+#![allow(clippy::identity_op)]
 use crate::values_extraction::{
     gadgets::metadata_gadget::{TableMetadata, TableMetadataGadget, TableMetadataTarget},
     public_inputs::{PublicInputs, PublicInputsArgs},
@@ -14,7 +14,7 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, hash_to_int_target},
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleStructSlotWires},
-    types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
+    types::{CBuilder, GFp},
     u256::UInt256Target,
     utils::{Endianness, ToTargets},
     CHasher, D, F,
@@ -187,6 +187,7 @@ mod tests {
         mpt_sequential::utils::bytes_to_nibbles,
         poseidon::{hash_to_int_value, H},
         rlp::MAX_KEY_NIBBLE_LEN,
+        types::MAPPING_LEAF_VALUE_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
         C, D, F,
     };

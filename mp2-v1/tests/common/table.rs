@@ -20,7 +20,7 @@ use mp2_v1::{
     values_extraction::gadgets::column_info::ColumnInfo,
 };
 use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
-use plonky2::field::types::PrimeField64;
+
 use ryhope::{
     storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
     tree::scapegoat::Alpha,
@@ -107,7 +107,7 @@ impl TableColumns {
             .iter()
             .chain(once(&self.secondary))
             .find(|c| c.identifier() == identifier)
-            .unwrap_or_else(|| panic!("can't find cell from identifier {}", identifier))
+            .expect("can't find cell from identifier")
             .clone()
     }
     pub fn ordered_cells(

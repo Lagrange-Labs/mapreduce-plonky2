@@ -257,14 +257,12 @@ impl ColumnMetadata {
             });
 
         let row_id_input = input_vals
-            .into_iter()
-            .map(|key| {
+            .iter()
+            .flat_map(|key| {
                 key.pack(Endianness::Big)
                     .into_iter()
                     .map(F::from_canonical_u32)
             })
-            .into_iter()
-            .flatten()
             .collect::<Vec<F>>();
 
         (point, H::hash_no_pad(&row_id_input).into())

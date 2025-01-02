@@ -32,8 +32,6 @@ use plonky2::plonk::config::GenericHashOut;
 
 /// Testing maximum columns
 pub(crate) const TEST_MAX_COLUMNS: usize = 32;
-/// Testing maximum fields for each EVM word
-pub(crate) const TEST_MAX_FIELD_PER_EVM: usize = 32;
 
 type ColumnIdentifier = u64;
 type PublicParameters = mp2_v1::api::PublicParameters<TEST_MAX_COLUMNS>;
