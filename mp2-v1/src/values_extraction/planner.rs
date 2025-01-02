@@ -96,6 +96,10 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> Extractable
         let key_paths = proofs
             .iter()
             .map(|input| {
+                let digest =
+                    crate::values_extraction::compute_receipt_leaf_value_digest(input, self)
+                        .to_weierstrass();
+                println!("extraction proof values digest: {:?}", digest);
                 let tx_index = input.tx_index;
                 input
                     .mpt_proof
