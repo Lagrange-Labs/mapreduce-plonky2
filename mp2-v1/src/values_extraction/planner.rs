@@ -101,6 +101,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> Extractable
                         .to_weierstrass();
                 println!("extraction proof values digest: {:?}", digest);
                 let tx_index = input.tx_index;
+                println!("tx index: {}", tx_index);
                 input
                     .mpt_proof
                     .iter()
