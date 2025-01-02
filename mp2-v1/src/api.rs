@@ -1,5 +1,5 @@
 //! Main APIs and related structures
-
+#![allow(clippy::identity_op)]
 use std::iter::once;
 
 use crate::{
@@ -15,7 +15,7 @@ use crate::{
         identifier_block_column, identifier_for_value_column, ColumnMetadata, INNER_KEY_ID_PREFIX,
         KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
     },
-    MAX_LEAF_VALUE_LEN, MAX_RECEIPT_LEAF_NODE_LEN,
+    MAX_RECEIPT_LEAF_NODE_LEN,
 };
 
 use alloy::primitives::Address;
@@ -105,7 +105,7 @@ where
         self.tree_creation.get_params_info()
     }
 
-    pub fn get_value_extraction_params(&self) -> &values_extraction::PublicParameters {
+    pub fn get_value_extraction_params(&self) -> &ValuesExtractionParameters<MAX_COLUMNS> {
         &self.values_extraction
     }
 }
@@ -118,6 +118,7 @@ where
     [(); MAX_COLUMNS - 1]:,
     [(); MAX_COLUMNS - 0]:,
 {
+    sanity_check();
     log::info!("Building contract_extraction parameters...");
     let contract_extraction = contract_extraction::build_circuits_params();
     log::info!("Building length_extraction parameters...");

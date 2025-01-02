@@ -15,7 +15,7 @@ use mp2_v1::indexing::{
     ColumnID,
 };
 use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
-use plonky2::field::types::PrimeField64;
+
 use ryhope::{
     storage::{
         pgsql::{SqlServerConnection, SqlStorageSettings},
@@ -108,7 +108,7 @@ impl TableColumns {
             .iter()
             .chain(once(&self.secondary))
             .find(|c| c.identifier() == identifier)
-            .unwrap_or_else(|| panic!("can't find cell from identifier {}", identifier))
+            .expect("can't find cell from identifier")
             .clone()
     }
     pub fn ordered_cells(

@@ -26,10 +26,7 @@ use rand::{thread_rng, Rng};
 use ryhope::storage::RoEpochKvStorage;
 
 use crate::common::{
-    bindings::{
-        eventemitter::EventEmitter::{self, EventEmitterInstance},
-        simple::Simple::{self, MappingChange, MappingOperation, SimpleInstance},
-    },
+    bindings::eventemitter::EventEmitter::{self, EventEmitterInstance},
     cases::{
         contract::Contract,
         identifier_for_mapping_key_column,
@@ -54,7 +51,7 @@ use crate::common::{
 use alloy::{
     contract::private::{Network, Provider, Transport},
     network::{Ethereum, TransactionBuilder},
-    primitives::{Address, U256},
+    primitives::U256,
     providers::{ext::AnvilApi, ProviderBuilder, RootProvider},
     sol_types::SolEvent,
 };
@@ -150,7 +147,7 @@ impl<T: TableSource> TableIndexing<T> {
             })
             .collect_vec();
         let (mapping_secondary_column, mapping_rest_columns, row_unique_id, mapping_source) = {
-            let mut slot_inputs = LargeStruct::slot_inputs(MAPPING_STRUCT_SLOT as u8);
+            let slot_inputs = LargeStruct::slot_inputs(MAPPING_STRUCT_SLOT as u8);
             let key_id = identifier_for_mapping_key_column(
                 MAPPING_STRUCT_SLOT as u8,
                 &contract_address,
@@ -168,7 +165,7 @@ impl<T: TableSource> TableIndexing<T> {
             let mapping_index = MappingIndex::OuterKey(key_id);
             let source = MappingExtractionArgs::new(
                 MAPPING_STRUCT_SLOT as u8,
-                mapping_index.clone(),
+                mapping_index,
                 slot_inputs.clone(),
                 None,
             );
@@ -183,9 +180,8 @@ impl<T: TableSource> TableIndexing<T> {
                     };
                     let rest_columns = value_ids
                         .into_iter()
-                        .zip(slot_inputs.iter())
                         .enumerate()
-                        .map(|(i, (id, slot_input))| TableColumn {
+                        .map(|(i, id)| TableColumn {
                             name: format!("{MAPPING_VALUE_COLUMN}_{i}"),
                             index: IndexType::None,
                             multiplier: false,
@@ -201,7 +197,7 @@ impl<T: TableSource> TableIndexing<T> {
                         .position(|id| id == &secondary_value_id)
                         .unwrap();
                     let secondary_id = value_ids.remove(pos);
-                    let secondary_slot_input = slot_inputs.remove(pos);
+
                     let secondary_column = TableColumn {
                         name: MAPPING_VALUE_COLUMN.to_string(),
                         index: IndexType::Secondary,
@@ -210,9 +206,8 @@ impl<T: TableSource> TableIndexing<T> {
                     };
                     let mut rest_columns = value_ids
                         .into_iter()
-                        .zip(slot_inputs.iter())
                         .enumerate()
-                        .map(|(i, (id, slot_input))| TableColumn {
+                        .map(|(i, id)| TableColumn {
                             name: format!("{MAPPING_VALUE_COLUMN}_{i}"),
                             index: IndexType::None,
                             multiplier: false,
@@ -390,8 +385,8 @@ impl<T: TableSource> TableIndexing<T> {
         let mapping_index = MappingIndex::OuterKey(key_id);
         let mut source = MappingExtractionArgs::<SimpleMapping>::new(
             MAPPING_SLOT,
-            mapping_index.clone(),
-            vec![slot_input.clone()],
+            mapping_index,
+            vec![slot_input],
             Some(LengthExtractionArgs {
                 slot: LENGTH_SLOT,
                 value: LENGTH_VALUE,
@@ -405,14 +400,7 @@ impl<T: TableSource> TableIndexing<T> {
 
         let table_row_updates = source.init_contract_data(ctx, &contract).await;
 
-        let table = build_mapping_table(
-            ctx,
-            &mapping_index,
-            key_id,
-            vec![value_id],
-            vec![slot_input],
-        )
-        .await;
+        let table = build_mapping_table(ctx, &mapping_index, key_id, vec![value_id]).await;
         let value_column = table.columns.rest[0].name.clone();
 
         Ok((
@@ -459,14 +447,14 @@ impl<T: TableSource> TableIndexing<T> {
         let mapping_index = MappingIndex::Value(value_ids[1]);
         let mut source = MappingExtractionArgs::<StructMapping>::new(
             MAPPING_STRUCT_SLOT as u8,
-            mapping_index.clone(),
+            mapping_index,
             slot_inputs.clone(),
             None,
         );
 
         let table_row_updates = source.init_contract_data(ctx, &contract).await;
 
-        let table = build_mapping_table(ctx, &mapping_index, key_id, value_ids, slot_inputs).await;
+        let table = build_mapping_table(ctx, &mapping_index, key_id, value_ids).await;
         let value_column = table.columns.rest[0].name.clone();
 
         Ok((
@@ -515,8 +503,8 @@ impl<T: TableSource> TableIndexing<T> {
         let index = MappingIndex::InnerKey(inner_key_id);
         let mut source = MappingExtractionArgs::<SimpleNestedMapping>::new(
             MAPPING_OF_SINGLE_VALUE_MAPPINGS_SLOT,
-            index.clone(),
-            vec![slot_input.clone()],
+            index,
+            vec![slot_input],
             None,
         );
 
@@ -528,7 +516,6 @@ impl<T: TableSource> TableIndexing<T> {
             outer_key_id,
             inner_key_id,
             vec![value_id],
-            vec![slot_input],
         )
         .await;
         let value_column = table.columns.rest[0].name.clone();
@@ -583,22 +570,16 @@ impl<T: TableSource> TableIndexing<T> {
         let index = MappingIndex::Value(value_ids[1]);
         let mut source = MappingExtractionArgs::<StructNestedMapping>::new(
             MAPPING_OF_STRUCT_MAPPINGS_SLOT,
-            index.clone(),
+            index,
             slot_inputs.clone(),
             None,
         );
 
         let table_row_updates = source.init_contract_data(ctx, &contract).await;
 
-        let table = build_mapping_of_mappings_table(
-            ctx,
-            &index,
-            outer_key_id,
-            inner_key_id,
-            value_ids,
-            slot_inputs,
-        )
-        .await;
+        let table =
+            build_mapping_of_mappings_table(ctx, &index, outer_key_id, inner_key_id, value_ids)
+                .await;
         let value_column = table.columns.rest[0].name.clone();
 
         Ok((
@@ -744,7 +725,24 @@ impl<T: TableSource> TableIndexing<T> {
             if table_row_updates.is_empty() {
                 continue;
             }
+            // If we are dealing with receipts we need to remove everything already in the row tree
             let bn = ctx.block_number().await as BlockPrimaryIndex;
+
+            let table_row_updates = if let ChangeType::Receipt(..) = ut {
+                let current_row_epoch = self.table.row.current_epoch();
+                let current_row_keys = self
+                    .table
+                    .row
+                    .keys_at(current_row_epoch)
+                    .await
+                    .into_iter()
+                    .map(TableRowUpdate::<BlockPrimaryIndex>::Deletion)
+                    .collect::<Vec<_>>();
+                [current_row_keys, table_row_updates].concat()
+            } else {
+                table_row_updates
+            };
+
             log::info!("Applying follow up updates to contract done - now at block {bn}",);
             // we first run the initial preprocessing and db creation.
             // NOTE: we don't show copy on write here - the fact of only reproving what has been
@@ -1007,7 +1005,6 @@ async fn build_mapping_table(
     mapping_index: &MappingIndex,
     key_id: u64,
     mut value_ids: Vec<u64>,
-    mut slot_inputs: Vec<SlotInput>,
 ) -> Table {
     // Construct the table columns.
     let (secondary_column, rest_columns) = match mapping_index {
@@ -1037,7 +1034,7 @@ async fn build_mapping_table(
                 .position(|id| id == secondary_value_id)
                 .unwrap();
             let secondary_id = value_ids.remove(pos);
-            let secondary_slot_input = slot_inputs.remove(pos);
+
             let secondary_column = TableColumn {
                 name: MAPPING_VALUE_COLUMN.to_string(),
                 index: IndexType::Secondary,
@@ -1046,9 +1043,8 @@ async fn build_mapping_table(
             };
             let mut rest_columns = value_ids
                 .into_iter()
-                .zip(slot_inputs.iter())
                 .enumerate()
-                .map(|(i, (id, slot_input))| TableColumn {
+                .map(|(i, id)| TableColumn {
                     name: format!("{MAPPING_VALUE_COLUMN}_{i}"),
                     index: IndexType::None,
                     multiplier: false,
@@ -1100,13 +1096,11 @@ async fn build_mapping_of_mappings_table(
     outer_key_id: u64,
     inner_key_id: u64,
     value_ids: Vec<u64>,
-    slot_inputs: Vec<SlotInput>,
 ) -> Table {
     let mut rest_columns = value_ids
         .into_iter()
-        .zip(slot_inputs.iter())
         .enumerate()
-        .map(|(i, (id, slot_input))| TableColumn {
+        .map(|(i, id)| TableColumn {
             name: format!("{MAPPING_OF_MAPPINGS_VALUE_COLUMN}_{i}"),
             index: IndexType::None,
             multiplier: false,

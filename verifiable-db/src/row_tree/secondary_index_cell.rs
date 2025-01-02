@@ -70,8 +70,15 @@ impl SecondaryIndexCell {
         self.cell.assign(pw, &wires.cell);
         pw.set_hash_target(wires.row_unique_data, self.row_unique_data);
     }
-
-    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn is_individual(&self) -> bool {
+        self.cell.is_individual()
+    }
+    #[allow(dead_code)]
+    pub fn is_multiplier(&self) -> bool {
+        self.cell.is_multiplier()
+    }
+    #[allow(dead_code)]
     pub(crate) fn digest(&self, cells_pi: &CellsPublicInputs<F>) -> RowDigest {
         use itertools::Itertools;
         use mp2_common::{poseidon::hash_to_int_value, utils::ToFields, F};

@@ -1,11 +1,8 @@
 //! Module handling the mapping entries inside a storage trie
 
-use crate::values_extraction::{
-    public_inputs::{PublicInputs, PublicInputsArgs},
-    KEY_ID_PREFIX,
-};
+use crate::values_extraction::public_inputs::{PublicInputs, PublicInputsArgs};
 use anyhow::Result;
-use itertools::Itertools;
+
 use mp2_common::{
     array::{Array, Targetable, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
@@ -16,7 +13,7 @@ use mp2_common::{
     poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
     storage_key::{MappingSlot, MappingStructSlotWires},
-    types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
+    types::{CBuilder, GFp},
     u256::UInt256Target,
     utils::{Endianness, ToTargets},
     CHasher, D, F,
@@ -213,7 +210,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::TEST_MAX_COLUMNS;
+    use crate::{tests::TEST_MAX_COLUMNS, values_extraction::KEY_ID_PREFIX};
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
         array::Array,
@@ -221,6 +218,7 @@ mod tests {
         mpt_sequential::utils::bytes_to_nibbles,
         poseidon::{hash_to_int_value, H},
         rlp::MAX_KEY_NIBBLE_LEN,
+        types::MAPPING_LEAF_VALUE_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
         C, D, F,
     };
@@ -303,7 +301,7 @@ mod tests {
             .chain(once(F::from_canonical_usize(
                 table_metadata.num_actual_columns,
             )))
-            .collect_vec();
+            .collect::<Vec<F>>();
         let hash = H::hash_no_pad(&inputs);
         let row_id = hash_to_int_value(hash);
 

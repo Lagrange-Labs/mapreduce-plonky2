@@ -16,13 +16,11 @@ use mp2_common::{
     eth::EventLogInfo,
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::H,
-    serialization::{deserialize_long_array, serialize_array, serialize_long_array},
+    serialization::{deserialize_long_array, serialize_long_array},
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target},
-    utils::{
-        less_than_or_equal_to_unsafe, Endianness, FromTargets, Packer, TargetsConnector, ToFields,
-    },
-    CHasher, F,
+    utils::{Endianness, Packer},
+    F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
@@ -81,7 +79,7 @@ where
         let mut table_info = [ExtractedColumnInfo::default(); { MAX_COLUMNS - INPUT_COLUMNS }];
         table_info
             .iter_mut()
-            .zip(extracted_columns.into_iter())
+            .zip(extracted_columns)
             .for_each(|(ti, &column)| *ti = column);
 
         TableMetadata::<MAX_COLUMNS, INPUT_COLUMNS> {
@@ -233,6 +231,7 @@ where
         let logs_offset = receipt_off + receipt_str_payload.header_len + 1 + logs_off;
 
         // Now we produce an iterator over the logs with each logs offset.
+        #[allow(clippy::unnecessary_find_map)]
         let relevant_log_offset = std::iter::successors(Some(0usize), |i| Some(i + 1))
             .map_while(|i| logs_rlp.at_with_offset(i).ok())
             .find_map(|(log_rlp, log_off)| {
@@ -394,17 +393,6 @@ where
     }
 }
 
-// impl<const MAX_COLUMNS: usize> TryFrom<StorageSlot> for TableMetadata<MAX_COLUMNS, 2> {
-//     type Error = anyhow::Error;
-//     fn try_from(value: StorageSlot) -> Result<Self, Self::Error> {
-//         match value {
-//             StorageSlot::Node(inner_slot) => {match inner_slot {
-//                 StorageSlotNode::
-//             }}
-//         }
-//     }
-// }
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TableMetadataTarget<const MAX_COLUMNS: usize, const INPUT_COLUMNS: usize>
 where
@@ -438,6 +426,7 @@ impl<const MAX_COLUMNS: usize, const INPUT_COLUMNS: usize>
 where
     [(); MAX_COLUMNS - INPUT_COLUMNS]:,
 {
+    #[cfg(test)]
     pub fn metadata_digest(&self, b: &mut CBuilder) -> CurveTarget {
         let input_points = self
             .input_columns
