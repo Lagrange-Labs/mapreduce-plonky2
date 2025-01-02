@@ -430,6 +430,9 @@ impl Table {
             .map(|plan| RowUpdateResult { updates: plan });
         {
             // debugging
+            if out.is_err() {
+                println!("Out was an error: {:?}", out);
+            }
             println!("\n+++++++++++++++++++++++++++++++++\n");
             let root = self.row.root_data().await.unwrap();
             let new_epoch = self.row.current_epoch();
@@ -491,7 +494,7 @@ pub enum TreeRowUpdate {
     Deletion(RowTreeKey),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RowUpdateResult {
     // There is only a single row key for a table that we update continuously
     // so no need to track all the rows that have been updated in the result

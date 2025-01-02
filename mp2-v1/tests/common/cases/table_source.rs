@@ -34,7 +34,7 @@ use mp2_v1::{
     values_extraction::{
         compute_all_receipt_coulmn_ids, compute_receipt_leaf_metadata_digest,
         identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column,
+        identifier_single_var_column, planner::Extractable,
     },
 };
 use plonky2::field::types::PrimeField64;
@@ -444,6 +444,9 @@ impl SingleValuesExtractionArgs {
                     current_values.s2 = next_value();
                 }
             },
+            ChangeType::Receipt(..) => {
+                panic!("Can't process a Receipt update type for a Simple variable")
+            }
         };
 
         let contract_update = UpdateSimpleStorage::Single(current_values);
@@ -718,6 +721,7 @@ impl MappingValuesExtractionArgs {
                     }
                 }
             }
+            ChangeType::Receipt(..) => panic!("Can't process Receipt update type for a Mapping"),
         };
         // small iteration to always have a good updated list of mapping keys
         for update in mapping_updates.iter() {
@@ -1137,7 +1141,7 @@ pub trait ReceiptExtractionArgs:
 
     fn get_index(&self) -> u64;
 
-    fn to_table_rows<PrimaryIndex: Copy>(
+    fn to_table_rows<PrimaryIndex: Clone>(
         proof_infos: &[ReceiptProofInfo],
         event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>,
         block: PrimaryIndex,
@@ -1189,7 +1193,7 @@ pub trait ReceiptExtractionArgs:
                             .skip(1)
                             .map(|(j, topic)| {
                                 Cell::new(
-                                    *column_ids.get(&format!("topic_{}", j)).unwrap(),
+                                    *column_ids.get(&format!("topic_{}", j + 1)).unwrap(),
                                     topic.into(),
                                 )
                             })
@@ -1217,7 +1221,7 @@ pub trait ReceiptExtractionArgs:
                                 data_cells,
                             ]
                             .concat(),
-                            primary: block,
+                            primary: block.clone(),
                         };
 
                         TableRowUpdate::<PrimaryIndex>::Insertion(collection, secondary)
@@ -1344,20 +1348,76 @@ where
 
     async fn generate_extraction_proof_inputs(
         &self,
-        _ctx: &mut TestContext,
-        _contract: &Contract,
-        _value_key: ProofKey,
+        ctx: &mut TestContext,
+        contract: &Contract,
+        value_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
-        todo!("Implement as part of CRY-25")
+        let event = self.get_event();
+
+        let ProofKey::ValueExtraction((_, bn)) = value_key else {
+            bail!("key wrong");
+        };
+
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+
+        let value_proof = event
+            .prove_value_extraction(
+                contract.address(),
+                bn as u64,
+                ctx.params().get_value_extraction_params(),
+                provider.root(),
+            )
+            .await?;
+        Ok((
+            ExtractionProofInput::Receipt(value_proof),
+            self.metadata_hash(contract.address(), contract.chain_id()),
+        ))
     }
 
     fn random_contract_update<'a>(
         &'a mut self,
-        _ctx: &'a mut TestContext,
-        _contract: &'a Contract,
-        _c: ChangeType,
+        ctx: &'a mut TestContext,
+        contract: &'a Contract,
+        c: ChangeType,
     ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        todo!("Implement as part of CRY-25")
+        let event = self.get_event();
+        async move {
+            let ChangeType::Receipt(relevant, others) = c else {
+                panic!("Need ChangeType::Receipt, got: {:?}", c);
+            };
+            let contract_update =
+                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA as u8), relevant, others);
+
+            let provider = ProviderBuilder::new()
+                .with_recommended_fillers()
+                .wallet(ctx.wallet())
+                .on_http(ctx.rpc_url.parse().unwrap());
+
+            let event_emitter = EventContract::new(contract.address(), provider.root());
+            event_emitter
+                .apply_update(ctx, &contract_update)
+                .await
+                .unwrap();
+
+            let block_number = ctx.block_number().await;
+            let new_block_number = block_number as BlockPrimaryIndex;
+
+            let query = ReceiptQuery::<{ R::NO_TOPICS }, { R::MAX_DATA }> {
+                contract: contract.address(),
+                event,
+            };
+
+            let proof_infos = query
+                .query_receipt_proofs(provider.root(), block_number.into())
+                .await
+                .unwrap();
+
+            R::to_table_rows(&proof_infos, &event, new_block_number)
+        }
+        .boxed()
     }
 
     fn metadata_hash(&self, _contract_address: Address, _chain_id: u64) -> MetadataHash {

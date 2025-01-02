@@ -75,6 +75,10 @@ impl PublicParameters {
     pub fn get_params_info(&self) -> Result<Vec<u8>> {
         self.tree_creation.get_params_info()
     }
+
+    pub fn get_value_extraction_params(&self) -> &values_extraction::PublicParameters {
+        &self.values_extraction
+    }
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,

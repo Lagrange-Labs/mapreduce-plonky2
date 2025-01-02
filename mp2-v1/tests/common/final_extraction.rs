@@ -22,10 +22,13 @@ pub struct MergeExtractionProof {
     pub mapping: ExtractionTableProof,
 }
 
+type ReceiptExtractionProof = Vec<u8>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExtractionProofInput {
     Single(ExtractionTableProof),
     Merge(MergeExtractionProof),
+    Receipt(ReceiptExtractionProof),
 }
 
 impl TestContext {
@@ -57,6 +60,9 @@ impl TestContext {
                 inputs.single.value_proof,
                 inputs.mapping.value_proof,
             ),
+            ExtractionProofInput::Receipt(input) => {
+                CircuitInput::new_receipt_input(block_proof, input)
+            }
         }?;
         let params = self.params();
         let proof = self
