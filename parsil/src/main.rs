@@ -190,7 +190,6 @@ fn main() -> Result<()> {
                 epoch,
                 (min_block as NodeIdx, max_block as NodeIdx),
                 &table_name,
-                &settings,
             )?;
             // let query_row = core_keys_for_row_tree(
             //     qeury,
