@@ -958,7 +958,7 @@ where
         assert_eq!(self.epoch, self.tree_store.read().await.current_epoch());
         assert_eq!(
             self.epoch_mapper
-                .to_incremental_epoch(self.state.current_epoch().await,)
+                .to_incremental_epoch(self.state.current_epoch().await?)
                 .await,
             self.epoch
         );

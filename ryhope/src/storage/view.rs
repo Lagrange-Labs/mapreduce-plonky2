@@ -45,8 +45,8 @@ impl<
 where
     T: Send,
 {
-    async fn current_epoch(&self) -> UserEpoch {
-        self.1
+    async fn current_epoch(&self) -> Result<UserEpoch> {
+        Ok(self.1)
     }
 
     async fn fetch_at(&self, epoch: UserEpoch) -> Result<T, RyhopeError> {
@@ -69,6 +69,10 @@ where
     }
 
     async fn rollback_to(&mut self, _epoch: UserEpoch) -> Result<(), RyhopeError> {
+        unimplemented!("storage views are read only")
+    }
+
+    async fn rollback(&mut self) -> Result<()> {
         unimplemented!("storage views are read only")
     }
 }

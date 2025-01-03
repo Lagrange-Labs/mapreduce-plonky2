@@ -697,7 +697,7 @@ pub struct CachedDbStore<V: Debug + Clone + Send + Sync + Serialize + for<'a> De
     /// True if the wrapped state has been modified
     dirty: bool,
     /// The current epoch
-    epoch: UserEpoch,
+    epoch: IncrementalEpoch,
     /// The table in which the data must be persisted
     table: String,
     // epoch mapper
@@ -726,7 +726,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
     /// immediately persisted, as the DB representation of the payload must be
     /// valid even if it is never modified further by the user.
     pub async fn with_value(table: String, db: DBPool, t: T, mapper: RoSharedEpochMapper<EpochMapperStorage>) -> Result<Self, RyhopeError> {
-        let initial_epoch = INITIAL_INCREMENTAL_EPOCH as UserEpoch;
+        let initial_epoch = INITIAL_INCREMENTAL_EPOCH;
         {
             let connection = db.get().await.unwrap();
             connection
@@ -974,8 +974,9 @@ where
         Ok(())
     }
 
-    async fn current_epoch(&self) -> UserEpoch {
-        self.epoch_mapper.to_user_epoch(self.epoch).await as UserEpoch
+    async fn current_epoch(&self) -> Result<UserEpoch> {
+        self.epoch_mapper.try_to_user_epoch(self.epoch).await
+        .ok_or(CurrenEpochUndefined(self.epoch).into())
     }
 
     async fn rollback_to(&mut self, new_epoch: UserEpoch) -> Result<(), RyhopeError> {
