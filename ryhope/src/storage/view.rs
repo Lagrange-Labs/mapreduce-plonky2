@@ -1,10 +1,10 @@
 //! This module offers facilities to “time-travel”, i.e. access the successive
 //! states of a tree at given epochs.
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
+use std::{collections::HashMap, fmt::Debug, future::Future, marker::PhantomData};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{error::RyhopeError, tree::TreeTopology, Epoch};
+use crate::{error::RyhopeError, tree::TreeTopology, UserEpoch};
 
 use super::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage};
 
@@ -17,7 +17,7 @@ pub struct StorageView<
     /// The wrapped [`EpochStorage`]
     &'s S,
     /// The target epoch
-    Epoch,
+    UserEpoch,
     /// [ignore]
     PhantomData<T>,
 );
@@ -29,7 +29,7 @@ impl<
 where
     T: Send,
 {
-    fn start_transaction(&mut self) -> Result<(), RyhopeError> {
+    async fn start_transaction(&mut self) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 
@@ -45,11 +45,11 @@ impl<
 where
     T: Send,
 {
-    fn current_epoch(&self) -> Epoch {
+    async fn current_epoch(&self) -> UserEpoch {
         self.1
     }
 
-    async fn fetch_at(&self, epoch: Epoch) -> Result<T, RyhopeError> {
+    async fn fetch_at(&self, epoch: UserEpoch) -> Result<T, RyhopeError> {
         if epoch != self.1 {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
@@ -68,7 +68,7 @@ where
         unimplemented!("storage views are read only")
     }
 
-    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<(), RyhopeError> {
+    async fn rollback_to(&mut self, _epoch: UserEpoch) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 }
@@ -78,7 +78,7 @@ pub struct KvStorageAt<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>
     /// The wrapped [`RoEpochKvStorage`]
     wrapped: &'a S,
     /// The epoch at which the wrapped storage is being looked at
-    current_epoch: Epoch,
+    current_epoch: UserEpoch,
     /// [ignore]
     _p: PhantomData<T>,
 }
@@ -86,15 +86,15 @@ pub struct KvStorageAt<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>
 impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStorage<T::Key, T::Node>
     for KvStorageAt<'_, T, S>
 {
-    fn initial_epoch(&self) -> Epoch {
+    fn initial_epoch(&self) -> impl Future<Output = UserEpoch> + Send {
         self.wrapped.initial_epoch()
     }
 
-    fn current_epoch(&self) -> Epoch {
-        self.current_epoch
+    async fn current_epoch(&self) -> Result<UserEpoch> {
+        Ok(self.current_epoch)
     }
 
-    async fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Result<Option<T::Node>, RyhopeError> {
+    async fn try_fetch_at(&self, k: &T::Key, epoch: UserEpoch) -> Result<Option<T::Node>, RyhopeError> {
         if epoch > self.current_epoch {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
@@ -105,19 +105,31 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStor
         }
     }
 
-    async fn size_at(&self, epoch: Epoch) -> usize {
+    async fn try_fetch(&self, k: &T::Key) -> Option<T::Node> {
+        self.wrapped.try_fetch_at(k, self.current_epoch).await
+    }
+
+    async fn fetch(&self, k: &T::Key) -> T::Node {
+        self.wrapped.fetch_at(k, self.current_epoch).await
+    }
+
+    async fn size(&self) -> usize {
+        self.wrapped.size_at(self.current_epoch).await
+    }
+
+    async fn size_at(&self, epoch: UserEpoch) -> usize {
         self.wrapped.size_at(epoch).await
     }
 
-    async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
+    async fn keys_at(&self, epoch: UserEpoch) -> Vec<T::Key> {
         self.wrapped.keys_at(epoch).await
     }
 
-    async fn random_key_at(&self, epoch: Epoch) -> Option<T::Key> {
+    async fn random_key_at(&self, epoch: UserEpoch) -> Option<T::Key> {
         self.wrapped.random_key_at(epoch).await
     }
 
-    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, T::Node>, RyhopeError> {
+    async fn pairs_at(&self, epoch: UserEpoch) -> Result<HashMap<T::Key, T::Node>, RyhopeError> {
         if epoch > self.current_epoch {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
@@ -144,7 +156,11 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> EpochKvStorag
         unimplemented!("storage views are read only")
     }
 
-    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<(), RyhopeError> {
+    async fn rollback_to(&mut self, _epoch: UserEpoch) -> Result<(), RyhopeError> {
+        unimplemented!("storage views are read only")
+    }
+    
+    async fn rollback(&mut self) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 }
@@ -154,17 +170,18 @@ pub struct TreeStorageView<'a, T: TreeTopology, S: TreeStorage<T>> {
     /// The wrapped [`TreeStorage`]
     pub wrapped: &'a S,
     /// The target epoch
-    pub epoch: Epoch,
+    pub epoch: UserEpoch,
     /// A wrapper over the state storage of `wrapped`
     pub state: StorageView<'a, T::State, S::StateStorage>,
     /// A wrapper over the node storage of `wrapped`
     pub nodes: KvStorageAt<'a, T, S::NodeStorage>,
+    epoch_mapper: &'a S::EpochMapper,
     /// [ignore]
     pub _t: PhantomData<T>,
 }
 impl<'a, T: TreeTopology + 'a, S: TreeStorage<T> + 'a> TreeStorageView<'a, T, S> {
     /// Create a new view on `s` locked at `epoch`.
-    pub fn new(s: &'a S, epoch: Epoch) -> Self {
+    pub fn new(s: &'a S, epoch: UserEpoch) -> Self {
         Self {
             wrapped: s,
             epoch,
@@ -174,6 +191,7 @@ impl<'a, T: TreeTopology + 'a, S: TreeStorage<T> + 'a> TreeStorageView<'a, T, S>
                 current_epoch: epoch,
                 _p: PhantomData,
             },
+            epoch_mapper: s.epoch_mapper(),
             _t: PhantomData,
         }
     }
@@ -186,6 +204,7 @@ where
 {
     type StateStorage = StorageView<'a, T::State, S::StateStorage>;
     type NodeStorage = KvStorageAt<'a, T, S::NodeStorage>;
+    type EpochMapper = S::EpochMapper;
 
     fn state(&self) -> &Self::StateStorage {
         &self.state
@@ -203,11 +222,19 @@ where
         unimplemented!("storage views are read only")
     }
 
-    async fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
+    async fn born_at(&self, epoch: UserEpoch) -> Vec<T::Key> {
         self.wrapped.born_at(epoch).await
     }
 
-    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<(), RyhopeError> {
+    async fn rollback_to(&mut self, _epoch: UserEpoch) -> Result<(), RyhopeError> {
+        unimplemented!("storage views are read only")
+    }
+    
+    fn epoch_mapper(&self) -> &Self::EpochMapper {
+        self.epoch_mapper
+    }
+    
+    fn epoch_mapper_mut(&mut self) -> &mut Self::EpochMapper {
         unimplemented!("storage views are read only")
     }
 }

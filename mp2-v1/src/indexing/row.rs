@@ -1,4 +1,6 @@
-use super::{cell::CellTreeKey, ColumnID};
+use std::collections::HashSet;
+
+use super::{block::BlockPrimaryIndex, cell::CellTreeKey, ColumnID};
 use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{Deref, From};
@@ -14,11 +16,14 @@ use plonky2::{
     hash::hash_types::HashOut,
     plonk::config::{GenericHashOut, Hasher},
 };
-use ryhope::{storage::pgsql::ToFromBytea, tree::scapegoat, NodePayload};
+use ryhope::{storage::pgsql::{PgsqlStorage, ToFromBytea}, tree::scapegoat, MerkleTreeKvDb, NodePayload};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
 pub type RowTreeKeyNonce = Vec<u8>;
+
+pub type RowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>, true>;
+pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
 
 pub trait ToNonce {
     fn to_nonce(&self) -> RowTreeKeyNonce;

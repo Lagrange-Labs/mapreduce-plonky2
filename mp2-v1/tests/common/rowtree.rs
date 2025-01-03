@@ -7,7 +7,7 @@ use mp2_v1::{
         block::BlockPrimaryIndex,
         cell::Cell,
         index::IndexNode,
-        row::{RowPayload, RowTree, RowTreeKey, ToNonce},
+        row::{RowTreeKey, ToNonce},
     },
     values_extraction::{
         row_unique_data_for_mapping_leaf, row_unique_data_for_mapping_of_mappings_leaf,
@@ -15,13 +15,9 @@ use mp2_v1::{
     },
 };
 use plonky2::plonk::config::GenericHashOut;
-use ryhope::{
-    storage::{
-        pgsql::PgsqlStorage,
+use ryhope::storage::{
         updatetree::{Next, UpdateTree},
         RoEpochKvStorage,
-    },
-    MerkleTreeKvDb,
 };
 use verifiable_db::{
     cells_tree,
@@ -72,9 +68,6 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
         }
     }
 }
-
-pub type RowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
-pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
 
 impl TestContext {
     /// Given a row tree (i.e. secondary index tree) and its update tree, prove

@@ -10,7 +10,6 @@ use crate::common::{
         table_source::BASE_VALUE,
     },
     proof_storage::{ProofKey, ProofStorage},
-    rowtree::MerkleRowTree,
     table::Table,
     TableInfo,
 };
@@ -34,7 +33,7 @@ use mp2_v1::{
         self,
         block::BlockPrimaryIndex,
         cell::MerkleCell,
-        row::{Row, RowPayload, RowTreeKey},
+        row::{MerkleRowTree, Row, RowPayload, RowTreeKey},
     },
     query::{
         batching_planner::{generate_chunks_and_update_tree, UTForChunkProofs, UTKey},
@@ -51,7 +50,7 @@ use ryhope::{
         updatetree::{Next, WorkplanItem},
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
-    Epoch,
+    UserEpoch,
 };
 use sqlparser::ast::Query;
 use tokio_postgres::Row as PsqlRow;
@@ -79,11 +78,17 @@ pub(crate) async fn prove_query(
     metadata: MetadataHash,
     planner: &mut QueryPlanner<'_>,
 ) -> Result<()> {
+    println!("Row cache query: {}", &core_keys_for_row_tree(
+        &planner.query.query,
+        planner.settings,
+        &planner.pis.bounds,
+        &planner.query.placeholders,
+    )?);
     let row_cache = planner
         .table
         .row
         .wide_lineage_between(
-            planner.table.row.current_epoch(),
+            planner.table.row.current_epoch().await?,
             &core_keys_for_row_tree(
                 &planner.query.query,
                 planner.settings,
@@ -91,15 +96,15 @@ pub(crate) async fn prove_query(
                 &planner.query.placeholders,
             )?,
             (
-                planner.query.min_block as Epoch,
-                planner.query.max_block as Epoch,
+                planner.query.min_block as UserEpoch,
+                planner.query.max_block as UserEpoch,
             ),
         )
         .await?;
     // prove the index tree, on a single version. Both path can be taken depending if we do have
     // some nodes or not
-    let initial_epoch = planner.table.index.initial_epoch() as BlockPrimaryIndex;
-    let current_epoch = planner.table.index.current_epoch() as BlockPrimaryIndex;
+    let initial_epoch = planner.table.index.initial_epoch().await as BlockPrimaryIndex;
+    let current_epoch = planner.table.index.current_epoch().await? as BlockPrimaryIndex;
     let block_range =
         planner.query.min_block.max(initial_epoch + 1)..=planner.query.max_block.min(current_epoch);
     info!(
@@ -127,7 +132,7 @@ pub(crate) async fn prove_query(
         let index_path = planner
             .table
             .index
-            .compute_path(&to_be_proven_node, current_epoch as Epoch)
+            .compute_path(&to_be_proven_node, current_epoch as UserEpoch)
             .await
             .unwrap_or_else(|| {
                 panic!("Compute path for index node with key {to_be_proven_node} failed")
@@ -157,8 +162,10 @@ pub(crate) async fn prove_query(
         info!("Running INDEX tree proving from cache");
         // Only here we can run the SQL query for index so it doesn't crash
         let index_query = core_keys_for_index_tree(
-            current_epoch as Epoch,
+            current_epoch as UserEpoch,
             (planner.query.min_block, planner.query.max_block),
+            planner.table.public_name.as_str(),
+            planner.settings,
         )?;
         let big_index_cache = planner
             .table
@@ -166,9 +173,9 @@ pub(crate) async fn prove_query(
             // The bounds here means between which versions of the tree should we look. For index tree,
             // we only look at _one_ version of the tree.
             .wide_lineage_between(
-                current_epoch as Epoch,
+                current_epoch as UserEpoch,
                 &index_query,
-                (current_epoch as Epoch, current_epoch as Epoch),
+                (current_epoch as UserEpoch, current_epoch as UserEpoch),
             )
             .await?;
         let (proven_chunks, update_tree) =
@@ -183,7 +190,7 @@ pub(crate) async fn prove_query(
                     planner.settings,
                     &planner.pis.bounds,
                 ),
-                current_epoch as Epoch,
+                current_epoch as UserEpoch,
             )
             .await?;
         info!("Root of update tree is {:?}", update_tree.root());
@@ -252,7 +259,7 @@ pub(crate) async fn prove_query(
         planner.ctx,
         &planner.query,
         planner.pis,
-        planner.table.index.current_epoch(),
+        planner.table.index.current_epoch().await?,
         &query_proof_id,
     )
     .await?;
@@ -280,7 +287,7 @@ pub(crate) async fn prove_query(
         planner.table,
         &planner.query,
         &pis,
-        planner.table.index.current_epoch(),
+        planner.table.index.current_epoch().await?,
         num_touched_rows,
         res,
         metadata,
@@ -293,7 +300,7 @@ async fn prove_revelation(
     ctx: &TestContext,
     query: &QueryCooking,
     pis: &DynamicCircuitPis,
-    tree_epoch: Epoch,
+    tree_epoch: UserEpoch,
     query_proof_id: &ProofKey,
 ) -> Result<Vec<u8>> {
     // load the query proof, which is at the root of the tree
@@ -325,7 +332,7 @@ pub(crate) fn check_final_outputs(
     table: &Table,
     query: &QueryCooking,
     pis: &StaticCircuitPis,
-    tree_epoch: Epoch,
+    tree_epoch: UserEpoch,
     num_touched_rows: usize,
     res: Vec<PsqlRow>,
     offcircuit_md: MetadataHash,
@@ -428,7 +435,7 @@ pub(crate) async fn cook_query_between_blocks(
     table: &Table,
     info: &TableInfo,
 ) -> Result<QueryCooking> {
-    let max = table.row.current_epoch();
+    let max = table.row.current_epoch().await?;
     let min = max - 1;
 
     let value_column = &info.value_column;
@@ -634,7 +641,7 @@ pub(crate) async fn cook_query_partial_block_range(
     let key_column = table.columns.secondary.name.clone();
     let value_column = info.value_column.clone();
     let table_name = &table.public_name;
-    let initial_epoch = table.row.initial_epoch();
+    let initial_epoch = table.row.initial_epoch().await;
     // choose a min query bound smaller than initial epoch
     let min_block = initial_epoch - 1;
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
@@ -660,7 +667,7 @@ pub(crate) async fn cook_query_no_matching_entries(
     table: &Table,
     info: &TableInfo,
 ) -> Result<QueryCooking> {
-    let initial_epoch = table.row.initial_epoch();
+    let initial_epoch = table.row.initial_epoch().await;
     // choose query bounds outside of the range [initial_epoch, last_epoch]
     let min_block = 0;
     let max_block = initial_epoch - 1;
@@ -704,8 +711,8 @@ pub(crate) async fn cook_query_non_matching_entries_some_blocks(
     let table_name = &table.public_name;
     // in this query we set query bounds on block numbers to the widest range, so that we
     // are sure that there are blocks where the chosen key is not alive
-    let min_block = table.row.initial_epoch() + 1;
-    let max_block = table.row.current_epoch();
+    let min_block = table.row.initial_epoch().await + 1;
+    let max_block = table.row.current_epoch().await?;
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
 
     let query_str = format!(
@@ -727,10 +734,10 @@ pub(crate) async fn cook_query_non_matching_entries_some_blocks(
 
 /// Utility function to associated to each row in the tree, the blocks where the row
 /// was valid
-async fn extract_row_liveness(table: &Table) -> Result<HashMap<RowTreeKey, Vec<Epoch>>> {
+async fn extract_row_liveness(table: &Table) -> Result<HashMap<RowTreeKey, Vec<UserEpoch>>> {
     let mut all_table = HashMap::new();
-    let max = table.row.current_epoch();
-    let min = table.row.initial_epoch() + 1;
+    let max = table.row.current_epoch().await?;
+    let min = table.row.initial_epoch().await + 1;
     for block in (min..=max).rev() {
         println!("Querying for block {block}");
         let rows = collect_all_at(&table.row, block).await?;
@@ -759,8 +766,8 @@ pub(crate) async fn find_longest_lived_key(
     table: &Table,
     must_not_be_alive_in_some_blocks: bool,
 ) -> Result<(RowTreeKey, BlockRange)> {
-    let initial_epoch = table.row.initial_epoch() + 1;
-    let last_epoch = table.row.current_epoch();
+    let initial_epoch = table.row.initial_epoch().await + 1;
+    let last_epoch = table.row.current_epoch().await?;
     let all_table = extract_row_liveness(table).await?;
     // find the longest running row
     let (longest_key, longest_sequence, starting) = all_table
@@ -794,7 +801,7 @@ pub(crate) async fn find_longest_lived_key(
     Ok((longest_key.clone(), (min_block, max_block)))
 }
 
-async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<BlockPrimaryIndex>>> {
+async fn collect_all_at(tree: &MerkleRowTree, at: UserEpoch) -> Result<Vec<Row<BlockPrimaryIndex>>> {
     let root_key = tree.root_at(at).await?.unwrap();
     let (ctx, payload) = tree
         .try_fetch_with_context_at(&root_key, at)

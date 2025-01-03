@@ -21,12 +21,11 @@ use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
 use plonky2::field::types::PrimeField64;
 use ryhope::{
     storage::{
-        pgsql::{SqlServerConnection, SqlStorageSettings},
         updatetree::UpdateTree,
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
     tree::scapegoat::Alpha,
-    Epoch, InitSettings,
+    UserEpoch,
 };
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, iter::once};
@@ -37,8 +36,6 @@ use super::{
         MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PREDICATE_OPS,
         MAX_NUM_RESULT_OPS,
     },
-    index_tree::MerkleIndexTree,
-    rowtree::MerkleRowTree,
     ColumnIdentifier,
 };
 
@@ -210,25 +207,12 @@ impl Table {
         row_unique_id: TableRowUniqueID,
     ) -> Result<Self> {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
-        let row_tree = MerkleRowTree::new(
-            InitSettings::MustExist,
-            SqlStorageSettings {
-                table: row_table_name(&public_name),
-                source: SqlServerConnection::NewConnection(db_url.clone()),
-            },
-        )
-        .await
-        .unwrap();
-        let index_tree = MerkleIndexTree::new(
-            InitSettings::MustExist,
-            SqlStorageSettings {
-                source: SqlServerConnection::NewConnection(db_url.clone()),
-                table: index_table_name(&public_name),
-            },
-        )
-        .await
-        .unwrap();
-        let genesis = index_tree.storage_state().await?.shift;
+        let (index_tree, row_tree) = load_trees(
+            db_url.as_str(), 
+            index_table_name(&public_name), 
+            row_table_name(&public_name)
+        ).await?;
+        let genesis = index_tree.storage_state().await.shift;
         columns.self_assert();
 
         Ok(Self {
@@ -253,29 +237,16 @@ impl Table {
         row_unique_id: TableRowUniqueID,
     ) -> Self {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
-        let db_settings_index = SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url.clone()),
-            table: index_table_name(&root_table_name),
-        };
-        let db_settings_row = SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url.clone()),
-            table: row_table_name(&root_table_name),
-        };
-
-        let row_tree = ryhope::new_row_tree(
-            genesis_block as Epoch,
-            Alpha::new(0.8),
-            db_settings_row,
-            true,
-        )
-        .await
-        .unwrap();
-        let index_tree = ryhope::new_index_tree(genesis_block as Epoch, db_settings_index, true)
-            .await
-            .unwrap();
-
+        let (index_tree, row_tree) = build_trees(
+            db_url.as_str(), 
+            index_table_name(&root_table_name), 
+            row_table_name(&root_table_name), 
+            genesis_block as UserEpoch, 
+            Alpha::new(0.8), 
+            true
+        ).await?;
         columns.self_assert();
-        Self {
+        Ok(Self {
             db_pool: new_db_pool(&db_url)
                 .await
                 .expect("unable to create db pool"),
@@ -285,7 +256,7 @@ impl Table {
             public_name: root_table_name,
             row: row_tree,
             index: index_tree,
-        }
+        })
     }
 
     // Function to call each time we need to build the index tree, i.e. for each row and
@@ -408,8 +379,7 @@ impl Table {
         &mut self,
         new_primary: BlockPrimaryIndex,
         updates: Vec<TreeRowUpdate>,
-    ) -> anyhow::Result<RowUpdateResult> {
-        let current_epoch = self.row.current_epoch();
+    ) -> Result<RowUpdateResult> {
         let out = self
             .row
             .in_transaction(|t| {
@@ -473,14 +443,7 @@ impl Table {
         {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
-            let root = self.row.root_data().await?.unwrap();
-            let new_epoch = self.row.current_epoch();
-            assert!(
-                current_epoch != new_epoch,
-                "new epoch {} vs previous epoch {}",
-                new_epoch,
-                current_epoch
-            );
+            let root = self.row.root_data().await.unwrap();
             println!(
                 " ++ After row update, row cell tree root tree proof hash = {:?}",
                 hex::encode(root.cell_root_hash.unwrap().0)

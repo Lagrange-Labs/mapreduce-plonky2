@@ -1,11 +1,10 @@
 use super::{
     context::TestContext,
-    index_tree::MerkleIndexTree,
     proof_storage::{IndexProofIdentifier, ProofKey, ProofStorage},
     table::TableID,
 };
 use mp2_common::{proof::ProofWithVK, types::HashOutput, F};
-use mp2_v1::{api, indexing::block::BlockPrimaryIndex};
+use mp2_v1::{api, indexing::block::{BlockPrimaryIndex, MerkleIndexTree}};
 use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
 use verifiable_db::ivc::PublicInputs;
 

@@ -6,8 +6,9 @@ use assembler::assemble_static;
 use clap::{Parser, Subcommand};
 use log::Level;
 use parsil::queries::{core_keys_for_index_tree, core_keys_for_row_tree};
-use ryhope::{tree::sbbst::NodeIdx, Epoch};
-use symbols::FileContextProvider;
+use ryhope::{tree::sbbst::NodeIdx, UserEpoch};
+use sqlparser::ast::Query;
+use symbols::{ContextProvider, FileContextProvider};
 use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
 
 mod assembler;
@@ -90,7 +91,7 @@ enum Command {
 
         /// The epoch at which to run the query
         #[arg(short = 'E', long)]
-        epoch: Epoch,
+        epoch: UserEpoch,
 
         /// Primary index lower bound
         #[arg(short = 'm', long)]

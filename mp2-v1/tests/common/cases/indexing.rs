@@ -337,7 +337,7 @@ impl TableIndexing {
             columns,
             row_unique_id,
         )
-        .await;
+        .await?;
         Ok((
             Self {
                 value_column: "".to_string(),

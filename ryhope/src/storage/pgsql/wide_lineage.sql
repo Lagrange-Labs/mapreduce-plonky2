@@ -78,13 +78,13 @@ WITH RECURSIVE descendance (is_core, {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD
    -- added by path traversal). To preserve the core key flag, we aggregate by
    -- max. of is_core, that will always be 1 if the key is in the core set.
    MAX(is_core) AS is_core,
-   -- Expand the epoch ranges [[{VALID_FROM}, {VALID_UNTIL}]] into
-   -- ({VALID_UNTIL} - {VALID_FROM}) individual rows, clamped within
-   -- [[min_block, max_block]]
-   generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS {EPOCH},
+   -- Epoch column
+   {USER_EPOCH} AS {EPOCH},
    -- Normal columns
    {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD}, {SUBTREE_SIZE}, {PAYLOAD}
    FROM
-     descendance
+     descendance JOIN (
+          SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {mapper_table_name} WHERE {USER_EPOCH} >= $1 AND {USER_EPOCH} <= $2  
+      ) AS __mapper ON {VALID_FROM} <= {INCREMENTAL_EPOCH} AND {VALID_UNTIL} >= {INCREMENTAL_EPOCH}
    -- Results must be deduplicated according to this tuple of attributes
-   GROUP BY (is_core, {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD}, {SUBTREE_SIZE}, {VALID_FROM}, {VALID_UNTIL}, {PAYLOAD})
+   GROUP BY (is_core, {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD}, {SUBTREE_SIZE}, {USER_EPOCH}, {PAYLOAD})

@@ -5,7 +5,7 @@ use repl::Repl;
 use rows::{RowDb, RowPayloadFormatter};
 use ryhope::{
     storage::pgsql::{SqlServerConnection, SqlStorageSettings, ToFromBytea},
-    Epoch, InitSettings,
+    UserEpoch, InitSettings,
 };
 use serde::Serialize;
 
@@ -26,7 +26,7 @@ struct Args {
 
     #[arg(short = 'E', long = "at")]
     /// If set, try to view the tree at this epoch
-    epoch: Option<Epoch>,
+    epoch: Option<UserEpoch>,
 
     #[command(subcommand)]
     /// The type of tree to load from the database
