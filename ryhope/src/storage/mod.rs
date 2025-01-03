@@ -334,13 +334,13 @@ pub trait EpochStorage<T: Debug + Send + Sync + Clone + Serialize + for<'a> Dese
 where
     Self: Send + Sync,
 {
-    /// Return the current epoch of the storage
-    fn current_epoch(&self) -> impl Future<Output = UserEpoch> + Send;
+    /// Return the current epoch of the storage. It returns an error
+    /// if the current epoch is undefined, which might happen when the epochs
+    /// are handled by another storage.
+    fn current_epoch(&self) -> impl Future<Output = Result<UserEpoch>> + Send;
 
-    /// Return the value stored at the current epoch.
-    fn fetch(&self) -> impl Future<Output = T> + Send {
-        async { self.fetch_at(self.current_epoch().await).await }
-    }
+    /// Return the value stored at the current epoch. 
+    fn fetch(&self) -> impl Future<Output = T> + Send;
 
     /// Return the value stored at the given epoch.
     fn fetch_at(&self, epoch: UserEpoch) -> impl Future<Output = T> + Send;
@@ -357,9 +357,7 @@ where
     }
 
     /// Roll back this storage one epoch in the past.
-    fn rollback(&mut self) -> impl Future<Output = Result<()>> {
-        async move { self.rollback_to(self.current_epoch().await - 1).await }
-    }
+    fn rollback(&mut self) -> impl Future<Output = Result<()>>;
 
     /// Roll back this storage to the given epoch
     fn rollback_to(&mut self, epoch: UserEpoch) -> impl Future<Output = Result<()>>;
