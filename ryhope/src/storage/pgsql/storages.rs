@@ -975,8 +975,10 @@ where
     }
 
     async fn current_epoch(&self) -> Result<UserEpoch> {
-        self.epoch_mapper.try_to_user_epoch(self.epoch).await
-        .ok_or(CurrenEpochUndefined(self.epoch).into())
+        self.epoch_mapper
+            .try_to_user_epoch(self.epoch)
+            .await
+            .ok_or(CurrenEpochUndefined(self.epoch).into())
     }
 
     async fn rollback_to(&mut self, new_epoch: UserEpoch) -> Result<(), RyhopeError> {

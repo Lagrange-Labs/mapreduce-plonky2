@@ -225,9 +225,10 @@ where
     ) -> Result<Self, RyhopeError> {
         // check consistency between `EXTERNAL_EPOCH_MAPPER` and `storage_settings.external_mapper`.
         // This check is not relevant if `init_settings` is `MustExist`, as in this case we don't need
-        // to create a new mapping table or view. 
-        if let InitSettings::MustExist = init_settings {} else {
-                match (
+        // to create a new mapping table or view.
+        if let InitSettings::MustExist = init_settings {
+        } else {
+            match (
                 EXTERNAL_EPOCH_MAPPER,
                 storage_settings.external_mapper.is_some(),
             ) {
@@ -793,7 +794,8 @@ where
             .apply_fn(|mapper| {
                 mapper.commit_success();
                 Ok(())
-            }).await
+            })
+            .await
             .unwrap();
         self.tree_store.write().await.new_epoch();
     }

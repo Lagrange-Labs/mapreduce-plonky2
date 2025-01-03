@@ -100,9 +100,10 @@ where
     T: Debug + Send + Sync + Clone + Serialize + for<'b> Deserialize<'b>,
 {
     async fn current_epoch(&self) -> Result<UserEpoch> {
-        self.epoch_mapper.try_to_user_epoch(self.inner_epoch())
-        .await
-        .ok_or(CurrenEpochUndefined(self.inner_epoch()).into())
+        self.epoch_mapper
+            .try_to_user_epoch(self.inner_epoch())
+            .await
+            .ok_or(CurrenEpochUndefined(self.inner_epoch()).into())
     }
 
     async fn fetch_at(&self, epoch: UserEpoch) -> T {
