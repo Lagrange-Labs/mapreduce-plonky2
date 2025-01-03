@@ -53,7 +53,8 @@ use super::{MutableTree, NodeContext, NodePath, TreeTopology};
 use crate::{
     error::RyhopeError,
     storage::{EpochKvStorage, EpochMapper, EpochStorage, TreeStorage},
-    tree::PrintableTree, IncrementalEpoch, UserEpoch,
+    tree::PrintableTree,
+    IncrementalEpoch, UserEpoch,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, future::Future};
@@ -121,8 +122,12 @@ impl State {
     pub async fn ascendance<I: IntoIterator<Item = NodeIdx>>(&self, ns: I) -> HashSet<NodeIdx> {
         self.ascendance_with_mapper(ns, self).await
     }
-    
-    async fn ascendance_with_mapper<I: IntoIterator<Item = NodeIdx>, M: IndexMapper>(&self, ns: I, mapper: &M) -> HashSet<NodeIdx> {
+
+    async fn ascendance_with_mapper<I: IntoIterator<Item = NodeIdx>, M: IndexMapper>(
+        &self,
+        ns: I,
+        mapper: &M,
+    ) -> HashSet<NodeIdx> {
         let mut ascendance = HashSet::new();
         let inner_max = self.inner_max();
         for n in ns.into_iter() {
@@ -167,7 +172,11 @@ impl State {
         self.lineage_with_mapper(n, self).await
     }
 
-    async fn lineage_with_mapper<M: IndexMapper>(&self, n: &NodeIdx, mapper: &M) -> Option<NodePath<NodeIdx>> {
+    async fn lineage_with_mapper<M: IndexMapper>(
+        &self,
+        n: &NodeIdx,
+        mapper: &M,
+    ) -> Option<NodePath<NodeIdx>> {
         if let Some(lineage_inner) = self.lineage_inner(&mapper.to_inner_idx(OuterIdx(*n)).await) {
             let mut ascendance = vec![];
             for n in lineage_inner.ascendance {
@@ -185,20 +194,21 @@ impl State {
     pub fn node_context(&self, k: &NodeIdx) -> Option<NodeContext<NodeIdx>> {
         // Not a simple call to `node_context_with_mapper` since we need a non-async version
         // to be employed in circuits
-        self.node_context_inner(&self.inner_idx(OuterIdx(*k))).map(|inner| {
-
-            NodeContext {
+        self.node_context_inner(&self.inner_idx(OuterIdx(*k)))
+            .map(|inner| NodeContext {
                 node_id: self.outer_idx(inner.node_id).0,
                 parent: inner.parent.map(|idx| self.outer_idx(idx).0),
                 left: inner.left.map(|idx| self.outer_idx(idx).0),
                 right: inner.right.map(|idx| self.outer_idx(idx).0),
-            }
-        })
+            })
     }
 
-    async fn node_context_with_mapper<M: IndexMapper>(&self, k: &NodeIdx, mapper: &M) -> Option<NodeContext<NodeIdx>> {
+    async fn node_context_with_mapper<M: IndexMapper>(
+        &self,
+        k: &NodeIdx,
+        mapper: &M,
+    ) -> Option<NodeContext<NodeIdx>> {
         if let Some(inner) = self.node_context_inner(&mapper.to_inner_idx(OuterIdx(*k)).await) {
-
             let parent_outer = mapper.to_outer_idx_map(inner.parent).await.map(|idx| idx.0);
             let left_outer = mapper.to_outer_idx_map(inner.left).await.map(|idx| idx.0);
             let right_outer = mapper.to_outer_idx_map(inner.right).await.map(|idx| idx.0);
@@ -218,11 +228,15 @@ impl State {
         self.children_with_mapper(n, self).await
     }
 
-    async fn children_with_mapper<M: IndexMapper>(&self, n: &NodeIdx, mapper: &M) -> Option<(Option<NodeIdx>, Option<NodeIdx>)> {
+    async fn children_with_mapper<M: IndexMapper>(
+        &self,
+        n: &NodeIdx,
+        mapper: &M,
+    ) -> Option<(Option<NodeIdx>, Option<NodeIdx>)> {
         if let Some((l, r)) = self.children_inner(&mapper.to_inner_idx(OuterIdx(*n)).await) {
             Some((
-                mapper.to_outer_idx_map(l).await.map(|idx| idx.0), 
-                mapper.to_outer_idx_map(r).await.map(|idx| idx.0)
+                mapper.to_outer_idx_map(l).await.map(|idx| idx.0),
+                mapper.to_outer_idx_map(r).await.map(|idx| idx.0),
             ))
         } else {
             None
@@ -340,22 +354,16 @@ impl State {
     }
 }
 
-
 trait IndexMapper: Sized + Send + Sync + Clone {
     fn to_inner_idx(&self, outer_idx: OuterIdx) -> impl Future<Output = InnerIdx> + Send;
 
     fn to_outer_idx(&self, inner_idx: InnerIdx) -> impl Future<Output = OuterIdx> + Send;
 
-    fn to_inner_idx_map(&self, outer_idx: Option<OuterIdx>) -> impl Future<Output = Option<InnerIdx>> + Send {
-        async move {
-            match outer_idx {
-                Some(outer_idx) => Some(self.to_inner_idx(outer_idx).await),
-                None => None,
-            }
-        }
-    }
-
-    fn to_outer_idx_map(&self, inner_idx: Option<InnerIdx>) -> impl Future<Output = Option<OuterIdx>> + Send {
+    /// Apply `to_outer_idx` to `inner_idx` if it is `Some`, otherwise return `None`.
+    fn to_outer_idx_map(
+        &self,
+        inner_idx: Option<InnerIdx>,
+    ) -> impl Future<Output = Option<OuterIdx>> + Send {
         async move {
             match inner_idx {
                 Some(inner_idx) => Some(self.to_outer_idx(inner_idx).await),
@@ -367,7 +375,12 @@ trait IndexMapper: Sized + Send + Sync + Clone {
 
 impl<T: EpochMapper> IndexMapper for T {
     async fn to_inner_idx(&self, outer_idx: OuterIdx) -> InnerIdx {
-        InnerIdx(self.to_incremental_epoch(outer_idx.0 as UserEpoch).await.try_into().unwrap())
+        InnerIdx(
+            self.to_incremental_epoch(outer_idx.0 as UserEpoch)
+                .await
+                .try_into()
+                .unwrap(),
+        )
     }
 
     async fn to_outer_idx(&self, inner_idx: InnerIdx) -> OuterIdx {
@@ -384,7 +397,6 @@ impl IndexMapper for State {
         self.outer_idx(inner_idx)
     }
 }
-
 
 #[derive(Default)]
 pub struct Tree<const IS_EPOCH_TREE: bool>;
@@ -424,8 +436,12 @@ impl<const IS_EPOCH_TREE: bool> Tree<IS_EPOCH_TREE> {
         }
     }
 
-
-    async fn to_inner_idx<S: TreeStorage<Self>>(&self, s: &S, state: &State, n: OuterIdx) -> InnerIdx {
+    async fn to_inner_idx<S: TreeStorage<Self>>(
+        &self,
+        s: &S,
+        state: &State,
+        n: OuterIdx,
+    ) -> InnerIdx {
         if IS_EPOCH_TREE {
             s.epoch_mapper().to_inner_idx(n).await
         } else {
@@ -433,7 +449,12 @@ impl<const IS_EPOCH_TREE: bool> Tree<IS_EPOCH_TREE> {
         }
     }
 
-    async fn to_outer_idx<S: TreeStorage<Self>>(&self, s: &S, state: &State, n: InnerIdx) -> OuterIdx {
+    async fn to_outer_idx<S: TreeStorage<Self>>(
+        &self,
+        s: &S,
+        state: &State,
+        n: InnerIdx,
+    ) -> OuterIdx {
         if IS_EPOCH_TREE {
             s.epoch_mapper().to_outer_idx(n).await
         } else {
@@ -479,7 +500,7 @@ fn children_inner_in_saturated(n: &InnerIdx) -> Option<(InnerIdx, InnerIdx)> {
     Some((maybe_left, maybe_right))
 }
 
-impl<const IS_EPOCH_TREE: bool> TreeTopology for Tree<IS_EPOCH_TREE>{
+impl<const IS_EPOCH_TREE: bool> TreeTopology for Tree<IS_EPOCH_TREE> {
     /// Max, shift
     type State = State;
     type Key = NodeIdx;
@@ -535,7 +556,7 @@ impl<const IS_EPOCH_TREE: bool> TreeTopology for Tree<IS_EPOCH_TREE>{
     ) -> Result<Option<(Option<NodeIdx>, Option<NodeIdx>)>, RyhopeError> {
         let state = s.state().fetch().await?;
         if IS_EPOCH_TREE {
-            state.children_with_mapper(n, s.epoch_mapper()).await 
+            state.children_with_mapper(n, s.epoch_mapper()).await
         } else {
             state.children(n).await
         }
@@ -590,12 +611,11 @@ impl<const IS_EPOCH_TREE: bool> MutableTree for Tree<IS_EPOCH_TREE> {
                 )
             );
             // in this case, k must be mapped to `expected_inner_k` in the epoch mapper
-            s.epoch_mapper_mut().add_epoch_map(
-                k as UserEpoch, 
-                expected_inner_k.0 as IncrementalEpoch
-            ).await?;
+            s.epoch_mapper_mut()
+                .add_epoch_map(k as UserEpoch, expected_inner_k.0 as IncrementalEpoch)
+                .await?;
         } else {
-            // in this case, we need to check that the inner key corresponding to k 
+            // in this case, we need to check that the inner key corresponding to k
             // is equal to `expected_inner_k`
             let inner_k = state.to_inner_idx(OuterIdx(k)).await;
             ensure!(inner_k == expected_inner_k,
@@ -634,7 +654,11 @@ impl<const IS_EPOCH_TREE: bool> PrintableTree for Tree<IS_EPOCH_TREE> {
                 let maybe_left = rank * (1 << (layer + 1)) + (1 << layer);
                 if maybe_left <= state.inner_max().0 {
                     let n = InnerIdx(maybe_left);
-                    r.push_str(&format!("{}{}", self.to_outer_idx(s, &state, n).await.0, spacing))
+                    r.push_str(&format!(
+                        "{}{}",
+                        self.to_outer_idx(s, &state, n).await.0,
+                        spacing
+                    ))
                 }
             }
             r.push('\n');

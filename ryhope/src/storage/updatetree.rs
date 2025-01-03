@@ -620,8 +620,11 @@ mod tests {
 
     #[tokio::test]
     async fn from_tree() {
-        let t = sbbst::Tree::default();
-        let storage = InMemory::<sbbst::IncrementalTree, (), true>::new_with_epoch(sbbst::IncrementalTree::with_capacity(10), 0);
+        let t = sbbst::Tree;
+        let storage = InMemory::<sbbst::IncrementalTree, (), true>::new_with_epoch(
+            sbbst::IncrementalTree::with_capacity(10),
+            0,
+        );
         let ut = UpdateTree::from_tree(&t, &storage, 1).await;
         ut.print();
     }

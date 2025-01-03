@@ -229,11 +229,11 @@ where
     async fn rollback_to(&mut self, _epoch: UserEpoch) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
-    
+
     fn epoch_mapper(&self) -> &Self::EpochMapper {
         self.epoch_mapper
     }
-    
+
     fn epoch_mapper_mut(&mut self) -> &mut Self::EpochMapper {
         unimplemented!("storage views are read only")
     }

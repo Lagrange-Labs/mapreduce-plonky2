@@ -2,17 +2,23 @@
 use futures::future::BoxFuture;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{
-    collections::{HashMap, HashSet}, fmt::Debug, future::Future, hash::Hash, ops::DerefMut, sync::Arc
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    future::Future,
+    hash::Hash,
+    ops::DerefMut,
+    sync::Arc,
 };
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio_postgres::Transaction;
 use view::TreeStorageView;
 
 use self::updatetree::UpdateTree;
 use crate::{
     error::RyhopeError,
-    tree::{NodeContext, TreeTopology}, UserEpoch, IncrementalEpoch, InitSettings
+    tree::{NodeContext, TreeTopology},
+    IncrementalEpoch, InitSettings, UserEpoch,
 };
 
 pub mod memory;
@@ -144,27 +150,40 @@ impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
 
 // An `EpochMapper` allows to map `UserEpoch` to `IncrementalEpoch` of
 // a `TreeStorage`, and vice versa
-pub trait EpochMapper: Sized + Send + Sync+ Clone + Debug {
-    fn try_to_incremental_epoch(&self, epoch: UserEpoch) -> impl Future<Output = Option<IncrementalEpoch>> + Send;
+pub trait EpochMapper: Sized + Send + Sync + Clone + Debug {
+    fn try_to_incremental_epoch(
+        &self,
+        epoch: UserEpoch,
+    ) -> impl Future<Output = Option<IncrementalEpoch>> + Send;
 
-    fn to_incremental_epoch(&self, epoch: UserEpoch) -> impl Future<Output = IncrementalEpoch> + Send {
+    fn to_incremental_epoch(
+        &self,
+        epoch: UserEpoch,
+    ) -> impl Future<Output = IncrementalEpoch> + Send {
         async move {
-            self.try_to_incremental_epoch(epoch).await.expect(format!("IncrementalEpoch corresponding to {epoch} not found").as_str())
+            self.try_to_incremental_epoch(epoch)
+                .await
+                .unwrap_or_else(|| panic!("IncrementalEpoch corresponding to {epoch} not found"))
         }
     }
 
-    fn try_to_user_epoch(&self, epoch: IncrementalEpoch) -> impl Future<Output = Option<UserEpoch>> + Send;
+    fn try_to_user_epoch(
+        &self,
+        epoch: IncrementalEpoch,
+    ) -> impl Future<Output = Option<UserEpoch>> + Send;
 
     fn to_user_epoch(&self, epoch: IncrementalEpoch) -> impl Future<Output = UserEpoch> + Send {
         async move {
-            self.try_to_user_epoch(epoch).await.expect(format!("UserEpoch corresponding to {epoch} not found").as_str())
+            self.try_to_user_epoch(epoch)
+                .await
+                .unwrap_or_else(|| panic!("UserEpoch corresponding to {epoch} not found"))
         }
     }
 
     fn add_epoch_map(
-        &mut self, 
+        &mut self,
         user_epoch: UserEpoch,
-        incremental_epoch: IncrementalEpoch
+        incremental_epoch: IncrementalEpoch,
     ) -> impl Future<Output = Result<()>> + Send;
 }
 #[derive(Clone, Debug)]
@@ -172,19 +191,17 @@ pub struct SharedEpochMapper<T: EpochMapper, const READ_ONLY: bool>(Arc<RwLock<T
 
 pub(crate) type RoSharedEpochMapper<T> = SharedEpochMapper<T, true>;
 
-impl<T: EpochMapper, const READ_ONLY: bool> From<&SharedEpochMapper<T, READ_ONLY>> 
-    for RoSharedEpochMapper<T> {
-        fn from(value: &SharedEpochMapper<T, READ_ONLY>) -> Self {
-            Self(value.0.clone())
-        }
+impl<T: EpochMapper, const READ_ONLY: bool> From<&SharedEpochMapper<T, READ_ONLY>>
+    for RoSharedEpochMapper<T>
+{
+    fn from(value: &SharedEpochMapper<T, READ_ONLY>) -> Self {
+        Self(value.0.clone())
     }
-
+}
 
 impl<T: EpochMapper, const READ_ONLY: bool> SharedEpochMapper<T, READ_ONLY> {
     pub(crate) fn new(mapper: T) -> Self {
-        Self(
-            Arc::new(RwLock::new(mapper))
-        )
+        Self(Arc::new(RwLock::new(mapper)))
     }
 
     /// Get a writable access to the underlying `EpochMapper`, if `SharedEpochMapper`
@@ -203,10 +220,10 @@ impl<T: EpochMapper, const READ_ONLY: bool> SharedEpochMapper<T, READ_ONLY> {
 
     pub(crate) async fn apply_fn<Fn: FnMut(&'_ mut T) -> Result<()>>(
         &mut self,
-        mut f: Fn
+        mut f: Fn,
     ) -> Result<()>
-    where 
-        T: 'static
+    where
+        T: 'static,
     {
         if let Some(mut mapper) = self.write_access_ref().await {
             f(mapper.deref_mut())
@@ -232,18 +249,22 @@ impl<T: EpochMapper, const READ_ONLY: bool> EpochMapper for SharedEpochMapper<T,
     }
 
     async fn add_epoch_map(
-        &mut self, 
+        &mut self,
         user_epoch: UserEpoch,
-        incremental_epoch: IncrementalEpoch
+        incremental_epoch: IncrementalEpoch,
     ) -> Result<()> {
         // add new epoch mapping only if `self` is not READ_ONLY
         if !READ_ONLY {
-            self.0.write().await.add_epoch_map(user_epoch, incremental_epoch).await
+            self.0
+                .write()
+                .await
+                .add_epoch_map(user_epoch, incremental_epoch)
+                .await
         } else {
             Ok(())
         }
     }
-} 
+}
 
 /// A `TreeStorage` stores all data related to the tree structure, i.e. (i) the
 /// state of the tree structure, (ii) the putative metadata associated to the
@@ -264,7 +285,7 @@ pub trait TreeStorage<T: TreeTopology>: Sized + Send + Sync {
 
     /// Return a handle to the epoch mapper.
     fn epoch_mapper(&self) -> &Self::EpochMapper;
-    
+
     /// Return a mutable handle to the epoch mapper.
     fn epoch_mapper_mut(&mut self) -> &mut Self::EpochMapper;
 
@@ -280,7 +301,8 @@ pub trait TreeStorage<T: TreeTopology>: Sized + Send + Sync {
     /// Rollback this tree one epoch in the past
     fn rollback(&mut self) -> impl Future<Output = Result<(), RyhopeError>> {
         async move {
-            self.rollback_to(self.nodes().current_epoch().await? - 1).await
+            self.rollback_to(self.nodes().current_epoch().await? - 1)
+                .await
         }
     }
 
@@ -363,7 +385,7 @@ where
 
     /// Return the current time stamp of the storage. It returns an error
     /// if the current epoch is undefined, which might happen when the epochs
-    /// are handled by another storage. 
+    /// are handled by another storage.
     fn current_epoch(&self) -> impl Future<Output = Result<UserEpoch>> + Send;
 
     /// Return the value associated to `k` at the current epoch if it exists,
@@ -514,7 +536,7 @@ pub trait SqlTransactionStorage: TransactionalStorage {
     /// This hook **MUST** be called after the **SUCCESSFUL** execution of the
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution failed.
-    fn commit_success(&mut self )-> impl Future<Output = ()>;
+    fn commit_success(&mut self) -> impl Future<Output = ()>;
 
     /// This hook **MUST** be called after the **FAILED** execution of the
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the

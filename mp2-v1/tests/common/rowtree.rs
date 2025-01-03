@@ -16,8 +16,8 @@ use mp2_v1::{
 };
 use plonky2::plonk::config::GenericHashOut;
 use ryhope::storage::{
-        updatetree::{Next, UpdateTree},
-        RoEpochKvStorage,
+    updatetree::{Next, UpdateTree},
+    RoEpochKvStorage,
 };
 use verifiable_db::{
     cells_tree,

@@ -9,12 +9,11 @@ use mp2_common::types::HashOutput;
 use parsil::{bracketer::bracket_secondary_index, symbols::ContextProvider, ParsilSettings};
 use ryhope::{
     storage::{
-        pgsql::ToFromBytea,
-        updatetree::UpdateTree,
-        FromSettings, PayloadStorage, TransactionalStorage, TreeStorage, WideLineage,
+        pgsql::ToFromBytea, updatetree::UpdateTree, FromSettings, PayloadStorage,
+        TransactionalStorage, TreeStorage, WideLineage,
     },
     tree::{MutableTree, NodeContext, TreeTopology},
-    UserEpoch, MerkleTreeKvDb, NodePayload,
+    MerkleTreeKvDb, NodePayload, UserEpoch,
 };
 use std::{fmt::Debug, future::Future};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql, NoTls};
@@ -349,7 +348,11 @@ where
 {
     const IS_WIDE_LINEAGE: bool = true;
 
-    async fn fetch_ctx_and_payload_at(&self, k: &K, epoch: UserEpoch) -> Option<(NodeContext<K>, V)> {
+    async fn fetch_ctx_and_payload_at(
+        &self,
+        k: &K,
+        epoch: UserEpoch,
+    ) -> Option<(NodeContext<K>, V)> {
         self.ctx_and_payload_at(epoch, k)
     }
 }

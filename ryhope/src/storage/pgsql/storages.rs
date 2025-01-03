@@ -1,11 +1,17 @@
 use crate::{
     error::{ensure, RyhopeError},
-    mapper_table_name, storage::{
-        memory::InMemoryEpochMapper, CurrenEpochUndefined, EpochKvStorage, EpochMapper, EpochStorage, RoEpochKvStorage, RoSharedEpochMapper, SqlTransactionStorage, TransactionalStorage, TreeStorage, WideLineage
-    }, tree::{
+    mapper_table_name,
+    storage::{
+        memory::InMemoryEpochMapper, CurrenEpochUndefined, EpochKvStorage, EpochMapper,
+        EpochStorage, RoEpochKvStorage, RoSharedEpochMapper, SqlTransactionStorage,
+        TransactionalStorage, TreeStorage, WideLineage,
+    },
+    tree::{
         sbbst::{self, NodeIdx},
         scapegoat, NodeContext, TreeTopology,
-    }, IncrementalEpoch, UserEpoch, EPOCH, INCREMENTAL_EPOCH, KEY, PAYLOAD, USER_EPOCH, VALID_FROM, VALID_UNTIL
+    },
+    IncrementalEpoch, UserEpoch, EPOCH, INCREMENTAL_EPOCH, KEY, PAYLOAD, USER_EPOCH, VALID_FROM,
+    VALID_UNTIL,
 };
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
@@ -178,7 +184,7 @@ where
         epoch: IncrementalEpoch,
     ) -> impl std::future::Future<Output = Result<Option<V>, RyhopeError>> + std::marker::Send {
         async move {
-           let connection = db.get().await.unwrap();
+            let connection = db.get().await.unwrap();
             connection
             .query(
                 &format!(
@@ -221,9 +227,9 @@ where
     /// Return the value associated to the given key at the given epoch.
     #[allow(clippy::type_complexity)]
     fn fetch_many_at<
-        S: TreeStorage<Self>, 
+        S: TreeStorage<Self>,
         I: IntoIterator<Item = (IncrementalEpoch, Self::Key)> + Send,
-        T: EpochMapper
+        T: EpochMapper,
     >(
         &self,
         s: &S,
@@ -663,8 +669,7 @@ where
             let epoch = row.get::<_, UserEpoch>(1);
             // convert internal incremental epoch to a user epoch
             let epoch = epoch_mapper.try_to_user_epoch(epoch as IncrementalEpoch)
-                .await.ok_or(anyhow!("Epoch correspong to inner epoch {epoch} not found"))?;
-               
+                .await.ok_or(anyhow!("Epoch correspong to inner epoch {epoch} not found"))?; 
             let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
             if let Some(v) = v {
                 r.push((
@@ -700,7 +705,12 @@ pub struct CachedDbStore<V: Debug + Clone + Send + Sync + Serialize + for<'a> De
     pub(super) cache: RwLock<Option<V>>,
 }
 impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStore<T> {
-    pub fn new(current_epoch: UserEpoch, table: String, db: DBPool, mapper: RoSharedEpochMapper<EpochMapperStorage>) -> Self {
+    pub fn new(
+        current_epoch: UserEpoch,
+        table: String,
+        db: DBPool,
+        mapper: RoSharedEpochMapper<EpochMapperStorage>,
+    ) -> Self {
         Self {
             db,
             in_tx: false,
@@ -733,7 +743,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
                     RyhopeError::from_db(format!("initializing new store in `{}`", table), err)
                 })?;
         }
-        
+
         Ok(Self {
             db,
             in_tx: false,
@@ -866,7 +876,6 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
 
         Ok(())
     }
-
 }
 
 impl<T> TransactionalStorage for CachedDbStore<T>
@@ -1019,7 +1028,12 @@ where
     T::Key: ToFromBytea,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
 {
-    pub fn new(current_epoch: IncrementalEpoch, table: String, db: DBPool, mapper: RoSharedEpochMapper<EpochMapperStorage>) -> Self {
+    pub fn new(
+        current_epoch: IncrementalEpoch,
+        table: String,
+        db: DBPool,
+        mapper: RoSharedEpochMapper<EpochMapperStorage>,
+    ) -> Self {
         trace!("[{}] initializing CachedDbTreeStore", table);
         CachedDbTreeStore {
             epoch: current_epoch,
@@ -1148,7 +1162,7 @@ where
     }
 }
 
-impl<T, V> NodeProjection<T, V> 
+impl<T, V> NodeProjection<T, V>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
@@ -1167,13 +1181,10 @@ where
             let value = self.wrapped.read().await.nodes_cache.get(k).cloned();
             if let Some(Some(cached_value)) = value {
                 Some(cached_value.into_value())
-            } else if let Some(value) = T::fetch_node_at(
-                db, 
-                &table, 
-                k, 
-                epoch
-            ).await.unwrap() {
-                self.wrapped.write().await
+            } else if let Some(value) = T::fetch_node_at(db, &table, k, epoch).await.unwrap() {
+                self.wrapped
+                    .write()
+                    .await
                     .nodes_cache
                     .insert(k.clone(), Some(CachedValue::Read(value.clone())));
                 Some(value)
@@ -1192,14 +1203,23 @@ where
     T::Key: ToFromBytea,
     V: PayloadInDb,
 {
-
     async fn initial_epoch(&self) -> UserEpoch {
-        self.wrapped.read().await.epoch_mapper.to_user_epoch(INITIAL_INCREMENTAL_EPOCH).await as UserEpoch
+        self.wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_user_epoch(INITIAL_INCREMENTAL_EPOCH)
+            .await as UserEpoch
     }
 
     async fn current_epoch(&self) -> Result<UserEpoch> {
         let inner_epoch = self.wrapped.read().await.current_epoch();
-        self.wrapped.read().await.epoch_mapper.try_to_user_epoch(inner_epoch).await
+        self.wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .try_to_user_epoch(inner_epoch)
+            .await
             .ok_or(CurrenEpochUndefined(inner_epoch).into())
     }
 
@@ -1208,17 +1228,25 @@ where
     }
 
     async fn size_at(&self, epoch: UserEpoch) -> usize {
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.to_incremental_epoch(epoch).await as UserEpoch;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_incremental_epoch(epoch)
+            .await as UserEpoch;
         self.wrapped.read().await.size_at(inner_epoch).await
     }
 
-    async fn try_fetch_at(
-        &self,
-        k: &T::Key,
-        epoch: UserEpoch,
-    ) -> Option<T::Node> {
+    async fn try_fetch_at(&self, k: &T::Key, epoch: UserEpoch) -> Option<T::Node> {
         trace!("[{self}] fetching {k:?}@{epoch}",);
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.try_to_incremental_epoch(epoch).await;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await;
         if let Some(epoch) = inner_epoch {
             self.try_fetch_at_incremental_epoch(k, epoch).await
         } else {
@@ -1230,26 +1258,30 @@ where
         let db = self.wrapped.read().await.db.clone();
         let table = self.wrapped.read().await.table.to_owned();
 
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.to_incremental_epoch(epoch).await;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_incremental_epoch(epoch)
+            .await;
 
-        T::fetch_all_keys(
-            db, 
-            &table, 
-            inner_epoch,
-        ).await.unwrap()
+        T::fetch_all_keys(db, &table, inner_epoch).await.unwrap()
     }
 
     async fn random_key_at(&self, epoch: UserEpoch) -> Option<T::Key> {
         let db = self.wrapped.read().await.db.clone();
         let table = self.wrapped.read().await.table.to_owned();
 
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.to_incremental_epoch(epoch).await;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_incremental_epoch(epoch)
+            .await;
 
-        T::fetch_a_key(
-            db, 
-            &table, 
-            inner_epoch,
-        ).await.unwrap()
+        T::fetch_a_key(db, &table, inner_epoch).await.unwrap()
     }
 
     async fn pairs_at(&self, _epoch: UserEpoch) -> Result<HashMap<T::Key, T::Node>, RyhopeError> {
@@ -1258,10 +1290,7 @@ where
 
     async fn try_fetch(&self, k: &T::Key) -> Result<Option<T::Node>, RyhopeError> {
         let current_epoch = self.wrapped.read().await.current_epoch();
-        self.try_fetch_at_incremental_epoch(
-            k, 
-            current_epoch,
-        ).await
+        self.try_fetch_at_incremental_epoch(k, current_epoch).await
     }
 
     async fn contains(&self, k: &T::Key) -> Result<bool, RyhopeError> {
@@ -1330,16 +1359,20 @@ where
     }
 
     async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<()> {
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.to_incremental_epoch(epoch).await;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_incremental_epoch(epoch)
+            .await;
         self.wrapped.write().await.rollback_to(inner_epoch).await
     }
 
-    fn rollback(&mut self) -> impl Future<Output = Result<()>> {
-        async move {
-            let inner_epoch = self.wrapped.read().await.current_epoch();
-            ensure!(inner_epoch > 0, "cannot rollback past the initial epoch");
-            self.wrapped.write().await.rollback_to(inner_epoch).await
-        }
+    async fn rollback(&mut self) -> Result<()> {
+        let inner_epoch = self.wrapped.read().await.current_epoch();
+        ensure!(inner_epoch > 0, "cannot rollback past the initial epoch");
+        self.wrapped.write().await.rollback_to(inner_epoch).await
     }
 }
 
@@ -1374,7 +1407,11 @@ where
     T::Key: ToFromBytea,
     V: PayloadInDb,
 {
-    async fn try_fetch_at_incremental_epoch(&self, k: &T::Key, epoch: IncrementalEpoch) -> Option<V> {
+    async fn try_fetch_at_incremental_epoch(
+        &self,
+        k: &T::Key,
+        epoch: IncrementalEpoch,
+    ) -> Option<V> {
         let db = self.wrapped.read().await.db.clone();
         let table = self.wrapped.read().await.table.to_owned();
         if epoch == self.wrapped.read().await.current_epoch() {
@@ -1383,14 +1420,10 @@ where
             let value = self.wrapped.read().await.payload_cache.get(k).cloned();
             if let Some(Some(cached_value)) = value {
                 Some(cached_value.into_value())
-            } else if let Some(value) = T::fetch_payload_at(
-                db, 
-                &table, 
-                k, 
-                epoch,
-            ).await.unwrap()
-            {
-                self.wrapped.write().await
+            } else if let Some(value) = T::fetch_payload_at(db, &table, k, epoch).await.unwrap() {
+                self.wrapped
+                    .write()
+                    .await
                     .payload_cache
                     .insert(k.clone(), Some(CachedValue::Read(value.clone())));
                 Some(value)
@@ -1398,12 +1431,7 @@ where
                 None
             }
         } else {
-            T::fetch_payload_at(
-                db, 
-                &table, 
-                k, 
-                epoch,
-            ).await.unwrap()
+            T::fetch_payload_at(db, &table, k, epoch).await.unwrap()
         }
     }
 }
@@ -1414,14 +1442,23 @@ where
     T::Key: ToFromBytea,
     V: PayloadInDb,
 {
-
     async fn initial_epoch(&self) -> UserEpoch {
-        self.wrapped.read().await.epoch_mapper.to_user_epoch(INITIAL_INCREMENTAL_EPOCH).await as UserEpoch
+        self.wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_user_epoch(INITIAL_INCREMENTAL_EPOCH)
+            .await as UserEpoch
     }
 
     async fn current_epoch(&self) -> Result<UserEpoch> {
         let inner_epoch = self.wrapped.read().await.current_epoch();
-        self.wrapped.read().await.epoch_mapper.try_to_user_epoch(inner_epoch as IncrementalEpoch).await
+        self.wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .try_to_user_epoch(inner_epoch as IncrementalEpoch)
+            .await
             .ok_or(CurrenEpochUndefined(inner_epoch).into())
     }
 
@@ -1430,13 +1467,25 @@ where
     }
 
     async fn size_at(&self, epoch: UserEpoch) -> usize {
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.to_incremental_epoch(epoch).await as UserEpoch;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_incremental_epoch(epoch)
+            .await as UserEpoch;
         self.wrapped.read().await.size_at(inner_epoch).await
     }
 
     async fn try_fetch_at(&self, k: &T::Key, epoch: UserEpoch) -> Option<V> {
         trace!("[{self}] attempting to fetch payload for {k:?}@{epoch}");
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.try_to_incremental_epoch(epoch).await;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await;
         if let Some(epoch) = inner_epoch {
             self.try_fetch_at_incremental_epoch(k, epoch).await
         } else {
@@ -1446,48 +1495,50 @@ where
 
     async fn try_fetch(&self, k: &T::Key) -> Option<V> {
         let current_epoch = self.wrapped.read().await.current_epoch();
-        self.try_fetch_at_incremental_epoch(
-            k, 
-            current_epoch,
-        ).await
+        self.try_fetch_at_incremental_epoch(k, current_epoch).await
     }
 
     async fn keys_at(&self, epoch: UserEpoch) -> Vec<T::Key> {
         let db = self.wrapped.read().await.db.clone();
         let table = self.wrapped.read().await.table.to_owned();
 
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.to_incremental_epoch(epoch).await;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_incremental_epoch(epoch)
+            .await;
 
-        T::fetch_all_keys(
-            db, 
-            &table, 
-            inner_epoch,
-        ).await.unwrap()
+        T::fetch_all_keys(db, &table, inner_epoch).await.unwrap()
     }
 
     async fn random_key_at(&self, epoch: UserEpoch) -> Option<T::Key> {
         let db = self.wrapped.read().await.db.clone();
         let table = self.wrapped.read().await.table.to_owned();
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.to_incremental_epoch(epoch).await;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_incremental_epoch(epoch)
+            .await;
 
-        T::fetch_a_key(
-            db, 
-            &table, 
-            inner_epoch,
-        ).await.unwrap()
+        T::fetch_a_key(db, &table, inner_epoch).await.unwrap()
     }
 
     async fn pairs_at(&self, epoch: UserEpoch) -> Result<HashMap<T::Key, V>, RyhopeError> {
         let db = self.wrapped.read().await.db.clone();
         let table = self.wrapped.read().await.table.to_owned();
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.to_incremental_epoch(epoch).await;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_incremental_epoch(epoch)
+            .await;
 
-
-        T::fetch_all_pairs(
-            db, 
-            &table, 
-            inner_epoch,
-        ).await
+        T::fetch_all_pairs(db, &table, inner_epoch).await
     }
 }
 impl<T, V> EpochKvStorage<T::Key, V> for PayloadProjection<T, V>
@@ -1532,16 +1583,20 @@ where
     }
 
     async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<()> {
-        let inner_epoch = self.wrapped.read().await.epoch_mapper.to_incremental_epoch(epoch).await;
+        let inner_epoch = self
+            .wrapped
+            .read()
+            .await
+            .epoch_mapper
+            .to_incremental_epoch(epoch)
+            .await;
         self.wrapped.write().await.rollback_to(inner_epoch).await
     }
 
-    fn rollback(&mut self) -> impl Future<Output = Result<()>> {
-        async move {
-            let inner_epoch = self.wrapped.read().await.current_epoch();
-            ensure!(inner_epoch > 0, "cannot rollback past the initial epoch");
-            self.wrapped.write().await.rollback_to(inner_epoch).await
-        }
+    async fn rollback(&mut self) -> Result<()> {
+        let inner_epoch = self.wrapped.read().await.current_epoch();
+        ensure!(inner_epoch > 0, "cannot rollback past the initial epoch");
+        self.wrapped.write().await.rollback_to(inner_epoch).await
     }
 }
 
@@ -1564,13 +1619,10 @@ impl EpochMapperStorage {
         mapper_table_name(&self.table)
     }
 
-    pub(crate) async fn new_from_table(
-        table: String,
-        db: DBPool,
-    ) -> Result<Self> {
+    pub(crate) async fn new_from_table(table: String, db: DBPool) -> Result<Self> {
         let cache = {
-                let connection = db.get().await?;
-            let mapper_table_name = mapper_table_name(table.as_str());        
+            let connection = db.get().await?;
+            let mapper_table_name = mapper_table_name(table.as_str());
             let mut cache = InMemoryEpochMapper::new_empty();
             let rows = connection
                 .query(
@@ -1586,62 +1638,61 @@ impl EpochMapperStorage {
             for row in rows {
                 let user_epoch = row.get::<_, i64>(0) as UserEpoch;
                 let incremental_epoch = row.get::<_, i64>(1) as IncrementalEpoch;
-                cache.add_epoch_map(user_epoch, incremental_epoch.try_into().unwrap())
-                .await
-                .context("while adding mapping to cache")?;
+                cache
+                    .add_epoch_map(user_epoch, incremental_epoch)
+                    .await
+                    .context("while adding mapping to cache")?;
             }
             cache
         };
-        Ok(
+        Ok(Self {
+            db,
+            table,
+            in_tx: false,
+            dirty: Default::default(),
+            cache: Arc::new(RwLock::new(cache)),
+        })
+    }
+
+    pub(crate) async fn new<const EXTERNAL_EPOCH_MAPPER: bool>(
+        table: String,
+        db: DBPool,
+        initial_epoch: UserEpoch,
+    ) -> Result<Self> {
+        // Add initial epoch to cache
+        let mapper_table_name = mapper_table_name(table.as_str());
+        Ok(if EXTERNAL_EPOCH_MAPPER {
+            // Initialize from mapper table
+            let mapper = Self::new_from_table(table, db).await?;
+            // check that there is a mapping initial_epoch -> INITIAL_INCREMENTAL_EPOCH
+            ensure!(
+                mapper.try_to_incremental_epoch(initial_epoch).await
+                    == Some(INITIAL_INCREMENTAL_EPOCH),
+                "No initial epoch {initial_epoch} found in mapping table {mapper_table_name}"
+            );
+            mapper
+        } else {
+            // add epoch map for `initial_epoch` to the DB
+            db.get()
+                .await?
+                .query(
+                    &format!(
+                        "INSERT INTO {} ({USER_EPOCH}, {INCREMENTAL_EPOCH})
+                            VALUES ($1, $2)",
+                        mapper_table_name,
+                    ),
+                    &[&(initial_epoch as UserEpoch), &INITIAL_INCREMENTAL_EPOCH],
+                )
+                .await?;
+            let cache = InMemoryEpochMapper::new_at(initial_epoch);
             Self {
                 db,
                 table,
                 in_tx: false,
                 dirty: Default::default(),
-                cache: Arc::new(RwLock::new(cache))
+                cache: Arc::new(RwLock::new(cache)),
             }
-        )      
-    }
-
-    pub(crate) async fn new<const EXTERNAL_EPOCH_MAPPER: bool>(
-        table: String, 
-        db: DBPool, 
-        initial_epoch: UserEpoch,
-    ) -> Result<Self> {
-        // Add initial epoch to cache
-        let mapper_table_name = mapper_table_name(table.as_str());    
-        Ok(
-            if EXTERNAL_EPOCH_MAPPER {
-                // Initialize from mapper table
-                let mapper = Self::new_from_table(table, db).await?;
-                // check that there is a mapping initial_epoch -> INITIAL_INCREMENTAL_EPOCH
-                ensure!(
-                    mapper.try_to_incremental_epoch(initial_epoch).await == Some(INITIAL_INCREMENTAL_EPOCH),
-                    "No initial epoch {initial_epoch} found in mapping table {mapper_table_name}"
-                );
-                mapper
-            } else {
-                // add epoch map for `initial_epoch` to the DB
-                db.get().await?
-                    .query(
-                        &format!(
-                            "INSERT INTO {} ({USER_EPOCH}, {INCREMENTAL_EPOCH})
-                            VALUES ($1, $2)",
-                            mapper_table_name,
-                        ),
-                        &[&(initial_epoch as UserEpoch), &INITIAL_INCREMENTAL_EPOCH],
-                    )
-                    .await?;
-                let cache = InMemoryEpochMapper::new_at(initial_epoch);
-                Self {
-                        db,
-                        table,
-                        in_tx: false,
-                        dirty: Default::default(),
-                        cache: Arc::new(RwLock::new(cache))
-                    }
-            }
-        )
+        })
     }
 
     /// Add a new epoch mapping for `IncrementalEpoch` `epoch`, assuming that `UserEpoch`s
@@ -1663,21 +1714,28 @@ impl EpochMapperStorage {
         Ok(())
     }
 
-    pub(crate) async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
+    pub(crate) async fn commit_in_transaction(
+        &mut self,
+        db_tx: &mut Transaction<'_>,
+    ) -> Result<()> {
         for &user_epoch in self.dirty.iter() {
-            let incremental_epoch = self.cache.write().await
-                .try_to_incremental_epoch(user_epoch).await
+            let incremental_epoch = self
+                .cache
+                .write()
+                .await
+                .try_to_incremental_epoch(user_epoch)
+                .await
                 .ok_or(anyhow!("Epoch {user_epoch} not found in cache"))?;
             db_tx
-            .query(
-                &format!(
-                    "INSERT INTO {} ({USER_EPOCH}, {INCREMENTAL_EPOCH})
+                .query(
+                    &format!(
+                        "INSERT INTO {} ({USER_EPOCH}, {INCREMENTAL_EPOCH})
                      VALUES ($1, $2)",
-                    self.mapper_table_name()
-                ),
-                &[&(user_epoch as UserEpoch), &incremental_epoch],
-            )
-            .await?;
+                        self.mapper_table_name()
+                    ),
+                    &[&(user_epoch as UserEpoch), &incremental_epoch],
+                )
+                .await?;
         }
 
         Ok(())
@@ -1692,7 +1750,8 @@ impl EpochMapperStorage {
                     "SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {} 
                     WHERE {USER_EPOCH} = 
                         (SELECT MAX({USER_EPOCH}) FROM {})",
-                    self.mapper_table_name(), self.mapper_table_name(),
+                    self.mapper_table_name(),
+                    self.mapper_table_name(),
                 ),
                 &[],
             )
@@ -1702,13 +1761,19 @@ impl EpochMapperStorage {
         if let Some(row) = row {
             let user_epoch = row.get::<_, i64>(0) as UserEpoch;
             let incremental_epoch = row.get::<_, i64>(1);
-            self.cache.write().await.add_epoch_map(user_epoch, incremental_epoch.try_into().unwrap())
-            .await
-            .context("while adding mapping to cache")
-            .unwrap();
+            self.cache
+                .write()
+                .await
+                .add_epoch_map(user_epoch, incremental_epoch)
+                .await
+                .context("while adding mapping to cache")
+                .unwrap();
             user_epoch
         } else {
-            unreachable!("There should always be at least one row in mapper table {}", self.mapper_table_name());
+            unreachable!(
+                "There should always be at least one row in mapper table {}",
+                self.mapper_table_name()
+            );
         }
     }
 
@@ -1753,7 +1818,12 @@ impl EpochMapperStorage {
 
 impl EpochMapper for EpochMapperStorage {
     async fn try_to_incremental_epoch(&self, epoch: UserEpoch) -> Option<IncrementalEpoch> {
-        let result = self.cache.read().await.try_to_incremental_epoch(epoch).await;
+        let result = self
+            .cache
+            .read()
+            .await
+            .try_to_incremental_epoch(epoch)
+            .await;
         if result.is_none() {
             let connection = self.db.get().await.unwrap();
             let row = connection
@@ -1768,12 +1838,15 @@ impl EpochMapper for EpochMapperStorage {
                 .context("while fetching incremental epoch")
                 .unwrap();
             if let Some(row) = row {
-                let incremental_epoch = row.get::<_, i64>(0);
-                self.cache.write().await.add_epoch_map(epoch, incremental_epoch.try_into().unwrap())
-                .await
-                .context("while adding mapping to cache")
-                .unwrap();
-                Some(incremental_epoch.try_into().unwrap())
+                let incremental_epoch = row.get::<_, i64>(0) as IncrementalEpoch;
+                self.cache
+                    .write()
+                    .await
+                    .add_epoch_map(epoch, incremental_epoch)
+                    .await
+                    .context("while adding mapping to cache")
+                    .unwrap();
+                Some(incremental_epoch)
             } else {
                 None
             }
@@ -1792,18 +1865,21 @@ impl EpochMapper for EpochMapperStorage {
                         "SELECT {USER_EPOCH} FROM {} WHERE {INCREMENTAL_EPOCH} = $1",
                         self.mapper_table_name()
                     ),
-                    &[&(epoch as i64)],
+                    &[&(epoch)],
                 )
                 .await
                 .context("while fetching incremental epoch")
                 .unwrap();
             if let Some(row) = row {
-                let user_epoch = row.get::<_, i64>(0);
-                self.cache.write().await.add_epoch_map(user_epoch.try_into().unwrap(), epoch)
-                .await
-                .context("while adding mapping to cache")
-                .unwrap();
-                Some(user_epoch.try_into().unwrap())
+                let user_epoch = row.get::<_, i64>(0) as UserEpoch;
+                self.cache
+                    .write()
+                    .await
+                    .add_epoch_map(user_epoch, epoch)
+                    .await
+                    .context("while adding mapping to cache")
+                    .unwrap();
+                Some(user_epoch)
             } else {
                 None
             }
@@ -1813,12 +1889,16 @@ impl EpochMapper for EpochMapperStorage {
     }
 
     async fn add_epoch_map(
-        &mut self, 
+        &mut self,
         user_epoch: UserEpoch,
-        incremental_epoch: IncrementalEpoch
+        incremental_epoch: IncrementalEpoch,
     ) -> Result<()> {
         // add to cache
-        self.cache.write().await.add_epoch_map(user_epoch, incremental_epoch).await?;
+        self.cache
+            .write()
+            .await
+            .add_epoch_map(user_epoch, incremental_epoch)
+            .await?;
         // add arbitrary epoch to dirty set
         self.dirty.insert(user_epoch);
         Ok(())
