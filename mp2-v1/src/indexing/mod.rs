@@ -5,7 +5,11 @@ use alloy::primitives::U256;
 use block::MerkleIndexTree;
 use mp2_common::types::HashOutput;
 use row::MerkleRowTree;
-use ryhope::{storage::pgsql::{SqlServerConnection, SqlStorageSettings}, tree::scapegoat, InitSettings, UserEpoch};
+use ryhope::{
+    storage::pgsql::{SqlServerConnection, SqlStorageSettings},
+    tree::scapegoat,
+    InitSettings, UserEpoch,
+};
 
 pub mod block;
 pub mod cell;
@@ -14,7 +18,7 @@ pub mod row;
 
 pub type ColumnID = u64;
 
-/// Build `MerkleIndexTree` and `MerkleRowTree` trees from tables 
+/// Build `MerkleIndexTree` and `MerkleRowTree` trees from tables
 /// `index_table_name` and `row_table_name` in the DB with URL `db_url`.
 pub async fn load_trees(
     db_url: &str,
@@ -40,14 +44,12 @@ pub async fn load_trees(
     )
     .await?;
 
-    Ok(
-        (index_tree, row_tree)
-    )
+    Ok((index_tree, row_tree))
 }
 
-/// Build `MerkleIndexTree` and `MerkleRowTree` trees starting from 
+/// Build `MerkleIndexTree` and `MerkleRowTree` trees starting from
 /// `genesis_block`. The tables employed in the DB with URL `db_url`
-/// to store the trees are `index_table_name` and `row_table_name`, 
+/// to store the trees are `index_table_name` and `row_table_name`,
 /// respectively. The following additional parameters are required:
 /// - `alpha`: Parameter of the Scapegoat tree employed for the `MerkleRowTree`
 /// - `reset_if_exist`: if true, an existing tree would be deleted
@@ -70,8 +72,12 @@ pub async fn build_trees(
         external_mapper: Some(index_table_name),
     };
 
-    let index_tree = ryhope::new_index_tree(genesis_block as UserEpoch, db_settings_index, reset_if_exist)
-        .await?;
+    let index_tree = ryhope::new_index_tree(
+        genesis_block as UserEpoch,
+        db_settings_index,
+        reset_if_exist,
+    )
+    .await?;
     let row_tree = ryhope::new_row_tree(
         genesis_block as UserEpoch,
         alpha,
@@ -80,10 +86,7 @@ pub async fn build_trees(
     )
     .await?;
 
-    Ok(
-        (index_tree, row_tree)
-    )
-
+    Ok((index_tree, row_tree))
 }
 
 // NOTE this might be good to have on public API ?

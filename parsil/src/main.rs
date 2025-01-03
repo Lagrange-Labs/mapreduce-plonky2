@@ -186,13 +186,12 @@ fn main() -> Result<()> {
             table_name,
         } => {
             let mut query = parse_and_validate(&request, &settings)?;
-            let query_index =
-                core_keys_for_index_tree(
-                    epoch, 
-                    (min_block as NodeIdx, max_block as NodeIdx),
-                    &table_name,
-                    &settings,
-                )?;
+            let query_index = core_keys_for_index_tree(
+                epoch,
+                (min_block as NodeIdx, max_block as NodeIdx),
+                &table_name,
+                &settings,
+            )?;
             // let query_row = core_keys_for_row_tree(
             //     qeury,
             //     &settings,

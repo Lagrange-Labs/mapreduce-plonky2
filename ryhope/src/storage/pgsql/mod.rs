@@ -1,19 +1,22 @@
 use self::storages::{CachedDbStore, CachedDbTreeStore, DbConnector};
 use super::{
-    EpochMapper, EpochStorage, FromSettings, MetaOperations, PayloadStorage, SharedEpochMapper, SqlTransactionStorage, TransactionalStorage, TreeStorage, WideLineage
+    EpochMapper, EpochStorage, FromSettings, MetaOperations, PayloadStorage, SharedEpochMapper,
+    SqlTransactionStorage, TransactionalStorage, TreeStorage, WideLineage,
 };
 use crate::{
-    mapper_table_name, storage::pgsql::storages::DBPool, tree::{NodeContext, TreeTopology}, IncrementalEpoch, InitSettings, UserEpoch, INCREMENTAL_EPOCH, KEY, PAYLOAD, USER_EPOCH, VALID_FROM, VALID_UNTIL
+    mapper_table_name,
+    storage::pgsql::storages::DBPool,
+    tree::{NodeContext, TreeTopology},
+    IncrementalEpoch, InitSettings, UserEpoch, INCREMENTAL_EPOCH, KEY, PAYLOAD, USER_EPOCH,
+    VALID_FROM, VALID_UNTIL,
 };
 use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
-use std::{
-    collections::HashSet, fmt::Debug, future::Future, sync::Arc
-};
+use std::{collections::HashSet, fmt::Debug, future::Future, sync::Arc};
 use storages::{EpochMapperStorage, NodeProjection, PayloadProjection, INITIAL_INCREMENTAL_EPOCH};
+use tokio::sync::RwLock;
 use tokio_postgres::{NoTls, Transaction};
 use tracing::*;
 
@@ -96,7 +99,10 @@ pub trait PayloadInDb: Clone + Send + Sync + Debug + Serialize + for<'a> Deseria
 impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb for T {}
 
 /// If it exists, remove the given table from the current database.
-async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(db: DBPool, table: &str) -> Result<()> {
+async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(
+    db: DBPool,
+    table: &str,
+) -> Result<()> {
     let connection = db.get().await.unwrap();
     connection
         .execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
@@ -120,7 +126,10 @@ async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(db: DBPool, tab
         // The epoch mapper is internal, so we directly erase the table
         let mapper_table_name = mapper_table_name(table);
         connection
-            .execute(&format!("DROP TABLE IF EXISTS {mapper_table_name} CASCADE"), &[])
+            .execute(
+                &format!("DROP TABLE IF EXISTS {mapper_table_name} CASCADE"),
+                &[],
+            )
             .await
             .with_context(|| format!("unable to delete table `{mapper_table_name}`"))
             .map(|_| ())
@@ -170,8 +179,8 @@ pub struct SqlStorageSettings {
     pub table: String,
     /// A way to connect to the DB server
     pub source: SqlServerConnection,
-    /// In case an external epoch mapper is employed for this storage, 
-    /// this field contains the name of the table providing such an epoch mapper. 
+    /// In case an external epoch mapper is employed for this storage,
+    /// this field contains the name of the table providing such an epoch mapper.
     /// It is None if the epoch mapper is handled internally by the storage
     pub external_mapper: Option<String>,
 }
@@ -201,7 +210,8 @@ where
     in_tx: bool,
 }
 
-impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> FromSettings<T::State> for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> FromSettings<T::State>
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
@@ -215,11 +225,22 @@ where
         init_settings: InitSettings<T::State>,
         storage_settings: Self::Settings,
     ) -> Result<Self> {
-        // check consistency between `EXTERNAL_EPOCH_MAPPER` and `storage_settings.external_mapper`
-        match (EXTERNAL_EPOCH_MAPPER, storage_settings.external_mapper.is_some()) {
-            (true, false) => bail!("No external mapper table provided for a storage with external epoch mapper"),
-            (false, true) => bail!("External mapper table provided for a storage with no external epoch mapper"),
-            _ => {},
+        // check consistency between `EXTERNAL_EPOCH_MAPPER` and `storage_settings.external_mapper`.
+        // This check is not relevant if `init_settings` is `MustExist`, as in this case we don't need
+        // to create a new mapping table or view. 
+        if let InitSettings::MustExist = init_settings {} else {
+                match (
+                EXTERNAL_EPOCH_MAPPER,
+                storage_settings.external_mapper.is_some(),
+            ) {
+                (true, false) => {
+                    bail!("No external mapper table provided for a storage with external epoch mapper")
+                }
+                (false, true) => {
+                    bail!("External mapper table provided for a storage with no external epoch mapper")
+                }
+                _ => {}
+            }
         };
         match init_settings {
             InitSettings::MustExist => {
@@ -287,7 +308,8 @@ async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
         .context("while fetching current epoch data")
 }
 
-impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> std::fmt::Display for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> std::fmt::Display
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
@@ -328,18 +350,15 @@ where
         Self::create_tables(db_pool.clone(), &table, mapper_table).await?;
 
         let epoch_mapper = SharedEpochMapper::new(
-            EpochMapperStorage::new::<EXTERNAL_EPOCH_MAPPER>(
-                table.clone(), 
-                db_pool.clone(), 
-                epoch
-            ).await?
+            EpochMapperStorage::new::<EXTERNAL_EPOCH_MAPPER>(table.clone(), db_pool.clone(), epoch)
+                .await?,
         );
 
         let tree_store = Arc::new(RwLock::new(CachedDbTreeStore::new(
             INITIAL_INCREMENTAL_EPOCH,
             table.clone(),
             db_pool.clone(),
-            (&epoch_mapper).into()
+            (&epoch_mapper).into(),
         )));
         let nodes = NodeProjection {
             wrapped: tree_store.clone(),
@@ -357,13 +376,13 @@ where
             nodes,
             payloads,
             state: CachedDbStore::with_value(
-                table.clone(), 
-                db_pool.clone(), 
+                table.clone(),
+                db_pool.clone(),
                 tree_state,
                 (&epoch_mapper).into(),
             )
-                .await
-                .context("failed to store initial state")?,
+            .await
+            .context("failed to store initial state")?,
             epoch_mapper,
         };
         Ok(r)
@@ -384,12 +403,15 @@ where
             "Wrong internal initial epoch found for existing table {table}: 
                 expected {INITIAL_INCREMENTAL_EPOCH}, found {initial_epoch}"
         );
-        let epoch_mapper = EpochMapperStorage::new_from_table(table.clone(), db_pool.clone()).await?;
-        let latest_epoch_in_mapper = epoch_mapper.to_incremental_epoch(epoch_mapper.latest_epoch().await).await;
+        let epoch_mapper =
+            EpochMapperStorage::new_from_table(table.clone(), db_pool.clone()).await?;
+        let latest_epoch_in_mapper = epoch_mapper
+            .to_incremental_epoch(epoch_mapper.latest_epoch().await)
+            .await;
         ensure!(
             latest_epoch_in_mapper == latest_epoch,
             "Mismatch between the latest internal epoch in mapper table and the latest epoch 
-            found in the storage: {latest_epoch_in_mapper} != {latest_epoch}" 
+            found in the storage: {latest_epoch_in_mapper} != {latest_epoch}"
         );
         let epoch_mapper = SharedEpochMapper::new(epoch_mapper);
         let tree_store = Arc::new(RwLock::new(CachedDbTreeStore::new(
@@ -410,8 +432,8 @@ where
             db: db_pool.clone(),
             epoch: latest_epoch,
             state: CachedDbStore::new(
-                latest_epoch, 
-                table.clone(), 
+                latest_epoch,
+                table.clone(),
                 db_pool.clone(),
                 (&epoch_mapper).into(),
             ),
@@ -442,10 +464,11 @@ where
 
         let epoch_mapper = SharedEpochMapper::new(
             EpochMapperStorage::new::<EXTERNAL_EPOCH_MAPPER>(
-                table.clone(), 
-                db_pool.clone(), 
+                table.clone(),
+                db_pool.clone(),
                 initial_epoch,
-            ).await?
+            )
+            .await?,
         );
 
         let tree_store = Arc::new(RwLock::new(CachedDbTreeStore::new(
@@ -568,18 +591,19 @@ where
         // create a view for the mapper table name expected for `table` to `mapper_table`.
         if EXTERNAL_EPOCH_MAPPER {
             ensure!(
-                mapper_table.is_some(), 
+                mapper_table.is_some(),
                 "No mapper table name provided for storage with external epoch mapper"
             );
             let mapper_table_alias = mapper_table_name(table);
-            let mapper_table_name = mapper_table_name(
-                mapper_table.unwrap().as_str()
-            );
+            let mapper_table_name = mapper_table_name(mapper_table.unwrap().as_str());
             connection
-                .execute(&format!("
+                .execute(
+                    &format!(
+                        "
                         CREATE VIEW {mapper_table_alias} AS
                         SELECT * FROM {mapper_table_name}"
-                    ), &[]
+                    ),
+                    &[],
                 )
                 .await
                 .map(|_| ())
@@ -587,20 +611,19 @@ where
         } else {
             let mapper_table_name = mapper_table_name(table);
             connection
-                .execute(&format!(
-                    "CREATE TABLE {mapper_table_name} (
+                .execute(
+                    &format!(
+                        "CREATE TABLE {mapper_table_name} (
                         {USER_EPOCH} BIGINT NOT NULL UNIQUE,
                         {INCREMENTAL_EPOCH} BIGINT NOT NULL UNIQUE
                     )"
-                ), 
-                &[]
-            )
-            .await
-            .map(|_| ())
-            .with_context(|| format!("unable to create table `{mapper_table_name}`"))
+                    ),
+                    &[],
+                )
+                .await
+                .map(|_| ())
+                .with_context(|| format!("unable to create table `{mapper_table_name}`"))
         }
-
-
     }
 
     /// Close the lifetim of a row to `self.epoch`.
@@ -650,11 +673,7 @@ where
             "[{self}] creating a new instance for {k:?}@{}",
             self.epoch + 1
         );
-        T::create_node_in_tx(
-            db_tx, 
-            &self.table, 
-            k, 
-            self.epoch + 1, &n).await
+        T::create_node_in_tx(db_tx, &self.table, k, self.epoch + 1, &n).await
     }
 
     async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
@@ -670,26 +689,12 @@ where
             cached_keys.extend(self.tree_store.read().await.nodes_cache.keys().cloned());
         }
         {
-            cached_keys.extend(
-                self.tree_store
-                    .read()
-                    .await
-                    .payload_cache
-                    .keys()
-                    .cloned(),
-            );
+            cached_keys.extend(self.tree_store.read().await.payload_cache.keys().cloned());
         }
 
         for k in cached_keys {
             let node_value = { self.tree_store.read().await.nodes_cache.get(&k).cloned() };
-            let data_value = {
-                self.tree_store
-                    .read()
-                    .await
-                    .payload_cache
-                    .get(&k)
-                    .cloned()
-            };
+            let data_value = { self.tree_store.read().await.payload_cache.get(&k).cloned() };
 
             match (node_value, data_value) {
                     // Nothing or a combination of read-only operations, do nothing
@@ -751,10 +756,10 @@ where
                     (_, Some(None)) => unreachable!(),
                 }
         }
-        // add new incremental epoch to `epoch_mapper` (unless an an epoch map for `self.epoch + 1` 
+        // add new incremental epoch to `epoch_mapper` (unless an an epoch map for `self.epoch + 1`
         // have already been added to `self.epoch_mapper`) and commit the new epoch map to DB
         let new_epoch = self.epoch + 1;
-        if let Some(mut mapper)  = self.epoch_mapper.write_access_ref().await {
+        if let Some(mut mapper) = self.epoch_mapper.write_access_ref().await {
             mapper.new_incremental_epoch(new_epoch).await?;
             mapper.commit_in_transaction(db_tx).await?;
         }
@@ -773,9 +778,12 @@ where
         self.in_tx = false;
         self.epoch += 1;
         self.state.commit_success().await;
-        self.epoch_mapper.apply_fn(|mapper|
-            Ok(mapper.commit_success())
-        ).await.unwrap();
+        self.epoch_mapper
+            .apply_fn(|mapper| {
+                mapper.commit_success();
+                Ok(())
+            }).await
+            .unwrap();
         self.tree_store.write().await.new_epoch();
     }
 
@@ -794,7 +802,7 @@ where
     }
 }
 
-impl<T: TreeTopology, V: PayloadInDb, const EXTERNAL_EPOCH_MAPPER: bool> TransactionalStorage 
+impl<T: TreeTopology, V: PayloadInDb, const EXTERNAL_EPOCH_MAPPER: bool> TransactionalStorage
     for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     V: Send + Sync,
@@ -807,9 +815,9 @@ where
         trace!("[{self}] starting a new transaction");
         ensure!(!self.in_tx, "already in a transaction");
         self.in_tx = true;
-        self.epoch_mapper.apply_fn(|mapper|
-             mapper.start_transaction()
-        ).await?;
+        self.epoch_mapper
+            .apply_fn(|mapper| mapper.start_transaction())
+            .await?;
         self.state.start_transaction().await?;
         Ok(())
     }
@@ -826,41 +834,24 @@ where
         let error_ctx = {
             let mut cached_keys = HashSet::new();
             cached_keys.extend(self.tree_store.read().await.nodes_cache.keys().cloned());
-            cached_keys.extend(
-                    self.tree_store
-                        .read()
-                        .await
-                        .payload_cache
-                        .keys()
-                        .cloned(),
-                );
+            cached_keys.extend(self.tree_store.read().await.payload_cache.keys().cloned());
 
-                let mut r = String::new();
+            let mut r = String::new();
 
-                for k in cached_keys {
-                    let node_value =
-                        { self.tree_store.read().await.nodes_cache.get(&k).cloned() };
-                    let data_value = {
-                        self.tree_store
-                            .read()
-                            .await
-                            .payload_cache
-                            .get(&k)
-                            .cloned()
-                    };
-                    r.push_str(&format!(
-                        "{:?}: node = {:?} data = {:?}  ",
-                        k, node_value, data_value
-                    ))
-                }
-                anyhow!("internal caches at failure time: {r}")
+            for k in cached_keys {
+                let node_value = { self.tree_store.read().await.nodes_cache.get(&k).cloned() };
+                let data_value = { self.tree_store.read().await.payload_cache.get(&k).cloned() };
+                r.push_str(&format!(
+                    "{:?}: node = {:?} data = {:?}  ",
+                    k, node_value, data_value
+                ))
+            }
+            anyhow!("internal caches at failure time: {r}")
         };
 
         self.commit_in_transaction(&mut db_tx)
             .await
-            .with_context(|| {
-                error_ctx
-            })?;
+            .with_context(|| error_ctx)?;
 
         // Atomically execute the PgSQL transaction
         let err = db_tx.commit().await.context("while committing transaction");
@@ -873,7 +864,7 @@ where
     }
 }
 
-impl<T: TreeTopology, V: PayloadInDb, const EXTERNAL_EPOCH_MAPPER: bool> SqlTransactionStorage 
+impl<T: TreeTopology, V: PayloadInDb, const EXTERNAL_EPOCH_MAPPER: bool> SqlTransactionStorage
     for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     V: Send + Sync,
@@ -888,39 +879,24 @@ where
         let error_ctx = {
             let mut cached_keys = HashSet::new();
             cached_keys.extend(self.tree_store.read().await.nodes_cache.keys().cloned());
-            cached_keys.extend(
-                    self.tree_store
-                        .read()
-                        .await
-                        .payload_cache
-                        .keys()
-                        .cloned(),
-                );
+            cached_keys.extend(self.tree_store.read().await.payload_cache.keys().cloned());
 
-                let mut r = String::new();
+            let mut r = String::new();
 
-                for k in cached_keys {
-                    let node_value =
-                        { self.tree_store.read().await.nodes_cache.get(&k).cloned() };
-                    let data_value = {
-                        self.tree_store
-                            .read()
-                            .await
-                            .payload_cache
-                            .get(&k)
-                            .cloned()
-                    };
-                    r.push_str(&format!(
-                        "{:?}: node = {:?} data = {:?}  ",
-                        k, node_value, data_value
-                    ))
-                }
+            for k in cached_keys {
+                let node_value = { self.tree_store.read().await.nodes_cache.get(&k).cloned() };
+                let data_value = { self.tree_store.read().await.payload_cache.get(&k).cloned() };
+                r.push_str(&format!(
+                    "{:?}: node = {:?} data = {:?}  ",
+                    k, node_value, data_value
+                ))
+            }
 
-                anyhow!("internal caches at failure time: {r}")
+            anyhow!("internal caches at failure time: {r}")
         };
-        self.commit_in_transaction(tx).await.with_context(|| {
-            error_ctx
-        })
+        self.commit_in_transaction(tx)
+            .await
+            .with_context(|| error_ctx)
     }
 
     async fn commit_success(&mut self) {
@@ -934,7 +910,8 @@ where
     }
 }
 
-impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> TreeStorage<T> for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> TreeStorage<T>
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     T: TreeTopology + DbConnector<V>,
     V: PayloadInDb + Send,
@@ -979,44 +956,60 @@ where
 
     async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<()> {
         self.state.rollback_to(epoch).await?;
-        let inner_epoch = self.epoch_mapper.try_to_incremental_epoch(epoch).await
+        let inner_epoch = self
+            .epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await
             .ok_or(anyhow!("IncrementalEpoch for epoch {} not found", epoch))?;
-        self.tree_store.write().await.rollback_to(inner_epoch).await?;
+        self.tree_store
+            .write()
+            .await
+            .rollback_to(inner_epoch)
+            .await?;
         self.epoch = inner_epoch;
 
         // rollback epoch mapper
-        self.epoch_mapper.as_ref().write().await.rollback_to::<EXTERNAL_EPOCH_MAPPER>(epoch).await?;
+        self.epoch_mapper
+            .as_ref()
+            .write()
+            .await
+            .rollback_to::<EXTERNAL_EPOCH_MAPPER>(epoch)
+            .await?;
 
         // Ensure epochs coherence
+        assert_eq!(self.epoch, self.tree_store.read().await.current_epoch());
         assert_eq!(
-            self.epoch,
-            self.tree_store.read().await.current_epoch()
-        );
-        assert_eq!(
-            self.epoch_mapper.to_incremental_epoch(
-                self.state.current_epoch().await,
-            ).await, 
+            self.epoch_mapper
+                .to_incremental_epoch(self.state.current_epoch().await,)
+                .await,
             self.epoch
         );
         assert_eq!(
-            self.epoch_mapper.to_incremental_epoch(
-                self.epoch_mapper.read_access_ref().await.latest_epoch().await
-            ).await,
+            self.epoch_mapper
+                .to_incremental_epoch(
+                    self.epoch_mapper
+                        .read_access_ref()
+                        .await
+                        .latest_epoch()
+                        .await
+                )
+                .await,
             self.epoch,
         );
         Ok(())
     }
-    
+
     fn epoch_mapper(&self) -> &Self::EpochMapper {
         &self.epoch_mapper
     }
-    
+
     fn epoch_mapper_mut(&mut self) -> &mut Self::EpochMapper {
         &mut self.epoch_mapper
     }
 }
 
-impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> PayloadStorage<T::Key, V> for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> PayloadStorage<T::Key, V>
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     Self: TreeStorage<T>,
     T: TreeTopology + DbConnector<V>,
@@ -1037,7 +1030,8 @@ where
     }
 }
 
-impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> MetaOperations<T, V> for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> MetaOperations<T, V>
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     Self: TreeStorage<T>,
     T: TreeTopology + DbConnector<V>,
@@ -1086,9 +1080,15 @@ where
                 if let Some(inner_epoch) = self.epoch_mapper.try_to_incremental_epoch(epoch).await {
                     data_with_incremental_epochs.push((inner_epoch, key));
                 }
-            } 
+            }
             t.fetch_many_at(
-                self, self.db.clone(), &table, data_with_incremental_epochs, &(&self.epoch_mapper).into()).await 
+                self,
+                self.db.clone(),
+                &table,
+                data_with_incremental_epochs,
+                &(&self.epoch_mapper).into(),
+            )
+            .await
         }
     }
 }

@@ -13,8 +13,8 @@ use mp2_v1::{
 };
 use plonky2::plonk::config::GenericHashOut;
 use ryhope::storage::{
-        updatetree::{Next, UpdateTree},
-        RoEpochKvStorage,
+    updatetree::{Next, UpdateTree},
+    RoEpochKvStorage,
 };
 use serde::{Deserialize, Serialize};
 use verifiable_db::{cells_tree, row_tree::extract_hash_from_proof};

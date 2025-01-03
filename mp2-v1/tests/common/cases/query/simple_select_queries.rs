@@ -19,7 +19,7 @@ use parsil::{
 };
 use ryhope::{
     storage::{pgsql::ToFromBytea, RoEpochKvStorage},
-    UserEpoch, NodePayload,
+    NodePayload, UserEpoch,
 };
 use sqlparser::ast::Query;
 use std::{fmt::Debug, hash::Hash};

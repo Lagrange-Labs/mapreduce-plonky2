@@ -1,5 +1,7 @@
 use alloy::primitives::U256;
-use ryhope::{mapper_table_name, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL, USER_EPOCH, INCREMENTAL_EPOCH};
+use ryhope::{
+    mapper_table_name, INCREMENTAL_EPOCH, KEY, PAYLOAD, USER_EPOCH, VALID_FROM, VALID_UNTIL,
+};
 use verifiable_db::query::utils::QueryBounds;
 
 use crate::{symbols::ContextProvider, ParsilSettings};
@@ -36,7 +38,7 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
 ) -> (Option<String>, Option<String>) {
     let zk_table = settings.context.fetch_table(table_name).unwrap();
     let zktable_name = &zk_table.zktable_name;
-    let mapper_table_name = mapper_table_name(&zktable_name);
+    let mapper_table_name = mapper_table_name(zktable_name);
     let sec_ind_column = zk_table.secondary_index_column().id;
 
     // A simple alias for the sec. ind. values

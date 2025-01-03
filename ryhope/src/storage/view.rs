@@ -160,7 +160,7 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> EpochKvStorag
     async fn rollback_to(&mut self, _epoch: UserEpoch) -> Result<()> {
         unimplemented!("storage views are read only")
     }
-    
+
     async fn rollback(&mut self) -> Result<()> {
         unimplemented!("storage views are read only")
     }
@@ -230,11 +230,11 @@ where
     async fn rollback_to(&mut self, _epoch: UserEpoch) -> Result<()> {
         unimplemented!("storage views are read only")
     }
-    
+
     fn epoch_mapper(&self) -> &Self::EpochMapper {
         self.epoch_mapper
     }
-    
+
     fn epoch_mapper_mut(&mut self) -> &mut Self::EpochMapper {
         unimplemented!("storage views are read only")
     }

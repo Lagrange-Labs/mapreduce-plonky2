@@ -6,10 +6,11 @@ use std::hash::Hash;
 use std::{collections::HashMap, fmt::Debug};
 
 use crate::tree::TreeTopology;
-use crate::{UserEpoch, IncrementalEpoch, InitSettings};
+use crate::{IncrementalEpoch, InitSettings, UserEpoch};
 
 use super::{
-    CurrenEpochUndefined, EpochKvStorage, EpochMapper, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage, RoSharedEpochMapper, SharedEpochMapper, TransactionalStorage, TreeStorage
+    CurrenEpochUndefined, EpochKvStorage, EpochMapper, EpochStorage, FromSettings, PayloadStorage,
+    RoEpochKvStorage, RoSharedEpochMapper, SharedEpochMapper, TransactionalStorage, TreeStorage,
 };
 
 /// A RAM-backed implementation of a transactional epoch storage for a single value.
@@ -113,8 +114,14 @@ where
     }
 
     async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<()> {
-        let inner_epoch = self.epoch_mapper.try_to_incremental_epoch(epoch).await
-            .ok_or(anyhow!(format!("trying to rollback to an invalid epoch {}", epoch)))?;
+        let inner_epoch = self
+            .epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await
+            .ok_or(anyhow!(format!(
+                "trying to rollback to an invalid epoch {}",
+                epoch
+            )))?;
         self.rollback_to_incremental_epoch(inner_epoch)
     }
 
@@ -136,8 +143,8 @@ where
 /// 0.
 #[derive(Debug)]
 pub struct VersionedKvStorage<
-    K: Hash + Eq + Clone + Debug + Send + Sync, 
-    V: Clone + Debug + Send + Sync
+    K: Hash + Eq + Clone + Debug + Send + Sync,
+    V: Clone + Debug + Send + Sync,
 > {
     /// In the diffs, the value carried by the insertion/modification of a key
     /// is represented as a Some, whereas a deletion is represented by
@@ -146,23 +153,19 @@ pub struct VersionedKvStorage<
     /// The shared data structure used to map epochs
     epoch_mapper: RoSharedEpochMapper<InMemoryEpochMapper>,
 }
-impl<
-    K: Hash + Eq + Clone + Debug + Send + Sync, 
-    V: Clone + Debug + Send + Sync
-> Default for VersionedKvStorage<K, V> {
+impl<K: Hash + Eq + Clone + Debug + Send + Sync, V: Clone + Debug + Send + Sync> Default
+    for VersionedKvStorage<K, V>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<
-    K: Hash + Eq + Clone + Debug + Send + Sync, 
-    V: Clone + Debug + Send + Sync
-> VersionedKvStorage<K, V> {
+impl<K: Hash + Eq + Clone + Debug + Send + Sync, V: Clone + Debug + Send + Sync>
+    VersionedKvStorage<K, V>
+{
     pub fn new() -> Self {
-        let epoch_mapper = SharedEpochMapper::new(
-            InMemoryEpochMapper::new_at(0)
-        );
+        let epoch_mapper = SharedEpochMapper::new(InMemoryEpochMapper::new_at(0));
         Self::new_with_mapper(epoch_mapper)
     }
 
@@ -184,11 +187,11 @@ impl<
     }
 
     fn try_fetch_at_incremental_epoch(&self, k: &K, epoch: IncrementalEpoch) -> Option<V> {
-        assert!(epoch >= 0);       // To fetch a key at a given epoch, the list of diffs up to the
-            // requested epoch is iterated in reverse. The first occurence of k,
-            // i.e. the most recent one, will be the current value.
-            //
-            // If this occurence is a None, it means that k has been deleted.
+        assert!(epoch >= 0); // To fetch a key at a given epoch, the list of diffs up to the
+                             // requested epoch is iterated in reverse. The first occurence of k,
+                             // i.e. the most recent one, will be the current value.
+                             //
+                             // If this occurence is a None, it means that k has been deleted.
 
         for i in (0..=epoch as usize).rev() {
             let maybe = self.mem[i].get(k);
@@ -201,10 +204,7 @@ impl<
     }
 
     fn rollback_to_incremental_epoch(&mut self, epoch: IncrementalEpoch) -> Result<()> {
-        ensure!(
-            epoch >= 0,
-            "unable to rollback before epoch 0",
-        );
+        ensure!(epoch >= 0, "unable to rollback before epoch 0",);
         ensure!(
             epoch <= self.inner_epoch(),
             "unable to rollback to epoch `{}` more recent than current epoch `{}`",
@@ -228,7 +228,9 @@ where
     }
 
     async fn current_epoch(&self) -> Result<UserEpoch> {
-        self.epoch_mapper.try_to_user_epoch(self.inner_epoch()).await
+        self.epoch_mapper
+            .try_to_user_epoch(self.inner_epoch())
+            .await
             .ok_or(CurrenEpochUndefined(self.inner_epoch()).into())
     }
 
@@ -237,10 +239,10 @@ where
     }
 
     async fn try_fetch_at(&self, k: &K, epoch: UserEpoch) -> Option<V> {
-        self.epoch_mapper.try_to_incremental_epoch(epoch).await
-            .and_then(|inner_epoch| {
-            self.try_fetch_at_incremental_epoch(k, inner_epoch)
-        })
+        self.epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await
+            .and_then(|inner_epoch| self.try_fetch_at_incremental_epoch(k, inner_epoch))
     }
 
     // Expensive, but only used in test context.
@@ -262,7 +264,7 @@ where
 
     async fn size_at(&self, epoch: UserEpoch) -> usize {
         let inner_epoch = self.epoch_mapper.to_incremental_epoch(epoch).await;
-        assert!(inner_epoch >= 0);       // To fetch a key at a given epoch, the list of diffs up to the
+        assert!(inner_epoch >= 0); // To fetch a key at a given epoch, the list of diffs up to the
         let mut keys = HashSet::new();
 
         for i in 0..=inner_epoch as usize {
@@ -291,7 +293,9 @@ where
     }
 
     async fn random_key_at(&self, epoch: UserEpoch) -> Option<K> {
-        self.epoch_mapper.try_to_incremental_epoch(epoch).await
+        self.epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await
             .and_then(|inner_epoch| {
                 assert!(inner_epoch >= 0);
 
@@ -308,7 +312,10 @@ where
     }
 
     async fn pairs_at(&self, epoch: UserEpoch) -> Result<HashMap<K, V>> {
-        let inner_epoch = self.epoch_mapper.try_to_incremental_epoch(epoch).await
+        let inner_epoch = self
+            .epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await
             .ok_or(anyhow!("Try fetching an invalid epoch {epoch}"))?;
         assert!(inner_epoch >= 0);
         let mut pairs = HashMap::new();
@@ -348,7 +355,10 @@ where
     }
 
     async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<()> {
-        let inner_epoch = self.epoch_mapper.try_to_incremental_epoch(epoch).await
+        let inner_epoch = self
+            .epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await
             .ok_or(anyhow!("Try to rollback to an invalid epoch {epoch}"))?;
         self.rollback_to_incremental_epoch(inner_epoch)
     }
@@ -366,9 +376,7 @@ impl InMemoryEpochMapper {
         Self(BTreeMap::new())
     }
 
-    pub(crate) fn new_at(
-        initial_epoch: UserEpoch
-    ) -> Self {
+    pub(crate) fn new_at(initial_epoch: UserEpoch) -> Self {
         let mut map = BTreeMap::new();
         map.insert(initial_epoch, 0);
         Self(map)
@@ -381,15 +389,15 @@ impl InMemoryEpochMapper {
     }
 
     pub(crate) fn last_epoch(&self) -> UserEpoch {
-        *self.0.iter().rev().next().unwrap().0
+        *self.0.iter().next_back().unwrap().0
     }
 
     fn try_to_incremental_epoch_inner(&self, epoch: UserEpoch) -> Option<IncrementalEpoch> {
-        self.0.get(&epoch).map(|epoch| *epoch)
+        self.0.get(&epoch).copied()
     }
 
     fn try_to_user_epoch_inner(&self, epoch: IncrementalEpoch) -> Option<UserEpoch> {
-        self.0.iter().skip(epoch as usize).next().map(|el| *el.0)
+        self.0.iter().nth(epoch as usize).map(|el| *el.0)
     }
 
     /// Add a new epoch mapping for `IncrementalEpoch` `epoch`, assuming that `UserEpoch`s
@@ -398,57 +406,48 @@ impl InMemoryEpochMapper {
     /// that the mapping has already been provided according to another, non-incremental, logic.
     /// This function returns the `UserEpoch` being mapper to `epoch`, in case a new mapping
     /// is actually inserted.
-    pub(crate) fn new_incremental_epoch(
-        &mut self,
-        epoch: IncrementalEpoch,
-    ) -> Option<UserEpoch> {
-        // compute last arbitrary epoch being inserted in the map 
+    pub(crate) fn new_incremental_epoch(&mut self, epoch: IncrementalEpoch) -> Option<UserEpoch> {
+        // compute last arbitrary epoch being inserted in the map
         let last_epoch = self.last_epoch();
         // check if `epoch` has already been inserted in the map
         match self.try_to_user_epoch_inner(epoch) {
             Some(matched_epoch) => {
                 // `epoch` has already been inserted, only check that
                 // `matched_epoch` corresponds to the last inserted `UserEpoch`
-                assert_eq!(
-                    last_epoch,
-                    matched_epoch,
-                );
+                assert_eq!(last_epoch, matched_epoch,);
                 None
-            },
+            }
             None => {
                 // get arbitrary epoch corresponding to the new incremental epoch.
-                // in this implementation, it is computed assuming that also 
+                // in this implementation, it is computed assuming that also
                 // `UserEpoch`s are incremental, and so the epoch to be inserted
                 // is simply `last_epoch + 1`
-                let mapped_epoch = last_epoch + 1;        
+                let mapped_epoch = last_epoch + 1;
                 // add the epoch mapping to `self`
                 self.add_epoch(mapped_epoch, epoch)
-                    .ok().map(|_| mapped_epoch)
-            },
+                    .ok()
+                    .map(|_| mapped_epoch)
+            }
         }
     }
 
-    pub(crate) fn rollback_to(
-        &mut self,
-        epoch: UserEpoch,
-    ) {
+    pub(crate) fn rollback_to(&mut self, epoch: UserEpoch) {
         // erase from the map all epochs greater than `epoch`
-        let to_be_erased_epochs = self.0.iter().rev().map_while(|el|
-            if *el.0 > epoch {
-                Some(*el.0)
-            } else {
-                None
-            }
-        ).collect_vec(); 
+        let to_be_erased_epochs = self
+            .0
+            .iter()
+            .rev()
+            .map_while(|el| if *el.0 > epoch { Some(*el.0) } else { None })
+            .collect_vec();
         to_be_erased_epochs.into_iter().for_each(|epoch| {
-            self.0.remove(&epoch);    
+            self.0.remove(&epoch);
         });
     }
 
     fn add_epoch(
-        &mut self, 
+        &mut self,
         user_epoch: UserEpoch,
-        incremental_epoch: IncrementalEpoch
+        incremental_epoch: IncrementalEpoch,
     ) -> Result<()> {
         // double check that we are either replacing an existing `IncrementalEpoch`
         // in the map or we are adding the next incremental one. This check ensures
@@ -458,31 +457,26 @@ impl InMemoryEpochMapper {
             incremental_epoch as usize <= num_epochs,
             "Inserted IncrementalEpoch is too big: found {incremental_epoch}, maximum is {num_epochs}"
         );
-        // check that the `user_epoch` being added is associated to the correct 
+        // check that the `user_epoch` being added is associated to the correct
         // `incremental_epoch`, according to the ordering in the map
-        if let Some(smaller_epoch) = self.try_to_user_epoch_inner(incremental_epoch-1) {
-            ensure!(
-                user_epoch > smaller_epoch
-            );
+        if let Some(smaller_epoch) = self.try_to_user_epoch_inner(incremental_epoch - 1) {
+            ensure!(user_epoch > smaller_epoch);
         }
-        if let Some(bigger_epoch) = self.try_to_user_epoch_inner(incremental_epoch+1) {
-            ensure!(
-                user_epoch < bigger_epoch
-            )
+        if let Some(bigger_epoch) = self.try_to_user_epoch_inner(incremental_epoch + 1) {
+            ensure!(user_epoch < bigger_epoch)
         }
         // if we are replacing an existing `IncrementalEpoch`, ensure that
-        // we remove the old map
+        // we remove the old mapping entry
         if let Some(epoch) = self.try_to_user_epoch_inner(incremental_epoch) {
             self.0.remove(&epoch);
         }
-        
+
         self.0.insert(user_epoch, incremental_epoch);
         Ok(())
     }
 }
 
 impl EpochMapper for InMemoryEpochMapper {
-
     async fn try_to_incremental_epoch(&self, epoch: UserEpoch) -> Option<IncrementalEpoch> {
         self.try_to_incremental_epoch_inner(epoch)
     }
@@ -492,10 +486,10 @@ impl EpochMapper for InMemoryEpochMapper {
     }
 
     async fn add_epoch_map(
-            &mut self, 
-            user_epoch: UserEpoch,
-            incremental_epoch: IncrementalEpoch
-        ) -> Result<()> {
+        &mut self,
+        user_epoch: UserEpoch,
+        incremental_epoch: IncrementalEpoch,
+    ) -> Result<()> {
         self.add_epoch(user_epoch, incremental_epoch)
     }
 }
@@ -513,11 +507,13 @@ pub struct InMemory<T: TreeTopology, V: Clone + Debug + Send + Sync, const READ_
     in_tx: bool,
 }
 
-impl<'a, T: TreeTopology, V: Clone + Debug + Send + Sync, const READ_ONLY: bool> InMemory<T, V, READ_ONLY> {
+impl<T: TreeTopology, V: Clone + Debug + Send + Sync, const READ_ONLY: bool>
+    InMemory<T, V, READ_ONLY>
+{
     /// Initialize a new `InMemory` storage with read-only epoch mapper
     pub fn new_with_mapper(
-        tree_state: T::State, 
-        epoch_mapper: SharedEpochMapper<InMemoryEpochMapper, READ_ONLY>
+        tree_state: T::State,
+        epoch_mapper: SharedEpochMapper<InMemoryEpochMapper, READ_ONLY>,
     ) -> Self {
         Self {
             state: VersionedStorage::new(tree_state, (&epoch_mapper).into()),
@@ -528,13 +524,8 @@ impl<'a, T: TreeTopology, V: Clone + Debug + Send + Sync, const READ_ONLY: bool>
         }
     }
 
-    pub fn new_with_epoch(
-        tree_state: T::State, 
-        initial_epoch: UserEpoch,
-    ) -> Self {
-        let epoch_mapper = SharedEpochMapper::new(
-            InMemoryEpochMapper::new_at(initial_epoch)
-        );
+    pub fn new_with_epoch(tree_state: T::State, initial_epoch: UserEpoch) -> Self {
+        let epoch_mapper = SharedEpochMapper::new(InMemoryEpochMapper::new_at(initial_epoch));
         Self {
             state: VersionedStorage::new(tree_state, (&epoch_mapper).into()),
             nodes: VersionedKvStorage::new_with_mapper((&epoch_mapper).into()),
@@ -545,7 +536,9 @@ impl<'a, T: TreeTopology, V: Clone + Debug + Send + Sync, const READ_ONLY: bool>
     }
 }
 
-impl<T: TreeTopology, V: Clone + Debug + Send + Sync> FromSettings<T::State> for InMemory<T, V, true> {
+impl<T: TreeTopology, V: Clone + Debug + Send + Sync> FromSettings<T::State>
+    for InMemory<T, V, true>
+{
     type Settings = SharedEpochMapper<InMemoryEpochMapper, true>;
 
     async fn from_settings(
@@ -562,7 +555,7 @@ impl<T: TreeTopology, V: Clone + Debug + Send + Sync> FromSettings<T::State> for
                 // check that initial_epoch is in epoch_mapper
                 ensure!(
                     storage_settings.read_access_ref().await.initial_epoch() == initial_epoch,
-                    "Initial epoch {initial_epoch} not found in the epoch mapper provided as input"  
+                    "Initial epoch {initial_epoch} not found in the epoch mapper provided as input"
                 );
                 Ok(Self::new_with_mapper(tree_state, storage_settings))
             }
@@ -570,7 +563,9 @@ impl<T: TreeTopology, V: Clone + Debug + Send + Sync> FromSettings<T::State> for
     }
 }
 
-impl<T: TreeTopology, V: Clone + Debug + Send + Sync> FromSettings<T::State> for InMemory<T, V, false> {
+impl<T: TreeTopology, V: Clone + Debug + Send + Sync> FromSettings<T::State>
+    for InMemory<T, V, false>
+{
     type Settings = ();
 
     async fn from_settings(
@@ -585,11 +580,10 @@ impl<T: TreeTopology, V: Clone + Debug + Send + Sync> FromSettings<T::State> for
             InitSettings::MustNotExistAt(tree_state, initial_epoch)
             | InitSettings::ResetAt(tree_state, initial_epoch) => {
                 Ok(Self::new_with_epoch(tree_state, initial_epoch))
-            } 
+            }
         }
     }
 }
-
 
 impl<T, V, const READ_ONLY: bool> TreeStorage<T> for InMemory<T, V, READ_ONLY>
 where
@@ -633,26 +627,30 @@ where
         self.data.rollback_to(epoch).await?;
 
         // Rollback epoch_mapper as well
-        self.epoch_mapper.apply_fn(|mapper|
-            Ok(mapper.rollback_to(epoch))
-        ).await?;
+        self.epoch_mapper
+            .apply_fn(|mapper| {
+                mapper.rollback_to(epoch);
+                Ok(())
+            })
+            .await?;
 
         assert_eq!(self.state.inner_epoch(), self.nodes.inner_epoch());
         assert_eq!(self.state.inner_epoch(), self.data.inner_epoch());
 
         Ok(())
     }
-    
+
     fn epoch_mapper(&self) -> &Self::EpochMapper {
         &self.epoch_mapper
     }
-    
+
     fn epoch_mapper_mut(&mut self) -> &mut Self::EpochMapper {
         &mut self.epoch_mapper
     }
 }
 
-impl<T, V, const READ_ONLY: bool> PayloadStorage<<T as TreeTopology>::Key, V> for InMemory<T, V, READ_ONLY>
+impl<T, V, const READ_ONLY: bool> PayloadStorage<<T as TreeTopology>::Key, V>
+    for InMemory<T, V, READ_ONLY>
 where
     T: TreeTopology,
     <T as TreeTopology>::Key: Clone,
@@ -680,17 +678,19 @@ where
         self.data.new_epoch();
         self.nodes.new_epoch();
         self.in_tx = true;
-        
+
         let new_epoch = self.state.inner_epoch();
         assert_eq!(new_epoch, self.nodes.inner_epoch());
         assert_eq!(new_epoch, self.data.inner_epoch());
 
         // add new_epoch to epoch mapper, if it is not READ_ONLY
-        self.epoch_mapper.apply_fn(|mapper| {
-            mapper.new_incremental_epoch(new_epoch);
-            Ok(())
-        }).await?;
-        
+        self.epoch_mapper
+            .apply_fn(|mapper| {
+                mapper.new_incremental_epoch(new_epoch);
+                Ok(())
+            })
+            .await?;
+
         Ok(())
     }
 

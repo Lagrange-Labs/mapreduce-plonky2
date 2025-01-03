@@ -14,9 +14,13 @@ use crate::{
         memory::InMemory,
         pgsql::{PgsqlStorage, SqlServerConnection, SqlStorageSettings},
         EpochKvStorage, PayloadStorage, RoEpochKvStorage, SqlTreeTransactionalStorage, TreeStorage,
-    }, tree::{
-        sbbst, scapegoat::{self, Alpha}, PrintableTree, TreeTopology
-    }, UserEpoch, InitSettings, MerkleTreeKvDb, NodePayload, EPOCH, KEY, VALID_FROM, VALID_UNTIL
+    },
+    tree::{
+        sbbst,
+        scapegoat::{self, Alpha},
+        PrintableTree, TreeTopology,
+    },
+    InitSettings, MerkleTreeKvDb, NodePayload, UserEpoch, EPOCH, KEY, VALID_FROM, VALID_UNTIL,
 };
 
 use super::TreeTransactionalStorage;
@@ -300,11 +304,9 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
         s_psql.diff_at(i).await.unwrap().print();
     }
 
-    let mut s_ram = MerkleTreeKvDb::<TestTree, V, RamStorage>::new(
-        InitSettings::Reset(TestTree::empty()),
-        (),
-    )
-    .await?;
+    let mut s_ram =
+        MerkleTreeKvDb::<TestTree, V, RamStorage>::new(InitSettings::Reset(TestTree::empty()), ())
+            .await?;
     s_ram
         .in_transaction(|t| {
             Box::pin(async {
@@ -611,8 +613,7 @@ async fn aggregation_memory() -> Result<()> {
     type Storage = InMemory<Tree, V, false>;
 
     let mut s =
-        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ())
-            .await?;
+        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ()).await?;
 
     s.in_transaction(|s| {
         Box::pin(async {
@@ -949,7 +950,7 @@ async fn grouped_txs() -> Result<()> {
         SqlStorageSettings {
             table: "nested_scape".into(),
             source: SqlServerConnection::Pool(db_pool.clone()),
-            external_mapper: Some("nested_sbbst".into())
+            external_mapper: Some("nested_sbbst".into()),
         },
     )
     .await
@@ -1184,7 +1185,6 @@ async fn all_pgsql() {
 
     const TEXT1: &str = "nature berce le il a froid";
     const TEXT2: &str = "dort tranquille deux trous rouges cote";
-
 
     s.in_transaction(|s| {
         Box::pin(async {

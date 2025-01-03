@@ -1,5 +1,9 @@
 //! Module to handle the block number as a primary index
-use ryhope::{storage::pgsql::PgsqlStorage, tree::{sbbst, TreeTopology}, MerkleTreeKvDb};
+use ryhope::{
+    storage::pgsql::PgsqlStorage,
+    tree::{sbbst, TreeTopology},
+    MerkleTreeKvDb,
+};
 
 use super::index::IndexNode;
 

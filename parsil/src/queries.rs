@@ -3,7 +3,10 @@
 
 use crate::{keys_in_index_boundaries, symbols::ContextProvider, ParsilSettings};
 use anyhow::*;
-use ryhope::{mapper_table_name, tree::sbbst::NodeIdx, UserEpoch, EPOCH, KEY, USER_EPOCH, INCREMENTAL_EPOCH, VALID_FROM, VALID_UNTIL};
+use ryhope::{
+    mapper_table_name, tree::sbbst::NodeIdx, UserEpoch, EPOCH, INCREMENTAL_EPOCH, KEY, USER_EPOCH,
+    VALID_FROM, VALID_UNTIL,
+};
 use verifiable_db::query::{
     universal_circuit::universal_circuit_inputs::Placeholders, utils::QueryBounds,
 };
@@ -34,7 +37,6 @@ pub fn core_keys_for_index_tree<C: ContextProvider>(
         .context("while fetching table")?;
 
     let mapper_table_name = mapper_table_name(&zk_table.zktable_name);
-
 
     // Integer default to i32 in PgSQL, they must be cast to i64, a.k.a. BIGINT.
     Ok(format!(

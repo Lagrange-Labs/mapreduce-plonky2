@@ -5,7 +5,13 @@ mod sbbst {
         tree::{sbbst, MutableTree, TreeTopology},
     };
 
-    fn sbbst_in_memory(shift: usize, n: usize) -> (sbbst::IncrementalTree, InMemory<sbbst::IncrementalTree, (), false>) {
+    fn sbbst_in_memory(
+        shift: usize,
+        n: usize,
+    ) -> (
+        sbbst::IncrementalTree,
+        InMemory<sbbst::IncrementalTree, (), false>,
+    ) {
         (
             sbbst::IncrementalTree::default(),
             InMemory::new_with_epoch(sbbst::IncrementalTree::with_shift_and_capacity(shift, n), 0),
@@ -90,7 +96,10 @@ mod scapegoat {
     >(
         a: Alpha,
     ) -> (scapegoat::Tree<K>, InMemory<scapegoat::Tree<K>, (), false>) {
-        (Default::default(), InMemory::new_with_epoch(scapegoat::Tree::empty(a), 0))
+        (
+            Default::default(),
+            InMemory::new_with_epoch(scapegoat::Tree::empty(a), 0),
+        )
     }
 
     #[tokio::test]

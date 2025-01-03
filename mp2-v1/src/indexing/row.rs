@@ -16,7 +16,11 @@ use plonky2::{
     hash::hash_types::HashOut,
     plonk::config::{GenericHashOut, Hasher},
 };
-use ryhope::{storage::pgsql::{PgsqlStorage, ToFromBytea}, tree::scapegoat, MerkleTreeKvDb, NodePayload};
+use ryhope::{
+    storage::pgsql::{PgsqlStorage, ToFromBytea},
+    tree::scapegoat,
+    MerkleTreeKvDb, NodePayload,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
