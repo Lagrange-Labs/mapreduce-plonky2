@@ -77,8 +77,8 @@ async fn main() -> Result<()> {
                 SqlStorageSettings {
                     source: SqlServerConnection::NewConnection(args.db_uri.clone()),
                     table: args.db_table,
-                    external_mapper: None, // not necessary even if there is an external epoch mapper, 
-                        // since we are initializing the tree with `InitSettings::MustExist`
+                    external_mapper: None, // not necessary even if there is an external epoch mapper,
+                                           // since we are initializing the tree with `InitSettings::MustExist`
                 },
             )
             .await?;

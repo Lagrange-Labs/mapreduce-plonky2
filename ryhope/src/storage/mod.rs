@@ -339,7 +339,7 @@ where
     /// are handled by another storage.
     fn current_epoch(&self) -> impl Future<Output = Result<UserEpoch>> + Send;
 
-    /// Return the value stored at the current epoch. 
+    /// Return the value stored at the current epoch.
     fn fetch(&self) -> impl Future<Output = T> + Send;
 
     /// Return the value stored at the given epoch.
