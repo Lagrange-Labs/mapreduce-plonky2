@@ -180,7 +180,7 @@ impl TableIndexing {
         );
 
         let indexing_genesis_block = ctx.block_number().await;
-        let table = Table::new(indexing_genesis_block, "merged_table".to_string(), columns).await;
+        let table = Table::new(indexing_genesis_block, "merged_table".to_string(), columns).await?;
         Ok((
             Self {
                 value_column,
@@ -264,7 +264,7 @@ impl TableIndexing {
                 })
                 .collect::<Vec<_>>(),
         };
-        let table = Table::new(indexing_genesis_block, "single_table".to_string(), columns).await;
+        let table = Table::new(indexing_genesis_block, "single_table".to_string(), columns).await?;
         Ok((
             Self {
                 value_column: "".to_string(),
@@ -366,7 +366,7 @@ impl TableIndexing {
         let value_column = columns.rest[0].name.clone();
         debug!("MAPPING ZK COLUMNS -> {:?}", columns);
         let index_genesis_block = ctx.block_number().await;
-        let table = Table::new(index_genesis_block, "mapping_table".to_string(), columns).await;
+        let table = Table::new(index_genesis_block, "mapping_table".to_string(), columns).await?;
 
         Ok((
             Self {
@@ -445,7 +445,7 @@ impl TableIndexing {
             "off_chain_table".to_string(),
             columns,
         )
-        .await;
+        .await?;
 
         Ok((
             Self {

@@ -10,7 +10,7 @@ use ryhope::{
         TreeStorage,
     },
     tree::{MutableTree, PrintableTree, TreeTopology},
-    Epoch, MerkleTreeKvDb, NodePayload,
+    UserEpoch, MerkleTreeKvDb, NodePayload,
 };
 use tabled::{builder::Builder, settings::Style};
 
@@ -58,7 +58,7 @@ pub(crate) struct Repl<
     F: PayloadFormatter<V>,
 > {
     current_key: T::Key,
-    current_epoch: Epoch,
+    current_epoch: UserEpoch,
     db: MerkleTreeKvDb<T, V, S>,
     tty: console::Term,
     payload_fmt: F,
@@ -106,7 +106,7 @@ impl<
         .unwrap();
     }
 
-    pub fn set_epoch(&mut self, epoch: Epoch) -> Result<()> {
+    pub fn set_epoch(&mut self, epoch: UserEpoch) -> Result<()> {
         if epoch < self.db.initial_epoch() {
             bail!(
                 "epoch `{}` is older than initial epoch `{}`",
@@ -148,7 +148,7 @@ impl<
 
     async fn travel(&mut self) -> Result<()> {
         loop {
-            let epoch: Epoch = Input::new().with_prompt("target epoch:").interact_text()?;
+            let epoch: UserEpoch = Input::new().with_prompt("target epoch:").interact_text()?;
 
             self.set_epoch(epoch)?;
         }

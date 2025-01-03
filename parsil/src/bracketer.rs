@@ -1,5 +1,5 @@
 use alloy::primitives::U256;
-use ryhope::{KEY, PAYLOAD, VALID_FROM, VALID_UNTIL};
+use ryhope::{mapper_table_name, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL, USER_EPOCH, INCREMENTAL_EPOCH};
 use verifiable_db::query::utils::QueryBounds;
 
 use crate::{symbols::ContextProvider, ParsilSettings};
@@ -36,6 +36,7 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
 ) -> (Option<String>, Option<String>) {
     let zk_table = settings.context.fetch_table(table_name).unwrap();
     let zktable_name = &zk_table.zktable_name;
+    let mapper_table_name = mapper_table_name(&zktable_name);
     let sec_ind_column = zk_table.secondary_index_column().id;
 
     // A simple alias for the sec. ind. values
@@ -46,8 +47,11 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
     let largest_below = if *secondary_lo == U256::ZERO {
         None
     } else {
-        Some(format!("SELECT {KEY} FROM {zktable_name}
-                           WHERE {sec_index} < '{secondary_lo}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
+        Some(format!("SELECT {KEY} FROM 
+            {zktable_name} JOIN (
+                SELECT {INCREMENTAL_EPOCH} FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number}
+            ) as __mapper ON {VALID_FROM} <= {INCREMENTAL_EPOCH} AND {VALID_UNTIL} >= {INCREMENTAL_EPOCH}
+                           WHERE {sec_index} < '{secondary_lo}'::DECIMAL
                            ORDER BY {sec_index} DESC LIMIT 1"))
     };
 
@@ -55,8 +59,11 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
     let smallest_above = if *secondary_hi == U256::MAX {
         None
     } else {
-        Some(format!("SELECT {KEY} FROM {zktable_name}
-                           WHERE {sec_index} > '{secondary_hi}'::DECIMAL AND {VALID_FROM} <= {block_number} AND {VALID_UNTIL} >= {block_number}
+        Some(format!("SELECT {KEY} FROM 
+            {zktable_name} JOIN (
+                SELECT {INCREMENTAL_EPOCH} FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number}
+            ) as __mapper ON {VALID_FROM} <= {INCREMENTAL_EPOCH} AND {VALID_UNTIL} >= {INCREMENTAL_EPOCH}
+                           WHERE {sec_index} > '{secondary_hi}'::DECIMAL
                            ORDER BY {sec_index} ASC LIMIT 1"))
     };
 
