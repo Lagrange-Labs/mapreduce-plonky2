@@ -167,8 +167,7 @@ pub(crate) async fn prove_query(
         let index_query = core_keys_for_index_tree(
             current_epoch as UserEpoch,
             (planner.query.min_block, planner.query.max_block),
-            planner.table.public_name.as_str(),
-            planner.settings,
+            &planner.table.index_table_name(),
         )?;
         let big_index_cache = planner
             .table

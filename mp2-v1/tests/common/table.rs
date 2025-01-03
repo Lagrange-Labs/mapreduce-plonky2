@@ -227,6 +227,10 @@ impl Table {
         row_table_name(&self.public_name)
     }
 
+    pub(crate) fn index_table_name(&self) -> String {
+        index_table_name(&self.public_name)
+    }
+
     pub async fn new(
         
         genesis_block: u64,
