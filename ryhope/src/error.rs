@@ -19,7 +19,7 @@ pub enum RyhopeError {
     Internal(String),
 
     /// Unable to extract data from the DB
-    #[error("unable to deserialize data while {msg}: {err}")]
+    #[error("unable to deserialize data while {msg}: {err} -- this should never happen; has a non-retrocompatible update of the storage format happened?")]
     InvalidFormat { msg: String, err: PgError },
 
     #[error("already in a transaction")]
