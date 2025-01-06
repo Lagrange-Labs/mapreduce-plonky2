@@ -424,7 +424,7 @@ impl<T: Debug + Clone + Hash + Eq> UpdatePlan<T> {
             .t
             .idx
             .get(item.k())
-            .ok_or_else(|| RyhopeError::fatal("unknwown key"))?;
+            .ok_or_else(|| RyhopeError::KeyNotFound)?;
 
         // May happen when restarting a plan
         self.anchors.retain(|k| k != item.k());

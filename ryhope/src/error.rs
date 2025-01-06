@@ -15,16 +15,25 @@ pub enum RyhopeError {
     },
 
     /// The internal state is incoherent; this is a bug.
-    #[error("internal Error: {0}")]
+    #[error("internal Error: {0}. Please fill a bug report here https://github.com/Lagrange-Labs/mapreduce-plonky2")]
     Internal(String),
 
     /// Unable to extract data from the DB
     #[error("unable to deserialize data while {msg}: {err}")]
     InvalidFormat { msg: String, err: PgError },
 
+    #[error("already in a transaction")]
+    AlreadyInTransaction,
+
+    #[error("not in a transaction")]
+    NotInATransaction,
+
     /// A non-recoverable error
     #[error("fatal error: {0}")]
     Fatal(String),
+
+    #[error("key not found in tree")]
+    KeyNotFound,
 }
 impl RyhopeError {
     pub fn from_db<S: AsRef<str>>(msg: S, err: PgError) -> Self {

@@ -51,7 +51,9 @@ where
     T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
     fn start_transaction(&mut self) -> Result<(), RyhopeError> {
-        ensure(!self.in_tx, "already in a transaction")?;
+        if self.in_tx {
+            return Err(RyhopeError::AlreadyInTransaction);
+        }
         self.in_tx = true;
         if let Some(latest) = self.ts.last().cloned() {
             self.ts.push(latest);
@@ -62,7 +64,9 @@ where
     }
 
     async fn commit_transaction(&mut self) -> Result<(), RyhopeError> {
-        ensure(self.in_tx, "not in a transaction")?;
+        if !self.in_tx {
+            return Err(RyhopeError::NotInATransaction);
+        }
         self.in_tx = false;
         Ok(())
     }
@@ -425,7 +429,10 @@ where
     V: Clone + Debug + Send + Sync,
 {
     fn start_transaction(&mut self) -> Result<(), RyhopeError> {
-        ensure(!self.in_tx, "already in a transaction")?;
+        if self.in_tx {
+            return Err(RyhopeError::AlreadyInTransaction);
+        }
+
         self.state.start_transaction()?;
         self.data.new_epoch();
         self.nodes.new_epoch();
@@ -434,7 +441,10 @@ where
     }
 
     async fn commit_transaction(&mut self) -> Result<(), RyhopeError> {
-        ensure(self.in_tx, "not in a transaction")?;
+        if !self.in_tx {
+            return Err(RyhopeError::NotInATransaction);
+        }
+
         self.state.commit_transaction().await?;
         self.in_tx = false;
         Ok(())

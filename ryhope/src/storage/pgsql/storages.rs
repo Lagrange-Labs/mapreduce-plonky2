@@ -795,7 +795,9 @@ where
 {
     fn start_transaction(&mut self) -> Result<(), RyhopeError> {
         trace!("[{self}] starting transaction");
-        ensure(!self.in_tx, "already in a transaction")?;
+        if self.in_tx {
+            return Err(RyhopeError::AlreadyInTransaction);
+        }
 
         self.in_tx = true;
         Ok(())
@@ -803,7 +805,10 @@ where
 
     async fn commit_transaction(&mut self) -> Result<(), RyhopeError> {
         trace!("[{self}] committing transaction");
-        ensure(self.in_tx, "not in a transaction")?;
+        if !self.in_tx {
+            return Err(RyhopeError::NotInATransaction);
+        }
+
         let pool = self.db.clone();
         let mut connection = pool.get().await.unwrap();
         let mut db_tx = connection

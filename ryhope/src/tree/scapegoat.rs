@@ -287,7 +287,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                             );
                             context.shift(Ordering::Less, left.to_owned());
                         } else {
-                            return Err(RyhopeError::fatal("key not found in tree"));
+                            return Err(RyhopeError::KeyNotFound);
                         }
                     }
                     Ordering::Equal => {
@@ -306,7 +306,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                             );
                             context.shift(Ordering::Greater, right.to_owned());
                         } else {
-                            return Err(RyhopeError::fatal("key not found in tree"));
+                            return Err(RyhopeError::KeyNotFound);
                         }
                     }
                 }
@@ -374,7 +374,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         let to_remove_context = self
             .find_with_path(k, s)
             .await?
-            .ok_or_else(|| RyhopeError::fatal("key not found in tree"))?;
+            .ok_or_else(|| RyhopeError::KeyNotFound)?;
         let to_remove = to_remove_context.target;
 
         let binding = s

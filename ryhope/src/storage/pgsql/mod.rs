@@ -555,7 +555,9 @@ where
         &mut self,
         db_tx: &mut Transaction<'_>,
     ) -> Result<(), RyhopeError> {
-        ensure(self.in_tx, "not in a transaction")?;
+        if !self.in_tx {
+            return Err(RyhopeError::NotInATransaction);
+        }
         trace!("[{self}] commiting in a transaction...");
 
         // The putative new stamps if everything goes well
@@ -571,7 +573,7 @@ where
                 self.tree_store
                     .lock()
                     .map_err(|e| {
-                        RyhopeError::fatal(format!("failed to lock tree store mutex: {e}"))
+                        RyhopeError::fatal(format!("failed to lock tree store mutex: {e:?}"))
                     })?
                     .payload_cache
                     .keys()
@@ -585,7 +587,7 @@ where
                 self.tree_store
                     .lock()
                     .map_err(|e| {
-                        RyhopeError::fatal(format!("failed to lock tree store mutex: {e}"))
+                        RyhopeError::fatal(format!("failed to lock tree store mutex: {e:?}"))
                     })?
                     .payload_cache
                     .get(&k)
@@ -691,14 +693,19 @@ where
     T::State: Send + Sync + Clone,
 {
     fn start_transaction(&mut self) -> Result<(), RyhopeError> {
+        if self.in_tx {
+            return Err(RyhopeError::AlreadyInTransaction);
+        }
         trace!("[{self}] starting a new transaction");
-        ensure(!self.in_tx, "already in a transaction")?;
         self.in_tx = true;
         self.state.start_transaction()?;
         Ok(())
     }
 
     async fn commit_transaction(&mut self) -> Result<(), RyhopeError> {
+        if !self.in_tx {
+            return Err(RyhopeError::NotInATransaction);
+        }
         trace!("[{self}] commiting transaction");
         let pool = self.db.clone();
         let mut connection = pool.get().await.unwrap();
