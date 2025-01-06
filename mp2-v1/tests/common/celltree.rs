@@ -42,7 +42,7 @@ impl TestContext {
         new_row_key: RowTreeKey,
         tree: MerkleCellTree<BlockPrimaryIndex>,
         ut: UpdateTree<CellTreeKey>,
-    ) -> CellTreeKey {
+    ) -> anyhow::Result<CellTreeKey> {
         let previous_row_key = match previous_row == Default::default() {
             true => new_row_key.clone(),
             false => previous_row.k.clone(),
@@ -54,7 +54,7 @@ impl TestContext {
 
         while let Some(Next::Ready(wk)) = workplan.next() {
             let k = wk.k();
-            let (context, cell) = tree.fetch_with_context(k).await;
+            let (context, cell) = tree.fetch_with_context(k).await?.unwrap();
             let column = table.columns.column_info(cell.identifier());
             let proof = if context.is_leaf() {
                 debug!(
@@ -77,7 +77,7 @@ impl TestContext {
                 // Prove a partial node - only care about the left side since sbbst has this nice
                 // property
                 let left_key = context.left.unwrap();
-                let left_node = tree.fetch(&left_key).await;
+                let left_node = tree.try_fetch(&left_key).await?.unwrap();
                 let proof_key = CellProofIdentifier {
                     table: table_id.clone(),
                     secondary: previous_row_key.clone(),
@@ -109,7 +109,7 @@ impl TestContext {
             } else {
                 // Prove a full node.
                 let left_key = context.left.unwrap();
-                let left_node = tree.fetch(&left_key).await;
+                let left_node = tree.try_fetch(&left_key).await?.unwrap();
                 let left_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
                     secondary: previous_row_key.clone(),
@@ -117,7 +117,7 @@ impl TestContext {
                     tree_key: context.left.unwrap(),
                 };
                 let right_key = context.right.unwrap();
-                let right_node = tree.fetch(&right_key).await;
+                let right_node = tree.try_fetch(&right_key).await?.unwrap();
                 let right_proof_key = CellProofIdentifier {
                     table: table_id.clone(),
                     secondary: previous_row_key.clone(),
@@ -186,8 +186,8 @@ impl TestContext {
             );
             workplan.done(&wk).unwrap();
         }
-        let root = tree.root().await.unwrap();
-        let root_data = tree.root_data().await.unwrap();
+        let root = tree.root().await?.unwrap();
+        let root_data = tree.root_data().await?.unwrap();
         let root_proof_key = CellProofIdentifier {
             table: table_id.clone(),
             secondary: new_row_key.clone(),
@@ -200,11 +200,12 @@ impl TestContext {
         }
 
         // just checking the storage is there
-        let _ = self
+        assert!(self
             .storage
             .get_proof_exact(&ProofKey::Cell(root_proof_key.clone()))
-            .unwrap();
-        root
+            .is_ok());
+
+        Ok(root)
     }
 
     /// Generate and prove a [`MerkleCellTree`] encoding the content of the
@@ -222,7 +223,7 @@ impl TestContext {
         // processed
         all_cells: CellCollection<BlockPrimaryIndex>,
         cells_update: CellsUpdateResult<BlockPrimaryIndex>,
-    ) -> RowPayload<BlockPrimaryIndex> {
+    ) -> anyhow::Result<RowPayload<BlockPrimaryIndex>> {
         // sanity check
         assert!(previous_row.k == cells_update.previous_row_key);
         // We need to (a) move the proofs to the new (new_row_key, primary) identifier
@@ -278,7 +279,7 @@ impl TestContext {
         );
         // (c) reconstruct key with those new updated cell info
         let updated_cell_tree = table.construct_cell_tree(&updated_cells).await;
-        let tree_hash = cells_update.latest.root_data().await.unwrap().hash;
+        let tree_hash = cells_update.latest.root_data().await?.unwrap().hash;
         let root_key = self
             .prove_cell_tree(
                 table,
@@ -288,7 +289,7 @@ impl TestContext {
                 updated_cell_tree,
                 cells_update.to_update,
             )
-            .await;
+            .await?;
         let root_proof_key = CellProofIdentifier {
             primary,
             table: table.public_name.clone(),
@@ -306,7 +307,7 @@ impl TestContext {
             "mismatch between cell tree root hash as computed by ryhope and mp2",
         );
 
-        RowPayload {
+        Ok(RowPayload {
             secondary_index_column: table.columns.secondary_column().identifier,
             cell_root_key: Some(root_key),
             cell_root_hash: Some(tree_hash),
@@ -318,7 +319,7 @@ impl TestContext {
             ),
             cells: updated_cells,
             ..Default::default()
-        }
+        })
     }
 
     /// Traverse the new cells tree, look at all the proofs already existing and move them to the
@@ -342,7 +343,7 @@ impl TestContext {
         let mut to_move = vec![cells_update
             .latest
             .root()
-            .await
+            .await?
             .expect("can't get root of new cells tree")];
         // traverse key in DFS style
         struct Return {
@@ -353,7 +354,7 @@ impl TestContext {
         while !to_move.is_empty() {
             let new_nodes = stream::iter(to_move.clone())
                 .then(|key| async move {
-                    let previous_node = cells_update.latest.fetch(&key).await;
+                    let previous_node = cells_update.latest.try_fetch(&key).await?.unwrap();
                     let previous_proof_key = CellProofIdentifier {
                         table: table_id.clone(),
                         secondary: cells_update.previous_row_key.clone(),
@@ -372,7 +373,7 @@ impl TestContext {
                     debug!("CELL PROOFS MOVING: cell key {key} from (block {:?} - row_key {:?} to --> (block {:?}, row_key {:?})",previous_proof_key.primary,previous_proof_key.secondary,new_proof_key.primary,new_proof_key.secondary);
                     // look at the children to move _all_ the cell tree proofs for all the proofs
                     // that exist
-                    let children = stream::iter(match cells_update.latest.node_context(&key).await {
+                    let children = stream::iter(match cells_update.latest.node_context(&key).await? {
                         Some(ctx) => {
                             let mut children = vec![];
                             if let Some(left_key) = ctx.left {
@@ -385,11 +386,11 @@ impl TestContext {
                         }
                         None => vec![],
                     }).collect::<Vec<_>>().await;
-                    Return {
-                       before: ProofKey::Cell(previous_proof_key),
-                        after: ProofKey::Cell(new_proof_key),
-                        children,
-                    }
+                    Ok(Return {
+                      before: ProofKey::Cell(previous_proof_key),
+                       after: ProofKey::Cell(new_proof_key),
+                       children,
+                   })
                 })
                 .collect::<Vec<_>>().await;
             // move all the proofs. Need to be done separately before of lifetime issues with
@@ -398,6 +399,7 @@ impl TestContext {
             to_move = new_nodes
                 .into_iter()
                 .flat_map(|r| {
+                    let r = r.unwrap();
                     self.storage
                         .move_proof(&r.before, &r.after)
                         .expect("can't move proof");

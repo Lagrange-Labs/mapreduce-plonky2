@@ -1,6 +1,5 @@
 use std::{collections::HashSet, future::Future};
 
-use anyhow::Result;
 use log::info;
 use mp2_v1::indexing::{
     block::BlockPrimaryIndex,
@@ -42,7 +41,7 @@ pub trait TreeInfo<K, V> {
         primary: BlockPrimaryIndex,
         key: &K,
         placeholder_values: PlaceholderValues,
-    ) -> Result<Vec<u8>>;
+    ) -> anyhow::Result<Vec<u8>>;
     fn save_proof(
         &self,
         ctx: &mut TestContext,
@@ -51,7 +50,7 @@ pub trait TreeInfo<K, V> {
         key: &K,
         placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
-    ) -> Result<()>;
+    ) -> anyhow::Result<()>;
 
     async fn load_or_prove_embedded(
         &self,
@@ -59,7 +58,7 @@ pub trait TreeInfo<K, V> {
         primary: BlockPrimaryIndex,
         k: &K,
         v: &V,
-    ) -> Result<Option<Vec<u8>>>;
+    ) -> anyhow::Result<Option<Vec<u8>>>;
 
     fn fetch_ctx_and_payload_at(
         &self,
@@ -86,7 +85,7 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
         placeholder_values: PlaceholderValues,
-    ) -> Result<Vec<u8>> {
+    ) -> anyhow::Result<Vec<u8>> {
         // TODO export that in single function
         let proof_key = ProofKey::QueryAggregateRow((
             query_id.clone(),
@@ -105,7 +104,7 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         key: &RowTreeKey,
         placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         // TODO export that in single function
         let proof_key = ProofKey::QueryAggregateRow((
             query_id.clone(),
@@ -122,7 +121,7 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>>
         primary: BlockPrimaryIndex,
         k: &RowTreeKey,
         _v: &RowPayload<BlockPrimaryIndex>,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         // TODO export that in single function
         Ok(if self.is_satisfying_query(k) {
             let ctx = &mut planner.ctx;
@@ -182,7 +181,7 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'_> {
         primary: BlockPrimaryIndex,
         key: &RowTreeKey,
         placeholder_values: PlaceholderValues,
-    ) -> Result<Vec<u8>> {
+    ) -> anyhow::Result<Vec<u8>> {
         let proof_key = ProofKey::QueryAggregateRow((
             query_id.clone(),
             placeholder_values,
@@ -200,7 +199,7 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'_> {
         key: &RowTreeKey,
         placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let proof_key = ProofKey::QueryAggregateRow((
             query_id.clone(),
             placeholder_values,
@@ -216,7 +215,7 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'_> {
         primary: BlockPrimaryIndex,
         k: &RowTreeKey,
         _v: &RowPayload<BlockPrimaryIndex>,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         Ok(if self.is_satisfying_query(k) {
             let ctx = &mut planner.ctx;
             Some(
@@ -241,7 +240,10 @@ impl TreeInfo<RowTreeKey, RowPayload<BlockPrimaryIndex>> for RowInfo<'_> {
         epoch: Epoch,
         key: &RowTreeKey,
     ) -> Option<(NodeContext<RowTreeKey>, RowPayload<BlockPrimaryIndex>)> {
-        self.tree.try_fetch_with_context_at(key, epoch).await
+        self.tree
+            .try_fetch_with_context_at(key, epoch)
+            .await
+            .unwrap()
     }
 }
 
@@ -263,7 +265,7 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
         placeholder_values: PlaceholderValues,
-    ) -> Result<Vec<u8>> {
+    ) -> anyhow::Result<Vec<u8>> {
         // TODO export that in single function - repetition
         info!("loading proof for {primary} -> {key:?}");
         let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
@@ -278,7 +280,7 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         key: &BlockPrimaryIndex,
         placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         // TODO export that in single function
         let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
         ctx.storage.store_proof(proof_key, proof)
@@ -290,7 +292,7 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>>
         primary: BlockPrimaryIndex,
         k: &BlockPrimaryIndex,
         v: &IndexNode<BlockPrimaryIndex>,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         load_or_prove_embedded_index(self, planner, primary, k, v).await
     }
 
@@ -334,7 +336,7 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo<'_>
         primary: BlockPrimaryIndex,
         key: &BlockPrimaryIndex,
         placeholder_values: PlaceholderValues,
-    ) -> Result<Vec<u8>> {
+    ) -> anyhow::Result<Vec<u8>> {
         //assert_eq!(primary, *key);
         info!("loading proof for {primary} -> {key:?}");
         let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
@@ -349,7 +351,7 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo<'_>
         key: &BlockPrimaryIndex,
         placeholder_values: PlaceholderValues,
         proof: Vec<u8>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         //assert_eq!(primary, *key);
         let proof_key = ProofKey::QueryAggregateIndex((query_id.clone(), placeholder_values, *key));
         ctx.storage.store_proof(proof_key, proof)
@@ -361,7 +363,7 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo<'_>
         primary: BlockPrimaryIndex,
         k: &BlockPrimaryIndex,
         v: &IndexNode<BlockPrimaryIndex>,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> anyhow::Result<Option<Vec<u8>>> {
         load_or_prove_embedded_index(self, planner, primary, k, v).await
     }
 
@@ -370,7 +372,10 @@ impl TreeInfo<BlockPrimaryIndex, IndexNode<BlockPrimaryIndex>> for IndexInfo<'_>
         epoch: Epoch,
         key: &BlockPrimaryIndex,
     ) -> Option<(NodeContext<BlockPrimaryIndex>, IndexNode<BlockPrimaryIndex>)> {
-        self.tree.try_fetch_with_context_at(key, epoch).await
+        self.tree
+            .try_fetch_with_context_at(key, epoch)
+            .await
+            .unwrap()
     }
 }
 
@@ -382,7 +387,7 @@ async fn load_or_prove_embedded_index<
     primary: BlockPrimaryIndex,
     k: &BlockPrimaryIndex,
     v: &IndexNode<BlockPrimaryIndex>,
-) -> Result<Option<Vec<u8>>> {
+) -> anyhow::Result<Option<Vec<u8>>> {
     //assert_eq!(primary, *k);
     info!("loading embedded proof for node {primary} -> {k:?}");
     Ok(if info.is_satisfying_query(k) {

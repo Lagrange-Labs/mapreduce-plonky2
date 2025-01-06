@@ -1,9 +1,9 @@
-use anyhow::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::{collections::HashMap, fmt::Debug};
 
+use crate::error::{ensure, RyhopeError};
 use crate::tree::TreeTopology;
 use crate::{Epoch, InitSettings};
 
@@ -50,8 +50,10 @@ impl<T> TransactionalStorage for VersionedStorage<T>
 where
     T: Debug + Send + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
 {
-    fn start_transaction(&mut self) -> Result<()> {
-        ensure!(!self.in_tx, "already in a trnsaction");
+    fn start_transaction(&mut self) -> Result<(), RyhopeError> {
+        if self.in_tx {
+            return Err(RyhopeError::AlreadyInTransaction);
+        }
         self.in_tx = true;
         if let Some(latest) = self.ts.last().cloned() {
             self.ts.push(latest);
@@ -61,8 +63,10 @@ where
         Ok(())
     }
 
-    async fn commit_transaction(&mut self) -> Result<()> {
-        ensure!(self.in_tx, "not in a transaction");
+    async fn commit_transaction(&mut self) -> Result<(), RyhopeError> {
+        if !self.in_tx {
+            return Err(RyhopeError::NotInATransaction);
+        }
         self.in_tx = false;
         Ok(())
     }
@@ -77,32 +81,34 @@ where
         inner_epoch + self.epoch_offset
     }
 
-    async fn fetch_at(&self, epoch: Epoch) -> T {
+    async fn fetch_at(&self, epoch: Epoch) -> Result<T, RyhopeError> {
         let epoch = epoch - self.epoch_offset;
         assert!(epoch >= 0);
-        self.ts[epoch as usize].clone().unwrap()
+        Ok(self.ts[epoch as usize].clone().unwrap())
     }
 
-    async fn store(&mut self, t: T) {
+    async fn store(&mut self, t: T) -> Result<(), RyhopeError> {
         assert!(self.in_tx);
         let latest = self.ts.len() - 1;
         self.ts[latest] = Some(t);
+        Ok(())
     }
 
-    async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
-        ensure!(
+    async fn rollback_to(&mut self, epoch: Epoch) -> Result<(), RyhopeError> {
+        ensure(
             epoch >= self.epoch_offset,
-            "unable to rollback before epoch {}",
-            self.epoch_offset
-        );
+            format!("unable to rollback before epoch {}", self.epoch_offset),
+        )?;
 
         let epoch = epoch - self.epoch_offset;
-        ensure!(
+        ensure(
             epoch <= self.current_epoch(),
-            "unable to rollback to epoch `{}` more recent than current epoch `{}`",
-            epoch,
-            self.current_epoch()
-        );
+            format!(
+                "unable to rollback to epoch `{}` more recent than current epoch `{}`",
+                epoch,
+                self.current_epoch()
+            ),
+        )?;
 
         self.ts.resize((epoch + 1).try_into().unwrap(), None);
         Ok(())
@@ -167,7 +173,7 @@ where
         inner_epoch + self.epoch_offset
     }
 
-    async fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Option<V> {
+    async fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Result<Option<V>, RyhopeError> {
         assert!(epoch >= self.epoch_offset);
         let epoch = epoch - self.epoch_offset;
         // To fetch a key at a given epoch, the list of diffs up to the
@@ -179,11 +185,11 @@ where
         for i in (0..=epoch as usize).rev() {
             let maybe = self.mem[i].get(k);
             if let Some(found) = maybe {
-                return found.to_owned();
+                return Ok(found.to_owned());
             };
         }
 
-        None
+        Ok(None)
     }
 
     // Expensive, but only used in test context.
@@ -196,7 +202,7 @@ where
 
         let mut count = 0;
         for k in all_keys {
-            if self.try_fetch(k).await.is_some() {
+            if self.try_fetch(k).await.unwrap().is_some() {
                 count += 1;
             }
         }
@@ -248,7 +254,7 @@ where
         None
     }
 
-    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<K, V>> {
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<K, V>, RyhopeError> {
         assert!(epoch >= self.epoch_offset);
         let mut pairs = HashMap::new();
         for i in 0..=epoch as usize {
@@ -269,36 +275,38 @@ where
     K: Hash + Eq + Clone + Debug + Send + Sync,
     V: Clone + Debug + Send + Sync,
 {
-    async fn remove(&mut self, k: K) -> Result<()> {
-        ensure!(self.try_fetch(&k).await.is_some(), "key not found");
+    async fn remove(&mut self, k: K) -> Result<(), RyhopeError> {
+        ensure(self.try_fetch(&k).await?.is_some(), "key not found")?;
         self.mem.last_mut().unwrap().insert(k, None);
         Ok(())
     }
 
-    async fn update(&mut self, k: K, new_value: V) -> Result<()> {
-        ensure!(self.try_fetch(&k).await.is_some(), "key not found");
+    async fn update(&mut self, k: K, new_value: V) -> Result<(), RyhopeError> {
+        ensure(self.try_fetch(&k).await?.is_some(), "key not found")?;
         self.mem.last_mut().unwrap().insert(k, Some(new_value));
         Ok(())
     }
 
-    async fn store(&mut self, k: K, value: V) -> Result<()> {
+    async fn store(&mut self, k: K, value: V) -> Result<(), RyhopeError> {
         self.mem.last_mut().unwrap().insert(k, Some(value));
         Ok(())
     }
 
-    async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
-        ensure!(
+    async fn rollback_to(&mut self, epoch: Epoch) -> Result<(), RyhopeError> {
+        ensure(
             epoch >= self.epoch_offset,
-            "unable to rollback before epoch {}",
-            self.epoch_offset
-        );
+            format!("unable to rollback before epoch {}", self.epoch_offset),
+        )?;
+
         let epoch = epoch - self.epoch_offset;
-        ensure!(
+        ensure(
             epoch <= self.current_epoch(),
-            "unable to rollback to epoch `{}` more recent than current epoch `{}`",
-            epoch,
-            self.current_epoch()
-        );
+            format!(
+                "unable to rollback to epoch `{}` more recent than current epoch `{}`",
+                epoch,
+                self.current_epoch()
+            ),
+        )?;
 
         self.mem.truncate((epoch + 1).try_into().unwrap());
 
@@ -338,7 +346,7 @@ impl<T: TreeTopology, V: Debug + Sync> FromSettings<T::State> for InMemory<T, V>
     async fn from_settings(
         init_settings: InitSettings<T::State>,
         _storage_settings: Self::Settings,
-    ) -> Result<Self> {
+    ) -> Result<Self, RyhopeError> {
         match init_settings {
             InitSettings::MustExist => unimplemented!(),
             InitSettings::MustNotExist(tree_state) | InitSettings::Reset(tree_state) => {
@@ -385,7 +393,7 @@ where
             .collect()
     }
 
-    async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, epoch: Epoch) -> Result<(), RyhopeError> {
         println!("Rolling back to {epoch}");
         self.state.rollback_to(epoch).await?;
         self.nodes.rollback_to(epoch).await?;
@@ -420,8 +428,11 @@ where
     T: TreeTopology,
     V: Clone + Debug + Send + Sync,
 {
-    fn start_transaction(&mut self) -> Result<()> {
-        ensure!(!self.in_tx, "already in a transaction");
+    fn start_transaction(&mut self) -> Result<(), RyhopeError> {
+        if self.in_tx {
+            return Err(RyhopeError::AlreadyInTransaction);
+        }
+
         self.state.start_transaction()?;
         self.data.new_epoch();
         self.nodes.new_epoch();
@@ -429,8 +440,11 @@ where
         Ok(())
     }
 
-    async fn commit_transaction(&mut self) -> Result<()> {
-        ensure!(self.in_tx, "not in a transaction");
+    async fn commit_transaction(&mut self) -> Result<(), RyhopeError> {
+        if !self.in_tx {
+            return Err(RyhopeError::NotInATransaction);
+        }
+
         self.state.commit_transaction().await?;
         self.in_tx = false;
         Ok(())

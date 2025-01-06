@@ -73,7 +73,7 @@ where
     let path = row_tree
         // since the epoch starts at genesis we can directly give the block number !
         .lineage_at(&to_be_proven_node, primary as Epoch)
-        .await
+        .await?
         .expect("node doesn't have a lineage?")
         .into_full_path()
         .collect_vec();
@@ -89,17 +89,18 @@ async fn get_successor_node_with_same_value(
     node_ctx: &NodeContext<RowTreeKey>,
     value: U256,
     primary: BlockPrimaryIndex,
-) -> Option<NodeContext<RowTreeKey>> {
+) -> anyhow::Result<Option<NodeContext<RowTreeKey>>> {
     if node_ctx.right.is_some() {
         let (right_child_ctx, payload) = row_tree
             .fetch_with_context_at(node_ctx.right.as_ref().unwrap(), primary as Epoch)
-            .await;
+            .await?
+            .expect("right is checked to be Some");
         // the value of the successor in this case is `payload.min`, since the successor is the
         // minimum of the subtree rooted in the right child
         if payload.min() != value {
             // the value of successor is different from `value`, so we don't return the
             // successor node
-            return None;
+            return Ok(None);
         }
         // find successor in the subtree rooted in the right child: it is
         // the leftmost node in such a subtree
@@ -107,7 +108,7 @@ async fn get_successor_node_with_same_value(
         while successor_ctx.left.is_some() {
             successor_ctx = row_tree
                 .node_context_at(successor_ctx.left.as_ref().unwrap(), primary as Epoch)
-                .await
+                .await?
                 .unwrap_or_else(|| {
                     panic!(
                         "Node context not found for left child of node {:?}",
@@ -115,7 +116,7 @@ async fn get_successor_node_with_same_value(
                     )
                 });
         }
-        Some(successor_ctx)
+        Ok(Some(successor_ctx))
     } else {
         // find successor among the ancestors of current node: we go up in the path
         // until we either found a node whose left child is the previous node in the
@@ -128,7 +129,8 @@ async fn get_successor_node_with_same_value(
                     candidate_successor_ctx.parent.as_ref().unwrap(),
                     primary as Epoch,
                 )
-                .await;
+                .await?
+                .unwrap();
             candidate_successor_val = parent_payload.value();
             if parent_ctx
                 .iter_children()
@@ -152,14 +154,14 @@ async fn get_successor_node_with_same_value(
             if candidate_successor_val != value {
                 // the value of successor is different from `value`, so we don't return the
                 // successor node
-                return None;
+                return Ok(None);
             }
-            Some(candidate_successor_ctx)
+            Ok(Some(candidate_successor_ctx))
         } else {
             // We got up to the root of the tree without finding the successor,
             // which means that the input node has no successor;
             // so we don't return any node
-            None
+            Ok(None)
         }
     }
 }
@@ -172,17 +174,18 @@ async fn get_predecessor_node_with_same_value(
     node_ctx: &NodeContext<RowTreeKey>,
     value: U256,
     primary: BlockPrimaryIndex,
-) -> Option<NodeContext<RowTreeKey>> {
+) -> anyhow::Result<Option<NodeContext<RowTreeKey>>> {
     if node_ctx.left.is_some() {
         let (left_child_ctx, payload) = row_tree
             .fetch_with_context_at(node_ctx.right.as_ref().unwrap(), primary as Epoch)
-            .await;
+            .await?
+            .expect("left is checked to be Some");
         // the value of the predecessor in this case is `payload.max`, since the predecessor is the
         // maximum of the subtree rooted in the left child
         if payload.max() != value {
             // the value of predecessor is different from `value`, so we don't return the
             // predecessor node
-            return None;
+            return Ok(None);
         }
         // find predecessor in the subtree rooted in the left child: it is
         // the rightmost node in such a subtree
@@ -190,7 +193,7 @@ async fn get_predecessor_node_with_same_value(
         while predecessor_ctx.right.is_some() {
             predecessor_ctx = row_tree
                 .node_context_at(predecessor_ctx.right.as_ref().unwrap(), primary as Epoch)
-                .await
+                .await?
                 .unwrap_or_else(|| {
                     panic!(
                         "Node context not found for right child of node {:?}",
@@ -198,7 +201,7 @@ async fn get_predecessor_node_with_same_value(
                     )
                 });
         }
-        Some(predecessor_ctx)
+        Ok(Some(predecessor_ctx))
     } else {
         // find successor among the ancestors of current node: we go up in the path
         // until we either found a node whose right child is the previous node in the
@@ -212,7 +215,8 @@ async fn get_predecessor_node_with_same_value(
                     candidate_predecessor_ctx.parent.as_ref().unwrap(),
                     primary as Epoch,
                 )
-                .await;
+                .await?
+                .unwrap();
             candidate_predecessor_val = parent_payload.value();
             if parent_ctx
                 .iter_children()
@@ -236,14 +240,14 @@ async fn get_predecessor_node_with_same_value(
             if candidate_predecessor_val != value {
                 // the value of predecessor is different from `value`, so we don't return the
                 // predecessor node
-                return None;
+                return Ok(None);
             }
-            Some(candidate_predecessor_ctx)
+            Ok(Some(candidate_predecessor_ctx))
         } else {
             // We got up to the root of the tree without finding the predecessor,
             // which means that the input node has no predecessor;
             // so we don't return any node
-            None
+            Ok(None)
         }
     }
 }
@@ -288,7 +292,8 @@ async fn find_node_for_proof(
     //   and so it implies that we found the node satisfying the property mentioned above
     let (mut node_ctx, node_value) = row_tree
         .fetch_with_context_at(&row_key, primary as Epoch)
-        .await;
+        .await?
+        .unwrap();
     let value = node_value.value();
 
     if is_min_query {
@@ -297,11 +302,11 @@ async fn find_node_for_proof(
         // from the value `value` stored in the node with key `row_key`; the node found is the one to be
         // employed to generate the non-existence proof
         let mut successor_ctx =
-            get_successor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
+            get_successor_node_with_same_value(row_tree, &node_ctx, value, primary).await?;
         while successor_ctx.is_some() {
             node_ctx = successor_ctx.unwrap();
             successor_ctx =
-                get_successor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
+                get_successor_node_with_same_value(row_tree, &node_ctx, value, primary).await?;
         }
     } else {
         // starting from the node with key `row_key`, we iterate over its predecessor nodes in the tree,
@@ -309,11 +314,11 @@ async fn find_node_for_proof(
         // from the value `value` stored in the node with key `row_key`; the node found is the one to be
         // employed to generate the non-existence proof
         let mut predecessor_ctx =
-            get_predecessor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
+            get_predecessor_node_with_same_value(row_tree, &node_ctx, value, primary).await?;
         while predecessor_ctx.is_some() {
             node_ctx = predecessor_ctx.unwrap();
             predecessor_ctx =
-                get_predecessor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
+                get_predecessor_node_with_same_value(row_tree, &node_ctx, value, primary).await?;
         }
     }
 
@@ -361,7 +366,7 @@ pub async fn get_node_info<T, V, S>(
     lookup: &MerkleTreeKvDb<T, V, S>,
     k: &T::Key,
     at: Epoch,
-) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>)
+) -> anyhow::Result<(NodeInfo, Option<NodeInfo>, Option<NodeInfo>)>
 where
     T: TreeTopology + MutableTree + Send,
     V: NodePayload + Send + Sync + LagrangeNode,
@@ -371,55 +376,56 @@ where
     // look at the left child first then right child, then build the node info
     let (ctx, node_payload) = lookup
         .try_fetch_with_context_at(k, at)
-        .await
+        .await?
         .expect("cache not filled");
     // this looks at the value of a child node (left and right), and fetches the grandchildren
     // information to be able to build their respective node info.
-    let fetch_ni = async |k: Option<T::Key>| -> (Option<NodeInfo>, Option<HashOutput>) {
-        match k {
-            None => (None, None),
-            Some(child_k) => {
-                let (child_ctx, child_payload) = lookup
-                    .try_fetch_with_context_at(&child_k, at)
-                    .await
-                    .expect("cache not filled");
-                // we need the grand child hashes for constructing the node info of the
-                // children of the node in argument
-                let child_left_hash = match child_ctx.left {
-                    Some(left_left_k) => {
-                        let (_, payload) = lookup
-                            .try_fetch_with_context_at(&left_left_k, at)
-                            .await
-                            .expect("cache not filled");
-                        Some(payload.hash())
-                    }
-                    None => None,
-                };
-                let child_right_hash = match child_ctx.right {
-                    Some(left_right_k) => {
-                        let (_, payload) = lookup
-                            .try_fetch_with_context_at(&left_right_k, at)
-                            .await
-                            .expect("cache not full");
-                        Some(payload.hash())
-                    }
-                    None => None,
-                };
-                let left_ni = NodeInfo::new(
-                    &child_payload.embedded_hash(),
-                    child_left_hash.as_ref(),
-                    child_right_hash.as_ref(),
-                    child_payload.value(),
-                    child_payload.min(),
-                    child_payload.max(),
-                );
-                (Some(left_ni), Some(child_payload.hash()))
-            }
-        }
-    };
-    let (left_node, left_hash) = fetch_ni(ctx.left).await;
-    let (right_node, right_hash) = fetch_ni(ctx.right).await;
-    (
+    let fetch_ni =
+        async |k: Option<T::Key>| -> anyhow::Result<(Option<NodeInfo>, Option<HashOutput>)> {
+            Ok(match k {
+                None => (None, None),
+                Some(child_k) => {
+                    let (child_ctx, child_payload) = lookup
+                        .try_fetch_with_context_at(&child_k, at)
+                        .await?
+                        .expect("cache not filled");
+                    // we need the grand child hashes for constructing the node info of the
+                    // children of the node in argument
+                    let child_left_hash = match child_ctx.left {
+                        Some(left_left_k) => {
+                            let (_, payload) = lookup
+                                .try_fetch_with_context_at(&left_left_k, at)
+                                .await?
+                                .expect("cache not filled");
+                            Some(payload.hash())
+                        }
+                        None => None,
+                    };
+                    let child_right_hash = match child_ctx.right {
+                        Some(left_right_k) => {
+                            let (_, payload) = lookup
+                                .try_fetch_with_context_at(&left_right_k, at)
+                                .await?
+                                .expect("cache not full");
+                            Some(payload.hash())
+                        }
+                        None => None,
+                    };
+                    let left_ni = NodeInfo::new(
+                        &child_payload.embedded_hash(),
+                        child_left_hash.as_ref(),
+                        child_right_hash.as_ref(),
+                        child_payload.value(),
+                        child_payload.min(),
+                        child_payload.max(),
+                    );
+                    (Some(left_ni), Some(child_payload.hash()))
+                }
+            })
+        };
+    let (left_node, left_hash) = fetch_ni(ctx.left).await?;
+    let (right_node, right_hash) = fetch_ni(ctx.right).await?;
+    Ok((
         NodeInfo::new(
             &node_payload.embedded_hash(),
             left_hash.as_ref(),
@@ -430,5 +436,5 @@ where
         ),
         left_node,
         right_node,
-    )
+    ))
 }

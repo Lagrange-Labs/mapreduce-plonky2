@@ -44,7 +44,11 @@ async fn run() -> Result<()> {
     println!("Tree of keys to update:");
     res.print();
     let fetch_key = 1;
-    let v = tree.try_fetch(&fetch_key).await.expect("that should exist");
+    let v = tree
+        .try_fetch(&fetch_key)
+        .await
+        .unwrap()
+        .expect("that should exist");
     assert_eq!(fetch_key, v);
     println!("Fetching value from key {} = {}", fetch_key, v);
 
@@ -58,13 +62,13 @@ async fn run() -> Result<()> {
         .await
         .expect("this should work");
 
-    match tree.try_fetch(&fetch_key).await {
+    match tree.try_fetch(&fetch_key).await.unwrap() {
         Some(_) => panic!("that should not happen"),
         None => println!("Fetching deleted key {} fails", fetch_key),
     }
 
     // Now try to fetch from previous version
-    match tree.try_fetch_at(&fetch_key, first_stamp).await {
+    match tree.try_fetch_at(&fetch_key, first_stamp).await.unwrap() {
         Some(v) => println!(
             "Fetching {} at previous stamp {} works: {}",
             fetch_key, first_stamp, v
@@ -84,10 +88,14 @@ async fn run() -> Result<()> {
         "The update tree from {first_stamp} to {} was:",
         first_stamp + 1
     );
-    tree.diff_at(first_stamp + 1).await.unwrap().print();
+    tree.diff_at(first_stamp + 1)
+        .await
+        .unwrap()
+        .unwrap()
+        .print();
 
     println!("The update tree from 0 to 1 was:",);
-    tree.diff_at(1).await.unwrap().print();
+    tree.diff_at(1).await.unwrap().unwrap().print();
 
     Ok(())
 }
