@@ -240,11 +240,7 @@ where
     ) -> Result<Option<(NodeContext<T::Key>, V)>, RyhopeError> {
         Ok(
             if let Some(ctx) = self.tree.node_context(k, &self.storage).await? {
-                if let Some(v) = self.try_fetch(k).await? {
-                    Some((ctx, v))
-                } else {
-                    None
-                }
+                self.try_fetch(k).await?.map(|v| (ctx, v))
             } else {
                 None
             },

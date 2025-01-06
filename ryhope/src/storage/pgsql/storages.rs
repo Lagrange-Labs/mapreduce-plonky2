@@ -204,7 +204,9 @@ where
     fn payload_from_row(row: &Row) -> Result<V, RyhopeError> {
         row.try_get::<_, Json<V>>(PAYLOAD)
             .map(|x| x.0)
-            .map_err(|err| RyhopeError::invalid_format("parsing payload from {row:?}", err))
+            .map_err(|err| {
+                RyhopeError::invalid_format(format!("parsing payload from {row:?}"), err)
+            })
     }
 
     fn node_from_row(row: &Row) -> Self::Node;
@@ -263,9 +265,7 @@ where
             })
     }
 
-    fn node_from_row(_r: &Row) -> () {
-        ()
-    }
+    fn node_from_row(_r: &Row) {}
 
     async fn create_node_in_tx(
         db_tx: &tokio_postgres::Transaction<'_>,

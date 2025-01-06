@@ -61,6 +61,6 @@ pub fn ensure<S: AsRef<str>>(cond: bool, msg: S) -> Result<(), RyhopeError> {
     if cond {
         Ok(())
     } else {
-        Err(RyhopeError::fatal(msg.as_ref().to_string()))
+        Err(RyhopeError::fatal(msg.as_ref()))
     }
 }
