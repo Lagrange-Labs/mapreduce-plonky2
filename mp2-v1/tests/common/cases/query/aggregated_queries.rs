@@ -22,7 +22,7 @@ use crate::common::{
 
 use crate::context::TestContext;
 use alloy::primitives::U256;
-use anyhow::{bail, Result};
+use anyhow::bail;
 use futures::{stream, FutureExt, StreamExt};
 
 use itertools::Itertools;
@@ -92,7 +92,7 @@ pub(crate) async fn prove_query(
     res: Vec<PsqlRow>,
     metadata: MetadataHash,
     pis: DynamicCircuitPis,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let row_cache = table
         .row
         .wide_lineage_between(
@@ -158,7 +158,7 @@ pub(crate) async fn prove_query(
         let lineage = table
             .index
             .lineage_at(&to_be_proven_node, current_epoch as Epoch)
-            .await
+            .await?
             .expect("can't get lineage")
             .into_full_path()
             .collect();
@@ -248,10 +248,10 @@ async fn prove_revelation(
     query: &QueryCooking,
     pis: &DynamicCircuitPis,
     tree_epoch: Epoch,
-) -> Result<Vec<u8>> {
+) -> anyhow::Result<Vec<u8>> {
     // load the query proof, which is at the root of the tree
     let query_proof = {
-        let root_key = table.index.root_at(tree_epoch).await.unwrap();
+        let root_key = table.index.root_at(tree_epoch).await?.unwrap();
         let proof_key = ProofKey::QueryAggregateIndex((
             query.query.clone(),
             query.placeholders.placeholder_values(),
@@ -290,7 +290,7 @@ pub(crate) fn check_final_outputs(
     num_touched_rows: usize,
     res: Vec<PsqlRow>,
     offcircuit_md: MetadataHash,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     // fetch indexing proof, whose public inputs are needed to check correctness of revelation proof outputs
     let indexing_proof = {
         let pk = ProofKey::IVC(tree_epoch as BlockPrimaryIndex);
@@ -394,7 +394,7 @@ async fn prove_query_on_tree<'a, I, K, V>(
     info: I,
     update: UpdateTree<K>,
     primary: BlockPrimaryIndex,
-) -> Result<Vec<u8>>
+) -> anyhow::Result<Vec<u8>>
 where
     I: TreeInfo<K, V>,
     V: NodePayload + Send + Sync + LagrangeNode + Clone,
@@ -438,7 +438,7 @@ where
     while let Some(Next::Ready(wk)) = workplan.next() {
         let k = wk.k();
         // closure performing all the operations necessary beofre jumping to the next iteration
-        let mut end_iteration = |proven_nodes: &mut HashSet<K>| -> Result<()> {
+        let mut end_iteration = |proven_nodes: &mut HashSet<K>| -> anyhow::Result<()> {
             proven_nodes.insert(k.clone());
             workplan.done(&wk)?;
             Ok(())
@@ -709,7 +709,7 @@ pub fn generate_non_existence_proof(
     primary: BlockPrimaryIndex,
     planner: &mut QueryPlanner<'_>,
     is_rows_tree_node: bool,
-) -> Result<Vec<u8>> {
+) -> anyhow::Result<Vec<u8>> {
     let index_ids = [
         planner.table.columns.primary_column().identifier,
         planner.table.columns.secondary_column().identifier,
@@ -760,7 +760,7 @@ pub fn generate_non_existence_proof(
 async fn prove_non_existence_index(
     planner: &mut QueryPlanner<'_>,
     primary: BlockPrimaryIndex,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let tree = &planner.table.index;
     let current_epoch = tree.current_epoch();
     let (node_info, left_child_info, right_child_info) = get_node_info(
@@ -795,7 +795,7 @@ async fn prove_non_existence_index(
 pub async fn prove_non_existence_row(
     planner: &mut QueryPlanner<'_>,
     primary: BlockPrimaryIndex,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let (chosen_node, plan) = find_row_node_for_non_existence(
         &planner.table.row,
         planner.table.public_name.clone(),
@@ -807,7 +807,7 @@ pub async fn prove_non_existence_row(
     .await?;
     let (node_info, left_child_info, right_child_info) =
         mp2_v1::query::planner::get_node_info(&planner.table.row, &chosen_node, primary as Epoch)
-            .await;
+            .await?;
 
     let proof_key = ProofKey::QueryAggregateRow((
         planner.query.query.clone(),
@@ -861,7 +861,7 @@ pub async fn prove_single_row<T: TreeInfo<RowTreeKey, RowPayload<BlockPrimaryInd
     row_key: &RowTreeKey,
     pis: &DynamicCircuitPis,
     query: &QueryCooking,
-) -> Result<Vec<u8>> {
+) -> anyhow::Result<Vec<u8>> {
     // 1. Get the all the cells including primary and secondary index
     // Note we can use the primary as epoch since now epoch == primary in the storage
     let (row_ctx, row_payload) = tree
@@ -923,7 +923,7 @@ type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
 pub(crate) async fn cook_query_between_blocks(
     table: &Table,
     info: &TableInfo,
-) -> Result<QueryCooking> {
+) -> anyhow::Result<QueryCooking> {
     let max = table.row.current_epoch();
     let min = max - 1;
 
@@ -950,7 +950,7 @@ pub(crate) async fn cook_query_between_blocks(
 pub(crate) async fn cook_query_secondary_index_nonexisting_placeholder(
     table: &Table,
     info: &TableInfo,
-) -> Result<QueryCooking> {
+) -> anyhow::Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -998,7 +998,7 @@ pub(crate) async fn cook_query_secondary_index_nonexisting_placeholder(
 pub(crate) async fn cook_query_secondary_index_placeholder(
     table: &Table,
     info: &TableInfo,
-) -> Result<QueryCooking> {
+) -> anyhow::Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1043,7 +1043,7 @@ pub(crate) async fn cook_query_secondary_index_placeholder(
 pub(crate) async fn cook_query_unique_secondary_index(
     table: &Table,
     info: &TableInfo,
-) -> Result<QueryCooking> {
+) -> anyhow::Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1108,7 +1108,7 @@ pub(crate) async fn cook_query_unique_secondary_index(
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
-        max_block: max_block as BlockPrimaryIndex,
+        max_block,
         query: query_str,
         placeholders,
         limit: None,
@@ -1119,7 +1119,7 @@ pub(crate) async fn cook_query_unique_secondary_index(
 pub(crate) async fn cook_query_partial_block_range(
     table: &Table,
     info: &TableInfo,
-) -> Result<QueryCooking> {
+) -> anyhow::Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1155,7 +1155,7 @@ pub(crate) async fn cook_query_partial_block_range(
 pub(crate) async fn cook_query_no_matching_entries(
     table: &Table,
     info: &TableInfo,
-) -> Result<QueryCooking> {
+) -> anyhow::Result<QueryCooking> {
     let initial_epoch = table.row.initial_epoch();
     // choose query bounds outside of the range [initial_epoch, last_epoch]
     let min_block = 0;
@@ -1187,7 +1187,7 @@ pub(crate) async fn cook_query_no_matching_entries(
 pub(crate) async fn cook_query_non_matching_entries_some_blocks(
     table: &Table,
     info: &TableInfo,
-) -> Result<QueryCooking> {
+) -> anyhow::Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, true).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
@@ -1223,7 +1223,7 @@ pub(crate) async fn cook_query_non_matching_entries_some_blocks(
 
 /// Utility function to associated to each row in the tree, the blocks where the row
 /// was valid
-async fn extract_row_liveness(table: &Table) -> Result<HashMap<RowTreeKey, Vec<Epoch>>> {
+async fn extract_row_liveness(table: &Table) -> anyhow::Result<HashMap<RowTreeKey, Vec<Epoch>>> {
     let mut all_table = HashMap::new();
     let max = table.row.current_epoch();
     let min = table.row.initial_epoch() + 1;
@@ -1254,7 +1254,7 @@ async fn extract_row_liveness(table: &Table) -> Result<HashMap<RowTreeKey, Vec<E
 pub(crate) async fn find_longest_lived_key(
     table: &Table,
     must_not_be_alive_in_some_blocks: bool,
-) -> Result<(RowTreeKey, BlockRange)> {
+) -> anyhow::Result<(RowTreeKey, BlockRange)> {
     let initial_epoch = table.row.initial_epoch() + 1;
     let last_epoch = table.row.current_epoch();
     let all_table = extract_row_liveness(table).await?;
@@ -1290,9 +1290,15 @@ pub(crate) async fn find_longest_lived_key(
     Ok((longest_key.clone(), (min_block, max_block)))
 }
 
-async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<BlockPrimaryIndex>>> {
-    let root_key = tree.root_at(at).await.unwrap();
-    let (ctx, payload) = tree.try_fetch_with_context_at(&root_key, at).await.unwrap();
+async fn collect_all_at(
+    tree: &MerkleRowTree,
+    at: Epoch,
+) -> anyhow::Result<Vec<Row<BlockPrimaryIndex>>> {
+    let root_key = tree.root_at(at).await?.unwrap();
+    let (ctx, payload) = tree
+        .try_fetch_with_context_at(&root_key, at)
+        .await?
+        .unwrap();
     let root_row = Row {
         k: root_key,
         payload,
@@ -1307,8 +1313,11 @@ async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<Block
                 let mut local_rows = Vec::new();
                 let mut local_ctx = Vec::new();
                 for child_k in lctx.iter_children().flatten() {
-                    let (child_ctx, child_payload) =
-                        tree.try_fetch_with_context_at(child_k, at).await.unwrap();
+                    let (child_ctx, child_payload) = tree
+                        .try_fetch_with_context_at(child_k, at)
+                        .await
+                        .unwrap()
+                        .unwrap();
                     local_rows.push(Row {
                         k: child_k.clone(),
                         payload: child_payload,
@@ -1343,7 +1352,7 @@ fn find_longest_consecutive_sequence(v: Vec<i64>) -> (usize, i64) {
 async fn check_correct_cells_tree(
     all_cells: &[ColumnCell],
     payload: &RowPayload<BlockPrimaryIndex>,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let local_cells = all_cells.to_vec();
     let expected_cells_root = payload
         .cell_root_hash
@@ -1365,7 +1374,7 @@ async fn check_correct_cells_tree(
     })
     .await
     .expect("can't update cell tree");
-    let found_hash = tree.root_data().await.unwrap().hash;
+    let found_hash = tree.root_data().await?.unwrap().hash;
     assert_eq!(
         expected_cells_root, found_hash,
         "cells root hash not the same when given to circuit"
