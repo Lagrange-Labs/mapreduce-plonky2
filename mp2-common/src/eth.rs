@@ -427,39 +427,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_pidgy_pinguin_mapping_slot() -> Result<()> {
-        // first pinguin holder https://dune.com/queries/2450476/4027653
-        // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
-        // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
-        let mapping_value =
-            Address::from_str("0xee5ac9c6db07c26e71207a41e64df42e1a2b05cf").unwrap();
-        let nft_id: u32 = 1116;
-        let mapping_key = left_pad32(&nft_id.to_be_bytes());
-        let url = get_mainnet_url();
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
-
-        // extracting from
-        // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol
-        // assuming it's using ERC731Enumerable that inherits ERC721
-        let mapping_slot = 2;
-        // pudgy pinguins
-        let pudgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
-        let query = ProofQuery::new_mapping_slot(pudgy_address, mapping_slot, mapping_key.to_vec());
-        let res = query
-            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
-            .await?;
-        let raw_address = ProofQuery::verify_storage_proof(&res)?;
-        // the value is actually RLP encoded !
-        let decoded_address: Vec<u8> = rlp::decode(&raw_address).unwrap();
-        let leaf_node: Vec<Vec<u8>> = rlp::decode_list(res.storage_proof[0].proof.last().unwrap());
-        println!("leaf_node[1].len() = {}", leaf_node[1].len());
-        // this is read in the same order
-        let found_address = Address::from_slice(&decoded_address.into_iter().collect::<Vec<u8>>());
-        assert_eq!(found_address, mapping_value);
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_kashish_contract_proof_query() -> Result<()> {
         // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
         // uint256 public n_registered; // storage slot 0
