@@ -31,7 +31,6 @@ use serde::{Deserialize, Serialize};
 use crate::revelation::placeholders_check::placeholder_ids_hash;
 
 use super::{
-    aggregation::QueryBoundSource,
     universal_circuit::{
         universal_circuit_inputs::{
             BasicOperation, InputOperand, OutputItem, PlaceholderIdsSet, ResultStructure,
@@ -39,6 +38,7 @@ use super::{
         universal_query_gadget::QueryBound,
         ComputationalHash, ComputationalHashTarget,
     },
+    utils::QueryBoundSource,
 };
 
 pub enum Identifiers {
@@ -234,7 +234,7 @@ impl<F: RichField> ToField<F> for Identifiers {
     }
 }
 /// Data structure to provide identifiers of columns of a table to compute computational hash
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ColumnIDs {
     pub(crate) primary: F,
     pub(crate) secondary: F,

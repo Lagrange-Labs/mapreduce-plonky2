@@ -28,7 +28,6 @@ use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
     computational_hash_ids::{
         ColumnIDs, ComputationalHashCache, HashPermutation, Operation, Output,
         PlaceholderIdentifier,
@@ -37,6 +36,7 @@ use crate::query::{
         basic_operation::BasicOperationInputs, column_extraction::ColumnExtractionValueWires,
         universal_circuit_inputs::OutputItem,
     },
+    utils::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
 };
 
 use super::{
@@ -163,6 +163,7 @@ impl QueryBound {
     /// Initialize a query bound for the primary index, from the set of `placeholders` employed in the query,
     /// which include also the primary index bounds by construction. The flag `is_min_bound`
     /// must be true iff the bound to be initialized is a lower bound in the range specified in the query
+    #[allow(dead_code)] // unused for now, but it could be useful to keep it
     pub(crate) fn new_primary_index_bound(
         placeholders: &Placeholders,
         is_min_bound: bool,
@@ -493,10 +494,14 @@ pub(crate) struct UniversalQueryHashInputWires<
 > {
     /// Input wires for column extraction component
     pub(crate) column_extraction_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
+    /// Lower bound of the range for the primary index specified in the query
+    pub(crate) min_query_primary: UInt256Target,
+    /// Upper bound of the range for the primary index specified in the query
+    pub(crate) max_query_primary: UInt256Target,
     /// Lower bound of the range for the secondary index specified in the query
-    min_query: QueryBoundTargetInputs,
+    min_query_secondary: QueryBoundTargetInputs,
     /// Upper bound of the range for the secondary index specified in the query
-    max_query: QueryBoundTargetInputs,
+    max_query_secondary: QueryBoundTargetInputs,
     /// Input wires for the `MAX_NUM_PREDICATE_OPS` basic operation components necessary
     /// to evaluate the filtering predicate
     #[serde(
@@ -548,8 +553,10 @@ pub(crate) struct UniversalQueryHashInputs<
     T: OutputComponent<MAX_NUM_RESULTS>,
 > {
     column_extraction_inputs: ColumnExtractionInputs<MAX_NUM_COLUMNS>,
-    min_query: QueryBound,
-    max_query: QueryBound,
+    min_query_primary: U256,
+    max_query_primary: U256,
+    min_query_secondary: QueryBound,
+    max_query_secondary: QueryBound,
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
@@ -661,8 +668,10 @@ where
 
         Ok(Self {
             column_extraction_inputs,
-            min_query,
-            max_query,
+            min_query_primary: query_bounds.min_query_primary(),
+            max_query_primary: query_bounds.max_query_primary(),
+            min_query_secondary: min_query,
+            max_query_secondary: max_query,
             filtering_predicate_inputs: predicate_ops_inputs,
             result_values_inputs: result_ops_inputs,
             output_component_inputs,
@@ -679,8 +688,9 @@ where
         T,
     > {
         let column_extraction_wires = ColumnExtractionInputs::build_hash(b);
-        let min_query = QueryBoundTarget::new(b);
-        let max_query = QueryBoundTarget::new(b);
+        let [min_query_primary, max_query_primary] = b.add_virtual_u256_arr_unsafe();
+        let min_query_secondary = QueryBoundTarget::new(b);
+        let max_query_secondary = QueryBoundTarget::new(b);
         let mut input_hash = column_extraction_wires.column_hash.to_vec();
         // Payload to compute the placeholder hash public input
         let mut placeholder_hash_payload = vec![];
@@ -742,27 +752,32 @@ where
         let placeholder_hash = b.hash_n_to_hash_no_pad::<CHasher>(placeholder_hash_payload);
         let placeholder_hash = QueryBoundTarget::add_query_bounds_to_placeholder_hash(
             b,
-            &min_query,
-            &max_query,
+            &min_query_secondary,
+            &max_query_secondary,
             &placeholder_hash,
         );
         // add query bounds to computational hash
         let computational_hash = QueryBoundTarget::add_query_bounds_to_computational_hash(
             b,
-            &min_query,
-            &max_query,
+            &min_query_secondary,
+            &max_query_secondary,
             &output_component_wires.computational_hash(),
         );
 
-        let min_secondary = min_query.get_bound_value().clone();
-        let max_secondary = max_query.get_bound_value().clone();
-        let num_bound_overflows =
-            QueryBoundTarget::num_overflows_for_query_bound_operations(b, &min_query, &max_query);
+        let min_secondary = min_query_secondary.get_bound_value().clone();
+        let max_secondary = max_query_secondary.get_bound_value().clone();
+        let num_bound_overflows = QueryBoundTarget::num_overflows_for_query_bound_operations(
+            b,
+            &min_query_secondary,
+            &max_query_secondary,
+        );
         UniversalQueryHashWires {
             input_wires: UniversalQueryHashInputWires {
                 column_extraction_wires: column_extraction_wires.input_wires,
-                min_query: min_query.into(),
-                max_query: max_query.into(),
+                min_query_primary,
+                max_query_primary,
+                min_query_secondary: min_query_secondary.into(),
+                max_query_secondary: max_query_secondary.into(),
                 filtering_predicate_ops: filtering_predicate_wires.try_into().unwrap(),
                 result_value_ops: result_value_wires.try_into().unwrap(),
                 output_component_wires: output_component_wires.input_wires(),
@@ -793,8 +808,14 @@ where
     ) {
         self.column_extraction_inputs
             .assign(pw, &wires.column_extraction_wires);
-        wires.min_query.assign(pw, &self.min_query);
-        wires.max_query.assign(pw, &self.max_query);
+        pw.set_u256_target(&wires.min_query_primary, self.min_query_primary);
+        pw.set_u256_target(&wires.max_query_primary, self.max_query_primary);
+        wires
+            .min_query_secondary
+            .assign(pw, &self.min_query_secondary);
+        wires
+            .max_query_secondary
+            .assign(pw, &self.max_query_secondary);
         self.filtering_predicate_inputs
             .iter()
             .chain(self.result_values_inputs.iter())
@@ -812,15 +833,33 @@ where
     /// This method returns the ids of the placeholders employed to compute the placeholder hash,
     /// in the same order, so that those ids can be provided as input to other circuits that need
     /// to recompute this hash
-    pub(crate) fn ids_for_placeholder_hash(&self) -> Vec<PlaceholderId> {
-        self.filtering_predicate_inputs
+    pub(crate) fn ids_for_placeholder_hash(
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+        placeholders: &Placeholders,
+        query_bounds: &QueryBounds,
+    ) -> Result<Vec<PlaceholderId>> {
+        let hash_input_gadget = Self::new(
+            &ColumnIDs::default(),
+            predicate_operations,
+            placeholders,
+            query_bounds,
+            results,
+        )?;
+        Ok(hash_input_gadget
+            .filtering_predicate_inputs
             .iter()
             .flat_map(|op_inputs| vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]])
-            .chain(self.result_values_inputs.iter().flat_map(|op_inputs| {
-                vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]]
-            }))
+            .chain(
+                hash_input_gadget
+                    .result_values_inputs
+                    .iter()
+                    .flat_map(|op_inputs| {
+                        vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]]
+                    }),
+            )
             .map(|id| PlaceholderIdentifier::from_fields(&[id]))
-            .collect_vec()
+            .collect_vec())
     }
 
     /// Utility function to compute the `BasicOperationInputs` corresponding to the set of `operations` specified
@@ -1081,7 +1120,6 @@ impl<const MAX_NUM_RESULTS: usize> OutputValues<MAX_NUM_RESULTS>
 where
     [(); MAX_NUM_RESULTS - 1]:,
 {
-    #[cfg(test)] // used only in test for now
     pub(crate) fn new_aggregation_outputs(values: &[U256]) -> Self {
         let first_output = CurveOrU256::<F>::from_slice(&values[0].to_fields());
         let other_outputs = values[1..]
@@ -1097,7 +1135,6 @@ where
         }
     }
 
-    #[cfg(test)] // used only in test for now
     pub(crate) fn new_outputs_no_aggregation(point: &plonky2_ecgfp5::curve::curve::Point) -> Self {
         let first_output = CurveOrU256::<F>::from_slice(&point.to_fields());
         Self {
@@ -1284,41 +1321,26 @@ where
         >,
         min_secondary: &UInt256Target,
         max_secondary: &UInt256Target,
-        min_primary: Option<&UInt256Target>, // Option since we don't need this in universal query circuit
-        max_primary: Option<&UInt256Target>,
         num_overflows: &Target,
     ) -> UniversalQueryValueWires<MAX_NUM_COLUMNS, MAX_NUM_RESULTS> {
         let column_values = ColumnExtractionInputs::build_column_values(b);
-        // check that min_primary and max_primary are either both Some or both None
-        assert_eq!(min_primary.is_some(), max_primary.is_some());
         let _true = b._true();
         // allocate dummy row flag only if we aren't in universal circuit, i.e., if min_primary.is_some() is true
-        let is_non_dummy_row = if min_primary.is_some() {
-            b.add_virtual_bool_target_safe()
-        } else {
-            _true
-        };
+        let is_non_dummy_row = b.add_virtual_bool_target_safe();
         let ColumnExtractionValueWires { tree_hash } = ColumnExtractionInputs::build_tree_hash(
             b,
             &column_values,
             &hash_input_wires.column_extraction_wires,
         );
 
-        // if we have min_primary and max_primary bounds, enforce that the value of
-        // primary index for the current row is in the range given by these bounds
-        match (min_primary, max_primary) {
-            (Some(min), Some(max)) => {
-                let index_value = &column_values[0];
-                let less_than_max = b.is_less_or_equal_than_u256(index_value, max);
-                let greater_than_min = b.is_less_or_equal_than_u256(min, index_value);
-                b.connect(less_than_max.target, _true.target);
-                b.connect(greater_than_min.target, _true.target);
-            }
-            (None, None) => (),
-            _ => unreachable!(
-                "min_primary and max_primary should be either both Some(_) or both None"
-            ),
-        }
+        // Enforce that the value of primary index for the current row is in the range given by these bounds
+        let index_value = &column_values[0];
+        let less_than_max =
+            b.is_less_or_equal_than_u256(index_value, &hash_input_wires.max_query_primary);
+        let greater_than_min =
+            b.is_less_or_equal_than_u256(&hash_input_wires.min_query_primary, index_value);
+        b.connect(less_than_max.target, _true.target);
+        b.connect(greater_than_min.target, _true.target);
 
         // min and max for secondary indexed column
         let node_min = &column_values[1];

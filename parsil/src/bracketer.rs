@@ -1,6 +1,6 @@
 use alloy::primitives::U256;
 use ryhope::{KEY, PAYLOAD, VALID_FROM, VALID_UNTIL};
-use verifiable_db::query::aggregation::QueryBounds;
+use verifiable_db::query::utils::QueryBounds;
 
 use crate::{symbols::ContextProvider, ParsilSettings};
 

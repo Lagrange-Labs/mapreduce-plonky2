@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{context::TestContextConfig, mkdir_all, table::TableID};
+use super::{cases::query::NUM_CHUNKS, context::TestContextConfig, mkdir_all, table::TableID};
 use alloy::primitives::{Address, U256};
 use anyhow::{bail, Context, Result};
 use envconfig::Envconfig;
@@ -68,14 +68,11 @@ pub enum ProofKey {
     #[allow(clippy::upper_case_acronyms)]
     IVC(BlockPrimaryIndex),
     QueryUniversal((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
-    QueryAggregateRow((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
-    QueryAggregateIndex((QueryID, PlaceholderValues, BlockPrimaryIndex)),
-    #[cfg(feature = "batching_circuits")]
     QueryAggregate(
         (
             QueryID,
             PlaceholderValues,
-            mp2_v1::query::batching_planner::UTKey<{ super::cases::query::NUM_CHUNKS }>,
+            mp2_v1::query::batching_planner::UTKey<NUM_CHUNKS>,
         ),
     ),
 }
@@ -131,15 +128,6 @@ impl Hash for ProofKey {
                 "query_universal".hash(state);
                 n.hash(state);
             }
-            ProofKey::QueryAggregateRow(n) => {
-                "query_aggregate_row".hash(state);
-                n.hash(state);
-            }
-            ProofKey::QueryAggregateIndex(n) => {
-                "query_aggregate_index".hash(state);
-                n.hash(state);
-            }
-            #[cfg(feature = "batching_circuits")]
             ProofKey::QueryAggregate(n) => {
                 "query_aggregate".hash(state);
                 n.hash(state);
