@@ -9,24 +9,28 @@ use mp2_common::{
     hash::hash_maybe_first,
     poseidon::empty_poseidon_hash,
     serialization::{
-        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+        circuit_data_serialization::SerializableRichField, deserialize, deserialize_array,
+        deserialize_long_array, serialize, serialize_array, serialize_long_array,
     },
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
-    utils::{FromTargets, SelectHashBuilder, ToTargets},
+    utils::{FromFields, FromTargets, HashBuilder, SelectTarget, ToFields, ToTargets, TryIntoBool},
     D, F,
 };
+use mp2_test::utils::gen_random_field_hash;
 use plonky2::{
-    hash::hash_types::{HashOut, HashOutTarget},
+    field::types::Field,
+    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{circuit_builder::CircuitBuilder, config::GenericHashOut},
 };
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use super::aggregation::{ChildPosition, NodeInfo, NodeInfoTarget};
+use super::utils::{ChildPosition, NodeInfo, NodeInfoTarget};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires for Merkle path verification gadget
@@ -73,7 +77,7 @@ where
     )]
     is_real_node: [BoolTarget; MAX_DEPTH - 1],
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Input wires related to the data of the end node whose membership in the tree
 /// is proven with `MerklePathWithNeighborsGadget`.
 pub struct EndNodeInputs {
@@ -83,11 +87,13 @@ pub struct EndNodeInputs {
     // maximum of the end node. It is necessary to recompute the hash of the node
     // inside the circuit
     node_max: UInt256Target,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     // Flag specifying whether the end node has a left child
     left_child_exists: BoolTarget,
     // The data about the left child of the node, which might be necessary to
     // extract the value of the predecessor of the end node
     left_child_info: NodeInfoTarget,
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     // Flag specifying whether the end node has a right child
     right_child_exists: BoolTarget,
     // The data about the right child of the node, which might be necessary to
@@ -127,14 +133,34 @@ where
 /// either the predecessor or the successor of a node)
 pub struct NeighborInfoTarget {
     /// Boolean flag specifying whether the node has the given neighbor
-    is_found: BoolTarget,
+    pub(crate) is_found: BoolTarget,
     /// Boolean flag specifying whether the neighbor is in the path from the
     /// given node up to the root
-    is_in_path: BoolTarget,
+    pub(crate) is_in_path: BoolTarget,
     /// Value of the neighbor (if the neighbor exists, otherwise a dummy value can be employed)
-    value: UInt256Target,
+    pub(crate) value: UInt256Target,
     /// Hash of the neighbor node (if the neighbor exists, otherwise a dummy value can be employed)
-    hash: HashOutTarget,
+    pub(crate) hash: HashOutTarget,
+}
+
+impl NeighborInfoTarget {
+    pub(crate) fn new_dummy_predecessor(b: &mut CircuitBuilder<F, D>) -> Self {
+        Self {
+            is_found: b._false(),
+            is_in_path: b._true(), // the circuit still looks at the predecessor in the path
+            value: b.zero_u256(),
+            hash: b.constant_hash(*empty_poseidon_hash()),
+        }
+    }
+
+    pub(crate) fn new_dummy_successor(b: &mut CircuitBuilder<F, D>) -> Self {
+        Self {
+            is_found: b._false(),
+            is_in_path: b._true(), // the circuit still looks at the predecessor in the path
+            value: b.constant_u256(U256::MAX),
+            hash: b.constant_hash(*empty_poseidon_hash()),
+        }
+    }
 }
 
 impl ToTargets for NeighborInfoTarget {
@@ -148,6 +174,8 @@ impl ToTargets for NeighborInfoTarget {
 }
 
 impl FromTargets for NeighborInfoTarget {
+    const NUM_TARGETS: usize = 2 + NUM_LIMBS + NUM_HASH_OUT_ELTS;
+
     fn from_targets(t: &[Target]) -> Self {
         Self {
             is_found: BoolTarget::new_unsafe(t[0]),
@@ -157,7 +185,32 @@ impl FromTargets for NeighborInfoTarget {
         }
     }
 }
-#[derive(Clone, Debug)]
+
+impl SelectTarget for NeighborInfoTarget {
+    fn select<F: SerializableRichField<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        cond: &BoolTarget,
+        first: &Self,
+        second: &Self,
+    ) -> Self {
+        Self {
+            is_found: BoolTarget::new_unsafe(b.select(
+                *cond,
+                first.is_found.target,
+                second.is_found.target,
+            )),
+            is_in_path: BoolTarget::new_unsafe(b.select(
+                *cond,
+                first.is_in_path.target,
+                second.is_in_path.target,
+            )),
+            value: b.select_u256(*cond, &first.value, &second.value),
+            hash: b.select_hash(*cond, &first.hash, &second.hash),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Set of input wires for the merkle path with neighbors gadget
 pub struct MerklePathWithNeighborsTargetInputs<const MAX_DEPTH: usize>
 where
@@ -497,6 +550,7 @@ where
             // the predecessor of end_node is an ancestor of end_node iff end_node has no left child
             let is_predecessor_in_path = b.not(end_node_info.left_child_exists);
             let zero_u256 = b.zero_u256();
+            let max_u256 = b.constant_u256(U256::MAX);
             // Initialize value of predecessor node of end_node to a dummy value if the predecessor node
             // will be found in the path; otherwise, the predecessor_value is the maximum value in
             // the subtree rooted in the left child of end_node
@@ -524,7 +578,8 @@ where
             // the subtree rooted in the right child of end_node
             let successor_value = b.select_u256(
                 is_successor_in_path,
-                &zero_u256,
+                &max_u256, // set dummy value of success to `U256::MAX`, it allows to satisfy constraints of
+                // `are_consecutive_nodes` gadget in case the node has no successor in the tree
                 &end_node_info.right_child_info.min,
             );
             // the successor value is already found if end_node has a right child
@@ -636,14 +691,76 @@ where
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct NeighborInfo {
+    pub(crate) is_found: bool,
+    pub(crate) is_in_path: bool,
+    pub(crate) value: U256,
+    pub(crate) hash: HashOut<F>,
+}
+
+impl FromFields<F> for NeighborInfo {
+    fn from_fields(t: &[F]) -> Self {
+        assert!(t.len() >= NeighborInfoTarget::NUM_TARGETS);
+        Self {
+            is_found: t[0].try_into_bool().unwrap(),
+            is_in_path: t[1].try_into_bool().unwrap(),
+            value: U256::from_fields(&t[2..2 + NUM_LIMBS]),
+            hash: HashOut::from_vec(t[2 + NUM_LIMBS..NeighborInfoTarget::NUM_TARGETS].to_vec()),
+        }
+    }
+}
+
+impl ToFields<F> for NeighborInfo {
+    fn to_fields(&self) -> Vec<F> {
+        [F::from_bool(self.is_found), F::from_bool(self.is_in_path)]
+            .into_iter()
+            .chain(self.value.to_fields())
+            .chain(self.hash.to_fields())
+            .collect()
+    }
+}
+
+impl NeighborInfo {
+    // Initialize `Self` for the predecessor/successor of a node. `value`
+    // must be the value of the predecessor/successor, while `hash` must
+    // be its hash. If `hash` is `None`, it is assumed that the
+    // predecessor/successor is not located in the path of the node
+    pub(crate) fn new(value: U256, hash: Option<HashOut<F>>) -> Self {
+        Self {
+            is_found: true,
+            is_in_path: hash.is_some(),
+            value,
+            hash: hash.unwrap_or(*empty_poseidon_hash()),
+        }
+    }
+    /// Generate at random data about the successor/predecessor of a node. The generated
+    /// predecessor/successor must have the `value` provided as input;
+    /// the existence of the generated predecessor/successor depends on the `is_found` input:
+    /// - if `is_found` is `None`, then the existence of the generated predecessor/successor
+    ///   is chosen at random
+    /// - otherwise, the generated predecessor/successor will be marked as found if and only if
+    ///   the flag wrapped by `is_found` is `true`
+    pub(crate) fn sample<R: Rng>(rng: &mut R, value: U256, is_found: Option<bool>) -> Self {
+        NeighborInfo {
+            is_found: is_found.unwrap_or(rng.gen()),
+            is_in_path: rng.gen(),
+            value,
+            hash: gen_random_field_hash(),
+        }
+    }
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use std::array;
+
     use alloy::primitives::U256;
     use mp2_common::{
         poseidon::empty_poseidon_hash,
         types::HashOutput,
-        u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
-        utils::{FromFields, ToTargets, TryIntoBool},
+        u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+        utils::{FromFields, FromTargets, ToTargets},
         C, D, F,
     };
     use mp2_test::{
@@ -663,11 +780,11 @@ mod tests {
     };
     use rand::thread_rng;
 
-    use crate::query::aggregation::{ChildPosition, NodeInfo};
+    use crate::query::utils::{ChildPosition, NodeInfo};
 
     use super::{
         MerklePathGadget, MerklePathTargetInputs, MerklePathWithNeighborsGadget,
-        MerklePathWithNeighborsTargetInputs, NeighborInfoTarget,
+        MerklePathWithNeighborsTargetInputs, NeighborInfo, NeighborInfoTarget,
     };
 
     #[derive(Clone, Debug)]
@@ -703,28 +820,24 @@ mod tests {
         }
     }
 
-    impl NeighborInfoTarget {
-        const NUM_ELEMENTS: usize = 2 + NUM_LIMBS + NUM_HASH_OUT_ELTS;
-    }
-
-    #[derive(Clone, Debug, Eq, PartialEq)]
-    pub(crate) struct NeighborInfo {
-        is_found: bool,
-        is_in_path: bool,
-        value: U256,
-        hash: HashOut<F>,
-    }
-
-    impl FromFields<F> for NeighborInfo {
-        fn from_fields(t: &[F]) -> Self {
-            assert!(t.len() >= NeighborInfoTarget::NUM_ELEMENTS);
+    impl NeighborInfo {
+        // Initialize `Self` for a node with no predecessor
+        pub(crate) fn new_dummy_predecessor() -> Self {
             Self {
-                is_found: t[0].try_into_bool().unwrap(),
-                is_in_path: t[1].try_into_bool().unwrap(),
-                value: U256::from_fields(&t[2..2 + NUM_LIMBS]),
-                hash: HashOut::from_vec(
-                    t[2 + NUM_LIMBS..NeighborInfoTarget::NUM_ELEMENTS].to_vec(),
-                ),
+                is_found: false,
+                is_in_path: true, // the circuit still looks at the predecessor in the path
+                value: U256::ZERO,
+                hash: *empty_poseidon_hash(),
+            }
+        }
+
+        // Initialize `Self` for a node with no successor
+        pub(crate) fn new_dummy_successor() -> Self {
+            Self {
+                is_found: false,
+                is_in_path: true, // the circuit still looks at the successor in the path
+                value: U256::MAX,
+                hash: *empty_poseidon_hash(),
             }
         }
     }
@@ -781,50 +894,80 @@ mod tests {
             pw.set_target(wires.3, self.index_id);
         }
     }
-    // Build the following Merkle-tree to be employed in tests, using
-    // the `index_id` provided as input to compute the hash of the nodes
-    //              A
-    //          B       C
-    //      D               G
-    //   E      F
-    fn generate_test_tree(index_id: F) -> [NodeInfo; 7] {
+
+    // method to build a `NodeInfo` for a node from the provided inputs
+    pub(crate) fn build_node(
+        left_child: Option<&NodeInfo>,
+        right_child: Option<&NodeInfo>,
+        node_value: U256,
+        embedded_tree_hash: HashOutput,
+        index_id: F,
+    ) -> NodeInfo {
+        let node_min = if let Some(node) = &left_child {
+            node.min
+        } else {
+            node_value
+        };
+        let node_max = if let Some(node) = &right_child {
+            node.max
+        } else {
+            node_value
+        };
+        let left_child = left_child
+            .map(|node| HashOutput::try_from(node.compute_node_hash(index_id).to_bytes()).unwrap());
+        let right_child = right_child
+            .map(|node| HashOutput::try_from(node.compute_node_hash(index_id).to_bytes()).unwrap());
+        NodeInfo::new(
+            &embedded_tree_hash,
+            left_child.as_ref(),
+            right_child.as_ref(),
+            node_value,
+            node_min,
+            node_max,
+        )
+    }
+
+    /// Build the following Merkle-tree to be employed in tests, using
+    /// the `index_id` provided as input to compute the hash of the nodes
+    ///              A
+    ///          B       C
+    ///      D               G
+    ///   E      F
+    pub(crate) fn generate_test_tree(
+        index_id: F,
+        value_range: Option<(U256, U256)>,
+    ) -> [NodeInfo; 7] {
         let rng = &mut thread_rng();
         // closure to generate a random node of the tree from the 2 children, if any
-        let mut random_node =
-            |left_child: Option<&NodeInfo>, right_child: Option<&NodeInfo>| -> NodeInfo {
-                let embedded_tree_hash = HashOutput::from(gen_random_field_hash::<F>());
-                let node_value = gen_random_u256(rng);
-                let node_min = if let Some(node) = &left_child {
-                    node.min
-                } else {
-                    node_value
-                };
-                let node_max = if let Some(node) = &right_child {
-                    node.max
-                } else {
-                    node_value
-                };
-                let left_child =
-                    left_child.map(|node| HashOutput::from(node.compute_node_hash(index_id)));
-                let right_child =
-                    right_child.map(|node| HashOutput::from(node.compute_node_hash(index_id)));
-                NodeInfo::new(
-                    &embedded_tree_hash,
-                    left_child.as_ref(),
-                    right_child.as_ref(),
-                    node_value,
-                    node_min,
-                    node_max,
-                )
-            };
-
-        let node_e = random_node(None, None); // it's a leaf node, so no children
-        let node_f = random_node(None, None);
-        let node_g = random_node(None, None);
-        let node_d = random_node(Some(&node_e), Some(&node_f));
-        let node_b = random_node(Some(&node_d), None);
-        let node_c = random_node(None, Some(&node_g));
-        let node_a = random_node(Some(&node_b), Some(&node_c));
+        let random_node = |left_child: Option<&NodeInfo>,
+                           right_child: Option<&NodeInfo>,
+                           node_value: U256|
+         -> NodeInfo {
+            let embedded_tree_hash =
+                HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap();
+            build_node(
+                left_child,
+                right_child,
+                node_value,
+                embedded_tree_hash,
+                index_id,
+            )
+        };
+        let mut values: [U256; 7] = array::from_fn(|_| gen_random_u256(rng));
+        if let Some((min_range, max_range)) = value_range {
+            // trim random values to the range specified as input
+            values.iter_mut().for_each(|value| {
+                *value = min_range + *value % (max_range - min_range + U256::from(1))
+            });
+        }
+        values.sort();
+        let node_e = random_node(None, None, values[0]); // it's a leaf node, so no children
+        let node_f = random_node(None, None, values[2]);
+        let node_g = random_node(None, None, values[6]);
+        let node_d = random_node(Some(&node_e), Some(&node_f), values[1]);
+        let node_b = random_node(Some(&node_d), None, values[3]);
+        let node_c = random_node(None, Some(&node_g), values[5]);
+        let node_a = random_node(Some(&node_b), Some(&node_c), values[4]);
         [node_a, node_b, node_c, node_d, node_e, node_f, node_g]
     }
 
@@ -832,7 +975,8 @@ mod tests {
     fn test_merkle_path() {
         // first, build the Merkle-tree
         let index_id = F::rand();
-        let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] = generate_test_tree(index_id);
+        let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] =
+            generate_test_tree(index_id, None);
         let root = node_a.compute_node_hash(index_id);
         // verify Merkle-path related to leaf F
         const MAX_DEPTH: usize = 10;
@@ -893,7 +1037,8 @@ mod tests {
     fn test_merkle_path_with_neighbors() {
         // first, build the Merkle-tree
         let index_id = F::rand();
-        let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] = generate_test_tree(index_id);
+        let [node_a, node_b, node_c, node_d, node_e, node_f, node_g] =
+            generate_test_tree(index_id, None);
         let root = node_a.compute_node_hash(index_id);
         // verify Merkle-path related to leaf F
         const MAX_DEPTH: usize = 10;
@@ -949,8 +1094,7 @@ mod tests {
             // check successor info extracted in the circuit
             assert_eq!(
                 NeighborInfo::from_fields(
-                    &proof.public_inputs
-                        [2 * NUM_HASH_OUT_ELTS + NeighborInfoTarget::NUM_ELEMENTS..]
+                    &proof.public_inputs[2 * NUM_HASH_OUT_ELTS + NeighborInfoTarget::NUM_TARGETS..]
                 ),
                 successor_info,
                 "failed for node {node_name}"
@@ -959,20 +1103,10 @@ mod tests {
         // build predecessor and successor info for node_F
         // predecessor should be node_D
         let node_d_hash = node_d.compute_node_hash(index_id);
-        let predecessor_info = NeighborInfo {
-            is_found: true,
-            is_in_path: true,
-            value: node_d.value,
-            hash: node_d_hash,
-        };
+        let predecessor_info = NeighborInfo::new(node_d.value, Some(node_d_hash));
         // successor should be node_B
         let node_b_hash = node_b.compute_node_hash(index_id);
-        let successor_info = NeighborInfo {
-            is_found: true,
-            is_in_path: true,
-            value: node_b.value,
-            hash: node_b_hash,
-        };
+        let successor_info = NeighborInfo::new(node_b.value, Some(node_b_hash));
         check_public_inputs(proof, &node_f, "node F", predecessor_info, successor_info);
 
         // verify Merkle-path related to leaf E
@@ -1001,19 +1135,9 @@ mod tests {
 
         // build predecessor and successor info for node_E
         // There should be no predecessor
-        let predecessor_info = NeighborInfo {
-            is_found: false,
-            is_in_path: true, // the circuit still looks at the predecessor in the path
-            value: U256::ZERO,
-            hash: *empty_poseidon_hash(),
-        };
+        let predecessor_info = NeighborInfo::new_dummy_predecessor();
         // successor should be node_D
-        let successor_info = NeighborInfo {
-            is_found: true,
-            is_in_path: true,
-            value: node_d.value,
-            hash: node_d_hash,
-        };
+        let successor_info = NeighborInfo::new(node_d.value, Some(node_d_hash));
         check_public_inputs(proof, &node_e, "node E", predecessor_info, successor_info);
 
         // verify Merkle-path related to node D
@@ -1037,19 +1161,9 @@ mod tests {
 
         // build predecessor and successor info for node_D
         // predecessor should be node_E, but it's not in the path
-        let predecessor_info = NeighborInfo {
-            is_found: true,
-            is_in_path: false,
-            value: node_e.value,
-            hash: *empty_poseidon_hash(), // dummy value since the predecessor is not found in the path
-        };
+        let predecessor_info = NeighborInfo::new(node_e.value, None);
         // successor should be node_F, but it's not in the path
-        let successor_info = NeighborInfo {
-            is_found: true,
-            is_in_path: false,
-            value: node_f.value,
-            hash: *empty_poseidon_hash(), // dummy value since the predecessor is not found in the path
-        };
+        let successor_info = NeighborInfo::new(node_f.value, None);
         check_public_inputs(proof, &node_d, "node D", predecessor_info, successor_info);
 
         // verify Merkle-path related to node B
@@ -1073,19 +1187,9 @@ mod tests {
 
         // build predecessor and successor info for node_B
         // predecessor should be node_F, but it's not in the path
-        let predecessor_info = NeighborInfo {
-            is_found: true,
-            is_in_path: false,
-            value: node_f.value,
-            hash: *empty_poseidon_hash(), // dummy value since the predecessor is not found in the path
-        };
+        let predecessor_info = NeighborInfo::new(node_f.value, None);
         // successor should be node_A
-        let successor_info = NeighborInfo {
-            is_found: true,
-            is_in_path: true,
-            value: node_a.value,
-            hash: root,
-        };
+        let successor_info = NeighborInfo::new(node_a.value, Some(root));
         check_public_inputs(proof, &node_b, "node B", predecessor_info, successor_info);
 
         // verify Merkle-path related to leaf G
@@ -1112,19 +1216,12 @@ mod tests {
 
         // build predecessor and successor info for node_G
         // predecessor should be node_C
-        let predecessor_info = NeighborInfo {
-            is_found: true,
-            is_in_path: true,
-            value: node_c.value,
-            hash: HashOut::from_bytes((&node_c_hash).into()),
-        };
+        let predecessor_info = NeighborInfo::new(
+            node_c.value,
+            Some(HashOut::from_bytes((&node_c_hash).into())),
+        );
         // There should be no successor
-        let successor_info = NeighborInfo {
-            is_found: false,
-            is_in_path: true,
-            value: U256::ZERO,
-            hash: *empty_poseidon_hash(),
-        };
+        let successor_info = NeighborInfo::new_dummy_successor();
         check_public_inputs(proof, &node_g, "node G", predecessor_info, successor_info);
 
         // verify Merkle-path related to root node A
@@ -1148,19 +1245,9 @@ mod tests {
 
         // build predecessor and successor info for node_A
         // predecessor should be node_B, but it's not in the path
-        let predecessor_info = NeighborInfo {
-            is_found: true,
-            is_in_path: false,
-            value: node_b.value,
-            hash: *empty_poseidon_hash(), // dummy value since the predecessor is not found in the path
-        };
+        let predecessor_info = NeighborInfo::new(node_b.value, None);
         // successor should be node_C, but it's not in the path
-        let successor_info = NeighborInfo {
-            is_found: true,
-            is_in_path: false,
-            value: node_c.value,
-            hash: *empty_poseidon_hash(), // dummy value since the successor is not found in the path
-        };
+        let successor_info = NeighborInfo::new(node_c.value, None);
         check_public_inputs(proof, &node_a, "node A", predecessor_info, successor_info);
     }
 }

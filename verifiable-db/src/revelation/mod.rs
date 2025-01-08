@@ -1,6 +1,6 @@
 //! Module including the revelation circuits for query
 
-use crate::{ivc::NUM_IO, query::pi_len as query_pi_len};
+use crate::ivc::NUM_IO;
 use mp2_common::F;
 
 pub mod api;
@@ -20,15 +20,12 @@ pub const fn pi_len<const L: usize, const S: usize, const PH: usize>() -> usize 
 }
 pub const NUM_PREPROCESSING_IO: usize = NUM_IO;
 
-pub const fn num_query_io<const S: usize>() -> usize {
-    query_pi_len::<S>()
-}
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::query::{
         computational_hash_ids::{AggregationOperation, PlaceholderIdentifier},
-        public_inputs::PublicInputs as QueryProofPublicInputs,
+        universal_circuit::universal_query_gadget::OutputValues,
     };
     use alloy::primitives::U256;
     use itertools::Itertools;
@@ -183,23 +180,24 @@ pub(crate) mod tests {
         }
     }
 
-    /// Compute the query results from the proof, and it returns the results and overflow flag.
-    pub(crate) fn compute_results_from_query_proof<const S: usize>(
-        query_pi: &QueryProofPublicInputs<F, S>,
-    ) -> ([U256; S], bool)
+    /// Compute the query results from the query proof outputs, and it returns the results.
+    pub(crate) fn compute_results_from_query_proof_outputs<const S: usize>(
+        entry_count: F,
+        output_values: OutputValues<S>,
+        ops: &[F; S],
+    ) -> [U256; S]
     where
         [(); S - 1]:,
     {
         // Convert the entry count to an Uint256.
-        let entry_count = U256::from(query_pi.num_matching_rows().to_canonical_u64());
+        let entry_count = U256::from(entry_count.to_canonical_u64());
 
         let [op_avg, op_count] =
             [AggregationOperation::AvgOp, AggregationOperation::CountOp].map(|op| op.to_field());
 
         // Compute the results array, and deal with AVG and COUNT operations if any.
-        let ops = query_pi.operation_ids();
-        let result = array::from_fn(|i| {
-            let value = query_pi.value_at_index(i);
+        array::from_fn(|i| {
+            let value = output_values.value_at_index(i);
 
             let op = ops[i];
             if op == op_avg {
@@ -209,8 +207,6 @@ pub(crate) mod tests {
             } else {
                 value
             }
-        });
-
-        (result, query_pi.overflow_flag())
+        })
     }
 }

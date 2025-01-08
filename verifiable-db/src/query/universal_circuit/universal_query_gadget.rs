@@ -10,33 +10,33 @@ use mp2_common::{
     array::ToField,
     poseidon::{empty_poseidon_hash, H},
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
-    types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{FromFields, ToFields, ToTargets},
+    types::{CBuilder, CURVE_TARGET_LEN},
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
+    utils::{FromFields, FromTargets, ToFields, ToTargets},
     CHasher, F,
 };
 use plonky2::{
     field::types::Field,
-    hash::hashing::hash_n_to_hash_no_pad,
+    hash::{hash_types::NUM_HASH_OUT_ELTS, hashing::hash_n_to_hash_no_pad},
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::config::{GenericHashOut, Hasher},
 };
+use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
 use serde::{Deserialize, Serialize};
 
 use crate::query::{
-    aggregation::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
     computational_hash_ids::{
         ColumnIDs, ComputationalHashCache, HashPermutation, Operation, Output,
         PlaceholderIdentifier,
     },
-    public_inputs::PublicInputs,
     universal_circuit::{
         basic_operation::BasicOperationInputs, column_extraction::ColumnExtractionValueWires,
         universal_circuit_inputs::OutputItem,
     },
+    utils::{QueryBoundSecondary, QueryBoundSource, QueryBounds},
 };
 
 use super::{
@@ -163,6 +163,7 @@ impl QueryBound {
     /// Initialize a query bound for the primary index, from the set of `placeholders` employed in the query,
     /// which include also the primary index bounds by construction. The flag `is_min_bound`
     /// must be true iff the bound to be initialized is a lower bound in the range specified in the query
+    #[allow(dead_code)] // unused for now, but it could be useful to keep it
     pub(crate) fn new_primary_index_bound(
         placeholders: &Placeholders,
         is_min_bound: bool,
@@ -493,10 +494,14 @@ pub(crate) struct UniversalQueryHashInputWires<
 > {
     /// Input wires for column extraction component
     pub(crate) column_extraction_wires: ColumnExtractionInputWires<MAX_NUM_COLUMNS>,
+    /// Lower bound of the range for the primary index specified in the query
+    pub(crate) min_query_primary: UInt256Target,
+    /// Upper bound of the range for the primary index specified in the query
+    pub(crate) max_query_primary: UInt256Target,
     /// Lower bound of the range for the secondary index specified in the query
-    min_query: QueryBoundTargetInputs,
+    min_query_secondary: QueryBoundTargetInputs,
     /// Upper bound of the range for the secondary index specified in the query
-    max_query: QueryBoundTargetInputs,
+    max_query_secondary: QueryBoundTargetInputs,
     /// Input wires for the `MAX_NUM_PREDICATE_OPS` basic operation components necessary
     /// to evaluate the filtering predicate
     #[serde(
@@ -516,6 +521,7 @@ pub(crate) struct UniversalQueryHashInputWires<
     output_component_wires: <T::HashWires as OutputComponentHashWires>::InputWires,
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct UniversalQueryHashWires<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
@@ -547,8 +553,10 @@ pub(crate) struct UniversalQueryHashInputs<
     T: OutputComponent<MAX_NUM_RESULTS>,
 > {
     column_extraction_inputs: ColumnExtractionInputs<MAX_NUM_COLUMNS>,
-    min_query: QueryBound,
-    max_query: QueryBound,
+    min_query_primary: U256,
+    max_query_primary: U256,
+    min_query_secondary: QueryBound,
+    max_query_secondary: QueryBound,
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
@@ -660,8 +668,10 @@ where
 
         Ok(Self {
             column_extraction_inputs,
-            min_query,
-            max_query,
+            min_query_primary: query_bounds.min_query_primary(),
+            max_query_primary: query_bounds.max_query_primary(),
+            min_query_secondary: min_query,
+            max_query_secondary: max_query,
             filtering_predicate_inputs: predicate_ops_inputs,
             result_values_inputs: result_ops_inputs,
             output_component_inputs,
@@ -678,8 +688,9 @@ where
         T,
     > {
         let column_extraction_wires = ColumnExtractionInputs::build_hash(b);
-        let min_query = QueryBoundTarget::new(b);
-        let max_query = QueryBoundTarget::new(b);
+        let [min_query_primary, max_query_primary] = b.add_virtual_u256_arr_unsafe();
+        let min_query_secondary = QueryBoundTarget::new(b);
+        let max_query_secondary = QueryBoundTarget::new(b);
         let mut input_hash = column_extraction_wires.column_hash.to_vec();
         // Payload to compute the placeholder hash public input
         let mut placeholder_hash_payload = vec![];
@@ -741,27 +752,32 @@ where
         let placeholder_hash = b.hash_n_to_hash_no_pad::<CHasher>(placeholder_hash_payload);
         let placeholder_hash = QueryBoundTarget::add_query_bounds_to_placeholder_hash(
             b,
-            &min_query,
-            &max_query,
+            &min_query_secondary,
+            &max_query_secondary,
             &placeholder_hash,
         );
         // add query bounds to computational hash
         let computational_hash = QueryBoundTarget::add_query_bounds_to_computational_hash(
             b,
-            &min_query,
-            &max_query,
+            &min_query_secondary,
+            &max_query_secondary,
             &output_component_wires.computational_hash(),
         );
 
-        let min_secondary = min_query.get_bound_value().clone();
-        let max_secondary = max_query.get_bound_value().clone();
-        let num_bound_overflows =
-            QueryBoundTarget::num_overflows_for_query_bound_operations(b, &min_query, &max_query);
+        let min_secondary = min_query_secondary.get_bound_value().clone();
+        let max_secondary = max_query_secondary.get_bound_value().clone();
+        let num_bound_overflows = QueryBoundTarget::num_overflows_for_query_bound_operations(
+            b,
+            &min_query_secondary,
+            &max_query_secondary,
+        );
         UniversalQueryHashWires {
             input_wires: UniversalQueryHashInputWires {
                 column_extraction_wires: column_extraction_wires.input_wires,
-                min_query: min_query.into(),
-                max_query: max_query.into(),
+                min_query_primary,
+                max_query_primary,
+                min_query_secondary: min_query_secondary.into(),
+                max_query_secondary: max_query_secondary.into(),
                 filtering_predicate_ops: filtering_predicate_wires.try_into().unwrap(),
                 result_value_ops: result_value_wires.try_into().unwrap(),
                 output_component_wires: output_component_wires.input_wires(),
@@ -792,8 +808,14 @@ where
     ) {
         self.column_extraction_inputs
             .assign(pw, &wires.column_extraction_wires);
-        wires.min_query.assign(pw, &self.min_query);
-        wires.max_query.assign(pw, &self.max_query);
+        pw.set_u256_target(&wires.min_query_primary, self.min_query_primary);
+        pw.set_u256_target(&wires.max_query_primary, self.max_query_primary);
+        wires
+            .min_query_secondary
+            .assign(pw, &self.min_query_secondary);
+        wires
+            .max_query_secondary
+            .assign(pw, &self.max_query_secondary);
         self.filtering_predicate_inputs
             .iter()
             .chain(self.result_values_inputs.iter())
@@ -811,15 +833,33 @@ where
     /// This method returns the ids of the placeholders employed to compute the placeholder hash,
     /// in the same order, so that those ids can be provided as input to other circuits that need
     /// to recompute this hash
-    pub(crate) fn ids_for_placeholder_hash(&self) -> Vec<PlaceholderId> {
-        self.filtering_predicate_inputs
+    pub(crate) fn ids_for_placeholder_hash(
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+        placeholders: &Placeholders,
+        query_bounds: &QueryBounds,
+    ) -> Result<Vec<PlaceholderId>> {
+        let hash_input_gadget = Self::new(
+            &ColumnIDs::default(),
+            predicate_operations,
+            placeholders,
+            query_bounds,
+            results,
+        )?;
+        Ok(hash_input_gadget
+            .filtering_predicate_inputs
             .iter()
             .flat_map(|op_inputs| vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]])
-            .chain(self.result_values_inputs.iter().flat_map(|op_inputs| {
-                vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]]
-            }))
+            .chain(
+                hash_input_gadget
+                    .result_values_inputs
+                    .iter()
+                    .flat_map(|op_inputs| {
+                        vec![op_inputs.placeholder_ids[0], op_inputs.placeholder_ids[1]]
+                    }),
+            )
             .map(|id| PlaceholderIdentifier::from_fields(&[id]))
-            .collect_vec()
+            .collect_vec())
     }
 
     /// Utility function to compute the `BasicOperationInputs` corresponding to the set of `operations` specified
@@ -936,6 +976,225 @@ where
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct CurveOrU256<T>([T; CURVE_TARGET_LEN]);
+
+impl<T: Clone + Debug> CurveOrU256<T> {
+    pub(crate) fn from_slice(t: &[T]) -> Self {
+        Self(
+            t.iter()
+                .cloned()
+                .chain(repeat(t[0].clone()))
+                .take(CURVE_TARGET_LEN)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub(crate) fn to_u256_raw(&self) -> &[T] {
+        &self.0[..NUM_LIMBS]
+    }
+
+    pub(crate) fn to_vec(&self) -> Vec<T> {
+        self.0.to_vec()
+    }
+}
+
+pub(crate) type CurveOrU256Target = CurveOrU256<Target>;
+
+impl CurveOrU256Target {
+    pub(crate) fn as_curve_target(&self) -> CurveTarget {
+        CurveTarget::from_targets(self.0.as_slice())
+    }
+
+    pub(crate) fn as_u256_target(&self) -> UInt256Target {
+        UInt256Target::from_targets(self.to_u256_raw())
+    }
+}
+
+impl FromTargets for CurveOrU256Target {
+    const NUM_TARGETS: usize = CurveTarget::NUM_TARGETS;
+
+    fn from_targets(t: &[Target]) -> Self {
+        Self::from_slice(t)
+    }
+}
+
+impl ToTargets for CurveOrU256Target {
+    fn to_targets(&self) -> Vec<Target> {
+        self.0.to_vec()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OutputValuesTarget<const MAX_NUM_RESULTS: usize>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    pub(crate) first_output: CurveOrU256Target,
+    pub(crate) other_outputs: [UInt256Target; MAX_NUM_RESULTS - 1],
+}
+
+impl<const MAX_NUM_RESULTS: usize> OutputValuesTarget<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    pub(crate) fn value_target_at_index(&self, i: usize) -> UInt256Target {
+        if i == 0 {
+            self.first_output.as_u256_target()
+        } else {
+            self.other_outputs[i - 1].clone()
+        }
+    }
+
+    #[cfg(test)] // used only in test for now
+    pub(crate) fn build(b: &mut CBuilder) -> Self {
+        let first_output = CurveOrU256(b.add_virtual_target_arr());
+        let other_outputs = b.add_virtual_u256_arr();
+
+        Self {
+            first_output,
+            other_outputs,
+        }
+    }
+
+    #[cfg(test)] // used only in test for now
+    pub(crate) fn set_target(
+        &self,
+        pw: &mut PartialWitness<F>,
+        inputs: &OutputValues<MAX_NUM_RESULTS>,
+    ) {
+        pw.set_target_arr(&self.first_output.0, &inputs.first_output.0);
+        pw.set_u256_target_arr(&self.other_outputs, &inputs.other_outputs);
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> ToTargets for OutputValuesTarget<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    fn to_targets(&self) -> Vec<Target> {
+        self.first_output
+            .to_targets()
+            .into_iter()
+            .chain(self.other_outputs.iter().flat_map(|out| out.to_targets()))
+            .collect()
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> FromTargets for OutputValuesTarget<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    const NUM_TARGETS: usize =
+        CurveTarget::NUM_TARGETS + (MAX_NUM_RESULTS - 1) * UInt256Target::NUM_TARGETS;
+
+    fn from_targets(t: &[Target]) -> Self {
+        assert!(t.len() >= Self::NUM_TARGETS);
+        let first_output = CurveOrU256Target::from_targets(&t[..CurveTarget::NUM_TARGETS]);
+        let other_outputs = t[CurveTarget::NUM_TARGETS..]
+            .chunks(UInt256Target::NUM_TARGETS)
+            .map(UInt256Target::from_targets)
+            .take(MAX_NUM_RESULTS - 1)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+
+        Self {
+            first_output,
+            other_outputs,
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub(crate) struct OutputValues<const MAX_NUM_RESULTS: usize>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    pub(crate) first_output: CurveOrU256<F>,
+    pub(crate) other_outputs: [U256; MAX_NUM_RESULTS - 1],
+}
+
+impl<const MAX_NUM_RESULTS: usize> OutputValues<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    pub(crate) fn new_aggregation_outputs(values: &[U256]) -> Self {
+        let first_output = CurveOrU256::<F>::from_slice(&values[0].to_fields());
+        let other_outputs = values[1..]
+            .iter()
+            .copied()
+            .chain(repeat(U256::ZERO))
+            .take(MAX_NUM_RESULTS - 1)
+            .collect_vec();
+
+        Self {
+            first_output,
+            other_outputs: other_outputs.try_into().unwrap(),
+        }
+    }
+
+    pub(crate) fn new_outputs_no_aggregation(point: &plonky2_ecgfp5::curve::curve::Point) -> Self {
+        let first_output = CurveOrU256::<F>::from_slice(&point.to_fields());
+        Self {
+            first_output,
+            other_outputs: [U256::ZERO; MAX_NUM_RESULTS - 1],
+        }
+    }
+
+    pub(crate) fn first_value_as_curve_point(&self) -> WeierstrassPoint {
+        WeierstrassPoint::from_fields(&self.first_output.0)
+    }
+
+    pub(crate) fn first_value_as_u256(&self) -> U256 {
+        let fields = self.first_output.to_u256_raw();
+        U256::from_fields(fields)
+    }
+
+    /// Return the value as a UInt256 at the specified index
+    pub(crate) fn value_at_index(&self, i: usize) -> U256 {
+        if i == 0 {
+            self.first_value_as_u256()
+        } else {
+            self.other_outputs[i - 1]
+        }
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> FromFields<F> for OutputValues<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    fn from_fields(t: &[F]) -> Self {
+        let first_output = CurveOrU256::from_slice(&t[..CURVE_TARGET_LEN]);
+        let other_outputs = t[CURVE_TARGET_LEN..]
+            .chunks(NUM_LIMBS)
+            .map(U256::from_fields)
+            .take(MAX_NUM_RESULTS - 1)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+
+        Self {
+            first_output,
+            other_outputs,
+        }
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> ToFields<F> for OutputValues<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    fn to_fields(&self) -> Vec<F> {
+        self.first_output
+            .to_vec()
+            .into_iter()
+            .chain(self.other_outputs.iter().flat_map(|out| out.to_fields()))
+            .collect()
+    }
+}
 /// Input wires for the universal query value gadget
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub(crate) struct UniversalQueryValueInputWires<const MAX_NUM_COLUMNS: usize> {
@@ -949,17 +1208,54 @@ pub(crate) struct UniversalQueryValueInputWires<const MAX_NUM_COLUMNS: usize> {
     pub(crate) is_non_dummy_row: BoolTarget,
 }
 
-pub(crate) struct UniversalQueryOutputWires<const MAX_NUM_RESULTS: usize> {
+#[derive(Clone, Debug)]
+pub(crate) struct UniversalQueryOutputWires<const MAX_NUM_RESULTS: usize>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
     pub(crate) tree_hash: MembershipHashTarget,
-    pub(crate) values: [Vec<Target>; MAX_NUM_RESULTS],
+    pub(crate) values: OutputValuesTarget<MAX_NUM_RESULTS>,
     pub(crate) count: Target,
     pub(crate) num_overflows: Target,
 }
 
+impl<const MAX_NUM_RESULTS: usize> FromTargets for UniversalQueryOutputWires<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    const NUM_TARGETS: usize = NUM_HASH_OUT_ELTS + 2 + OutputValuesTarget::NUM_TARGETS;
+    fn from_targets(t: &[Target]) -> Self {
+        assert!(t.len() >= Self::NUM_TARGETS);
+        Self {
+            tree_hash: MembershipHashTarget::from_vec(t[..NUM_HASH_OUT_ELTS].to_vec()),
+            values: OutputValuesTarget::from_targets(&t[NUM_HASH_OUT_ELTS..]),
+            count: t[Self::NUM_TARGETS - 2],
+            num_overflows: t[Self::NUM_TARGETS - 1],
+        }
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> ToTargets for UniversalQueryOutputWires<MAX_NUM_RESULTS>
+where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
+    fn to_targets(&self) -> Vec<Target> {
+        self.tree_hash
+            .to_targets()
+            .into_iter()
+            .chain(self.values.to_targets())
+            .chain([self.count, self.num_overflows])
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct UniversalQueryValueWires<
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_RESULTS: usize,
-> {
+> where
+    [(); MAX_NUM_RESULTS - 1]:,
+{
     pub(crate) input_wires: UniversalQueryValueInputWires<MAX_NUM_COLUMNS>,
     pub(crate) output_wires: UniversalQueryOutputWires<MAX_NUM_RESULTS>,
 }
@@ -975,8 +1271,8 @@ pub(crate) struct UniversalQueryValueInputs<
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    column_values: [U256; MAX_NUM_COLUMNS],
-    is_non_dummy_row: bool,
+    pub(crate) column_values: [U256; MAX_NUM_COLUMNS],
+    pub(crate) is_dummy_row: bool,
 }
 
 impl<
@@ -993,8 +1289,9 @@ impl<
     >
 where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); MAX_NUM_RESULTS - 1]:,
 {
-    pub(crate) fn new(row_cells: &RowCells, is_non_dummy_row: bool) -> Result<Self> {
+    pub(crate) fn new(row_cells: &RowCells, is_dummy_row: bool) -> Result<Self> {
         let num_columns = row_cells.num_columns();
         ensure!(
             num_columns <= MAX_NUM_COLUMNS,
@@ -1009,7 +1306,7 @@ where
             .collect_vec();
         Ok(Self {
             column_values: padded_column_values.try_into().unwrap(),
-            is_non_dummy_row,
+            is_dummy_row,
         })
     }
 
@@ -1024,41 +1321,26 @@ where
         >,
         min_secondary: &UInt256Target,
         max_secondary: &UInt256Target,
-        min_primary: Option<&UInt256Target>, // Option since we don't need this in universal query circuit
-        max_primary: Option<&UInt256Target>,
         num_overflows: &Target,
     ) -> UniversalQueryValueWires<MAX_NUM_COLUMNS, MAX_NUM_RESULTS> {
         let column_values = ColumnExtractionInputs::build_column_values(b);
-        // check that min_primary and max_primary are either both Some or both None
-        assert_eq!(min_primary.is_some(), max_primary.is_some());
         let _true = b._true();
         // allocate dummy row flag only if we aren't in universal circuit, i.e., if min_primary.is_some() is true
-        let is_non_dummy_row = if min_primary.is_some() {
-            b.add_virtual_bool_target_safe()
-        } else {
-            _true
-        };
+        let is_non_dummy_row = b.add_virtual_bool_target_safe();
         let ColumnExtractionValueWires { tree_hash } = ColumnExtractionInputs::build_tree_hash(
             b,
             &column_values,
             &hash_input_wires.column_extraction_wires,
         );
 
-        // if we have min_primary and max_primary bounds, enforce that the value of
-        // primary index for the current row is in the range given by these bounds
-        match (min_primary, max_primary) {
-            (Some(min), Some(max)) => {
-                let index_value = &column_values[0];
-                let less_than_max = b.is_less_or_equal_than_u256(index_value, max);
-                let greater_than_min = b.is_less_or_equal_than_u256(min, index_value);
-                b.connect(less_than_max.target, _true.target);
-                b.connect(greater_than_min.target, _true.target);
-            }
-            (None, None) => (),
-            _ => unreachable!(
-                "min_primary and max_primary should be either both Some(_) or both None"
-            ),
-        }
+        // Enforce that the value of primary index for the current row is in the range given by these bounds
+        let index_value = &column_values[0];
+        let less_than_max =
+            b.is_less_or_equal_than_u256(index_value, &hash_input_wires.max_query_primary);
+        let greater_than_min =
+            b.is_less_or_equal_than_u256(&hash_input_wires.min_query_primary, index_value);
+        b.connect(less_than_max.target, _true.target);
+        b.connect(greater_than_min.target, _true.target);
 
         // min and max for secondary indexed column
         let node_min = &column_values[1];
@@ -1134,22 +1416,21 @@ where
             &hash_input_wires.output_component_wires,
         );
 
-        // compute output_values to be exposed; we call `pad_slice_to_curve_len` to ensure that the
-        // first output value is always padded to the size of a `CurveTarget`
-        let first_output_value = PublicInputs::<_, MAX_NUM_RESULTS>::pad_slice_to_curve_len(
+        // compute output_values to be exposed; we build the first output value as a `CurveOrU256Target`
+        let first_output = CurveOrU256Target::from_targets(
             &output_component_value_wires
                 .first_output_value()
                 .to_targets(),
         );
         // Append the other `MAX_NUM_RESULTS-1` output values
-        let output_values = once(first_output_value)
-            .chain(
-                output_component_value_wires
-                    .other_output_values()
-                    .iter()
-                    .map(|t| t.to_targets()),
-            )
-            .collect_vec();
+        let output_values = OutputValuesTarget {
+            first_output,
+            other_outputs: output_component_value_wires
+                .other_output_values()
+                .to_vec()
+                .try_into()
+                .unwrap(),
+        };
 
         // ensure that `num_overflows` is always 0 in case of dummy rows
         let num_overflows = b.mul(num_overflows, is_non_dummy_row.target);
@@ -1161,7 +1442,7 @@ where
             },
             output_wires: UniversalQueryOutputWires {
                 tree_hash,
-                values: output_values.try_into().unwrap(),
+                values: output_values,
                 count: predicate_value.target,
                 num_overflows,
             },
@@ -1174,7 +1455,7 @@ where
         wires: &UniversalQueryValueInputWires<MAX_NUM_COLUMNS>,
     ) {
         pw.set_u256_target_arr(&wires.column_values, &self.column_values);
-        pw.set_bool_target(wires.is_non_dummy_row, self.is_non_dummy_row);
+        pw.set_bool_target(wires.is_non_dummy_row, !self.is_dummy_row);
     }
 }
 

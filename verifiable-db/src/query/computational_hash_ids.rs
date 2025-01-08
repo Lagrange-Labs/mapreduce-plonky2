@@ -13,7 +13,7 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     types::{CBuilder, HashOutput},
     u256::UInt256Target,
-    utils::{Fieldable, FromFields, SelectHashBuilder, ToFields, ToTargets},
+    utils::{Fieldable, FromFields, HashBuilder, ToFields, ToTargets},
     CHasher, F,
 };
 use plonky2::{
@@ -31,7 +31,6 @@ use serde::{Deserialize, Serialize};
 use crate::revelation::placeholders_check::placeholder_ids_hash;
 
 use super::{
-    aggregation::QueryBoundSource,
     universal_circuit::{
         universal_circuit_inputs::{
             BasicOperation, InputOperand, OutputItem, PlaceholderIdsSet, ResultStructure,
@@ -39,6 +38,7 @@ use super::{
         universal_query_gadget::QueryBound,
         ComputationalHash, ComputationalHashTarget,
     },
+    utils::QueryBoundSource,
 };
 
 pub enum Identifiers {
@@ -234,7 +234,7 @@ impl<F: RichField> ToField<F> for Identifiers {
     }
 }
 /// Data structure to provide identifiers of columns of a table to compute computational hash
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ColumnIDs {
     pub(crate) primary: F,
     pub(crate) secondary: F,
@@ -248,6 +248,21 @@ impl ColumnIDs {
             secondary: secondary_id.to_field(),
             rest: rest_ids.into_iter().map(|id| id.to_field()).collect_vec(),
         }
+    }
+
+    pub fn primary_column(&self) -> u64 {
+        self.primary.to_canonical_u64()
+    }
+
+    pub fn secondary_column(&self) -> u64 {
+        self.secondary.to_canonical_u64()
+    }
+
+    pub fn non_indexed_columns(&self) -> Vec<u64> {
+        self.rest
+            .iter()
+            .map(|id| id.to_canonical_u64())
+            .collect_vec()
     }
 
     pub(crate) fn to_vec(&self) -> Vec<F> {

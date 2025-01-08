@@ -7,7 +7,7 @@ use mp2_common::{
     },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
-    utils::SelectHashBuilder,
+    utils::HashBuilder,
     F,
 };
 use plonky2::iop::{

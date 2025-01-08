@@ -3,7 +3,7 @@
 use anyhow::*;
 use log::warn;
 use sqlparser::ast::{BinaryOperator, Expr, Query, Select, SelectItem, TableAlias, TableFactor};
-use verifiable_db::query::aggregation::QueryBounds;
+use verifiable_db::query::utils::QueryBounds;
 
 use crate::{
     errors::ValidationError,
