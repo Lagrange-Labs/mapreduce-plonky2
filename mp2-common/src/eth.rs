@@ -432,7 +432,7 @@ mod test {
         // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
         // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
         let mapping_value =
-            Address::from_str("0x29469395eAf6f95920E59F858042f0e28D98a20B").unwrap();
+            Address::from_str("0xee5ac9c6db07c26e71207a41e64df42e1a2b05cf").unwrap();
         let nft_id: u32 = 1116;
         let mapping_key = left_pad32(&nft_id.to_be_bytes());
         let url = get_mainnet_url();
