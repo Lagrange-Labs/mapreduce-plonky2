@@ -794,10 +794,7 @@ pub(crate) async fn find_longest_lived_key(
     Ok((longest_key.clone(), (min_block, max_block)))
 }
 
-async fn collect_all_at(
-    tree: &MerkleRowTree,
-    at: Epoch,
-) -> Result<Vec<Row<BlockPrimaryIndex>>> {
+async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<BlockPrimaryIndex>>> {
     let root_key = tree.root_at(at).await?.unwrap();
     let (ctx, payload) = tree
         .try_fetch_with_context_at(&root_key, at)
