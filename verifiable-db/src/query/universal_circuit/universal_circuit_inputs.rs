@@ -5,11 +5,14 @@ use std::collections::{btree_set, BTreeSet, HashMap};
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
+    array::ToField,
     utils::{Fieldable, TryIntoBool},
     F,
 };
 
-use crate::query::computational_hash_ids::{ColumnIDs, Operation, Output, PlaceholderIdentifier};
+use crate::query::computational_hash_ids::{
+    AggregationOperation, ColumnIDs, Identifiers, Operation, Output, PlaceholderIdentifier,
+};
 
 use super::universal_query_circuit::dummy_placeholder_id;
 
@@ -321,6 +324,18 @@ impl BasicOperation {
 
         Ok((results, arithmetic_error))
     }
+
+    // utility function to locate operation `op` in the set of `previous_ops`
+    #[cfg(test)] // used only in test for now
+    pub(crate) fn locate_previous_operation(previous_ops: &[Self], op: &Self) -> Result<usize> {
+        previous_ops
+            .iter()
+            .find_position(|current_op| *current_op == op)
+            .map(|(pos, _)| pos)
+            .ok_or(anyhow::Error::msg(
+                "operation {} not found in set of previous ops",
+            ))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -409,6 +424,15 @@ impl ResultStructure {
             output_variant: Output::NoAggregation,
             distinct: Some(distinct),
         })
+    }
+
+    pub fn aggregation_operations(&self) -> Vec<F> {
+        match self.query_variant() {
+            Output::Aggregation => self.output_ids.clone(),
+            Output::NoAggregation => {
+                vec![Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field()]
+            }
+        }
     }
 
     pub fn query_variant(&self) -> Output {

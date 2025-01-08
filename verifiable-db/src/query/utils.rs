@@ -5,7 +5,6 @@ use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, HashPermutation},
-    proof::ProofWithVK,
     serialization::{
         deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
         serialize_long_array,
@@ -28,22 +27,13 @@ use plonky2::{
 };
 use serde::{Deserialize, Serialize};
 
-pub(crate) mod child_proven_single_path_node;
-pub(crate) mod embedded_tree_proven_single_path_node;
-pub(crate) mod full_node_index_leaf;
-pub(crate) mod full_node_with_one_child;
-pub(crate) mod full_node_with_two_children;
-pub(crate) mod non_existence_inter;
-mod output_computation;
-pub(crate) mod partial_node;
-mod utils;
-
 use super::{
-    api::CircuitInput,
     computational_hash_ids::{ColumnIDs, Identifiers, PlaceholderIdentifier},
     universal_circuit::{
         universal_circuit_inputs::{BasicOperation, PlaceholderId, Placeholders, ResultStructure},
-        universal_query_circuit::{placeholder_hash, placeholder_hash_without_query_bounds},
+        universal_query_circuit::{
+            placeholder_hash, placeholder_hash_without_query_bounds, UniversalCircuitInput,
+        },
         universal_query_gadget::QueryBound,
         ComputationalHash, PlaceholderHash,
     },
@@ -316,125 +306,12 @@ pub enum ChildPosition {
     Right,
 }
 
-impl ChildPosition {
-    // convert `self` to a flag specifying whether a node is the left child of another node or not
-    pub(crate) fn to_flag(self) -> bool {
-        match self {
-            ChildPosition::Left => true,
-            ChildPosition::Right => false,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct CommonInputs {
-    pub(crate) is_rows_tree_node: bool,
-    pub(crate) min_query: U256,
-    pub(crate) max_query: U256,
-}
-
-impl CommonInputs {
-    pub(crate) fn new(is_rows_tree_node: bool, query_bounds: &QueryBounds) -> Self {
-        Self {
-            is_rows_tree_node,
-            min_query: if is_rows_tree_node {
-                query_bounds.min_query_secondary.value
-            } else {
-                query_bounds.min_query_primary
-            },
-            max_query: if is_rows_tree_node {
-                query_bounds.max_query_secondary.value
-            } else {
-                query_bounds.max_query_primary
-            },
-        }
-    }
-}
-/// Input data structure for circuits employed for nodes where both the children and the embedded tree are proven
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TwoProvenChildNodeInput {
-    /// Proof for the left child of the node being proven
-    pub(crate) left_child_proof: ProofWithVK,
-    /// Proof for the right child of the node being proven
-    pub(crate) right_child_proof: ProofWithVK,
-    /// Proof for the embedded tree stored in the current node
-    pub(crate) embedded_tree_proof: ProofWithVK,
-    /// Common inputs shared across all the circuits
-    pub(crate) common: CommonInputs,
-}
-/// Input data structure for circuits employed for nodes where one child and the embedded tree are proven
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OneProvenChildNodeInput {
-    /// Data related to the child not associated with a proof, if any
-    pub(crate) unproven_child: Option<NodeInfo>,
-    /// Proof for the proven child
-    pub(crate) proven_child_proof: ChildProof,
-    /// Proof for the embedded tree stored in the current node
-    pub(crate) embedded_tree_proof: ProofWithVK,
-    /// Common inputs shared across all the circuits
-    pub(crate) common: CommonInputs,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-/// Data structure representing a proof for a child node
-pub struct ChildProof {
-    /// Actual proof
-    pub(crate) proof: ProofWithVK,
-    /// Flag specifying whether the child associated with `proof` is the left or right child of its parent
-    pub(crate) child_position: ChildPosition,
-}
-
-impl ChildProof {
-    pub fn new(proof: Vec<u8>, child_position: ChildPosition) -> Result<ChildProof> {
-        Ok(Self {
-            proof: ProofWithVK::deserialize(&proof)?,
-            child_position,
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-/// Enum employed to specify whether a proof refers to a child node or the embedded tree stored in a node
-pub enum SubProof {
-    /// Proof refer to a child
-    Child(ChildProof),
-    /// Proof refer to the embedded tree stored in the node: can be either the proof for a single row
-    /// (if proving a rows tree node) of the proof for the root node of a rows tree (if proving an index tree node)
-    Embedded(ProofWithVK),
-}
-
-impl SubProof {
-    /// Initialize a new `SubProof::Child`
-    pub fn new_child_proof(proof: Vec<u8>, child_position: ChildPosition) -> Result<Self> {
-        Ok(SubProof::Child(ChildProof::new(proof, child_position)?))
-    }
-
-    /// Initialize a new `SubProof::Embedded`
-    pub fn new_embedded_tree_proof(proof: Vec<u8>) -> Result<Self> {
-        Ok(SubProof::Embedded(ProofWithVK::deserialize(&proof)?))
-    }
-}
-
-/// Input data structure for circuits employed for nodes where only one among children node and embedded tree is proven
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SinglePathInput {
-    /// Data about the left child of the node being proven, if any
-    pub(crate) left_child: Option<NodeInfo>,
-    /// Data about the right child of the node being proven, if any
-    pub(crate) right_child: Option<NodeInfo>,
-    /// Data about the node being proven
-    pub(crate) node_info: NodeInfo,
-    /// Proof of either a child node or of the embedded tree stored in the current node
-    pub(crate) subtree_proof: SubProof,
-    /// Common inputs shared across all the circuits
-    pub(crate) common: CommonInputs,
-}
-
 /// Data structure containing the computational hash and placeholder hash to be provided as input to
 /// non-existence circuits. These hashes are computed from the query specific data provided as input
 /// to the initialization method of this data structure
 pub struct QueryHashNonExistenceCircuits {
-    computational_hash: ComputationalHash,
-    placeholder_hash: PlaceholderHash,
+    pub(crate) computational_hash: ComputationalHash,
+    pub(crate) placeholder_hash: PlaceholderHash,
 }
 
 impl QueryHashNonExistenceCircuits {
@@ -474,7 +351,7 @@ impl QueryHashNonExistenceCircuits {
                     .into(),
             )
         };
-        let placeholder_hash_ids = CircuitInput::<
+        let placeholder_hash_ids = UniversalCircuitInput::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
@@ -539,7 +416,7 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
 pub(crate) mod tests {
     use crate::query::{
         computational_hash_ids::{AggregationOperation, Identifiers},
-        public_inputs::PublicInputs,
+        public_inputs::PublicInputsQueryCircuits,
         universal_circuit::universal_query_gadget::{CurveOrU256, OutputValues},
     };
     use alloy::primitives::U256;
@@ -641,7 +518,7 @@ pub(crate) mod tests {
     /// the proofs. It's the test function corresponding to `compute_output_item`.
     pub(crate) fn compute_output_item_value<const S: usize>(
         i: usize,
-        proofs: &[&PublicInputs<F, S>],
+        proofs: &[&PublicInputsQueryCircuits<F, S>],
     ) -> (Vec<F>, u32)
     where
         [(); S - 1]:,

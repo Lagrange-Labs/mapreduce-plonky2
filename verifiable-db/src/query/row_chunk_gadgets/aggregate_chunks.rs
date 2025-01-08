@@ -22,7 +22,7 @@ pub(crate) fn aggregate_chunks<const MAX_NUM_RESULTS: usize>(
     primary_query_bounds: (&UInt256Target, &UInt256Target),
     secondary_query_bounds: (&UInt256Target, &UInt256Target),
     ops: &[Target; MAX_NUM_RESULTS],
-    is_second_dummy: &BoolTarget,
+    is_second_non_dummy: &BoolTarget,
 ) -> RowChunkDataTarget<MAX_NUM_RESULTS>
 where
     [(); MAX_NUM_RESULTS - 1]:,
@@ -42,8 +42,8 @@ where
         max_query_secondary,
     );
     // assert that the 2 chunks are consecutive only if the second one is not dummy
-    let are_consecutive = b.or(are_consecutive, *is_second_dummy);
-    b.connect(are_consecutive.target, _true.target);
+    let are_consecutive = b.and(are_consecutive, *is_second_non_dummy);
+    b.connect(are_consecutive.target, is_second_non_dummy.target);
 
     // check the same root of the index tree is employed in both chunks to prove
     // membership of rows in the chunks
@@ -75,17 +75,17 @@ where
 
     RowChunkDataTarget {
         left_boundary_row: first.left_boundary_row.clone(),
-        right_boundary_row: // if `is_second_dummy`, then we keep right boundary row of first chunk for the 
-        // aggregated chunk, otherwise the right boundary row of the aggregated chunk will be the right boundary
-        // row of second chunk 
+        right_boundary_row: // if `is_second_non_dummy`, then the right boundary row of the aggregated chunk will 
+        // be the right boundary row of second chunk, otherwise we keep right boundary row of first chunk for the 
+        // aggregated chunk  
             BoundaryRowDataTarget::select(
                 b,
-                is_second_dummy,
-                &first.right_boundary_row,
+                is_second_non_dummy,
                 &second.right_boundary_row,
+                &first.right_boundary_row,
             ),
         chunk_outputs: UniversalQueryOutputWires {
-            tree_hash: first.chunk_outputs.tree_hash, //  we check it's the same between the 2 chunks
+            tree_hash: second.chunk_outputs.tree_hash, //  we check it's the same between the 2 chunks
             values: OutputValuesTarget::from_targets(&output_values),
             count,
             num_overflows,
@@ -124,22 +124,22 @@ mod tests {
 
     use crate::{
         query::{
-            aggregation::{tests::aggregate_output_values, ChildPosition, NodeInfo},
-            batching::row_chunk::{
-                tests::{BoundaryRowData, BoundaryRowNodeInfo, RowChunkData},
-                BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget,
-            },
             computational_hash_ids::{AggregationOperation, Identifiers},
             merkle_path::{
-                tests::{build_node, generate_test_tree, NeighborInfo},
-                MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs,
+                tests::{build_node, generate_test_tree},
+                MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs, NeighborInfo,
             },
-            public_inputs::PublicInputs,
+            public_inputs::PublicInputsQueryCircuits,
+            row_chunk_gadgets::{
+                tests::RowChunkData, BoundaryRowData, BoundaryRowDataTarget, BoundaryRowNodeInfo,
+                BoundaryRowNodeInfoTarget, RowChunkDataTarget,
+            },
             universal_circuit::universal_query_gadget::{
                 OutputValues, OutputValuesTarget, UniversalQueryOutputWires,
             },
+            utils::{tests::aggregate_output_values, ChildPosition, NodeInfo},
         },
-        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
+        test_utils::random_aggregation_operations,
     };
 
     use super::aggregate_chunks;
@@ -332,7 +332,7 @@ mod tests {
         primary_index_id: Target,
         secondary_index_id: Target,
         ops: [Target; MAX_NUM_RESULTS],
-        is_second_dummy: BoolTarget,
+        is_second_non_dummy: BoolTarget,
     }
     #[derive(Clone, Debug)]
     struct TestAggregateChunks {
@@ -357,18 +357,18 @@ mod tests {
                 RowChunkDataInput::build(c, primary_index_id, secondary_index_id);
             let (second_chunk_inputs, second_chunk_data) =
                 RowChunkDataInput::build(c, primary_index_id, secondary_index_id);
-            let [min_primary, max_primary, min_secondary, max_secondary] =
+            let [min_query_primary, max_query_primary, min_query_secondary, max_query_secondary] =
                 c.add_virtual_u256_arr_unsafe();
             let ops = c.add_virtual_target_arr();
-            let is_second_dummy = c.add_virtual_bool_target_unsafe();
+            let is_second_non_dummy = c.add_virtual_bool_target_unsafe();
             let aggregated_chunk = aggregate_chunks(
                 c,
                 &first_chunk_data,
                 &second_chunk_data,
-                (&min_primary, &max_primary),
-                (&min_secondary, &max_secondary),
+                (&min_query_primary, &max_query_primary),
+                (&min_query_secondary, &max_query_secondary),
                 &ops,
-                &is_second_dummy,
+                &is_second_non_dummy,
             );
 
             c.register_public_inputs(&aggregated_chunk.to_targets());
@@ -376,14 +376,14 @@ mod tests {
             TestAggregateChunkWires {
                 first: first_chunk_inputs,
                 second: second_chunk_inputs,
-                min_query_primary: min_primary,
-                max_query_primary: max_primary,
-                min_query_secondary: min_secondary,
-                max_query_secondary: max_secondary,
+                min_query_primary,
+                max_query_primary,
+                min_query_secondary,
+                max_query_secondary,
                 primary_index_id,
                 secondary_index_id,
                 ops,
-                is_second_dummy,
+                is_second_non_dummy,
             }
         }
 
@@ -417,7 +417,7 @@ mod tests {
             .into_iter()
             .chain(wires.ops.into_iter().zip(self.ops))
             .for_each(|(t, v)| pw.set_target(t, v));
-            pw.set_bool_target(wires.is_second_dummy, self.is_second_dummy);
+            pw.set_bool_target(wires.is_second_non_dummy, !self.is_second_dummy);
         }
     }
 
@@ -445,12 +445,14 @@ mod tests {
         let root = index_node.compute_node_hash(primary_index_id);
 
         // generate the output values associated to each chunk
-        let inputs = random_aggregation_public_inputs::<2, MAX_NUM_RESULTS>(&ops);
+        let inputs = PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::sample_from_ops::<2>(&ops);
         let [(first_chunk_count, first_chunk_outputs, fist_chunk_num_overflows), (second_chunk_count, second_chunk_outputs, second_chunk_num_overflows)] =
             inputs
                 .into_iter()
                 .map(|input| {
-                    let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(input.as_slice());
+                    let pis = PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::from_slice(
+                        input.as_slice(),
+                    );
                     (
                         pis.num_matching_rows(),
                         OutputValues::from_fields(pis.to_values_raw()),

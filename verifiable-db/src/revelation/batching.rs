@@ -1,172 +1,61 @@
-//! The revelation circuit handling the queries where we don't need to build the results tree
+use mp2_common::{types::CBuilder, u256::CircuitBuilderU256, utils::FromTargets, F};
+use plonky2::iop::{target::Target, witness::PartialWitness};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
-        computational_hash_ids::AggregationOperation, pi_len as query_pi_len,
-        public_inputs::PublicInputsQueryCircuits as QueryProofPublicInputs,
-    },
-    revelation::PublicInputs,
-};
-use anyhow::Result;
-use itertools::Itertools;
-use mp2_common::{
-    array::ToField,
-    default_config,
-    poseidon::{flatten_poseidon_hash_target, H},
-    proof::ProofWithVK,
-    public_inputs::PublicInputCommon,
-    serialization::{deserialize, serialize},
-    types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target},
-    utils::ToTargets,
-    C, D, F,
-};
-use plonky2::{
-    iop::{
-        target::Target,
-        witness::{PartialWitness, WitnessWrite},
-    },
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        circuit_data::VerifierOnlyCircuitData,
-        config::Hasher,
-        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
+        batching::public_inputs::PublicInputs as QueryProofPublicInputs,
+        universal_circuit::universal_query_gadget::OutputValuesTarget,
     },
 };
-use recursion_framework::{
-    circuit_builder::CircuitLogicWires,
-    framework::{
-        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
-    },
-};
-use serde::{Deserialize, Serialize};
 
-use super::{
-    pi_len as revelation_pi_len,
-    placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
-    NUM_PREPROCESSING_IO,
+use super::revelation_without_results_tree::{
+    QueryProofInputWires, RevelationWithoutResultsTreeCircuit, RevelationWithoutResultsTreeWires,
 };
 
-// L: maximum number of results
-// S: maximum number of items in each result
-// PH: maximum number of unique placeholder IDs and values bound for query
-// PP: maximum number of placeholders present in query (may be duplicate, PP >= PH)
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RevelationWithoutResultsTreeWires<
-    const L: usize,
-    const S: usize,
-    const PH: usize,
-    const PP: usize,
-> {
-    check_placeholder: CheckPlaceholderInputWires<PH, PP>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RevelationWithoutResultsTreeCircuit<
-    const L: usize,
-    const S: usize,
-    const PH: usize,
-    const PP: usize,
-> {
-    pub(crate) check_placeholder: CheckPlaceholderGadget<PH, PP>,
-}
-
-impl<const L: usize, const S: usize, const PH: usize, const PP: usize>
-    RevelationWithoutResultsTreeCircuit<L, S, PH, PP>
+impl<'a, const S: usize> From<&'a QueryProofPublicInputs<'a, Target, S>> for QueryProofInputWires<S>
 where
     [(); S - 1]:,
 {
-    pub fn build(
+    fn from(value: &'a QueryProofPublicInputs<Target, S>) -> Self {
+        Self {
+            tree_hash: value.tree_hash_target(),
+            results: OutputValuesTarget::from_targets(value.to_values_raw()),
+            entry_count: value.num_matching_rows_target(),
+            overflow: value.overflow_flag_target().target,
+            placeholder_hash: value.placeholder_hash_target(),
+            computational_hash: value.computational_hash_target(),
+            min_primary: value.min_primary_target(),
+            max_primary: value.max_primary_target(),
+            ops: value.operation_ids_target(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RevelationCircuitBatching<
+    const L: usize,
+    const S: usize,
+    const PH: usize,
+    const PP: usize,
+>(RevelationWithoutResultsTreeCircuit<L, S, PH, PP>);
+
+impl<const L: usize, const S: usize, const PH: usize, const PP: usize>
+    RevelationCircuitBatching<L, S, PH, PP>
+where
+    [(); S - 1]:,
+{
+    pub(crate) fn build(
         b: &mut CBuilder,
-        // Proof of the query results computed by the aggregation circuits
         query_proof: &QueryProofPublicInputs<Target, S>,
-        // proof of construction of the original tree in the pre-processing stage (IVC proof)
         original_tree_proof: &OriginalTreePublicInputs<Target>,
     ) -> RevelationWithoutResultsTreeWires<L, S, PH, PP> {
-        let zero = b.zero();
-        let u256_zero = b.zero_u256();
-
-        // The operation cannot be ID for aggregation.
-        let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
-            .map(|op| b.constant(op.to_field()));
-
-        // Convert the entry count to an Uint256.
-        let entry_count = UInt256Target::new_from_target(b, query_proof.num_matching_rows_target());
-
-        // Compute the output results array, and deal with AVG and COUNT operations if any.
-        let mut results = Vec::with_capacity(L * S);
-        // flag to determine whether entry count is zero
-        let is_entry_count_zero = b.add_virtual_bool_target_unsafe();
-        query_proof
-            .operation_ids_target()
-            .into_iter()
-            .enumerate()
-            .for_each(|(i, op)| {
-                let is_op_avg = b.is_equal(op, op_avg);
-                let is_op_count = b.is_equal(op, op_count);
-                let result = query_proof.value_target_at_index(i);
-
-                // Compute the AVG result (and it's set to zero if the divisor is zero).
-                let (avg_result, _, is_divisor_zero) = b.div_u256(&result, &entry_count);
-
-                let result = b.select_u256(is_op_avg, &avg_result, &result);
-                let result = b.select_u256(is_op_count, &entry_count, &result);
-
-                b.connect(is_divisor_zero.target, is_entry_count_zero.target);
-
-                results.push(result);
-            });
-        results.resize(L * S, u256_zero);
-
-        // Pre-compute the final placeholder hash then check it in the
-        // `check_placeholders` function:
-        // H(pQ.H_p || pQ.MIN_I || pQ.MAX_I)
-        let inputs = query_proof
-            .placeholder_hash_target()
-            .to_targets()
-            .into_iter()
-            .chain(query_proof.min_primary_target().to_targets())
-            .chain(query_proof.max_primary_target().to_targets())
-            .collect();
-        let final_placeholder_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
-
-        // Check the placeholder data.
-        let check_placeholder_wires =
-            CheckPlaceholderGadget::<PH, PP>::build(b, &final_placeholder_hash);
-
-        // Check that the tree employed to build the queries is the same as the
-        // tree constructed in pre-processing.
-        b.connect_hashes(
-            query_proof.tree_hash_target(),
-            original_tree_proof.merkle_hash(),
+        let wires = RevelationWithoutResultsTreeCircuit::build_core(
+            b,
+            query_proof.into(),
+            original_tree_proof,
         );
-
-        // Add the hash of placeholder identifiers and pre-processing metadata
-        // hash to the computational hash:
-        // H(pQ.C || placeholder_ids_hash || pQ.M)
-        let inputs = query_proof
-            .computational_hash_target()
-            .to_targets()
-            .iter()
-            .chain(&check_placeholder_wires.placeholder_id_hash.to_targets())
-            .chain(original_tree_proof.metadata_hash())
-            .cloned()
-            .collect();
-        let computational_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
-
-        let placeholder_values_slice = check_placeholder_wires
-            .input_wires
-            .placeholder_values
-            .iter()
-            .flat_map(ToTargets::to_targets)
-            .collect_vec();
-        let results_slice = results.iter().flat_map(ToTargets::to_targets).collect_vec();
-
-        let num_results = b.not(is_entry_count_zero);
-
-        let flat_computational_hash = flatten_poseidon_hash_target(b, computational_hash);
-
         // additional constraints on boundary rows to ensure completeness of proven rows
         // (i.e., that we look at all the rows with primary and secondary index values in the query range)
 
@@ -257,28 +146,7 @@ where
                 .target,
             constraint.target,
         );
-
-        // Register the public innputs.
-        PublicInputs::<_, L, S, PH>::new(
-            &original_tree_proof.block_hash(),
-            &flat_computational_hash,
-            &placeholder_values_slice,
-            &results_slice,
-            &[check_placeholder_wires.num_placeholders],
-            // The aggregation query proof only has one result.
-            &[num_results.target],
-            &[query_proof.num_matching_rows_target()],
-            &[query_proof.overflow_flag_target().target],
-            // Query limit
-            &[zero],
-            // Query offset
-            &[zero],
-        )
-        .register(b);
-
-        RevelationWithoutResultsTreeWires {
-            check_placeholder: check_placeholder_wires.input_wires,
-        }
+        wires
     }
 
     pub(crate) fn assign(
@@ -286,89 +154,7 @@ where
         pw: &mut PartialWitness<F>,
         wires: &RevelationWithoutResultsTreeWires<L, S, PH, PP>,
     ) {
-        self.check_placeholder.assign(pw, &wires.check_placeholder);
-    }
-}
-#[derive(Clone, Debug)]
-pub struct CircuitBuilderParams {
-    pub(crate) query_circuit_set: RecursiveCircuits<F, C, D>,
-    pub(crate) preprocessing_circuit_set: RecursiveCircuits<F, C, D>,
-    pub(crate) preprocessing_vk: VerifierOnlyCircuitData<C, D>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct RecursiveCircuitWires<const L: usize, const S: usize, const PH: usize, const PP: usize> {
-    revelation_circuit: RevelationWithoutResultsTreeWires<L, S, PH, PP>,
-    query_verifier: RecursiveCircuitsVerifierTarget<D>,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    preprocessing_proof: ProofWithPublicInputsTarget<D>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RecursiveCircuitInputs<const L: usize, const S: usize, const PH: usize, const PP: usize>
-{
-    pub(crate) inputs: RevelationWithoutResultsTreeCircuit<L, S, PH, PP>,
-    pub(crate) query_proof: ProofWithVK,
-    pub(crate) preprocessing_proof: ProofWithPublicInputs<F, C, D>,
-    pub(crate) query_circuit_set: RecursiveCircuits<F, C, D>,
-}
-
-impl<const L: usize, const S: usize, const PH: usize, const PP: usize> CircuitLogicWires<F, D, 0>
-    for RecursiveCircuitWires<L, S, PH, PP>
-where
-    [(); S - 1]:,
-    [(); query_pi_len::<S>()]:,
-    [(); <H as Hasher<F>>::HASH_SIZE]:,
-{
-    type CircuitBuilderParams = CircuitBuilderParams;
-
-    type Inputs = RecursiveCircuitInputs<L, S, PH, PP>;
-
-    const NUM_PUBLIC_INPUTS: usize = revelation_pi_len::<L, S, PH>();
-
-    fn circuit_logic(
-        builder: &mut CircuitBuilder<F, D>,
-        _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
-        builder_parameters: Self::CircuitBuilderParams,
-    ) -> Self {
-        let query_verifier =
-            RecursiveCircuitsVerifierGagdet::<F, C, D, { query_pi_len::<S>() }>::new(
-                default_config(),
-                &builder_parameters.query_circuit_set,
-            );
-        let query_verifier = query_verifier.verify_proof_in_circuit_set(builder);
-        let preprocessing_verifier =
-            RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PREPROCESSING_IO>::new(
-                default_config(),
-                &builder_parameters.preprocessing_circuit_set,
-            );
-        let preprocessing_proof = preprocessing_verifier.verify_proof_fixed_circuit_in_circuit_set(
-            builder,
-            &builder_parameters.preprocessing_vk,
-        );
-        let preprocessing_pi =
-            OriginalTreePublicInputs::from_slice(&preprocessing_proof.public_inputs);
-        let revelation_circuit = {
-            let query_pi = QueryProofPublicInputs::from_slice(
-                query_verifier.get_public_input_targets::<F, { query_pi_len::<S>() }>(),
-            );
-            RevelationWithoutResultsTreeCircuit::build(builder, &query_pi, &preprocessing_pi)
-        };
-
-        Self {
-            revelation_circuit,
-            query_verifier,
-            preprocessing_proof,
-        }
-    }
-
-    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
-        let (proof, verifier_data) = (&inputs.query_proof).into();
-        self.query_verifier
-            .set_target(pw, &inputs.query_circuit_set, proof, verifier_data)?;
-        pw.set_proof_with_pis_target(&self.preprocessing_proof, &inputs.preprocessing_proof);
-        inputs.inputs.assign(pw, &self.revelation_circuit);
-        Ok(())
+        self.0.assign(pw, wires)
     }
 }
 
@@ -399,14 +185,18 @@ mod tests {
     use crate::{
         ivc::PublicInputs as OriginalTreePublicInputs,
         query::{
-            computational_hash_ids::AggregationOperation,
-            public_inputs::{
-                PublicInputsQueryCircuits as QueryProofPublicInputs, QueryPublicInputs,
+            aggregation::{QueryBoundSource, QueryBounds},
+            batching::{
+                public_inputs::{
+                    tests::gen_values_in_range, PublicInputs as QueryProofPublicInputs,
+                    QueryPublicInputs,
+                },
+                row_chunk::tests::BoundaryRowData,
             },
+            computational_hash_ids::AggregationOperation,
             universal_circuit::{
                 universal_circuit_inputs::Placeholders, universal_query_gadget::OutputValues,
             },
-            utils::{QueryBoundSource, QueryBounds},
         },
         revelation::{
             revelation_without_results_tree::{
@@ -415,11 +205,10 @@ mod tests {
             tests::{compute_results_from_query_proof_outputs, TestPlaceholders},
             PublicInputs, NUM_PREPROCESSING_IO,
         },
-        test_utils::{
-            random_aggregation_operations, random_original_tree_proof,
-            sample_boundary_rows_for_revelation,
-        },
+        test_utils::{random_aggregation_operations, random_original_tree_proof},
     };
+
+    use super::RevelationCircuitBatching;
 
     // L: maximum number of results
     // S: maximum number of items in each result
@@ -435,22 +224,14 @@ mod tests {
 
     const QUERY_PI_LEN: usize = QueryProofPublicInputs::<F, S>::total_len();
 
-    impl From<&TestPlaceholders<PH, PP>> for RevelationWithoutResultsTreeCircuit<L, S, PH, PP> {
-        fn from(test_placeholders: &TestPlaceholders<PH, PP>) -> Self {
-            Self {
-                check_placeholder: test_placeholders.check_placeholder_inputs.clone(),
-            }
-        }
-    }
-
     #[derive(Clone, Debug)]
-    struct TestRevelationCircuit<'a> {
+    struct TestRevelationBatchingCircuit<'a> {
         c: RevelationWithoutResultsTreeCircuit<L, S, PH, PP>,
         query_proof: &'a [F],
         original_tree_proof: &'a [F],
     }
 
-    impl UserCircuit<F, D> for TestRevelationCircuit<'_> {
+    impl UserCircuit<F, D> for TestRevelationBatchingCircuit<'_> {
         // Circuit wires + query proof + original tree proof (IVC proof)
         type Wires = (
             RevelationWithoutResultsTreeWires<L, S, PH, PP>,
@@ -465,7 +246,7 @@ mod tests {
             let query_pi = QueryProofPublicInputs::from_slice(&query_proof);
             let original_tree_pi = OriginalTreePublicInputs::from_slice(&original_tree_proof);
 
-            let wires = RevelationWithoutResultsTreeCircuit::build(b, &query_pi, &original_tree_pi);
+            let wires = RevelationCircuitBatching::build(b, &query_pi, &original_tree_pi);
 
             (wires, query_proof, original_tree_proof)
         }
@@ -523,8 +304,50 @@ mod tests {
             Some(QueryBoundSource::Constant(max_secondary)),
         )
         .unwrap();
-        let (left_boundary_row, right_boundary_row) =
-            sample_boundary_rows_for_revelation(&query_bounds, rng);
+        let mut left_boundary_row = BoundaryRowData::sample(rng, &query_bounds);
+        // for predecessor of `left_boundary_row` in index tree, we need to either mark it as
+        // non-existent or to make its value out of range
+        if rng.gen() || query_bounds.min_query_primary() == U256::ZERO {
+            left_boundary_row.index_node_info.predecessor_info.is_found = false;
+        } else {
+            let [predecessor_value] = gen_values_in_range(
+                rng,
+                U256::ZERO,
+                query_bounds.min_query_primary() - U256::from(1),
+            );
+            left_boundary_row.index_node_info.predecessor_info.value = predecessor_value;
+        }
+        // for predecessor of `left_boundary_row` in rows tree, we need to either mark it as
+        // non-existent or to make its value out of range
+        if rng.gen() || min_secondary == U256::ZERO {
+            left_boundary_row.row_node_info.predecessor_info.is_found = false;
+        } else {
+            let [predecessor_value] =
+                gen_values_in_range(rng, U256::ZERO, min_secondary - U256::from(1));
+            left_boundary_row.row_node_info.predecessor_info.value = predecessor_value;
+        }
+        let mut right_boundary_row = BoundaryRowData::sample(rng, &query_bounds);
+        // for successor of `right_boundary_row` in index tree, we need to either mark it as
+        // non-existent or to make its value out of range
+        if rng.gen() || query_bounds.max_query_primary() == U256::MAX {
+            right_boundary_row.index_node_info.successor_info.is_found = false;
+        } else {
+            let [successor_value] = gen_values_in_range(
+                rng,
+                query_bounds.max_query_primary() + U256::from(1),
+                U256::MAX,
+            );
+            right_boundary_row.index_node_info.successor_info.value = successor_value;
+        }
+        // for successor of `right_boundary_row` in rows tree, we need to either mark it as
+        // non-existent or to make its value out of range
+        if rng.gen() || max_secondary == U256::MAX {
+            right_boundary_row.row_node_info.successor_info.is_found = false;
+        } else {
+            let [successor_value] =
+                gen_values_in_range(rng, max_secondary + U256::from(1), U256::MAX);
+            right_boundary_row.row_node_info.successor_info.value = successor_value;
+        }
 
         proof[left_row_range].copy_from_slice(&left_boundary_row.to_fields());
         proof[right_row_range].copy_from_slice(&right_boundary_row.to_fields());
@@ -549,7 +372,7 @@ mod tests {
         let original_tree_pi = OriginalTreePublicInputs::from_slice(&original_tree_proof);
 
         // Construct the test circuit.
-        let test_circuit = TestRevelationCircuit {
+        let test_circuit = TestRevelationBatchingCircuit {
             c: (&test_placeholders).into(),
             query_proof: &query_proof,
             original_tree_proof: &original_tree_proof,
