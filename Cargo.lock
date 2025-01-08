@@ -5499,6 +5499,7 @@ dependencies = [
  "serde_json",
  "sha256",
  "simple_logger",
+ "thiserror 2.0.3",
  "tokio",
  "tokio-postgres",
  "tracing",

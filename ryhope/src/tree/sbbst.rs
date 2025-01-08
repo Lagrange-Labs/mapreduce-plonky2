@@ -51,10 +51,10 @@
 //!   parent = parent(s_tree, parent)
 use super::{MutableTree, NodeContext, NodePath, TreeTopology};
 use crate::{
+    error::RyhopeError,
     storage::{EpochKvStorage, EpochStorage, TreeStorage},
     tree::PrintableTree,
 };
-use anyhow::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -334,8 +334,8 @@ impl Tree {
     }
 }
 
-async fn shift<S: TreeStorage<Tree>>(s: &S) -> usize {
-    s.state().fetch().await.shift
+async fn shift<S: TreeStorage<Tree>>(s: &S) -> Result<usize, RyhopeError> {
+    s.state().fetch().await.map(|s| s.shift)
 }
 
 /// Return the parent that `n` would have if this tree was saturated.
@@ -377,56 +377,63 @@ impl TreeTopology for Tree {
     type Key = NodeIdx;
     type Node = ();
 
-    async fn size<S: TreeStorage<Tree>>(&self, s: &S) -> usize {
-        let state = s.state().fetch().await;
-        state.inner_max().0
+    async fn size<S: TreeStorage<Tree>>(&self, s: &S) -> Result<usize, RyhopeError> {
+        s.state().fetch().await.map(|s| s.inner_max().0)
     }
 
     async fn ascendance<S: TreeStorage<Tree>, I: IntoIterator<Item = Self::Key>>(
         &self,
         ns: I,
         s: &S,
-    ) -> HashSet<NodeIdx> {
-        let state = s.state().fetch().await;
-        state.ascendance(ns)
+    ) -> Result<HashSet<NodeIdx>, RyhopeError> {
+        s.state().fetch().await.map(|s| s.ascendance(ns))
     }
 
-    async fn root<S: TreeStorage<Tree>>(&self, s: &S) -> Option<NodeIdx> {
-        let state = s.state().fetch().await;
-        Some(state.root())
+    async fn root<S: TreeStorage<Tree>>(&self, s: &S) -> Result<Option<NodeIdx>, RyhopeError> {
+        s.state().fetch().await.map(|s| Some(s.root()))
     }
 
-    async fn parent<S: TreeStorage<Tree>>(&self, n: NodeIdx, s: &S) -> Option<NodeIdx> {
-        let state = s.state().fetch().await;
-        state.parent(n)
+    async fn parent<S: TreeStorage<Tree>>(
+        &self,
+        n: NodeIdx,
+        s: &S,
+    ) -> Result<Option<NodeIdx>, RyhopeError> {
+        s.state().fetch().await.map(|s| s.parent(n))
     }
 
-    async fn lineage<S: TreeStorage<Tree>>(&self, n: &NodeIdx, s: &S) -> Option<NodePath<NodeIdx>> {
-        let state = s.state().fetch().await;
-        state.lineage(n)
+    async fn lineage<S: TreeStorage<Tree>>(
+        &self,
+        n: &NodeIdx,
+        s: &S,
+    ) -> Result<Option<NodePath<NodeIdx>>, RyhopeError> {
+        s.state().fetch().await.map(|s| s.lineage(n))
     }
 
     async fn children<S: TreeStorage<Tree>>(
         &self,
         n: &NodeIdx,
         s: &S,
-    ) -> Option<(Option<NodeIdx>, Option<NodeIdx>)> {
-        let state = s.state().fetch().await;
-        state.children(n)
+    ) -> Result<Option<(Option<NodeIdx>, Option<NodeIdx>)>, RyhopeError> {
+        s.state().fetch().await.map(|s| s.children(n))
     }
 
     async fn node_context<S: TreeStorage<Self>>(
         &self,
         k: &NodeIdx,
         s: &S,
-    ) -> Option<NodeContext<NodeIdx>> {
-        let state = s.state().fetch().await;
-        state.node_context(k)
+    ) -> Result<Option<NodeContext<NodeIdx>>, RyhopeError> {
+        s.state().fetch().await.map(|s| s.node_context(k))
     }
 
-    async fn contains<S: TreeStorage<Tree>>(&self, k: &NodeIdx, s: &S) -> bool {
-        let state = s.state().fetch().await;
-        state.inner_idx(*k) <= state.inner_max()
+    async fn contains<S: TreeStorage<Tree>>(
+        &self,
+        k: &NodeIdx,
+        s: &S,
+    ) -> Result<bool, RyhopeError> {
+        s.state()
+            .fetch()
+            .await
+            .map(|s| s.inner_idx(*k) <= s.inner_max())
     }
 }
 
@@ -436,35 +443,38 @@ impl MutableTree for Tree {
         &mut self,
         k: NodeIdx,
         s: &mut S,
-    ) -> Result<NodePath<NodeIdx>> {
-        ensure!(
-            k >= shift(s).await,
-            "invalid insert in SBST: index `{k}` smaller than origin `{}`",
-            shift(s).await
-        );
+    ) -> Result<NodePath<NodeIdx>, RyhopeError> {
+        let shift = shift(s).await?;
+        crate::error::ensure(
+            k >= shift,
+            format!(
+                "invalid insert in SBST: index `{k}` smaller than origin `{}`",
+                shift
+            ),
+        )?;
 
-        let state = s.state().fetch().await;
+        let state = s.state().fetch().await?;
         if state.inner_idx(k) != state.inner_max() + 1 {
-            bail!(
+            return Err(RyhopeError::fatal(format!(
                 "invalid insert in SBBST: trying to insert {}, but next insert should be {} (shift = {})",
                 k,
                 state.outer_idx(state.inner_max() +1),
                 state.shift,
-            );
+            )));
         } else {
-            s.state_mut().update(|state| state.max += 1).await;
+            s.state_mut().update(|state| state.max += 1).await?;
         }
         s.nodes_mut().store(k, ()).await?;
 
-        Ok(self.lineage(&k, s).await.unwrap())
+        Ok(self.lineage(&k, s).await?.unwrap())
     }
 
     async fn delete<S: TreeStorage<Tree>>(
         &mut self,
         _k: &NodeIdx,
         _: &mut S,
-    ) -> Result<Vec<NodeIdx>> {
-        unreachable!("SBBST does not support deletion")
+    ) -> Result<Vec<NodeIdx>, RyhopeError> {
+        unreachable!("SBBSTs do not support deletion")
     }
 }
 
@@ -472,7 +482,7 @@ impl PrintableTree for Tree {
     async fn tree_to_string<S: TreeStorage<Tree>>(&self, s: &S) -> String {
         let mut r = String::new();
 
-        let state = s.state().fetch().await;
+        let state = s.state().fetch().await.unwrap();
         let max_layer = state.inner_root().0.trailing_zeros();
         for layer in (0..max_layer).rev() {
             let spacing = " ".repeat((2 * layer + 1).try_into().unwrap());

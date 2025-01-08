@@ -371,7 +371,9 @@ impl<
         k: &T::Key,
         epoch: Epoch,
     ) -> Option<(NodeContext<T::Key>, V)> {
-        self.try_fetch_with_context_at(k, epoch).await
+        self.try_fetch_with_context_at(k, epoch)
+            .await
+            .expect("Failed to fetch context")
     }
 }
 
@@ -489,7 +491,8 @@ async fn find_node_for_proof(
     //   and so it implies that we found the node satisfying the property mentioned above
     let (mut node_ctx, node_value) = row_tree
         .fetch_with_context_at(&row_key, primary as Epoch)
-        .await;
+        .await?
+        .unwrap();
     let value = node_value.value();
 
     if is_min_query {

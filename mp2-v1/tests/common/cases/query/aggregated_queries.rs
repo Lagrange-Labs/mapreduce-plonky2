@@ -612,7 +612,7 @@ pub(crate) async fn cook_query_unique_secondary_index(
     );
     Ok(QueryCooking {
         min_block: min_block as BlockPrimaryIndex,
-        max_block: max_block as BlockPrimaryIndex,
+        max_block,
         query: query_str,
         placeholders,
         limit: None,
@@ -794,9 +794,15 @@ pub(crate) async fn find_longest_lived_key(
     Ok((longest_key.clone(), (min_block, max_block)))
 }
 
-async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<BlockPrimaryIndex>>> {
-    let root_key = tree.root_at(at).await.unwrap();
-    let (ctx, payload) = tree.try_fetch_with_context_at(&root_key, at).await.unwrap();
+async fn collect_all_at(
+    tree: &MerkleRowTree,
+    at: Epoch,
+) -> Result<Vec<Row<BlockPrimaryIndex>>> {
+    let root_key = tree.root_at(at).await?.unwrap();
+    let (ctx, payload) = tree
+        .try_fetch_with_context_at(&root_key, at)
+        .await?
+        .unwrap();
     let root_row = Row {
         k: root_key,
         payload,
@@ -811,8 +817,11 @@ async fn collect_all_at(tree: &MerkleRowTree, at: Epoch) -> Result<Vec<Row<Block
                 let mut local_rows = Vec::new();
                 let mut local_ctx = Vec::new();
                 for child_k in lctx.iter_children().flatten() {
-                    let (child_ctx, child_payload) =
-                        tree.try_fetch_with_context_at(child_k, at).await.unwrap();
+                    let (child_ctx, child_payload) = tree
+                        .try_fetch_with_context_at(child_k, at)
+                        .await
+                        .unwrap()
+                        .unwrap();
                     local_rows.push(Row {
                         k: child_k.clone(),
                         payload: child_payload,
@@ -869,7 +878,7 @@ async fn check_correct_cells_tree(
     })
     .await
     .expect("can't update cell tree");
-    let found_hash = tree.root_data().await.unwrap().hash;
+    let found_hash = tree.root_data().await?.unwrap().hash;
     assert_eq!(
         expected_cells_root, found_hash,
         "cells root hash not the same when given to circuit"
