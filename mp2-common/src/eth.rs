@@ -286,7 +286,7 @@ mod test {
         types::MAX_BLOCK_LEN,
         utils::{Endianness, Packer},
     };
-    use mp2_test::eth::{get_mainnet_url, get_sepolia_url};
+    use mp2_test::eth::get_sepolia_url;
 
     #[tokio::test]
     #[ignore]
