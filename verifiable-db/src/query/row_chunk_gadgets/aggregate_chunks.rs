@@ -124,22 +124,22 @@ mod tests {
 
     use crate::{
         query::{
-            aggregation::{tests::aggregate_output_values, ChildPosition, NodeInfo},
-            batching::row_chunk::{
-                tests::{BoundaryRowData, BoundaryRowNodeInfo, RowChunkData},
-                BoundaryRowDataTarget, BoundaryRowNodeInfoTarget, RowChunkDataTarget,
-            },
             computational_hash_ids::{AggregationOperation, Identifiers},
             merkle_path::{
-                tests::{build_node, generate_test_tree, NeighborInfo},
-                MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs,
+                tests::{build_node, generate_test_tree},
+                MerklePathWithNeighborsGadget, MerklePathWithNeighborsTargetInputs, NeighborInfo,
             },
-            public_inputs::PublicInputs,
+            public_inputs::PublicInputsQueryCircuits,
+            row_chunk_gadgets::{
+                tests::RowChunkData, BoundaryRowData, BoundaryRowDataTarget, BoundaryRowNodeInfo,
+                BoundaryRowNodeInfoTarget, RowChunkDataTarget,
+            },
             universal_circuit::universal_query_gadget::{
                 OutputValues, OutputValuesTarget, UniversalQueryOutputWires,
             },
+            utils::{tests::aggregate_output_values, ChildPosition, NodeInfo},
         },
-        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
+        test_utils::random_aggregation_operations,
     };
 
     use super::aggregate_chunks;
@@ -445,12 +445,14 @@ mod tests {
         let root = index_node.compute_node_hash(primary_index_id);
 
         // generate the output values associated to each chunk
-        let inputs = random_aggregation_public_inputs::<2, MAX_NUM_RESULTS>(&ops);
+        let inputs = PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::sample_from_ops::<2>(&ops);
         let [(first_chunk_count, first_chunk_outputs, fist_chunk_num_overflows), (second_chunk_count, second_chunk_outputs, second_chunk_num_overflows)] =
             inputs
                 .into_iter()
                 .map(|input| {
-                    let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(input.as_slice());
+                    let pis = PublicInputsQueryCircuits::<F, MAX_NUM_RESULTS>::from_slice(
+                        input.as_slice(),
+                    );
                     (
                         pis.num_matching_rows(),
                         OutputValues::from_fields(pis.to_values_raw()),

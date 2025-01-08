@@ -12,6 +12,7 @@ pub mod extraction;
 pub mod ivc;
 /// Module for circuits for simple queries
 pub mod query;
+#[cfg(feature = "results_tree")]
 pub mod results_tree;
 /// Module for the query revelation circuits
 pub mod revelation;

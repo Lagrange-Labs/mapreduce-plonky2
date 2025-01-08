@@ -11,7 +11,10 @@ use log::info;
 use mp2_v1::{
     api::MetadataHash, indexing::block::BlockPrimaryIndex, query::planner::execute_row_query,
 };
-use parsil::{parse_and_validate, utils::ParsilSettingsBuilder, PlaceholderSettings};
+use parsil::{
+    assembler::DynamicCircuitPis, parse_and_validate, utils::ParsilSettingsBuilder, ParsilSettings,
+    PlaceholderSettings,
+};
 use simple_select_queries::{
     cook_query_no_matching_rows, cook_query_too_big_offset, cook_query_with_distinct,
     cook_query_with_matching_rows, cook_query_with_max_num_matching_rows,
@@ -23,7 +26,10 @@ use verifiable_db::query::{
     computational_hash_ids::Output, universal_circuit::universal_circuit_inputs::Placeholders,
 };
 
-use crate::common::{cases::planner::QueryPlanner, table::Table, TableInfo, TestContext};
+use crate::common::{
+    table::{Table, TableColumns},
+    TableInfo, TestContext,
+};
 
 use super::table_source::TableSource;
 
@@ -31,7 +37,7 @@ pub mod aggregated_queries;
 pub mod simple_select_queries;
 
 pub const NUM_CHUNKS: usize = 5;
-pub const NUM_ROWS: usize = 5;
+pub const NUM_ROWS: usize = 3;
 pub const MAX_NUM_RESULT_OPS: usize = 20;
 pub const MAX_NUM_OUTPUTS: usize = 3;
 pub const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
@@ -55,6 +61,10 @@ pub type GlobalCircuitInput = verifiable_db::api::QueryCircuitInput<
 >;
 
 pub type QueryCircuitInput = verifiable_db::query::api::CircuitInput<
+    NUM_CHUNKS,
+    NUM_ROWS,
+    ROW_TREE_MAX_DEPTH,
+    INDEX_TREE_MAX_DEPTH,
     MAX_NUM_COLUMNS,
     MAX_NUM_PREDICATE_OPS,
     MAX_NUM_RESULT_OPS,
@@ -80,6 +90,17 @@ pub struct QueryCooking {
     pub(crate) max_block: BlockPrimaryIndex,
     pub(crate) limit: Option<u32>,
     pub(crate) offset: Option<u32>,
+}
+
+pub(crate) struct QueryPlanner<'a> {
+    pub(crate) query: QueryCooking,
+    pub(crate) pis: &'a DynamicCircuitPis,
+    pub(crate) ctx: &'a mut TestContext,
+    pub(crate) settings: &'a ParsilSettings<&'a Table>,
+    // useful for non existence since we need to search in both trees the places to prove
+    // the fact a given node doesn't exist
+    pub(crate) table: &'a Table,
+    pub(crate) columns: TableColumns,
 }
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
@@ -202,17 +223,7 @@ async fn test_query_mapping(
 
     match pis.result.query_variant() {
         Output::Aggregation => {
-            prove_aggregation_query(
-                ctx,
-                table,
-                query_info,
-                parsed,
-                &settings,
-                res,
-                *table_hash,
-                pis,
-            )
-            .await
+            prove_aggregation_query(parsed, res, *table_hash, &mut planner).await
         }
         Output::NoAggregation => {
             prove_no_aggregation_query(parsed, table_hash, &mut planner, res).await
