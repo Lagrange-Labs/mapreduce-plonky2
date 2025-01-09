@@ -165,7 +165,7 @@ where
             let mut child_data = vec![];
             for c in c.iter_children() {
                 if let Some(k) = c {
-                    child_data.push(Some(self.storage.data().try_fetch(k).await?));
+                    child_data.push(self.storage.data().try_fetch(k).await?);
                 } else {
                     child_data.push(None);
                 }
@@ -177,7 +177,7 @@ where
                 .try_fetch(item.k())
                 .await?
                 .expect("the node can not not be present");
-            payload.aggregate(child_data.into_iter().flatten());
+            payload.aggregate(child_data.into_iter());
             plan.done(&item)?;
             self.storage
                 .data_mut()

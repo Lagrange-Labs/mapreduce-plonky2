@@ -500,11 +500,9 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
         left: &UInt256Target,
         right: &UInt256Target,
     ) -> BoolTarget {
-        // left <= right iff left - right requires a borrow or left - right == 0
-        let (res, borrow) = self.sub_u256(left, right);
-        let less_than = BoolTarget::new_unsafe(borrow.0);
-        let is_eq = self.is_zero(&res);
-        self.or(less_than, is_eq)
+        // left <= right iff ! right < left
+        let is_greater = self.is_less_than_u256(right, left);
+        self.not(is_greater)
     }
 
     fn is_zero(&mut self, target: &UInt256Target) -> BoolTarget {
@@ -827,6 +825,7 @@ impl ToTargets for UInt256Target {
 }
 
 impl FromTargets for UInt256Target {
+    const NUM_TARGETS: usize = NUM_LIMBS;
     // Expects big endian limbs as the standard format for IO
     fn from_targets(t: &[Target]) -> Self {
         Self::new_from_be_target_limbs(&t[..NUM_LIMBS]).unwrap()

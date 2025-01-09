@@ -23,6 +23,7 @@ itertools.workspace = true
 rand.workspace = true
 serial_test.workspace = true
 sha2.workspace = true
+mp2_test = { path = "../mp2-test" }
 
 recursion_framework = { path = "../recursion-framework" }
 verifiable-db = { path = "../verifiable-db" }
