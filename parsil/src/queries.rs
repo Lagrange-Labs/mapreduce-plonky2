@@ -4,8 +4,7 @@
 use crate::{keys_in_index_boundaries, symbols::ContextProvider, ParsilSettings};
 use anyhow::*;
 use ryhope::{
-    mapper_table_name, tree::sbbst::NodeIdx, UserEpoch, EPOCH, INCREMENTAL_EPOCH, KEY, USER_EPOCH,
-    VALID_FROM, VALID_UNTIL,
+    mapper_table_name, tree::sbbst::NodeIdx, UserEpoch, EPOCH, KEY, USER_EPOCH, INCREMENTAL_EPOCH,
 };
 use verifiable_db::query::{
     universal_circuit::universal_circuit_inputs::Placeholders, utils::QueryBounds,
@@ -38,10 +37,9 @@ pub fn core_keys_for_index_tree(
         "
             SELECT {execution_epoch}::BIGINT as {EPOCH},
             {USER_EPOCH} as {KEY}
-            FROM {table_name} JOIN (
-                SELECT * FROM {mapper_table_name}
-                WHERE {USER_EPOCH} >= {}::BIGINT AND {USER_EPOCH} <= {}::BIGINT
-            ) as __mapper ON {VALID_FROM} <= {INCREMENTAL_EPOCH} AND {VALID_UNTIL} >= {INCREMENTAL_EPOCH}
+            FROM {mapper_table_name}
+            WHERE {USER_EPOCH} >= {}::BIGINT AND {USER_EPOCH} <= {}::BIGINT
+                AND NOT {INCREMENTAL_EPOCH} = 0  
             ORDER BY {USER_EPOCH}
         ",
         query_min_block,
