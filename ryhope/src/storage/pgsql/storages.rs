@@ -334,14 +334,19 @@ where
 
         // Fetch all the payloads for the wide lineage in one fell swoop
         let mapper_table_name = mapper_table_name(table);
-        let payload_query = format!(
-            "SELECT {KEY}, {USER_EPOCH} AS epoch, {PAYLOAD} 
-            FROM {table} JOIN (
-                SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {mapper_table_name} WHERE {USER_EPOCH} >= $1 AND {USER_EPOCH} <= $2  
-            ) AS __mapper ON {VALID_FROM} <= {INCREMENTAL_EPOCH} AND {VALID_UNTIL} >= {INCREMENTAL_EPOCH} 
-             WHERE {KEY} = ANY($3)
-            "
-        );
+        let payload_query = format!("
+            SELECT 
+                {KEY}, 
+                generate_series(GREATEST({VALID_FROM}, min_epoch), LEAST({VALID_UNTIL}, max_epoch)) AS epoch,
+                {PAYLOAD} 
+            FROM {table} CROSS JOIN 
+                (SELECT MIN({INCREMENTAL_EPOCH}) as min_epoch, MAX({INCREMENTAL_EPOCH}) as max_epoch 
+                FROM {mapper_table_name} 
+                WHERE {USER_EPOCH} >= $1 AND {USER_EPOCH} <= $2) as mapper_range 
+            WHERE {VALID_FROM} <= mapper_range.max_epoch AND {VALID_UNTIL} >= mapper_range.min_epoch 
+            AND {KEY} = ANY($3)
+            ;
+        ");
         let rows = db
             .get()
             .await
@@ -368,6 +373,9 @@ where
         > = HashMap::new();
         for row in &rows {
             let epoch = row.get::<_, i64>("epoch");
+            // convert incremental epoch to user epoch
+            let epoch = s.epoch_mapper().try_to_user_epoch(epoch as IncrementalEpoch).await
+                .ok_or(anyhow!("Epoch correspong to inner epoch {epoch} not found"))?;
             let key = NodeIdx::from_bytea(row.get::<_, Vec<u8>>(KEY));
 
             let payload = Self::payload_from_row(row)?;

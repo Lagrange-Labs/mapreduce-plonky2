@@ -51,8 +51,8 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
     } else {
         Some(format!("SELECT {KEY} FROM 
             {zktable_name} JOIN (
-                SELECT {INCREMENTAL_EPOCH} FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number}
-            ) as __mapper ON {VALID_FROM} <= {INCREMENTAL_EPOCH} AND {VALID_UNTIL} >= {INCREMENTAL_EPOCH}
+                SELECT {INCREMENTAL_EPOCH} as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number} LIMIT 1
+            ) as __mapper ON {VALID_FROM} <= epoch AND {VALID_UNTIL} >= epoch
                            WHERE {sec_index} < '{secondary_lo}'::DECIMAL
                            ORDER BY {sec_index} DESC LIMIT 1"))
     };
@@ -63,8 +63,8 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
     } else {
         Some(format!("SELECT {KEY} FROM 
             {zktable_name} JOIN (
-                SELECT {INCREMENTAL_EPOCH} FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number}
-            ) as __mapper ON {VALID_FROM} <= {INCREMENTAL_EPOCH} AND {VALID_UNTIL} >= {INCREMENTAL_EPOCH}
+                SELECT {INCREMENTAL_EPOCH} as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number} LIMIT 1
+            ) as __mapper ON {VALID_FROM} <= epoch AND {VALID_UNTIL} >= epoch
                            WHERE {sec_index} > '{secondary_hi}'::DECIMAL
                            ORDER BY {sec_index} ASC LIMIT 1"))
     };
