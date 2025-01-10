@@ -5,7 +5,7 @@ use std::{
 };
 
 use alloy::primitives::U256;
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use itertools::Itertools;
 
 use mp2_common::{
@@ -112,7 +112,9 @@ impl Identifiers {
         let mut cache = ComputationalHashCache::new(column_ids.len());
         let predicate_ops_hash =
             Operation::operation_hash(predicate_operations, &column_ids, &mut cache)?;
-        let predicate_hash = predicate_ops_hash.last().unwrap();
+        let predicate_hash = predicate_ops_hash
+            .last()
+            .context("missing predicate on query")?;
         let result_ops_hash =
             Operation::operation_hash(&results.result_operations, &column_ids, &mut cache)?;
         results.output_variant.output_hash(
