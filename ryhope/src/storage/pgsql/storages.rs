@@ -371,7 +371,10 @@ where
                 .try_get::<_, i64>("epoch")
                 .context("while fetching epoch from row")?;
             // convert incremental epoch to user epoch
-            let epoch = s.epoch_mapper().try_to_user_epoch(epoch as IncrementalEpoch).await
+            let epoch = s
+                .epoch_mapper()
+                .try_to_user_epoch(epoch as IncrementalEpoch)
+                .await
                 .ok_or(anyhow!("Epoch correspong to inner epoch {epoch} not found"))?;
             let key = row
                 .try_get::<_, Vec<u8>>(KEY)
@@ -548,7 +551,7 @@ where
 
     async fn wide_lineage_between<S: TreeStorage<Self>>(
         &self,
-        _: &S,
+        s: &S,
         db: DBPool,
         table: &str,
         keys_query: &str,
@@ -604,6 +607,12 @@ where
             let epoch = row
                 .try_get::<_, i64>(EPOCH)
                 .context("while fetching epoch from row")?;
+            // convert incremental epoch to user epoch
+            let epoch = s
+                .epoch_mapper()
+                .try_to_user_epoch(epoch as IncrementalEpoch)
+                .await
+                .ok_or(anyhow!("Epoch correspong to inner epoch {epoch} not found"))?;
             let node = <Self as DbConnector<V>>::node_from_row(row)?;
             let payload = Self::payload_from_row(row)?;
             if is_core {

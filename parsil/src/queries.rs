@@ -4,7 +4,7 @@
 use crate::{keys_in_index_boundaries, symbols::ContextProvider, ParsilSettings};
 use anyhow::*;
 use ryhope::{
-    mapper_table_name, tree::sbbst::NodeIdx, UserEpoch, EPOCH, KEY, USER_EPOCH, INCREMENTAL_EPOCH,
+    mapper_table_name, tree::sbbst::NodeIdx, UserEpoch, EPOCH, INCREMENTAL_EPOCH, KEY, USER_EPOCH,
 };
 use verifiable_db::query::{
     universal_circuit::universal_circuit_inputs::Placeholders, utils::QueryBounds,
