@@ -92,7 +92,7 @@ where
         let value: Array<Target, 32> = left_pad_leaf_value(b, &wires.value);
 
         // Compute the metadata digest and the value digest
-        let (metadata_digest, value_digest) = metadata.extracted_digests(
+        let (metadata_digest, value_digest) = metadata.extracted_digests::<32>(
             b,
             &value,
             &u256_no_off,
