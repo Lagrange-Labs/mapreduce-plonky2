@@ -572,10 +572,10 @@ impl LargeStruct {
 
     pub fn slot_inputs(slot: u8) -> Vec<SlotInput> {
         vec![
-            SlotInput::new(slot, 0, 256, 0),
+            SlotInput::new(slot, 0, 32, 0),
             // Big-endian layout
-            SlotInput::new(slot, 16, 128, 1),
-            SlotInput::new(slot, 0, 128, 1),
+            SlotInput::new(slot, 16, 16, 1),
+            SlotInput::new(slot, 0, 16, 1),
         ]
     }
 }
