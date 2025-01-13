@@ -2,9 +2,8 @@ use crate::{
     error::{ensure, RyhopeError},
     mapper_table_name,
     storage::{
-        memory::InMemoryEpochMapper, CurrenEpochUndefined, EpochKvStorage, EpochMapper,
-        EpochStorage, RoEpochKvStorage, RoSharedEpochMapper, SqlTransactionStorage,
-        TransactionalStorage, TreeStorage, WideLineage,
+        CurrenEpochUndefined, EpochKvStorage, EpochMapper, EpochStorage, RoEpochKvStorage,
+        RoSharedEpochMapper, SqlTransactionStorage, TransactionalStorage, TreeStorage, WideLineage,
     },
     tree::{
         sbbst::{self, NodeIdx},
@@ -19,7 +18,7 @@ use itertools::Itertools;
 use postgres_types::Json;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt::Debug,
     future::Future,
     marker::PhantomData,
@@ -29,7 +28,10 @@ use tokio::sync::RwLock;
 use tokio_postgres::{self, NoTls, Row, Transaction};
 use tracing::*;
 
-use super::{CachedValue, PayloadInDb, ToFromBytea, MAX_PGSQL_BIGINT};
+use super::{
+    epoch_mapper::{EpochMapperStorage, INITIAL_INCREMENTAL_EPOCH},
+    metadata_table_name, CachedValue, PayloadInDb, ToFromBytea, MAX_PGSQL_BIGINT,
+};
 
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 
@@ -749,9 +751,9 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
             connection
                 .query(
                     &format!(
-                        "INSERT INTO {}_meta ({VALID_FROM}, {VALID_UNTIL}, {PAYLOAD})
+                        "INSERT INTO {} ({VALID_FROM}, {VALID_UNTIL}, {PAYLOAD})
                         VALUES ($1, $1, $2)",
-                        table
+                        metadata_table_name(table.as_str())
                     ),
                     &[&initial_epoch, &Json(t.clone())],
                 )
@@ -779,14 +781,15 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
         ensure(self.in_tx, "not in a transaction")?;
         trace!("[{self}] commiting in transaction");
 
+        let meta_table = metadata_table_name(&self.table);
+
         if self.dirty {
             let state = self.cache.read().await.clone();
             db_tx
                 .query(
                     &format!(
-                        "INSERT INTO {}_meta ({VALID_FROM}, {VALID_UNTIL}, {PAYLOAD})
-                     VALUES ($1, $1, $2)",
-                        self.table
+                        "INSERT INTO {meta_table} ({VALID_FROM}, {VALID_UNTIL}, {PAYLOAD})
+                     VALUES ($1, $1, $2)"
                     ),
                     &[&(self.epoch + 1), &Json(state)],
                 )
@@ -798,8 +801,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
             db_tx
                 .query(
                     &format!(
-                        "UPDATE {}_meta SET {VALID_UNTIL} = $1 + 1 WHERE {VALID_UNTIL} = $1",
-                        self.table
+                        "UPDATE {meta_table} SET {VALID_UNTIL} = $1 + 1 WHERE {VALID_UNTIL} = $1"
                     ),
                     &[&(self.epoch)],
                 )
@@ -830,12 +832,16 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
 
     async fn fetch_at_inner(&self, epoch: IncrementalEpoch) -> T {
         trace!("[{self}] fetching payload at {}", epoch);
-        let connection = self.db.get().await.unwrap();
+        let meta_table = metadata_table_name(&self.table);
+        let connection = self
+            .db
+            .get()
+            .await
+            .expect("Failed to get DB connection from pool");
         connection
             .query_one(
                 &format!(
-                    "SELECT {PAYLOAD} FROM {}_meta WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
-                    self.table,
+                    "SELECT {PAYLOAD} FROM {meta_table} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}"
                 ),
                 &[&epoch],
             )
@@ -844,9 +850,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
             .map(|x| x.0)
             .with_context(|| {
                 anyhow!(
-                    "failed to fetch state from `{}_meta` at epoch `{}`",
-                    self.table,
-                    epoch
+                    "failed to fetch state from `{meta_table}` at epoch `{epoch}`"
                 )
             }).unwrap()
     }
@@ -866,6 +870,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
         );
 
         let _ = self.cache.get_mut().take();
+        let meta_table = metadata_table_name(&self.table);
         let mut connection = self.db.get().await.unwrap();
         let db_tx = connection
             .transaction()
@@ -874,17 +879,14 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
         // Roll back all the nodes that would still have been alive
         db_tx
             .query(
-                &format!(
-                    "UPDATE {}_meta SET {VALID_UNTIL} = $1 WHERE {VALID_UNTIL} > $1",
-                    self.table
-                ),
+                &format!("UPDATE {meta_table} SET {VALID_UNTIL} = $1 WHERE {VALID_UNTIL} > $1"),
                 &[&new_epoch],
             )
             .await?;
         // Delete nodes that would not have been born yet
         db_tx
             .query(
-                &format!("DELETE FROM {}_meta WHERE {VALID_FROM} > $1", self.table),
+                &format!("DELETE FROM {meta_table} WHERE {VALID_FROM} > $1"),
                 &[&new_epoch],
             )
             .await?;
@@ -1617,310 +1619,5 @@ where
         let inner_epoch = self.wrapped.read().await.current_epoch();
         ensure!(inner_epoch > 0, "cannot rollback past the initial epoch");
         self.wrapped.write().await.rollback_to(inner_epoch).await
-    }
-}
-
-pub(crate) const INITIAL_INCREMENTAL_EPOCH: IncrementalEpoch = 0;
-
-#[derive(Clone, Debug)]
-pub struct EpochMapperStorage {
-    /// A pointer to the DB client
-    db: DBPool,
-    /// The table in which the data must be persisted
-    table: String,
-    in_tx: bool,
-    /// Set of `UserEpoch`s being updated in the cache since the last commit to the DB
-    dirty: BTreeSet<UserEpoch>,
-    pub(super) cache: Arc<RwLock<InMemoryEpochMapper>>,
-}
-
-impl EpochMapperStorage {
-    pub(crate) fn mapper_table_name(&self) -> String {
-        mapper_table_name(&self.table)
-    }
-
-    pub(crate) async fn new_from_table(table: String, db: DBPool) -> Result<Self> {
-        let cache = {
-            let connection = db.get().await?;
-            let mapper_table_name = mapper_table_name(table.as_str());
-            let mut cache = InMemoryEpochMapper::new_empty();
-            let rows = connection
-                .query(
-                    &format!(
-                        "SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {}",
-                        mapper_table_name,
-                    ),
-                    &[],
-                )
-                .await
-                .context("while fetching incremental epoch")
-                .unwrap();
-            for row in rows {
-                let user_epoch = row.get::<_, i64>(0) as UserEpoch;
-                let incremental_epoch = row.get::<_, i64>(1) as IncrementalEpoch;
-                cache
-                    .add_epoch_map(user_epoch, incremental_epoch)
-                    .await
-                    .context("while adding mapping to cache")?;
-            }
-            cache
-        };
-        Ok(Self {
-            db,
-            table,
-            in_tx: false,
-            dirty: Default::default(),
-            cache: Arc::new(RwLock::new(cache)),
-        })
-    }
-
-    pub(crate) async fn new<const EXTERNAL_EPOCH_MAPPER: bool>(
-        table: String,
-        db: DBPool,
-        initial_epoch: UserEpoch,
-    ) -> Result<Self> {
-        // Add initial epoch to cache
-        let mapper_table_name = mapper_table_name(table.as_str());
-        Ok(if EXTERNAL_EPOCH_MAPPER {
-            // Initialize from mapper table
-            let mapper = Self::new_from_table(table, db).await?;
-            // check that there is a mapping initial_epoch -> INITIAL_INCREMENTAL_EPOCH
-            ensure!(
-                mapper.try_to_incremental_epoch(initial_epoch).await
-                    == Some(INITIAL_INCREMENTAL_EPOCH),
-                "No initial epoch {initial_epoch} found in mapping table {mapper_table_name}"
-            );
-            mapper
-        } else {
-            // add epoch map for `initial_epoch` to the DB
-            db.get()
-                .await?
-                .query(
-                    &format!(
-                        "INSERT INTO {} ({USER_EPOCH}, {INCREMENTAL_EPOCH})
-                            VALUES ($1, $2)",
-                        mapper_table_name,
-                    ),
-                    &[&(initial_epoch as UserEpoch), &INITIAL_INCREMENTAL_EPOCH],
-                )
-                .await?;
-            let cache = InMemoryEpochMapper::new_at(initial_epoch);
-            Self {
-                db,
-                table,
-                in_tx: false,
-                dirty: Default::default(),
-                cache: Arc::new(RwLock::new(cache)),
-            }
-        })
-    }
-
-    /// Add a new epoch mapping for `IncrementalEpoch` `epoch`, assuming that `UserEpoch`s
-    /// are also computed incrementally from an initial shift. If there is already a mapping for
-    /// `IncrementalEpoch` `epoch`, then this function has no side effects, because it is assumed
-    /// that the mapping has already been provided according to another logic.
-    pub(crate) async fn new_incremental_epoch(&mut self, epoch: IncrementalEpoch) -> Result<()> {
-        if let Some(mapped_epoch) = self.cache.write().await.new_incremental_epoch(epoch) {
-            // if a new mapping is actually added to the cache, then we add the `UserEpoch`
-            // of this mapping to the `dirty` set, so that it is later committed to the DB
-            self.dirty.insert(mapped_epoch);
-        }
-        Ok(())
-    }
-
-    pub(crate) fn start_transaction(&mut self) -> Result<()> {
-        ensure!(!self.in_tx, "already in a transaction");
-        self.in_tx = true;
-        Ok(())
-    }
-
-    pub(crate) async fn commit_in_transaction(
-        &mut self,
-        db_tx: &mut Transaction<'_>,
-    ) -> Result<()> {
-        for &user_epoch in self.dirty.iter() {
-            let incremental_epoch = self
-                .cache
-                .write()
-                .await
-                .try_to_incremental_epoch(user_epoch)
-                .await
-                .ok_or(anyhow!("Epoch {user_epoch} not found in cache"))?;
-            db_tx
-                .query(
-                    &format!(
-                        "INSERT INTO {} ({USER_EPOCH}, {INCREMENTAL_EPOCH})
-                     VALUES ($1, $2)",
-                        self.mapper_table_name()
-                    ),
-                    &[&(user_epoch as UserEpoch), &incremental_epoch],
-                )
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn latest_epoch(&self) -> UserEpoch {
-        // always fetch it from the DB as it might be outdated in cache
-        let connection = self.db.get().await.unwrap();
-        let row = connection
-            .query_opt(
-                &format!(
-                    "SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {} 
-                    WHERE {USER_EPOCH} = 
-                        (SELECT MAX({USER_EPOCH}) FROM {})",
-                    self.mapper_table_name(),
-                    self.mapper_table_name(),
-                ),
-                &[],
-            )
-            .await
-            .context("while fetching incremental epoch")
-            .unwrap();
-        if let Some(row) = row {
-            let user_epoch = row.get::<_, i64>(0) as UserEpoch;
-            let incremental_epoch = row.get::<_, i64>(1);
-            self.cache
-                .write()
-                .await
-                .add_epoch_map(user_epoch, incremental_epoch)
-                .await
-                .context("while adding mapping to cache")
-                .unwrap();
-            user_epoch
-        } else {
-            unreachable!(
-                "There should always be at least one row in mapper table {}",
-                self.mapper_table_name()
-            );
-        }
-    }
-
-    pub(crate) fn commit_success(&mut self) {
-        self.dirty.clear();
-        self.in_tx = false;
-    }
-
-    pub(crate) async fn commit_failed(&mut self) {
-        // revert mappings inserted in the cache since the last commit.
-        // we rollback to the smallest epoch found in dirty, if any
-        if let Some(epoch) = self.dirty.pop_first() {
-            self.cache.write().await.rollback_to(epoch);
-        }
-        self.dirty.clear();
-        self.in_tx = false;
-    }
-
-    pub(crate) async fn rollback_to<const EXTERNAL_EPOCH_MAPPER: bool>(
-        &mut self,
-        epoch: UserEpoch,
-    ) -> Result<()> {
-        // rollback the cache
-        self.cache.write().await.rollback_to(epoch);
-        if !EXTERNAL_EPOCH_MAPPER {
-            // rollback also DB
-            let connection = self.db.get().await?;
-            connection
-                .query(
-                    &format!(
-                        "DELETE FROM {} WHERE {USER_EPOCH} > $1",
-                        self.mapper_table_name()
-                    ),
-                    &[&(epoch)],
-                )
-                .await?;
-        }
-
-        Ok(())
-    }
-}
-
-impl EpochMapper for EpochMapperStorage {
-    async fn try_to_incremental_epoch(&self, epoch: UserEpoch) -> Option<IncrementalEpoch> {
-        let result = self
-            .cache
-            .read()
-            .await
-            .try_to_incremental_epoch(epoch)
-            .await;
-        if result.is_none() {
-            let connection = self.db.get().await.unwrap();
-            let row = connection
-                .query_opt(
-                    &format!(
-                        "SELECT {INCREMENTAL_EPOCH} FROM {} WHERE {USER_EPOCH} = $1",
-                        self.mapper_table_name()
-                    ),
-                    &[&(epoch)],
-                )
-                .await
-                .context("while fetching incremental epoch")
-                .unwrap();
-            if let Some(row) = row {
-                let incremental_epoch = row.get::<_, i64>(0) as IncrementalEpoch;
-                self.cache
-                    .write()
-                    .await
-                    .add_epoch_map(epoch, incremental_epoch)
-                    .await
-                    .context("while adding mapping to cache")
-                    .unwrap();
-                Some(incremental_epoch)
-            } else {
-                None
-            }
-        } else {
-            result
-        }
-    }
-
-    async fn try_to_user_epoch(&self, epoch: IncrementalEpoch) -> Option<UserEpoch> {
-        let result = self.cache.read().await.try_to_user_epoch(epoch).await;
-        if result.is_none() {
-            let connection = self.db.get().await.unwrap();
-            let row = connection
-                .query_opt(
-                    &format!(
-                        "SELECT {USER_EPOCH} FROM {} WHERE {INCREMENTAL_EPOCH} = $1",
-                        self.mapper_table_name()
-                    ),
-                    &[&(epoch)],
-                )
-                .await
-                .context("while fetching incremental epoch")
-                .unwrap();
-            if let Some(row) = row {
-                let user_epoch = row.get::<_, i64>(0) as UserEpoch;
-                self.cache
-                    .write()
-                    .await
-                    .add_epoch_map(user_epoch, epoch)
-                    .await
-                    .context("while adding mapping to cache")
-                    .unwrap();
-                Some(user_epoch)
-            } else {
-                None
-            }
-        } else {
-            result
-        }
-    }
-
-    async fn add_epoch_map(
-        &mut self,
-        user_epoch: UserEpoch,
-        incremental_epoch: IncrementalEpoch,
-    ) -> Result<()> {
-        // add to cache
-        self.cache
-            .write()
-            .await
-            .add_epoch_map(user_epoch, incremental_epoch)
-            .await?;
-        // add arbitrary epoch to dirty set
-        self.dirty.insert(user_epoch);
-        Ok(())
     }
 }

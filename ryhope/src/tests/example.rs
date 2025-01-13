@@ -88,14 +88,10 @@ async fn run() -> Result<()> {
         "The update tree from {first_stamp} to {} was:",
         first_stamp + 1
     );
-    tree.diff_at(first_stamp + 1)
-        .await
-        .unwrap()
-        .unwrap()
-        .print();
+    tree.diff_at(first_stamp + 1).await?.unwrap().print();
 
     println!("The update tree from 0 to 1 was:",);
-    tree.diff_at(1).await.unwrap().unwrap().print();
+    tree.diff_at(1).await?.unwrap().print();
 
     Ok(())
 }

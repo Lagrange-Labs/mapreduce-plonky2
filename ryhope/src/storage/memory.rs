@@ -435,17 +435,16 @@ impl InMemoryEpochMapper {
     }
 
     pub(crate) fn initial_epoch(&self) -> UserEpoch {
-        let (initial_epoch, initial_inner_epoch) = self.0.iter().next().unwrap();
+        let (initial_epoch, initial_inner_epoch) =
+            self.0.iter().next().expect(
+                "Initial epoch is always expected to be inserted at build-time in the storage",
+            );
         assert_eq!(*initial_inner_epoch, 0);
         *initial_epoch
     }
 
     pub(crate) fn last_epoch(&self) -> UserEpoch {
         *self.0.iter().next_back().unwrap().0
-    }
-
-    fn try_to_incremental_epoch_inner(&self, epoch: UserEpoch) -> Option<IncrementalEpoch> {
-        self.0.get(&epoch).copied()
     }
 
     fn try_to_user_epoch_inner(&self, epoch: IncrementalEpoch) -> Option<UserEpoch> {
@@ -459,14 +458,14 @@ impl InMemoryEpochMapper {
     /// This function returns the `UserEpoch` being mapper to `epoch`, in case a new mapping
     /// is actually inserted.
     pub(crate) fn new_incremental_epoch(&mut self, epoch: IncrementalEpoch) -> Option<UserEpoch> {
-        // compute last arbitrary epoch being inserted in the map
+        // compute last arbitrary epoch having been inserted in the map
         let last_epoch = self.last_epoch();
         // check if `epoch` has already been inserted in the map
         match self.try_to_user_epoch_inner(epoch) {
             Some(matched_epoch) => {
                 // `epoch` has already been inserted, only check that
                 // `matched_epoch` corresponds to the last inserted `UserEpoch`
-                assert_eq!(last_epoch, matched_epoch,);
+                assert_eq!(last_epoch, matched_epoch);
                 None
             }
             None => {
@@ -530,7 +529,7 @@ impl InMemoryEpochMapper {
 
 impl EpochMapper for InMemoryEpochMapper {
     async fn try_to_incremental_epoch(&self, epoch: UserEpoch) -> Option<IncrementalEpoch> {
-        self.try_to_incremental_epoch_inner(epoch)
+        self.0.get(&epoch).copied()
     }
 
     async fn try_to_user_epoch(&self, epoch: IncrementalEpoch) -> Option<UserEpoch> {
@@ -554,6 +553,7 @@ pub struct InMemory<T: TreeTopology, V: Clone + Debug + Send + Sync, const READ_
     nodes: VersionedKvStorage<<T as TreeTopology>::Key, <T as TreeTopology>::Node>,
     /// Storage for node-associated data.
     data: VersionedKvStorage<<T as TreeTopology>::Key, V>,
+    /// Mapper between used-defined epochs and internal incremental epochs
     epoch_mapper: SharedEpochMapper<InMemoryEpochMapper, READ_ONLY>,
     /// Whether a transaction is currently opened.
     in_tx: bool,

@@ -5,22 +5,24 @@ use super::{
 };
 use crate::{
     error::{ensure, RyhopeError},
-    mapper_table_name,
+    mapper_table_name, metadata_table_name,
     storage::pgsql::storages::DBPool,
     tree::{NodeContext, TreeTopology},
     IncrementalEpoch, InitSettings, UserEpoch, INCREMENTAL_EPOCH, KEY, PAYLOAD, USER_EPOCH,
     VALID_FROM, VALID_UNTIL,
 };
 use bb8_postgres::PostgresConnectionManager;
+use epoch_mapper::{EpochMapperStorage, INITIAL_INCREMENTAL_EPOCH};
 use futures::TryFutureExt;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, future::Future, sync::Arc};
-use storages::{EpochMapperStorage, NodeProjection, PayloadProjection, INITIAL_INCREMENTAL_EPOCH};
+use storages::{NodeProjection, PayloadProjection};
 use tokio::sync::RwLock;
 use tokio_postgres::{NoTls, Transaction};
 use tracing::*;
 
+mod epoch_mapper;
 mod storages;
 
 const MAX_PGSQL_BIGINT: i64 = i64::MAX;
@@ -108,7 +110,10 @@ async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(db: DBPool, tab
         .map_err(|err| RyhopeError::from_db(format!("unable to delete table `{table}`"), err))
         .map(|_| ())?;
     connection
-        .execute(&format!("DROP TABLE IF EXISTS {}_meta", table), &[])
+        .execute(
+            &format!("DROP TABLE IF EXISTS {}", metadata_table_name(table)),
+            &[],
+        )
         .await
         .map_err(|err| RyhopeError::from_db(format!("unable to delete table `{table}`"), err))
         .map(|_| ())?;
@@ -299,7 +304,10 @@ async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64), RyhopeE
     let connection = db.get().await.unwrap();
     connection
         .query_one(
-            &format!("SELECT MIN({VALID_FROM}), MAX({VALID_UNTIL}) FROM {table}_meta",),
+            &format!(
+                "SELECT MIN({VALID_FROM}), MAX({VALID_UNTIL}) FROM {}",
+                metadata_table_name(table)
+            ),
             &[],
         )
         .await
@@ -577,10 +585,11 @@ where
             .map_err(|err| RyhopeError::from_db(format!("creating table `{table}`"), err))?;
 
         // The meta table will store everything related to the tree itself.
+        let meta_table = metadata_table_name(table);
         connection
             .execute(
                 &format!(
-                    "CREATE TABLE {table}_meta (
+                    "CREATE TABLE {meta_table} (
                    {VALID_FROM}   BIGINT NOT NULL UNIQUE,
                    {VALID_UNTIL}  BIGINT DEFAULT -1,
                    {PAYLOAD}      JSONB)"
@@ -589,7 +598,7 @@ where
             )
             .await
             .map(|_| ())
-            .map_err(|err| RyhopeError::from_db(format!("creating table `{table}_meta`"), err))?;
+            .map_err(|err| RyhopeError::from_db(format!("creating table `{meta_table}`"), err))?;
 
         Ok(())?;
 
