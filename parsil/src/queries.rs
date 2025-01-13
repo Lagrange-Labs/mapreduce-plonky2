@@ -32,22 +32,25 @@ pub fn core_keys_for_index_tree(
 
     let mapper_table_name = mapper_table_name(table_name);
 
+    let (lower_epoch, higher_epoch) = (
+        query_min_block,
+        query_max_block.min(
+            execution_epoch
+                .try_into()
+                .with_context(|| format!("unable to convert {} to i64", execution_epoch))?,
+        ),
+    );
+
     // Integer default to i32 in PgSQL, they must be cast to i64, a.k.a. BIGINT.
     Ok(format!(
         "
             SELECT {execution_epoch}::BIGINT as {EPOCH},
             {USER_EPOCH} as {KEY}
             FROM {mapper_table_name}
-            WHERE {USER_EPOCH} >= {}::BIGINT AND {USER_EPOCH} <= {}::BIGINT
+            WHERE {USER_EPOCH} >= {lower_epoch}::BIGINT AND {USER_EPOCH} <= {higher_epoch}::BIGINT
                 AND NOT {INCREMENTAL_EPOCH} = 0  
             ORDER BY {USER_EPOCH}
-        ",
-        query_min_block,
-        query_max_block.min(
-            execution_epoch
-                .try_into()
-                .with_context(|| format!("unable to convert {} to i64", execution_epoch))?
-        )
+        "
     ))
 }
 

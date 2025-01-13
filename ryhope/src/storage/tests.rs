@@ -13,7 +13,8 @@ use crate::{
     storage::{
         memory::InMemory,
         pgsql::{PgsqlStorage, SqlServerConnection, SqlStorageSettings},
-        EpochKvStorage, PayloadStorage, RoEpochKvStorage, SqlTreeTransactionalStorage, TreeStorage,
+        EpochKvStorage, EpochMapper, PayloadStorage, RoEpochKvStorage, SqlTreeTransactionalStorage,
+        TreeStorage,
     },
     tree::{
         sbbst,
@@ -52,7 +53,7 @@ async fn _storage_in_memory(initial_epoch: UserEpoch) -> Result<()> {
         println!("\nEpoch = {i}");
         let ss = s.view_at(i);
         s.tree().print(&ss).await;
-        s.diff_at(i).await.unwrap().print();
+        s.diff_at(i).await?.unwrap().print();
 
         match i - initial_epoch {
             1 => {
@@ -131,7 +132,7 @@ async fn _storage_in_pgsql(initial_epoch: UserEpoch) -> Result<()> {
         println!("\nEpoch = {i}");
         let ss = s.view_at(i);
         s.tree().print(&ss).await;
-        s.diff_at(i).await.unwrap().print();
+        s.diff_at(i).await?.unwrap().print();
 
         match i {
             1 => {
@@ -301,7 +302,7 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
         println!("\nEpoch = {i}");
         let ss = s2.view_at(i);
         s2.tree().print(&ss).await;
-        s_psql.diff_at(i).await.unwrap().print();
+        s_psql.diff_at(i).await?.unwrap().print();
     }
 
     let mut s_ram =
@@ -540,6 +541,60 @@ async fn epoch_sbbst_can_use_non_sequential_keys() -> Result<()> {
     assert!(s.store(14, 2).await.is_ok());
     assert!(s.store(15, 2).await.is_ok());
     s.commit_transaction().await?;
+
+    // check that values have been inserted
+    assert_eq!(s.try_fetch(&12).await.unwrap(), 2);
+    assert_eq!(s.try_fetch(&14).await.unwrap(), 2);
+    assert_eq!(s.try_fetch(&15).await.unwrap(), 2);
+
+    // chekc that 11 has not been inserted
+    assert!(s.try_fetch(&11).await.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn epoch_sbbst_over_pgsql_with_non_sequential_keys() -> Result<()> {
+    type Tree = sbbst::EpochTree;
+    type V = i64;
+
+    type Storage = PgsqlStorage<Tree, V, false>;
+
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::Reset(Tree::with_shift_and_capacity(10, 0)),
+        SqlStorageSettings {
+            table: "epoch_sbbst".to_string(),
+            source: SqlServerConnection::NewConnection(db_url()),
+            external_mapper: None,
+        },
+    )
+    .await?;
+
+    s.start_transaction().await?;
+    assert!(s.store(2, 2).await.is_err()); // try insert key smaller than initial shift
+    assert!(s.store(12, 2).await.is_ok());
+    assert!(s.store(11, 2).await.is_err()); // try insert key smaller than previous one
+    s.commit_transaction().await?;
+
+    // start a new transaction
+    s.start_transaction().await?;
+    assert!(s.store(14, 2).await.is_ok());
+    s.commit_transaction().await?;
+
+    // check that values have been inserted
+    assert_eq!(s.try_fetch(&12).await.unwrap(), 2);
+    assert_eq!(s.try_fetch(&14).await.unwrap(), 2);
+
+    // check that 11 has not been inserted
+    assert!(s.try_fetch(&11).await.is_none());
+
+    assert_eq!(s.storage.epoch_mapper().to_incremental_epoch(12).await, 1);
+    assert_eq!(s.storage.epoch_mapper().to_incremental_epoch(14).await, 1);
+    assert!(s
+        .storage
+        .epoch_mapper()
+        .try_to_incremental_epoch(11)
+        .await
+        .is_none());
 
     Ok(())
 }

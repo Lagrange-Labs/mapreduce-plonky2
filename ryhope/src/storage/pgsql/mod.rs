@@ -4,7 +4,7 @@ use super::{
     SqlTransactionStorage, TransactionalStorage, TreeStorage, WideLineage,
 };
 use crate::{
-    mapper_table_name,
+    mapper_table_name, metadata_table_name,
     storage::pgsql::storages::DBPool,
     tree::{NodeContext, TreeTopology},
     IncrementalEpoch, InitSettings, UserEpoch, INCREMENTAL_EPOCH, KEY, PAYLOAD, USER_EPOCH,
@@ -12,14 +12,16 @@ use crate::{
 };
 use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
+use epoch_mapper::{EpochMapperStorage, INITIAL_INCREMENTAL_EPOCH};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, future::Future, sync::Arc};
-use storages::{EpochMapperStorage, NodeProjection, PayloadProjection, INITIAL_INCREMENTAL_EPOCH};
+use storages::{NodeProjection, PayloadProjection};
 use tokio::sync::RwLock;
 use tokio_postgres::{NoTls, Transaction};
 use tracing::*;
 
+mod epoch_mapper;
 mod storages;
 
 const MAX_PGSQL_BIGINT: i64 = i64::MAX;
@@ -110,7 +112,10 @@ async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(
         .with_context(|| format!("unable to delete table `{table}`"))
         .map(|_| ())?;
     connection
-        .execute(&format!("DROP TABLE IF EXISTS {}_meta", table), &[])
+        .execute(
+            &format!("DROP TABLE IF EXISTS {}", metadata_table_name(table)),
+            &[],
+        )
         .await
         .with_context(|| format!("unable to delete table `{table}`"))
         .map(|_| ())?;
@@ -301,7 +306,10 @@ async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
     let connection = db.get().await.unwrap();
     connection
         .query_one(
-            &format!("SELECT MIN({VALID_FROM}), MAX({VALID_UNTIL}) FROM {table}_meta",),
+            &format!(
+                "SELECT MIN({VALID_FROM}), MAX({VALID_UNTIL}) FROM {}",
+                metadata_table_name(table)
+            ),
             &[],
         )
         .await
@@ -574,10 +582,11 @@ where
             .with_context(|| format!("unable to create table `{table}`"))?;
 
         // The meta table will store everything related to the tree itself.
+        let meta_table = metadata_table_name(table);
         connection
             .execute(
                 &format!(
-                    "CREATE TABLE {table}_meta (
+                    "CREATE TABLE {meta_table} (
                    {VALID_FROM}   BIGINT NOT NULL UNIQUE,
                    {VALID_UNTIL}  BIGINT DEFAULT -1,
                    {PAYLOAD}      JSONB)"
@@ -586,7 +595,7 @@ where
             )
             .await
             .map(|_| ())
-            .with_context(|| format!("unable to create table `{table}_meta`"))?;
+            .with_context(|| format!("unable to create table `{meta_table}`"))?;
 
         // Create the mapper table if the mapper table is not external, otherwise
         // create a view for the mapper table name expected for `table` to `mapper_table`.

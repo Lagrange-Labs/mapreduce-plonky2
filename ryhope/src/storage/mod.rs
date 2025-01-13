@@ -186,6 +186,11 @@ pub trait EpochMapper: Sized + Send + Sync + Clone + Debug {
         incremental_epoch: IncrementalEpoch,
     ) -> impl Future<Output = Result<()>> + Send;
 }
+
+/// Wrapper data structure to safely use an instance of an `EpochMapper` shared among multiple
+/// threads. The `READ_ONLY` flag specifies whether the wrapped `EpochMapper` can be
+/// modified or not by callers of this wrapper, that is if `READ_ONLY` is `true`, then callers
+// this wrapper can only access the `EpochMapper` without modifying it
 #[derive(Clone, Debug)]
 pub struct SharedEpochMapper<T: EpochMapper, const READ_ONLY: bool>(Arc<RwLock<T>>);
 
@@ -389,15 +394,7 @@ where
 
     /// Return the value associated to `k` at the current epoch if it exists,
     /// `None` otherwise.
-    fn try_fetch(&self, k: &K) -> impl Future<Output = Option<V>> + Send {
-        async {
-            if let Result::Ok(current_epoch) = self.current_epoch().await {
-                self.try_fetch_at(k, current_epoch).await
-            } else {
-                None
-            }
-        }
-    }
+    fn try_fetch(&self, k: &K) -> impl Future<Output = Option<V>> + Send;
 
     /// Return the value associated to `k` at the given `epoch`.
     ///
