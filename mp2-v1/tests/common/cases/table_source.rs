@@ -85,10 +85,10 @@ impl SlotEvmWordColumns {
     fn new(column_info: Vec<ExtractedColumnInfo>) -> Self {
         // Ensure the column information should have the same slot and EVM word.
 
-        let slot = column_info[0].extraction_id()[0].0 as u8;
+        let slot = column_info[0].extraction_id()[7].0 as u8;
         let evm_word = column_info[0].location_offset().0 as u32;
         column_info[1..].iter().for_each(|col| {
-            let col_slot = col.extraction_id()[0].0 as u8;
+            let col_slot = col.extraction_id()[7].0 as u8;
             let col_word = col.location_offset().0 as u32;
             assert_eq!(col_slot, slot);
             assert_eq!(col_word, evm_word);
@@ -98,7 +98,7 @@ impl SlotEvmWordColumns {
     }
     fn slot(&self) -> u8 {
         // The columns should have the same slot.
-        u8::try_from(self.0[0].extraction_id()[0].to_canonical_u64()).unwrap()
+        u8::try_from(self.0[0].extraction_id()[7].to_canonical_u64()).unwrap()
     }
     fn evm_word(&self) -> u32 {
         // The columns should have the same EVM word.
