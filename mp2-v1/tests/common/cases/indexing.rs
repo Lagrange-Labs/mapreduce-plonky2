@@ -34,8 +34,8 @@ use crate::common::{
             LargeStruct, SimpleMapping, SimpleNestedMapping, StructMapping, StructNestedMapping,
         },
         table_source::{
-            ContractExtractionArgs, LengthExtractionArgs, MappingExtractionArgs, MappingIndex,
-            MergeSource, ReceiptExtractionArgs, SingleExtractionArgs, TableSource,
+            ContractExtractionArgs, MappingExtractionArgs, MappingIndex, MergeSource,
+            ReceiptExtractionArgs, SingleExtractionArgs, TableSource,
         },
         TableIndexing,
     },
@@ -64,9 +64,11 @@ pub(crate) const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
 const MAPPING_SLOT: u8 = 4;
 
 /// Test slot for length extraction
+#[allow(dead_code)]
 const LENGTH_SLOT: u8 = 1;
 
 /// Test length value for length extraction
+#[allow(dead_code)]
 const LENGTH_VALUE: u8 = 2;
 
 /// Test slot for contract extraction
@@ -375,7 +377,7 @@ impl<T: TableSource> TableIndexing<T> {
         let contract_address = contract.address;
         let chain_id = contract.chain_id;
 
-        let slot_input = SlotInput::new(MAPPING_SLOT, 0, 256, 0);
+        let slot_input = SlotInput::new(MAPPING_SLOT, 0, 32, 0);
         let key_id =
             identifier_for_mapping_key_column(MAPPING_SLOT, &contract_address, chain_id, vec![]);
         let value_id =
@@ -387,10 +389,7 @@ impl<T: TableSource> TableIndexing<T> {
             MAPPING_SLOT,
             mapping_index,
             vec![slot_input],
-            Some(LengthExtractionArgs {
-                slot: LENGTH_SLOT,
-                value: LENGTH_VALUE,
-            }),
+            None,
         );
 
         let contract = Contract {
@@ -482,7 +481,7 @@ impl<T: TableSource> TableIndexing<T> {
         let contract_address = contract.address;
         let chain_id = contract.chain_id;
 
-        let slot_input = SlotInput::new(MAPPING_OF_SINGLE_VALUE_MAPPINGS_SLOT, 0, 256, 0);
+        let slot_input = SlotInput::new(MAPPING_OF_SINGLE_VALUE_MAPPINGS_SLOT, 0, 32, 0);
         let outer_key_id = identifier_for_outer_mapping_key_column(
             MAPPING_OF_SINGLE_VALUE_MAPPINGS_SLOT,
             &contract_address,

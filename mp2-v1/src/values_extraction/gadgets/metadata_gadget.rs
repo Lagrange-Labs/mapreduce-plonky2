@@ -514,10 +514,14 @@ where
 
                 // We only extract if we are in the correct location AND `column.is_extracted` is true
                 let correct_location = b.and(correct_offset, correct_extraction_id);
+                let not_selector = b.not(selector);
+                // We also make sure we should actually extract for this column, otherwise we have issues
+                // when indexing into the array.
+                let correct = b.and(not_selector, correct_location);
 
                 // last_byte_found lets us know whether we continue extracting or not.
                 // Hence if we want to extract values `extract` will be true so `last_byte_found` should be false
-                let mut last_byte_found = b.not(correct_location);
+                let mut last_byte_found = b.not(correct);
 
                 // Even if the constant `VALUE_LEN` is larger than 32 this is the maximum size in bytes
                 // of data that we extract per column
@@ -526,10 +530,9 @@ where
                 // We iterate over the result bytes in reverse order, the first element that we want to access
                 // from `value` is `value[MAPPING_LEAF_VALUE_LEN - column.byte_offset - column.length]` and then
                 // we keep extracting until we reach `value[column.byte_offset]`.
-                // let mapping_leaf_val_len = b.constant(F::from_canonical_usize(VALUE_LEN));
+
                 let last_byte_offset = b.add(column.byte_offset, column.length);
-                // let to_sub = b.sub(mapping_leaf_val_len, last_byte_offset);
-                // let last_index = b.constant(F::from_canonical_usize(VALUE_LEN - 1));
+
                 let start = b.sub(last_byte_offset, one);
 
                 result_bytes

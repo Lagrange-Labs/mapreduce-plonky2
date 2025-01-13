@@ -110,7 +110,7 @@ where
             .map(|key| Array::<Target, 32>::pack(key, b, Endianness::Big));
 
         let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(b, &input_values);
-        let (extracted_metadata_digest, extracted_value_digest) = metadata.extracted_digests(
+        let (extracted_metadata_digest, extracted_value_digest) = metadata.extracted_digests::<32>(
             b,
             &value,
             &u256_no_off,

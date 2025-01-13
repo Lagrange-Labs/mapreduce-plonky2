@@ -378,8 +378,8 @@ pub fn merge_metadata_hash(
     table_a: SlotInputs,
     table_b: SlotInputs,
 ) -> MetadataHash {
-    let md_a = value_metadata(table_a, &contract, chain_id, extra.clone());
-    let md_b = value_metadata(table_b, &contract, chain_id, extra);
+    let (md_a, _) = value_metadata(table_a, &contract, chain_id, extra.clone());
+    let (md_b, _) = value_metadata(table_b, &contract, chain_id, extra);
     let combined = map_to_curve_point(&md_a.to_fields()) + map_to_curve_point(&md_b.to_fields());
     let contract_digest = contract_metadata_digest(&contract);
     // the block id is only added at the index tree level, the rest is combined at the final
@@ -389,7 +389,12 @@ pub fn merge_metadata_hash(
 
 // NOTE: the block id is added at the end of the digest computation only once - this returns only
 // the part without the block id
-fn value_metadata(inputs: SlotInputs, contract: &Address, chain_id: u64, extra: Vec<u8>) -> Digest {
+fn value_metadata(
+    inputs: SlotInputs,
+    contract: &Address,
+    chain_id: u64,
+    extra: Vec<u8>,
+) -> (Digest, Digest) {
     let column_metadata = inputs.to_column_metadata(contract, chain_id, extra.clone());
 
     let md = column_metadata.digest();
@@ -404,7 +409,7 @@ fn value_metadata(inputs: SlotInputs, contract: &Address, chain_id: u64, extra: 
             length_metadata_digest(length_slot, mapping_slot)
         }
     };
-    md + length_digest
+    (md, length_digest)
 }
 
 /// Compute the table information for the value columns.
@@ -448,7 +453,8 @@ pub fn metadata_hash(
     extra: Vec<u8>,
 ) -> MetadataHash {
     // closure to compute the metadata digest associated to a mapping variable
-    let value_digest = value_metadata(slot_input, contract_address, chain_id, extra);
+    let (value_digest, length_digest) =
+        value_metadata(slot_input, contract_address, chain_id, extra);
     // Correspond to the computation of final extraction base circuit.
     let value_digest = map_to_curve_point(&value_digest.to_fields());
     // add contract digest
@@ -460,5 +466,5 @@ pub fn metadata_hash(
         (contract_digest + value_digest).to_weierstrass(),
     );
     // compute final hash
-    combine_digest_and_block(contract_digest + value_digest)
+    combine_digest_and_block(contract_digest + value_digest + length_digest)
 }
