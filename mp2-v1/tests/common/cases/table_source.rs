@@ -78,7 +78,7 @@ fn metadata_hash(
 }
 
 /// Save the columns information of same slot and EVM word.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SlotEvmWordColumns(Vec<ExtractedColumnInfo>);
 
 impl SlotEvmWordColumns {
@@ -1284,31 +1284,6 @@ impl SingleExtractionArgs {
         old_table_values.compute_update(&new_table_values[0])
     }
 }
-
-// /// Mapping extraction arguments
-// #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
-// pub(crate) struct MappingExtractionArgs<K, V>
-// where
-//     K: StorageSlotMappingKey,
-//     V: StorageSlotValue,
-// {
-//     /// Mapping slot number
-//     slot: u8,
-//     /// Mapping index type
-//     index: MappingIndex,
-//     /// Slot input information
-//     slot_inputs: Vec<SlotInput>,
-//     /// Mapping keys: they are useful for two things:
-//     ///     * doing some controlled changes on the smart contract, since if we want to do an update we
-//     /// need to know an existing key
-//     ///     * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
-//     /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
-//     mapping_keys: BTreeSet<K>,
-//     /// The optional length extraction parameters
-//     length_args: Option<LengthExtractionArgs>,
-//     /// Phantom
-//     _phantom: PhantomData<(K, V)>,
-// }
 
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub(crate) struct MappingExtractionArgs<T: MappingInfo> {
