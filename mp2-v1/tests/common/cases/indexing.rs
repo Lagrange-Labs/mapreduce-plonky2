@@ -98,7 +98,7 @@ pub(crate) const MAPPING_OF_MAPPINGS_VALUE_COLUMN: &str = "mapping_of_mappings_v
 /// Construct the all slot inputs for single value testing.
 fn single_value_slot_inputs() -> Vec<SlotInput> {
     let mut slot_inputs = SINGLE_SLOTS
-        .map(|slot| SlotInput::new(slot, 0, 256, 0))
+        .map(|slot| SlotInput::new(slot, 0, 32, 0))
         .to_vec();
 
     // Add the Struct single slots.
