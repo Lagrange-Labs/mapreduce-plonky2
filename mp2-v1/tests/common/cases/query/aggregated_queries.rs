@@ -73,7 +73,7 @@ use verifiable_db::{
 };
 
 use super::{
-    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, MAX_NUM_COLUMNS,
+    GlobalCircuitInput, QueryCircuitInput, RevelationCircuitInput, TableSource, MAX_NUM_COLUMNS,
     MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS,
     MAX_NUM_RESULT_OPS,
 };
@@ -920,9 +920,9 @@ pub async fn prove_single_row<T: TreeInfo<RowTreeKey, RowPayload<BlockPrimaryInd
 
 type BlockRange = (BlockPrimaryIndex, BlockPrimaryIndex);
 
-pub(crate) async fn cook_query_between_blocks(
+pub(crate) async fn cook_query_between_blocks<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let max = table.row.current_epoch();
     let min = max - 1;
@@ -947,9 +947,9 @@ pub(crate) async fn cook_query_between_blocks(
     })
 }
 
-pub(crate) async fn cook_query_secondary_index_nonexisting_placeholder(
+pub(crate) async fn cook_query_secondary_index_nonexisting_placeholder<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -995,9 +995,9 @@ pub(crate) async fn cook_query_secondary_index_nonexisting_placeholder(
 // cook up a SQL query on the secondary index and with a predicate on the non-indexed column.
 // we just iterate on mapping keys and take the one that exist for most blocks. We also choose
 // a value to filter over the non-indexed column
-pub(crate) async fn cook_query_secondary_index_placeholder(
+pub(crate) async fn cook_query_secondary_index_placeholder<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -1040,9 +1040,9 @@ pub(crate) async fn cook_query_secondary_index_placeholder(
 
 // cook up a SQL query on the secondary index. For that we just iterate on mapping keys and
 // take the one that exist for most blocks
-pub(crate) async fn cook_query_unique_secondary_index(
+pub(crate) async fn cook_query_unique_secondary_index<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -1116,9 +1116,9 @@ pub(crate) async fn cook_query_unique_secondary_index(
     })
 }
 
-pub(crate) async fn cook_query_partial_block_range(
+pub(crate) async fn cook_query_partial_block_range<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -1152,9 +1152,9 @@ pub(crate) async fn cook_query_partial_block_range(
     })
 }
 
-pub(crate) async fn cook_query_no_matching_entries(
+pub(crate) async fn cook_query_no_matching_entries<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let initial_epoch = table.row.initial_epoch();
     // choose query bounds outside of the range [initial_epoch, last_epoch]
@@ -1184,9 +1184,9 @@ pub(crate) async fn cook_query_no_matching_entries(
 
 /// Cook a query where there are no entries satisying the secondary query bounds only for some
 /// blocks of the primary index bounds (not for all the blocks)
-pub(crate) async fn cook_query_non_matching_entries_some_blocks(
+pub(crate) async fn cook_query_non_matching_entries_some_blocks<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, true).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());

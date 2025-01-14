@@ -22,6 +22,12 @@ const HEADER_PARENT_HASH_OFFSET: usize = 4;
 /// State root offset in RLP encoded header.
 const HEADER_STATE_ROOT_OFFSET: usize = 91;
 
+/// Transaction root offset in RLP encoded header.
+const HEADER_TRANSACTION_ROOT_OFFSET: usize = 124;
+
+/// Receipt root offset in RLP encoded header.
+const HEADER_RECEIPT_ROOT_OFFSET: usize = 157;
+
 /// Block number offset in RLP encoded header.
 const HEADER_BLOCK_NUMBER_OFFSET: usize = 449;
 /// We define u64 as the maximum block mnumber ever to be reached
@@ -50,6 +56,25 @@ pub struct BlockCircuit {
     pub rlp_headers: Vec<u8>,
 }
 
+/// Enum that represents the extraction type, storage, receipt or transaction
+#[derive(Debug, Clone, Serialize, Deserialize, Copy)]
+pub enum ExtractionType {
+    Storage,
+    Receipt,
+    Transaction,
+}
+
+impl ExtractionType {
+    /// This function returns the offset of the relevant root for that type of extraction
+    pub fn offset(&self) -> usize {
+        match self {
+            ExtractionType::Storage => HEADER_STATE_ROOT_OFFSET,
+            ExtractionType::Receipt => HEADER_RECEIPT_ROOT_OFFSET,
+            ExtractionType::Transaction => HEADER_TRANSACTION_ROOT_OFFSET,
+        }
+    }
+}
+
 impl BlockCircuit {
     /// Creates a new instance of the circuit.
     pub fn new(rlp_headers: Vec<u8>) -> Result<Self> {
@@ -69,16 +94,31 @@ impl BlockCircuit {
         rlp_headers.assert_bytes(cb);
 
         // extract the previous block hash from the RLP header
-        let prev_bh = Array::<Target, HASH_LEN>::from_array(create_array(|i| {
+        let prev_bh: Array<Target, 32> = Array::<Target, HASH_LEN>::from_array(create_array(|i| {
             rlp_headers.arr.arr[HEADER_PARENT_HASH_OFFSET + i]
         }));
         let packed_prev_bh = prev_bh.pack(cb, Endianness::Little).downcast_to_targets();
 
         // extract the state root of the block
-        let state_root = Array::<Target, HASH_LEN>::from_array(create_array(|i| {
-            rlp_headers.arr.arr[HEADER_STATE_ROOT_OFFSET + i]
-        }));
+        let state_root: Array<Target, 32> =
+            Array::<Target, HASH_LEN>::from_array(create_array(|i| {
+                rlp_headers.arr.arr[HEADER_STATE_ROOT_OFFSET + i]
+            }));
         let state_root_packed = state_root.pack(cb, Endianness::Little);
+
+        // extract the transaction root of the block
+        let transaction_root: Array<Target, 32> =
+            Array::<Target, HASH_LEN>::from_array(create_array(|i| {
+                rlp_headers.arr.arr[HEADER_TRANSACTION_ROOT_OFFSET + i]
+            }));
+        let transaction_root_packed = transaction_root.pack(cb, Endianness::Little);
+
+        // extract the receipt root of the block
+        let receipt_root: Array<Target, 32> =
+            Array::<Target, HASH_LEN>::from_array(create_array(|i| {
+                rlp_headers.arr.arr[HEADER_RECEIPT_ROOT_OFFSET + i]
+            }));
+        let receipt_root_packed = receipt_root.pack(cb, Endianness::Little);
 
         // compute the block hash
         let bh_wires = KeccakCircuit::hash_vector(cb, &rlp_headers);
@@ -99,6 +139,8 @@ impl BlockCircuit {
             &packed_prev_bh.downcast_to_targets().arr,
             &bn_u256.to_targets(),
             &state_root_packed.downcast_to_targets().arr,
+            &transaction_root_packed.downcast_to_targets().arr,
+            &receipt_root_packed.downcast_to_targets().arr,
         )
         .register(cb);
 
@@ -131,7 +173,7 @@ mod test {
     use mp2_common::{eth::left_pad_generic, u256, utils::ToFields, C, F};
 
     use mp2_common::{
-        eth::BlockUtil,
+        eth::Rlpable,
         types::CBuilder,
         utils::{Endianness, Packer},
         D,
@@ -146,10 +188,36 @@ mod test {
     use super::{public_inputs::PublicInputs, BlockCircuit, BlockWires};
     use anyhow::Result;
 
-    pub type SepoliaBlockCircuit = BlockCircuit;
-
     #[tokio::test]
-    async fn prove_and_verify_block_extraction_circuit() -> Result<()> {
+    pub async fn prove_and_verify_block_extraction_circuit() -> Result<()> {
+        #[derive(Clone, Debug)]
+        pub struct TestCircuit {
+            inner: BlockCircuit,
+        }
+
+        impl TestCircuit {
+            pub fn new(rlp_headers: Vec<u8>) -> Result<Self> {
+                crate::block_extraction::circuit::ensure!(
+                    rlp_headers.len() <= crate::block_extraction::circuit::MAX_BLOCK_LEN,
+                    "block rlp headers too long"
+                );
+                Ok(Self {
+                    inner: BlockCircuit { rlp_headers },
+                })
+            }
+        }
+
+        impl UserCircuit<F, D> for TestCircuit {
+            type Wires = BlockWires;
+
+            fn build(cb: &mut CBuilder) -> Self::Wires {
+                BlockCircuit::build(cb)
+            }
+
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                self.inner.assign(pw, wires);
+            }
+        }
         let url = get_sepolia_url();
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
         let block_number = BlockNumberOrTag::Latest;
@@ -168,20 +236,27 @@ mod test {
             .pack(Endianness::Little)
             .to_fields();
         let block_hash = block.block_hash().pack(Endianness::Little).to_fields();
-        let state_root = block
+
+        let state_root = block.header.state_root.pack(Endianness::Little).to_fields();
+        let transaction_root = block
             .header
-            .state_root
-            .0
+            .transactions_root
             .pack(Endianness::Little)
             .to_fields();
+        let receipt_root = block
+            .header
+            .receipts_root
+            .pack(Endianness::Little)
+            .to_fields();
+
         let block_number_buff = block.header.number.to_be_bytes();
         const NUM_LIMBS: usize = u256::NUM_LIMBS;
         let block_number =
             left_pad_generic::<u32, NUM_LIMBS>(&block_number_buff.pack(Endianness::Big))
                 .to_fields();
 
-        let setup = setup_circuit::<_, D, C, SepoliaBlockCircuit>();
-        let circuit = SepoliaBlockCircuit::new(rlp_headers).unwrap();
+        let setup = setup_circuit::<_, D, C, TestCircuit>();
+        let circuit = TestCircuit::new(rlp_headers).unwrap();
         let proof = prove_circuit(&setup, &circuit);
         let pi = PublicInputs::<F>::from_slice(&proof.public_inputs);
 
@@ -191,20 +266,11 @@ mod test {
             pi.block_hash_raw(),
             block.header.hash.0.pack(Endianness::Little).to_fields()
         );
+
         assert_eq!(pi.state_root_raw(), &state_root);
+        assert_eq!(pi.transaction_root_raw(), &transaction_root);
+        assert_eq!(pi.receipt_root_raw(), &receipt_root);
         assert_eq!(pi.block_number_raw(), &block_number);
         Ok(())
-    }
-
-    impl UserCircuit<F, D> for BlockCircuit {
-        type Wires = BlockWires;
-
-        fn build(cb: &mut CBuilder) -> Self::Wires {
-            Self::build(cb)
-        }
-
-        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.assign(pw, wires);
-        }
     }
 }

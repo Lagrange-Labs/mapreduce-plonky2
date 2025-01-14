@@ -31,6 +31,7 @@ alloy = { version = "0.6", default-features = false, features = [
   "transports",
   "postgres",
 ] }
+
 anyhow = "1.0"
 base64 = "0.22"
 bb8 = "0.8.5"
@@ -74,7 +75,7 @@ rand_chacha = "0.3.1"
 revm = { version = "3.5", default-features = false }
 rlp = "0.5"
 rstest = "0.23"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "std"] }
 serde_json = "1.0"
 serial_test = "3.0"
 sha2 = "0.10"

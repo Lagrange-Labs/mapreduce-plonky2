@@ -57,7 +57,9 @@ pub async fn new_tree<
 
 /// Cell is the information stored in a specific cell of a specific row.
 /// A row node in the row tree contains a vector of such cells.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Default, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub struct Cell {
     /// The unique identifier of the cell, derived from the contract it comes
     /// from and its slot in its storage.

@@ -7,18 +7,15 @@ use futures::{
 };
 use itertools::Itertools;
 use log::debug;
-use mp2_v1::{
-    indexing::{
-        block::{BlockPrimaryIndex, BlockTreeKey},
-        cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},
-        index::IndexNode,
-        row::{CellCollection, Row, RowTreeKey},
-        ColumnID,
-    },
-    values_extraction::gadgets::column_info::ColumnInfo,
+use mp2_v1::indexing::{
+    block::{BlockPrimaryIndex, BlockTreeKey},
+    cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},
+    index::IndexNode,
+    row::{CellCollection, Row, RowTreeKey},
+    ColumnID,
 };
 use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
-use plonky2::field::types::PrimeField64;
+
 use ryhope::{
     storage::{
         pgsql::{SqlServerConnection, SqlStorageSettings},
@@ -60,7 +57,7 @@ impl IndexType {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TableColumn {
     pub name: String,
-    pub info: ColumnInfo,
+    pub identifier: u64,
     pub index: IndexType,
     /// multiplier means if this columns come from a "merged" table, then it either come from a
     /// table a or table b. One of these table is the "multiplier" table, the other is not.
@@ -69,7 +66,7 @@ pub struct TableColumn {
 
 impl TableColumn {
     pub fn identifier(&self) -> ColumnID {
-        self.info.identifier().to_canonical_u64()
+        self.identifier
     }
 }
 
@@ -84,6 +81,7 @@ pub enum TableRowUniqueID {
     Single,
     Mapping(ColumnID),
     MappingOfMappings(ColumnID, ColumnID),
+    Receipt(ColumnID, ColumnID),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -110,7 +108,7 @@ impl TableColumns {
             .iter()
             .chain(once(&self.secondary))
             .find(|c| c.identifier() == identifier)
-            .unwrap_or_else(|| panic!("can't find cell from identifier {}", identifier))
+            .expect("can't find cell from identifier")
             .clone()
     }
     pub fn ordered_cells(
@@ -470,6 +468,9 @@ impl Table {
             .map(|plan| RowUpdateResult { updates: plan });
         {
             // debugging
+            if out.is_err() {
+                println!("Out was an error: {:?}", out);
+            }
             println!("\n+++++++++++++++++++++++++++++++++\n");
             let root = self.row.root_data().await.unwrap();
             let new_epoch = self.row.current_epoch();
@@ -531,7 +532,7 @@ pub enum TreeRowUpdate {
     Deletion(RowTreeKey),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RowUpdateResult {
     // There is only a single row key for a table that we update continuously
     // so no need to track all the rows that have been updated in the result
