@@ -6,6 +6,8 @@
 //!
 //! 2. wrap the original query into a CTE to expand CoW row spans into
 //!    individual column for each covered block number.
+use std::cmp::Ordering;
+
 use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
@@ -337,7 +339,11 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     ///   - sid <[=] <placeholder>
     ///   - sid >[=] <placeholder>
     ///   - sid = <placeholder>
-    fn maybe_set_secondary_index_boundary(&mut self, expr: &Expr) -> Result<()> {
+    fn maybe_set_secondary_index_boundary(
+        &mut self,
+        expr: &Expr,
+        bounds: &mut Bounds,
+    ) -> Result<()> {
         fn plus_one(expr: &Expr) -> Expr {
             Expr::BinaryOp {
                 left: Box::new(expr.clone()),
@@ -371,12 +377,18 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         };
                         let bound = Some(self.expression_to_boundary(right)?);
 
-                        if self.secondary_index_bounds.low.is_some() {
-                            // impossible to say which is higher between two
-                            // conflicting low bounds
-                            self.secondary_index_bounds.low = None;
+                        if bounds.low.is_some() {
+                            match bound.partial_cmp(&bounds.low) {
+                                // If $sid > x, $sid > y and y > x, then $sid > y
+                                Some(Ordering::Greater) => bounds.low = bound,
+                                // If $sid > x, $sid > y and x > y, then $sid > x
+                                Some(_) => {}
+                                // impossible to say which is higher between two
+                                // conflicting low bounds
+                                None => bounds.low = None,
+                            };
                         } else {
-                            self.secondary_index_bounds.low = bound;
+                            bounds.low = bound;
                         }
                     }
                     // $sid < x
@@ -388,25 +400,27 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         };
                         let bound = Some(self.expression_to_boundary(right)?);
 
-                        if self.secondary_index_bounds.high.is_some() {
-                            // impossible to say which is lower between two
-                            // conflicting high bounds
-                            self.secondary_index_bounds.high = None;
+                        if bounds.high.is_some() {
+                            match bound.partial_cmp(&bounds.high) {
+                                Some(Ordering::Less) => bounds.high = bound,
+                                // impossible to say which is lower between two
+                                // conflicting high bounds
+                                Some(_) => {}
+                                None => bounds.low = None,
+                            }
                         } else {
-                            self.secondary_index_bounds.high = bound;
+                            bounds.high = bound;
                         }
                     }
                     // $sid = x
                     BinaryOperator::Eq => {
                         let bound = Some(self.expression_to_boundary(right)?);
-                        if self.secondary_index_bounds.low.is_some()
-                            && self.secondary_index_bounds.high.is_some()
-                        {
-                            self.secondary_index_bounds.low = None;
-                            self.secondary_index_bounds.high = None;
+                        if bounds.low.is_some() && bounds.high.is_some() {
+                            bounds.low = None;
+                            bounds.high = None;
                         } else {
-                            self.secondary_index_bounds.low = bound.clone();
-                            self.secondary_index_bounds.high = bound;
+                            bounds.low = bound.clone();
+                            bounds.high = bound;
                         }
                     }
                     _ => {}
@@ -422,10 +436,10 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         };
                         let bound = Some(self.expression_to_boundary(left)?);
 
-                        if self.secondary_index_bounds.high.is_some() {
-                            self.secondary_index_bounds.high = None;
+                        if bounds.high.is_some() {
+                            bounds.high = None;
                         } else {
-                            self.secondary_index_bounds.high = bound;
+                            bounds.high = bound;
                         }
                     }
                     // x < $sid
@@ -437,25 +451,23 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         };
                         let bound = Some(self.expression_to_boundary(left)?);
 
-                        if self.secondary_index_bounds.low.is_some() {
+                        if bounds.low.is_some() {
                             // impossible to say which is lower between two
                             // conflicting high bounds
-                            self.secondary_index_bounds.low = None;
+                            bounds.low = None;
                         } else {
-                            self.secondary_index_bounds.low = bound;
+                            bounds.low = bound;
                         }
                     }
                     // x = $sid
                     BinaryOperator::Eq => {
                         let bound = Some(self.expression_to_boundary(left)?);
-                        if self.secondary_index_bounds.low.is_some()
-                            && self.secondary_index_bounds.high.is_some()
-                        {
-                            self.secondary_index_bounds.low = None;
-                            self.secondary_index_bounds.high = None;
+                        if bounds.low.is_some() && bounds.high.is_some() {
+                            bounds.low = None;
+                            bounds.high = None;
                         } else {
-                            self.secondary_index_bounds.low = bound.clone();
-                            self.secondary_index_bounds.high = bound;
+                            bounds.low = bound.clone();
+                            bounds.high = bound;
                         }
                     }
                     _ => {}
@@ -470,19 +482,19 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     /// to extract putative bounds on the secondary index. Only `AND`
     /// combinators are traversed, as any other one would not statically
     /// guarantee the predominance of the bound.
-    fn find_secondary_index_boundaries(&mut self, expr: &Expr) -> Result<()> {
-        self.maybe_set_secondary_index_boundary(expr)?;
+    fn find_secondary_index_boundaries(&mut self, expr: &Expr, bounds: &mut Bounds) -> Result<()> {
+        self.maybe_set_secondary_index_boundary(expr, bounds)?;
         match expr {
             Expr::BinaryOp {
                 left,
                 op: BinaryOperator::And,
                 right,
             } => {
-                self.find_secondary_index_boundaries(left)?;
-                self.find_secondary_index_boundaries(right)?;
+                self.find_secondary_index_boundaries(left, bounds)?;
+                self.find_secondary_index_boundaries(right, bounds)?;
                 Ok(())
             }
-            Expr::Nested(e) => self.find_secondary_index_boundaries(e),
+            Expr::Nested(e) => self.find_secondary_index_boundaries(e, bounds),
             _ => Ok(()),
         }
     }
@@ -968,9 +980,11 @@ impl<C: ContextProvider> AstVisitor for Assembler<'_, C> {
         self.distinct = select.distinct.is_some();
         if let Some(where_clause) = select.selection.as_ref() {
             // As the expression are traversed depth-first, the top level
-            // expression will mechnically find itself at the last position, as
+            // expression will mechanically find itself at the last position, as
             // required by the universal query circuit API.
-            self.find_secondary_index_boundaries(where_clause)?;
+            let mut secondary_index_bounds = Default::default();
+            self.find_secondary_index_boundaries(where_clause, &mut secondary_index_bounds)?;
+            self.secondary_index_bounds = secondary_index_bounds;
             self.compile(where_clause, &mut StorageTarget::Predicate)?;
         }
         self.exit_scope()

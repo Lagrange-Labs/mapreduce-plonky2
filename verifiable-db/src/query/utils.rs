@@ -1,4 +1,4 @@
-use std::{array, iter::once};
+use std::{array, cmp::Ordering, iter::once};
 
 use alloy::primitives::U256;
 use anyhow::Result;
@@ -72,6 +72,34 @@ pub enum QueryBoundSource {
 impl From<&QueryBoundSecondary> for QueryBoundSource {
     fn from(value: &QueryBoundSecondary) -> Self {
         value.source.clone()
+    }
+}
+
+impl PartialOrd for QueryBoundSource {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (QueryBoundSource::Constant(x), QueryBoundSource::Constant(y)) => Some(x.cmp(y)),
+            (QueryBoundSource::Constant(_), QueryBoundSource::Placeholder(_))
+            | (QueryBoundSource::Constant(_), QueryBoundSource::Operation(_))
+            | (QueryBoundSource::Placeholder(_), QueryBoundSource::Constant(_)) => None,
+            (QueryBoundSource::Placeholder(p1), QueryBoundSource::Placeholder(p2)) => {
+                if p1 == p2 {
+                    Some(Ordering::Equal)
+                } else {
+                    None
+                }
+            }
+            (QueryBoundSource::Placeholder(_), QueryBoundSource::Operation(_))
+            | (QueryBoundSource::Operation(_), QueryBoundSource::Constant(_))
+            | (QueryBoundSource::Operation(_), QueryBoundSource::Placeholder(_)) => None,
+            (QueryBoundSource::Operation(op1), QueryBoundSource::Operation(op2)) => {
+                if op1 == op2 {
+                    Some(Ordering::Equal)
+                } else {
+                    None
+                }
+            }
+        }
     }
 }
 
