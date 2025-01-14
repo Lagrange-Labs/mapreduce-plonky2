@@ -515,12 +515,12 @@ impl Ord for EpochMapItem {
 /// as a cache or as a standalong in-memory `EpochMapper`.
 /// It basically handles two types of epochs mappings, depending on how the epoch maps
 /// are inserted by users:
-/// 
+///
 /// - If the `UserEpoch`s being inserted are all incrementals, starting from an
 ///   initial offset, then an optimized implementation is employed for this conversion
 /// - Otherwise, there is a more generic implementation that can handle any monotonically
 ///   increasing sequence of `UserEpoch`s
-/// 
+///
 /// The first implementation is used until the `UserEpoch`s being inserted followed the
 /// incremental pattern; as soon as a non-incremental `UserEpoch` is inserted, then the
 /// implementation falls back to the more generic generic implementation
