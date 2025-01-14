@@ -21,7 +21,8 @@ use crate::{
         scapegoat::{self, Alpha},
         PrintableTree, TreeTopology,
     },
-    InitSettings, MerkleTreeKvDb, NodePayload, UserEpoch, EPOCH, KEY, VALID_FROM, VALID_UNTIL,
+    IncrementalEpoch, InitSettings, MerkleTreeKvDb, NodePayload, UserEpoch, EPOCH, KEY, VALID_FROM,
+    VALID_UNTIL,
 };
 
 use super::TreeTransactionalStorage;
@@ -629,6 +630,85 @@ async fn epoch_sbbst_over_pgsql_with_non_sequential_keys() -> Result<()> {
         .try_to_incremental_epoch(11)
         .await
         .is_none());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_caching_mechanism() -> Result<()> {
+    const MAX_ENTRIES: usize = 10;
+    const INITIAL_EPOCH: UserEpoch = 4;
+
+    // test that we never erase from an `InMemoryEpochMapper`
+    let mut epoch_mapper = crate::storage::memory::InMemoryEpochMapper::new_at(INITIAL_EPOCH);
+
+    for i in 0..2 * MAX_ENTRIES {
+        epoch_mapper
+            .add_epoch_map(INITIAL_EPOCH + i as UserEpoch, i as IncrementalEpoch)
+            .await?;
+    }
+
+    assert_eq!(epoch_mapper.initial_epoch(), INITIAL_EPOCH);
+    for i in 0..2 * MAX_ENTRIES {
+        // check that no epoch has been erased from the storage
+        assert!(epoch_mapper
+            .try_to_incremental_epoch(INITIAL_EPOCH + i as UserEpoch)
+            .await
+            .is_some())
+    }
+
+    // test that epochs are not erased from cache if we insert them sequentially
+    let mut epoch_cache =
+        crate::storage::memory::EpochMapperCache::<MAX_ENTRIES>::new_at(INITIAL_EPOCH);
+
+    for i in 0..2 * MAX_ENTRIES {
+        epoch_cache
+            .add_epoch_map(INITIAL_EPOCH + i as UserEpoch, i as IncrementalEpoch)
+            .await?;
+    }
+
+    assert_eq!(epoch_cache.initial_epoch(), INITIAL_EPOCH);
+    println!("{}", epoch_cache.last_epoch());
+    for i in 0..2 * MAX_ENTRIES {
+        // check that no epoch has been erased from the storage
+        assert!(
+            epoch_cache
+                .try_to_incremental_epoch(INITIAL_EPOCH + i as UserEpoch)
+                .await
+                .is_some(),
+            "failed for epoch {i}"
+        );
+    }
+
+    // now, insert epochs not sequentially, and test that epochs starts to be erased
+    for i in 0..MAX_ENTRIES {
+        epoch_cache
+            .add_epoch_map(
+                (3 * MAX_ENTRIES as UserEpoch + INITIAL_EPOCH) * (i + 1) as UserEpoch,
+                (2 * MAX_ENTRIES + i) as IncrementalEpoch,
+            )
+            .await?;
+    }
+
+    assert_eq!(epoch_cache.initial_epoch(), INITIAL_EPOCH);
+    // count number of epochs still in the storage
+    let mut num_epochs = 0;
+    for i in 0..2 * MAX_ENTRIES {
+        num_epochs += epoch_cache
+            .try_to_incremental_epoch(INITIAL_EPOCH + i as UserEpoch)
+            .await
+            .is_some() as usize;
+    }
+    for i in 0..MAX_ENTRIES {
+        num_epochs += epoch_cache
+            .try_to_incremental_epoch(
+                (3 * MAX_ENTRIES as UserEpoch + INITIAL_EPOCH) * (i + 1) as UserEpoch,
+            )
+            .await
+            .is_some() as usize;
+    }
+
+    assert_eq!(num_epochs, MAX_ENTRIES);
 
     Ok(())
 }

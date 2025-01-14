@@ -449,9 +449,9 @@ impl EpochMapItem {
     /// only for complete `EpochMapItem`s, i.e., ones that wrap
     /// both a `UserEpoch` and an `IncrementalEpoch`;
     /// the method will panic if this assumption is not satisfied
-    fn to_epochs(&self) -> (UserEpoch, IncrementalEpoch) {
+    fn to_epochs(self) -> (UserEpoch, IncrementalEpoch) {
         if let EpochMapItem::Complete(user_epoch, incremental_epoch) = self {
-            (*user_epoch, *incremental_epoch)
+            (user_epoch, incremental_epoch)
         } else {
             panic!("Invalid `EpochMapItem` being unpacked")
         }
@@ -460,6 +460,12 @@ impl EpochMapItem {
 
 impl PartialOrd for EpochMapItem {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for EpochMapItem {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Implement the partial order relationship employed to compare
         // `EpochMapItem`s. It is partial since by construction we will never
         // compare 2 Partial `EpochMapItem`s
@@ -467,79 +473,76 @@ impl PartialOrd for EpochMapItem {
             (
                 EpochMapItem::PartialUser(first_user_epoch),
                 EpochMapItem::Complete(second_user_epoch, _),
-            ) => Some(first_user_epoch.cmp(&second_user_epoch)),
+            ) => first_user_epoch.cmp(second_user_epoch),
             (
                 EpochMapItem::PartialIncremental(first_incremental_epoch),
                 EpochMapItem::Complete(_, second_incremental_epoch),
-            ) => Some(first_incremental_epoch.cmp(&second_incremental_epoch)),
+            ) => first_incremental_epoch.cmp(second_incremental_epoch),
             (
                 EpochMapItem::Complete(first_user_epoch, _),
                 EpochMapItem::PartialUser(second_user_epoch),
-            ) => Some(first_user_epoch.cmp(&second_user_epoch)),
+            ) => first_user_epoch.cmp(second_user_epoch),
             (
                 EpochMapItem::Complete(_, first_incremental_epoch),
                 EpochMapItem::PartialIncremental(second_incremental_epoch),
-            ) => Some(first_incremental_epoch.cmp(&second_incremental_epoch)),
+            ) => first_incremental_epoch.cmp(second_incremental_epoch),
             (
                 EpochMapItem::Complete(first_user_epoch, first_incremental_epoch),
                 EpochMapItem::Complete(second_user_epoch, second_incremental_epoch),
             ) => {
-                let user_epoch_cmp = first_user_epoch.cmp(&second_user_epoch);
-                let incremental_epoch_cmp = first_incremental_epoch.cmp(&second_incremental_epoch);
+                let user_epoch_cmp = first_user_epoch.cmp(second_user_epoch);
+                let incremental_epoch_cmp = first_incremental_epoch.cmp(second_incremental_epoch);
                 assert_eq!(
                     user_epoch_cmp, incremental_epoch_cmp,
                     "Breaking invariant of `EpochMapper`: both `UserEpoch` and `IncrementalEpoch`
                     must be monotonically increasing"
                 );
-                Some(user_epoch_cmp)
+                user_epoch_cmp
             }
             _ =>
             // all other cases are partial `EpochMapItem`s, which are never compared
             {
-                None
+                unreachable!()
             }
         }
     }
 }
 
-impl Ord for EpochMapItem {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Safe since by construction we will never compare 2 Partial
-        // `EpochMapItem`s, which is the only case when `PartialOrd` is
-        // undefined
-        self.partial_cmp(other).unwrap()
-    }
-}
-
 #[derive(Clone, Debug)]
-/// In-memory implementation of an `EpochMapper`, which allows to map a `UserEpoch`
-/// to an `IncrementalEpoch` used by storages. It basically handles two types of
-/// mappings, depending on how the epoch maps are inserted:
+/// Data structure employed both for in-memory implementation of an `EpochMapper`,
+/// and as a memory cache for the DB-based `EpochMapper` implementation.
+/// The flag `IS_CACHE` is employed to specify whether the data structure is employed
+/// as a cache or as a standalong in-memory `EpochMapper`.
+/// It basically handles two types of epochs mappings, depending on how the epoch maps
+/// are inserted by users:
+/// 
 /// - If the `UserEpoch`s being inserted are all incrementals, starting from an
 ///   initial offset, then an optimized implementation is employed for this conversion
 /// - Otherwise, there is a more generic implementation that can handle any monotonically
 ///   increasing sequence of `UserEpoch`s
+/// 
 /// The first implementation is used until the `UserEpoch`s being inserted followed the
 /// incremental pattern; as soon as a non-incremental `UserEpoch` is inserted, then the
 /// implementation falls back to the more generic generic implementation
-pub struct InMemoryEpochMapper {
+pub struct InMemoryEpochMapperGeneric<const IS_CACHE: bool, const MAX_ENTRIES: usize> {
     // Generic implementation to map monotonically increasing `UserEpoch`s to `IncrementalEpoch`s
     generic_map: BTreeSet<EpochMapItem>,
-    // Optimized implemenetation for incremental `UserEpoch`s: it is sufficient to
+    // Optimized implementation for incremental `UserEpoch`s: it is sufficient to
     // simply store:
     // - The initial offset to convert between `UserEpoch`s and `IncrementalEpoch`s
     // - The last inserted `UserEpoch`
     incremental_epochs_map: Option<(UserEpoch, UserEpoch)>,
 }
+/// In-memory implementation of `EpochMapper`, which allows to map a
+/// `UserEpoch` to an `IncrementalEpoch` used by storages
+pub type InMemoryEpochMapper = InMemoryEpochMapperGeneric<false, { usize::MAX }>;
+/// In-memory cache of the DB-based implementation of `EpochMapper`
+pub(crate) type EpochMapperCache<const MAX_ENTRIES: usize> =
+    InMemoryEpochMapperGeneric<true, MAX_ENTRIES>;
 
-impl InMemoryEpochMapper {
-    pub(crate) fn new_empty() -> Self {
-        Self {
-            generic_map: BTreeSet::new(),
-            incremental_epochs_map: None,
-        }
-    }
-
+impl<const IS_CACHE: bool, const MAX_ENTRIES: usize>
+    InMemoryEpochMapperGeneric<IS_CACHE, MAX_ENTRIES>
+{
     pub(crate) fn new_at(initial_epoch: UserEpoch) -> Self {
         // by default, we assume epochs are incremental, so we initialize
         // the optimized epochs map
@@ -580,12 +583,17 @@ impl InMemoryEpochMapper {
         }
     }
 
+    /// Return the maximum number of epoch mapping entries that can be stored in `self`, if any.
+    fn max_number_of_entries(&self) -> Option<usize> {
+        (IS_CACHE && self.incremental_epochs_map.is_none()).then_some(MAX_ENTRIES)
+    }
+
     fn try_to_user_epoch_inner(&self, epoch: IncrementalEpoch) -> Option<UserEpoch> {
         match self.incremental_epochs_map {
             Some((initial_epoch, last_epoch)) => {
                 let user_epoch = epoch + initial_epoch;
                 // return `user_epoch` only if it is at most `last_epoch`
-                (user_epoch <= last_epoch).then(|| user_epoch)
+                (user_epoch <= last_epoch).then_some(user_epoch)
             }
             None => {
                 // To lookup an `IncrementalEpoch` in `self.generic_map`, we build
@@ -668,7 +676,7 @@ impl InMemoryEpochMapper {
                 // back to an invalid `UserEpoch`
                 to_be_erased_epochs
                     .pop()
-                    .and_then(|item| (item.to_epochs().0 == epoch).then(|| ()))
+                    .and_then(|item| (item.to_epochs().0 == epoch).then_some(()))
                     .ok_or(anyhow!("Trying to rollback to non-existing epoch {epoch}"))?;
                 to_be_erased_epochs.into_iter().for_each(|epoch| {
                     self.generic_map.remove(&epoch);
@@ -686,6 +694,9 @@ impl InMemoryEpochMapper {
         let (initial_epoch, last_epoch) = self.incremental_epochs_map.take().unwrap();
         self.generic_map = (initial_epoch..=last_epoch)
             .enumerate()
+            .take(self.max_number_of_entries().unwrap_or(
+                usize::MAX, // this is practically unbounded
+            )) // fill up to the maximum number of entries allowed to be stored, if any
             .map(|(i, epoch)| EpochMapItem::Complete(epoch, i as IncrementalEpoch))
             .collect();
     }
@@ -707,6 +718,16 @@ impl InMemoryEpochMapper {
 
         self.generic_map
             .insert(EpochMapItem::Complete(user_epoch, incremental_epoch));
+
+        // check if we need to remove an item since we got to the maximum number of entries allowed
+        // to be stored
+        if let Some(max_entries) = self.max_number_of_entries() {
+            if self.generic_map.len() > max_entries {
+                // remove the second item in the mapping (as the first one contains the initial epoch)
+                let second_item = *self.generic_map.iter().nth(1).unwrap();
+                self.generic_map.remove(&second_item);
+            }
+        }
 
         Ok(())
     }
@@ -755,7 +776,9 @@ impl InMemoryEpochMapper {
     }
 }
 
-impl EpochMapper for InMemoryEpochMapper {
+impl<const IS_CACHE: bool, const MAX_ENTRIES: usize> EpochMapper
+    for InMemoryEpochMapperGeneric<IS_CACHE, MAX_ENTRIES>
+{
     async fn try_to_incremental_epoch(&self, epoch: UserEpoch) -> Option<IncrementalEpoch> {
         match self.incremental_epochs_map {
             Some((initial_epoch, last_epoch)) => {
