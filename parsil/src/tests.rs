@@ -160,7 +160,7 @@ fn test_serde_circuit_pis() {
 
 #[test]
 fn isolation() {
-    fn isolated_to_string(q: &str, lo_sec: bool, hi_sec: bool) -> String {
+    fn isolated_to_string(q: &str, lo_sec: Option<U256>, hi_sec: Option<U256>) -> String {
         let settings = ParsilSettingsBuilder::default()
             .context(TestFileContextProvider::from_file("tests/context.json").unwrap())
             .placeholders(PlaceholderSettings::with_freestanding(3))
@@ -175,59 +175,79 @@ fn isolation() {
 
     assert_eq!(
         isolated_to_string(
-            "SELECT * FROM table1 WHERE block BETWEEN 1 AND 5",
-            false,
-            false
+            "SELECT * FROM table2 WHERE block BETWEEN 1 AND 5", 
+            None,
+            None
         ),
-        format!("SELECT * FROM table1 WHERE (block >= 1 AND block <= 5) LIMIT {MAX_NUM_OUTPUTS}")
+        format!("SELECT * FROM table2 WHERE table2.block >= $MIN_BLOCK AND table2.block <= $MAX_BLOCK LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Drop references to other columns
     assert_eq!(
         isolated_to_string(
             "SELECT * FROM table2 WHERE block BETWEEN 1 AND 5 AND 3 = 4 OR bar = 5",
-            false,
-            false
+            None,
+            None
         ),
-        format!("SELECT * FROM table2 WHERE (block >= 1 AND block <= 5) LIMIT {MAX_NUM_OUTPUTS}")
+        format!("SELECT * FROM table2 WHERE table2.block >= $MIN_BLOCK AND table2.block <= $MAX_BLOCK LIMIT {MAX_NUM_OUTPUTS}")
     );
 
-    // Drop sec. ind. references if it has no kown bounds.
+    // Drop sec. ind. references if it has no known bounds.
     assert_eq!(
         isolated_to_string(
             "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo < 5",
-            false,
-            false
+            None,
+            None
         ),
-        format!("SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) LIMIT {MAX_NUM_OUTPUTS}")
+        format!("SELECT * FROM table2 WHERE table2.block >= $MIN_BLOCK AND table2.block <= $MAX_BLOCK LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Drop sec.ind. < [...] if it has a defined higher bound
     assert_eq!(
         isolated_to_string(
             "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo < 5",
-            true,
-            false
+            Some(U256::from(45)),
+            None,
         ),
-        format!("SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) LIMIT {MAX_NUM_OUTPUTS}")
+        format!("SELECT * FROM table2 WHERE table2.block >= $MIN_BLOCK AND table2.block <= $MAX_BLOCK AND table2.foo >= 45 LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Keep sec.ind. < [...] if it has a defined higher bound
     assert_eq!(
         isolated_to_string(
             "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo < 5",
-            false,
-            true
+            None,
+            Some(U256::from(4))
         ),
-        format!("SELECT * FROM table2 WHERE (block >= $MIN_BLOCK AND block <= $MAX_BLOCK) AND foo < 5 LIMIT {MAX_NUM_OUTPUTS}")
+        format!("SELECT * FROM table2 WHERE table2.block >= $MIN_BLOCK AND table2.block <= $MAX_BLOCK AND table2.foo <= 4 LIMIT {MAX_NUM_OUTPUTS}")
+    );
+
+    // Both secondary index bounds
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo = 50", 
+            Some(U256::from(45)),
+            Some(U256::from(56))
+        ),
+        format!("SELECT * FROM table2 WHERE table2.block >= $MIN_BLOCK AND table2.block <= $MAX_BLOCK AND table2.foo >= 45 AND table2.foo <= 56 LIMIT {MAX_NUM_OUTPUTS}")
+    );
+
+    // Ignore any other primary index predicate
+    assert_eq!(
+        isolated_to_string(
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND block = 50", 
+            None,
+            None
+        ),
+        format!("SELECT * FROM table2 WHERE table2.block >= $MIN_BLOCK AND table2.block <= $MAX_BLOCK LIMIT {MAX_NUM_OUTPUTS}")
     );
 
     // Nicholas's example
     assert_eq!(
         isolated_to_string(
             "SELECT * FROM table2 WHERE block BETWEEN 5 AND 10 AND (foo = 4 OR foo = 15) AND bar = 12",
-            false,
-            false),
-        format!("SELECT * FROM table2 WHERE (block >= 5 AND block <= 10) LIMIT {MAX_NUM_OUTPUTS}")
+            None,
+            None),
+        format!("SELECT * FROM table2 WHERE table2.block >= $MIN_BLOCK AND table2.block <= $MAX_BLOCK LIMIT {MAX_NUM_OUTPUTS}")
     );
 }
