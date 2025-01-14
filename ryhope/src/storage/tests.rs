@@ -622,7 +622,7 @@ async fn epoch_sbbst_over_pgsql_with_non_sequential_keys() -> Result<()> {
     assert!(s.try_fetch(&11).await.is_none());
 
     assert_eq!(s.storage.epoch_mapper().to_incremental_epoch(12).await, 1);
-    assert_eq!(s.storage.epoch_mapper().to_incremental_epoch(14).await, 1);
+    assert_eq!(s.storage.epoch_mapper().to_incremental_epoch(14).await, 2);
     assert!(s
         .storage
         .epoch_mapper()
