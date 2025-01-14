@@ -1,11 +1,11 @@
 use anyhow::{anyhow, ensure, Context, Result};
 use std::{collections::BTreeSet, sync::Arc};
 use tokio::sync::RwLock;
-use tokio_postgres::Transaction;
+use tokio_postgres::{Row, Transaction};
 
 use crate::{
     mapper_table_name,
-    storage::{memory::InMemoryEpochMapper, EpochMapper},
+    storage::{memory::EpochMapperCache, EpochMapper},
     IncrementalEpoch, UserEpoch, INCREMENTAL_EPOCH, USER_EPOCH,
 };
 
@@ -39,10 +39,15 @@ pub struct EpochMapperStorage {
     // current `EpochMapperStorage`. The usage of a `RwLock` data structure to wrap the cache is only
     // an implementation detail to be able to update the cache also in methods of `EpochMapper` trait
     // which aren't expected to modify the `EpochMapper`
-    pub(super) cache: Arc<RwLock<InMemoryEpochMapper>>,
+    pub(super) cache: Arc<RwLock<EpochMapperCache<{ Self::MAX_CACHE_ENTRIES }>>>,
 }
 
 impl EpochMapperStorage {
+    /// Upper bound on the number of epoch mappings that can be stored in an `EpochMapperCache`
+    /// to avoid a blowup in memory consumption; the cache will be wiped as soon as the number of
+    /// epoch mappings found goes beyond this value
+    const MAX_CACHE_ENTRIES: usize = 1000000;
+
     pub(crate) fn mapper_table_name(&self) -> String {
         mapper_table_name(&self.table)
     }
@@ -51,11 +56,10 @@ impl EpochMapperStorage {
         let cache = {
             let connection = db.get().await?;
             let mapper_table_name = mapper_table_name(table.as_str());
-            let mut cache = InMemoryEpochMapper::new_empty();
             let rows = connection
                 .query(
                     &format!(
-                        "SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {}",
+                        "SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {} ORDER BY {USER_EPOCH}",
                         mapper_table_name,
                     ),
                     &[],
@@ -63,9 +67,23 @@ impl EpochMapperStorage {
                 .await
                 .context("while fetching incremental epoch")
                 .unwrap();
-            for row in rows {
+            ensure!(
+                !rows.is_empty(),
+                "Loading from empty table {mapper_table_name}"
+            );
+            let read_row = |row: &Row| {
                 let user_epoch = row.get::<_, i64>(0) as UserEpoch;
                 let incremental_epoch = row.get::<_, i64>(1) as IncrementalEpoch;
+                (user_epoch, incremental_epoch)
+            };
+            let (user_epoch, incremental_epoch) = read_row(&rows[0]);
+            ensure!(
+                incremental_epoch == INITIAL_INCREMENTAL_EPOCH,
+                "Wrong initial epoch found in table {mapper_table_name}"
+            );
+            let mut cache = EpochMapperCache::new_at(user_epoch);
+            for row in &rows[1..] {
+                let (user_epoch, incremental_epoch) = read_row(row);
                 cache
                     .add_epoch_map(user_epoch, incremental_epoch)
                     .await
@@ -112,7 +130,7 @@ impl EpochMapperStorage {
                     &[&(initial_epoch as UserEpoch), &INITIAL_INCREMENTAL_EPOCH],
                 )
                 .await?;
-            let cache = InMemoryEpochMapper::new_at(initial_epoch);
+            let cache = EpochMapperCache::new_at(initial_epoch);
             Self {
                 db,
                 table,
