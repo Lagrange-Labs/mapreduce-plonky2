@@ -1067,17 +1067,11 @@ where
             for (epoch, key) in data {
                 // add current (epoch, key) pair to data to be fetched only if `epoch` is found in the epoch mapper
                 if let Some(inner_epoch) = self.epoch_mapper.try_to_incremental_epoch(epoch).await {
-                    data_with_incremental_epochs.push((inner_epoch, key));
+                    data_with_incremental_epochs.push((epoch, inner_epoch, key));
                 }
             }
-            t.fetch_many_at(
-                self,
-                self.db.clone(),
-                &table,
-                data_with_incremental_epochs,
-                &(&self.epoch_mapper).into(),
-            )
-            .await
+            t.fetch_many_at(self, self.db.clone(), &table, data_with_incremental_epochs)
+                .await
         }
     }
 }

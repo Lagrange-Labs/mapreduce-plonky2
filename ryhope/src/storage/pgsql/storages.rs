@@ -230,15 +230,13 @@ where
     #[allow(clippy::type_complexity)]
     fn fetch_many_at<
         S: TreeStorage<Self>,
-        I: IntoIterator<Item = (IncrementalEpoch, Self::Key)> + Send,
-        T: EpochMapper,
+        I: IntoIterator<Item = (UserEpoch, IncrementalEpoch, Self::Key)> + Send,
     >(
         &self,
         s: &S,
         db: DBPool,
         table: &str,
         data: I,
-        epoch_mapper: &RoSharedEpochMapper<T>,
     ) -> impl Future<Output = Result<Vec<(UserEpoch, NodeContext<Self::Key>, V)>, RyhopeError>> + Send;
 }
 
@@ -399,23 +397,21 @@ where
 
     async fn fetch_many_at<
         S: TreeStorage<Self>,
-        I: IntoIterator<Item = (IncrementalEpoch, Self::Key)> + Send,
-        T: EpochMapper,
+        I: IntoIterator<Item = (UserEpoch, IncrementalEpoch, Self::Key)> + Send,
     >(
         &self,
         s: &S,
         db: DBPool,
         table: &str,
         data: I,
-        epoch_mapper: &RoSharedEpochMapper<T>,
     ) -> Result<Vec<(UserEpoch, NodeContext<Self::Key>, V)>, RyhopeError> 
     {
         let connection = db.get().await.unwrap();
         let immediate_table = data
             .into_iter()
-            .map(|(epoch, key)| {
+            .map(|(user_epoch, incremental_epoch, key)| {
                 format!(
-                    "({epoch}::BIGINT, '\\x{}'::BYTEA)",
+                    "({user_epoch}::BIGINT, {incremental_epoch}::BIGINT, '\\x{}'::BYTEA)",
                     hex::encode(key.to_bytea())
                 )
             })
@@ -423,29 +419,28 @@ where
 
         let mut r = Vec::new();
         for row in connection
-        .query(
-            &dbg!(format!(
-               "SELECT batch.key, batch.epoch, {table}.{PAYLOAD} FROM
-                 (VALUES {}) AS batch (epoch, key)
+            .query(
+                &dbg!(format!(
+                    "SELECT batch.key, batch.user_epoch, {table}.{PAYLOAD} FROM
+                 (VALUES {}) AS batch (user_epoch, incremental_epoch, key)
                  LEFT JOIN {table} ON
-                 batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
-               immediate_table
-           )),
-            &[],
-        )
-            .await
-            .map_err(|err| RyhopeError::from_db("fetching payload from DB", err))?
-            .iter() {
-               let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
-               let epoch = row.get::<_, UserEpoch>(1);
-               // convert internal incremental epoch to an arbitrary epoch
-               let epoch = epoch_mapper.try_to_user_epoch(epoch as IncrementalEpoch)
-                .await.ok_or(anyhow!("Epoch correspong to inner epoch {epoch} not found"))?;
-                let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
-                if let Some(v) = v {
-                    r.push((epoch, self.node_context(&k, s).await?.unwrap() , v));
-                }
+                 batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.incremental_epoch 
+                 AND batch.incremental_epoch <= {table}.{VALID_UNTIL}",
+                    immediate_table
+                )),
+                &[],
+            )
+             .await
+             .map_err(|err| RyhopeError::from_db("fetching payload from DB", err))?
+            .iter()
+        {
+            let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
+            let epoch = row.get::<_, UserEpoch>(1);
+            let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
+            if let Some(v) = v {
+                r.push((epoch, self.node_context(&k, s).await?.unwrap(), v));
             }
+        }
         Ok(r)
     }
 }
@@ -643,23 +638,21 @@ where
 
     async fn fetch_many_at<
         S: TreeStorage<Self>,
-        I: IntoIterator<Item = (IncrementalEpoch, Self::Key)> + Send,
-        T: EpochMapper,
+        I: IntoIterator<Item = (UserEpoch, IncrementalEpoch, Self::Key)> + Send,
     >(
         &self,
         _s: &S,
         db: DBPool,
         table: &str,
         data: I,
-        epoch_mapper: &RoSharedEpochMapper<T>,
     ) -> Result<Vec<(UserEpoch, NodeContext<Self::Key>, V)>, RyhopeError> 
     {
         let connection = db.get().await.unwrap();
         let immediate_table = data
             .into_iter()
-            .map(|(epoch, key)| {
+            .map(|(user_epoch, incremental_epoch, key)| {
                 format!(
-                    "({epoch}::BIGINT, '\\x{}'::BYTEA)",
+                    "({user_epoch}::BIGINT, {incremental_epoch}::BIGINT, '\\x{}'::BYTEA)",
                     hex::encode(key.to_bytea())
                 )
             })
@@ -670,12 +663,13 @@ where
             .query(
                  &format!(
                      "SELECT
-                        batch.key, batch.epoch, {table}.{PAYLOAD},
+                        batch.key, batch.user_epoch, {table}.{PAYLOAD},
                         {table}.{PARENT}, {table}.{LEFT_CHILD}, {table}.{RIGHT_CHILD}
                       FROM
-                        (VALUES {}) AS batch (epoch, key)
+                        (VALUES {}) AS batch (user_epoch, incremental_epoch, key)
                       LEFT JOIN {table} ON
-                        batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.epoch AND batch.epoch <= {table}.{VALID_UNTIL}",
+                        batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.incremental_epoch 
+                        AND batch.incremental_epoch <= {table}.{VALID_UNTIL}",
                     immediate_table
                 ),
                 &[],
@@ -686,9 +680,6 @@ where
         {
             let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
             let epoch = row.get::<_, UserEpoch>(1);
-            // convert internal incremental epoch to a user epoch
-            let epoch = epoch_mapper.try_to_user_epoch(epoch as IncrementalEpoch)
-                .await.ok_or(anyhow!("Epoch correspong to inner epoch {epoch} not found"))?; 
             let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
             if let Some(v) = v {
                 r.push((
