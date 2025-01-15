@@ -1092,11 +1092,11 @@ impl<C: ContextProvider> AstVisitor for Assembler<'_, C> {
             self.find_primary_index_boundaries(where_clause, &mut primary_index_bounded)?;
             ensure!(
                 primary_index_bounded.0,
-                "min. bound not found for parimary index"
+                "min. bound not found for primary index"
             );
             ensure!(
                 primary_index_bounded.1,
-                "max. bound not found for parimary index"
+                "max. bound not found for primary index"
             );
 
             let mut secondary_index_bounds = Default::default();
