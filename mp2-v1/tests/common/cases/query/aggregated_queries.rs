@@ -58,8 +58,8 @@ use tokio_postgres::Row as PsqlRow;
 use verifiable_db::{
     ivc::PublicInputs as IndexingPIS,
     query::{
-        computational_hash_ids::{ColumnIDs, Identifiers},
-        universal_circuit::universal_circuit_inputs::{ColumnCell, PlaceholderId, Placeholders},
+        computational_hash_ids::{ColumnIDs, Identifiers, PlaceholderIdentifier},
+        universal_circuit::universal_circuit_inputs::{ColumnCell, Placeholders},
     },
     revelation::PublicInputs,
 };
@@ -472,8 +472,8 @@ pub(crate) async fn cook_query_secondary_index_nonexisting_placeholder(
     let random_value = U256::from(1234567890);
     let placeholders = Placeholders::from((
         vec![
-            (PlaceholderId::Generic(1), random_value),
-            (PlaceholderId::Generic(2), filtering_value),
+            (PlaceholderIdentifier::Generic(1), random_value),
+            (PlaceholderIdentifier::Generic(2), filtering_value),
         ],
         U256::from(min_block),
         U256::from(max_block),
@@ -518,8 +518,8 @@ pub(crate) async fn cook_query_secondary_index_placeholder(
 
     let placeholders = Placeholders::from((
         vec![
-            (PlaceholderId::Generic(1), longest_key.value),
-            (PlaceholderId::Generic(2), filtering_value),
+            (PlaceholderIdentifier::Generic(1), longest_key.value),
+            (PlaceholderIdentifier::Generic(2), filtering_value),
         ],
         U256::from(min_block),
         U256::from(max_block),

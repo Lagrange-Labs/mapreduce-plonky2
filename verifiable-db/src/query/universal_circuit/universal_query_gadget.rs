@@ -46,8 +46,7 @@ use super::{
     },
     column_extraction::{ColumnExtractionInputWires, ColumnExtractionInputs},
     universal_circuit_inputs::{
-        BasicOperation, InputOperand, Placeholder, PlaceholderId, Placeholders, ResultStructure,
-        RowCells,
+        BasicOperation, InputOperand, Placeholder, Placeholders, ResultStructure, RowCells,
     },
     universal_query_circuit::dummy_placeholder_id,
     ComputationalHash, ComputationalHashTarget, MembershipHashTarget, PlaceholderHash,
@@ -838,7 +837,7 @@ where
         results: &ResultStructure,
         placeholders: &Placeholders,
         query_bounds: &QueryBounds,
-    ) -> Result<Vec<PlaceholderId>> {
+    ) -> Result<Vec<PlaceholderIdentifier>> {
         let hash_input_gadget = Self::new(
             &ColumnIDs::default(),
             predicate_operations,

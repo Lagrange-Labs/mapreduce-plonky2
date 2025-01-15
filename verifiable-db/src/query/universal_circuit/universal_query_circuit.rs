@@ -37,9 +37,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use super::{
     output_no_aggregation::Circuit as NoAggOutputCircuit,
     output_with_aggregation::Circuit as AggOutputCircuit,
-    universal_circuit_inputs::{
-        BasicOperation, PlaceholderId, Placeholders, ResultStructure, RowCells,
-    },
+    universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure, RowCells},
     universal_query_gadget::{
         OutputComponent, QueryBound, UniversalQueryHashInputWires, UniversalQueryHashInputs,
         UniversalQueryValueInputWires, UniversalQueryValueInputs,
@@ -236,14 +234,14 @@ where
     }
 }
 
-pub(crate) fn dummy_placeholder_id() -> PlaceholderId {
+pub(crate) fn dummy_placeholder_id() -> PlaceholderIdentifier {
     PlaceholderIdentifier::default()
 }
 
 /// Utility method to compute the placeholder hash for the placeholders provided as input, without including the
 /// query bounds on the secondary index
 pub(crate) fn placeholder_hash_without_query_bounds(
-    placeholder_ids: &[PlaceholderId],
+    placeholder_ids: &[PlaceholderIdentifier],
     placeholders: &Placeholders,
 ) -> Result<PlaceholderHash> {
     let inputs = placeholder_ids
@@ -260,7 +258,7 @@ pub(crate) fn placeholder_hash_without_query_bounds(
 
 /// Compute the placeholder hash for the placeholders and query bounds provided as input
 pub(crate) fn placeholder_hash(
-    placeholder_ids: &[PlaceholderId],
+    placeholder_ids: &[PlaceholderIdentifier],
     placeholders: &Placeholders,
     query_bounds: &QueryBounds,
 ) -> Result<PlaceholderHash> {
@@ -454,7 +452,7 @@ where
         results: &ResultStructure,
         placeholders: &Placeholders,
         query_bounds: &QueryBounds,
-    ) -> Result<[PlaceholderId; 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]> {
+    ) -> Result<[PlaceholderIdentifier; 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]> {
         Ok(match results.output_variant {
             Output::Aggregation => UniversalQueryHashInputs::<
                 MAX_NUM_COLUMNS,
@@ -519,7 +517,7 @@ mod tests {
             output_no_aggregation::Circuit as OutputNoAggCircuit,
             output_with_aggregation::Circuit as OutputAggCircuit,
             universal_circuit_inputs::{
-                BasicOperation, ColumnCell, InputOperand, OutputItem, PlaceholderId, Placeholders,
+                BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders,
                 ResultStructure, RowCells,
             },
             universal_query_circuit::{
@@ -618,14 +616,14 @@ mod tests {
             column_cells[2..].to_vec(),
         );
         // define placeholders
-        let first_placeholder_id = PlaceholderId::Generic(0);
+        let first_placeholder_id = PlaceholderIdentifier::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
         let mut placeholders = Placeholders::new_empty(min_query_primary, max_query_primary);
         [first_placeholder_id, second_placeholder_id]
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is the max query bound
-        let third_placeholder_id = PlaceholderId::Generic(2);
+        let third_placeholder_id = PlaceholderIdentifier::Generic(2);
         placeholders.insert(third_placeholder_id, max_query_secondary);
 
         // build predicate operations
@@ -987,14 +985,14 @@ mod tests {
             column_cells[2..].to_vec(),
         );
         // define placeholders
-        let first_placeholder_id = PlaceholderId::Generic(0);
+        let first_placeholder_id = PlaceholderIdentifier::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
         let mut placeholders = Placeholders::new_empty(min_query_primary, max_query_primary);
         [first_placeholder_id, second_placeholder_id]
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is the min query bound
-        let third_placeholder_id = PlaceholderId::Generic(2);
+        let third_placeholder_id = PlaceholderIdentifier::Generic(2);
         placeholders.insert(third_placeholder_id, min_query_secondary);
 
         // build predicate operations

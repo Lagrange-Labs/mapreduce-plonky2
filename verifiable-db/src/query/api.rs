@@ -41,13 +41,10 @@ use crate::query::{
 };
 
 use super::{
-    computational_hash_ids::Output,
+    computational_hash_ids::{Output, PlaceholderIdentifier},
     pi_len,
-    universal_circuit::{
-        universal_circuit_inputs::PlaceholderId,
-        universal_query_circuit::{
-            placeholder_hash, UniversalCircuitInput, UniversalQueryCircuitParams,
-        },
+    universal_circuit::universal_query_circuit::{
+        placeholder_hash, UniversalCircuitInput, UniversalQueryCircuitParams,
     },
 };
 
@@ -379,7 +376,7 @@ where
         results: &ResultStructure,
         placeholders: &Placeholders,
         query_bounds: &QueryBounds,
-    ) -> Result<[PlaceholderId; 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]> {
+    ) -> Result<[PlaceholderIdentifier; 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]> {
         UniversalCircuitInput::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
