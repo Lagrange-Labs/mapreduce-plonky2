@@ -1,5 +1,5 @@
-//! This module prunes a query from all its WHERE clauses that are not related
-//! to either the primary index, or a well-defined bound on the secondary index.
+//! This module replaces the WHERE clause of a query with another one that contains
+//! only predicates to apply the query bounds on primary and secondary index columns.
 use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
