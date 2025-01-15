@@ -75,6 +75,11 @@ impl PublicParameters {
     pub fn get_params_info(&self) -> Result<Vec<u8>> {
         self.tree_creation.get_params_info()
     }
+
+    /// Get the a proof of for an empty cell tree.
+    pub fn empty_cell_tree_proof(&self) -> Result<Vec<u8>> {
+        self.tree_creation.empty_cell_tree_proof()
+    }
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
