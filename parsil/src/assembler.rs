@@ -151,6 +151,7 @@ pub(crate) struct Assembler<'a, C: ContextProvider> {
     /// The query-global column storage, mapping a column index to a
     /// cryptographic column ID.
     columns: Vec<u64>,
+    /// If any, the boundaries of the secondary index
     secondary_index_bounds: Bounds,
     /// Flag specifying whether DISTINCT keyword is employed in the query
     distinct: bool,
@@ -275,24 +276,42 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     }
 
     /// Return whether the given `Symbol` encodes the secondary index column.
-    fn is_symbol_secondary_idx(s: &Symbol<Wire>) -> bool {
+    fn is_symbol_kind(s: &Symbol<Wire>, _kind: ColumnKind) -> bool {
         match s {
-            Symbol::Column { kind, .. } => *kind == ColumnKind::SecondaryIndex,
-            Symbol::Alias { to, .. } => Self::is_symbol_secondary_idx(to),
+            Symbol::Column { kind, .. } => *kind == _kind,
+            Symbol::Alias { to, .. } => Self::is_symbol_kind(to, _kind),
             _ => false,
         }
+    }
+
+    /// Return whether, in the current scope, the given expression refers to the
+    /// primary index.
+    fn is_primary_index(&self, expr: &Expr) -> Result<bool> {
+        Ok(match expr {
+            Expr::Identifier(s) => Self::is_symbol_kind(
+                &self.scopes.resolve_freestanding(s)?,
+                ColumnKind::PrimaryIndex,
+            ),
+            Expr::CompoundIdentifier(c) => {
+                Self::is_symbol_kind(&self.scopes.resolve_compound(c)?, ColumnKind::PrimaryIndex)
+            }
+
+            _ => false,
+        })
     }
 
     /// Return whether, in the current scope, the given expression refers to the
     /// secondary index.
     fn is_secondary_index(&self, expr: &Expr) -> Result<bool> {
         Ok(match expr {
-            Expr::Identifier(s) => {
-                Self::is_symbol_secondary_idx(&self.scopes.resolve_freestanding(s)?)
-            }
-            Expr::CompoundIdentifier(c) => {
-                Self::is_symbol_secondary_idx(&self.scopes.resolve_compound(c)?)
-            }
+            Expr::Identifier(s) => Self::is_symbol_kind(
+                &self.scopes.resolve_freestanding(s)?,
+                ColumnKind::SecondaryIndex,
+            ),
+            Expr::CompoundIdentifier(c) => Self::is_symbol_kind(
+                &self.scopes.resolve_compound(c)?,
+                ColumnKind::SecondaryIndex,
+            ),
 
             _ => false,
         })
@@ -495,6 +514,93 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                 Ok(())
             }
             Expr::Nested(e) => self.find_secondary_index_boundaries(e, bounds),
+            _ => Ok(()),
+        }
+    }
+
+    fn find_primary_index_bounded(&mut self, expr: &Expr, bounds: &mut (bool, bool)) -> Result<()> {
+        if let Expr::BinaryOp { left, op, right } = expr {
+            if self.is_primary_index(left)?
+                // SID can only be computed from constants and placeholders
+                && self.is_expr_static(right)?
+                // SID can only be defined by up to one level of BasicOperation
+                && Self::depth(right) <= 1
+            {
+                match op {
+                    // $PI > x
+                    BinaryOperator::Gt | BinaryOperator::GtEq => {
+                        let bound = self.expression_to_boundary(right)?;
+                        if matches!(
+                            bound,
+                            QueryBoundSource::Placeholder(PlaceholderIdentifier::MinQueryOnIdx1)
+                        ) {
+                            bounds.0 = true;
+                        }
+                    }
+                    // $PI < x
+                    BinaryOperator::Lt | BinaryOperator::LtEq => {
+                        let bound = self.expression_to_boundary(right)?;
+
+                        if matches!(
+                            bound,
+                            QueryBoundSource::Placeholder(PlaceholderIdentifier::MaxQueryOnIdx1)
+                        ) {
+                            bounds.1 = true;
+                        }
+                    }
+                    _ => {}
+                }
+            } else if self.is_primary_index(right)? && self.is_expr_static(left)? {
+                match op {
+                    // x > $PI
+                    BinaryOperator::Gt | BinaryOperator::GtEq => {
+                        let bound = self.expression_to_boundary(right)?;
+
+                        if matches!(
+                            bound,
+                            QueryBoundSource::Placeholder(PlaceholderIdentifier::MaxQueryOnIdx1)
+                        ) {
+                            bounds.1 = true;
+                        }
+                    }
+                    // x < $PI
+                    BinaryOperator::Lt | BinaryOperator::LtEq => {
+                        let bound = self.expression_to_boundary(right)?;
+                        if matches!(
+                            bound,
+                            QueryBoundSource::Placeholder(PlaceholderIdentifier::MinQueryOnIdx1)
+                        ) {
+                            bounds.0 = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Recursively traverses the given expression (typically a WHERE clause) to
+    /// ensure that the [MIN_BLOCK, MAX_BLOCK] boundaries are enforced on the
+    /// primary index.
+    fn find_primary_index_boundaries(
+        &mut self,
+        expr: &Expr,
+        bounds: &mut (bool, bool),
+    ) -> Result<()> {
+        self.find_primary_index_bounded(expr, bounds)?;
+        match expr {
+            Expr::BinaryOp {
+                left,
+                op: BinaryOperator::And,
+                right,
+            } => {
+                self.find_primary_index_boundaries(left, bounds)?;
+                self.find_primary_index_boundaries(right, bounds)?;
+                Ok(())
+            }
+            Expr::Nested(e) => self.find_primary_index_boundaries(e, bounds),
             _ => Ok(()),
         }
     }
@@ -982,6 +1088,17 @@ impl<C: ContextProvider> AstVisitor for Assembler<'_, C> {
             // As the expression are traversed depth-first, the top level
             // expression will mechanically find itself at the last position, as
             // required by the universal query circuit API.
+            let mut primary_index_bounded = (false, false);
+            self.find_primary_index_boundaries(where_clause, &mut primary_index_bounded)?;
+            ensure!(
+                primary_index_bounded.0,
+                "min. bound not found for parimary index"
+            );
+            ensure!(
+                primary_index_bounded.1,
+                "max. bound not found for parimary index"
+            );
+
             let mut secondary_index_bounds = Default::default();
             self.find_secondary_index_boundaries(where_clause, &mut secondary_index_bounds)?;
             self.secondary_index_bounds = secondary_index_bounds;

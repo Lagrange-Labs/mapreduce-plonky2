@@ -1,5 +1,5 @@
 #![allow(clippy::single_element_loop)]
-use crate::assembler::{assemble_dynamic, DynamicCircuitPis};
+use crate::assembler::{assemble_dynamic, assemble_static, DynamicCircuitPis};
 use crate::isolator;
 use crate::utils::ParsilSettingsBuilder;
 use crate::{
@@ -33,6 +33,53 @@ type TestFileContextProvider = FileContextProvider<
     MAX_NUM_ITEMS_PER_OUTPUT,
     MAX_NUM_OUTPUTS,
 >;
+
+#[test]
+fn prim_index_bounds() -> Result<()> {
+    fn check(query: &str) -> Result<()> {
+        let settings = ParsilSettings {
+            context: TestFileContextProvider::from_file("tests/context.json")?,
+            placeholders: PlaceholderSettings::with_freestanding(3),
+            limit: None,
+            offset: None,
+        };
+        let query = parse_and_validate(query, &settings)?;
+        assemble_static(&query, &settings).map(|_| ())
+    }
+
+    assert!(check(
+        "SELECT pipo FROM table1 WHERE block = $1 OR block BETWEEN $MIN_BLOCK AND $MAX_BLOCK;"
+    )
+    .is_err());
+    assert!(check(
+        "SELECT pipo FROM table1 WHERE block = pipo + 5 OR block BETWEEN $MIN_BLOCK AND $MAX_BLOCK"
+    )
+    .is_err());
+    assert!(
+        check("SELECT pipo FROM table1 WHERE block = pipo + 5 AND block BETWEEN 10 AND 15")
+            .is_err()
+    );
+    assert!(check(
+        "SELECT pipo FROM table1 WHERE block = pipo + 5 AND block BETWEEN $MIN_BLOCK AND $MAX_BLOCK"
+    )
+    .is_ok());
+    assert!(check(
+        "SELECT pipo FROM table1 WHERE block = pipo + 5 AND block BETWEEN $MIN_BLOCK AND $1"
+    )
+    .is_err());
+    assert!(check("SELECT pipo FROM table1 WHERE block < MAX_BLOCK").is_err());
+    assert!(check("SELECT pipo FROM table1 WHERE block > $MIN_BLOCK").is_err());
+    assert!(
+        check("SELECT pipo FROM table1 WHERE block < $MAX_BLOCK AND block > $MIN_BLOCK").is_ok()
+    );
+    assert!(
+        check("SELECT pipo FROM table1 WHERE block > $MIN_BLOCK AND block < $MAX_BLOCK").is_ok()
+    );
+    assert!(
+        check("SELECT pipo FROM table1 WHERE block > $MAX_BLOCK AND block < $MIN_BLOCK").is_err()
+    );
+    Ok(())
+}
 
 #[test]
 fn must_accept() -> Result<()> {
