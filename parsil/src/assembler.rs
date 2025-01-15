@@ -518,7 +518,13 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         }
     }
 
-    fn find_primary_index_bounded(&mut self, expr: &Expr, bounds: &mut (bool, bool)) -> Result<()> {
+    /// If `expr` defines a definite boundary on the primary index, update the
+    /// adequate member of the `bounds` tuple.
+    fn maybe_set_primary_index_bounds(
+        &mut self,
+        expr: &Expr,
+        bounds: &mut (bool, bool),
+    ) -> Result<()> {
         if let Expr::BinaryOp { left, op, right } = expr {
             if self.is_primary_index(left)?
                 // SID can only be computed from constants and placeholders
@@ -584,23 +590,25 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     /// Recursively traverses the given expression (typically a WHERE clause) to
     /// ensure that the [MIN_BLOCK, MAX_BLOCK] boundaries are enforced on the
     /// primary index.
-    fn find_primary_index_boundaries(
+    ///   * `expr`: the [`Expr`] to traverse;
+    ///   * `bound`: whether the (low, high) bound for the prim. ind. have been found.
+    fn detect_primary_index_boundaries(
         &mut self,
         expr: &Expr,
         bounds: &mut (bool, bool),
     ) -> Result<()> {
-        self.find_primary_index_bounded(expr, bounds)?;
+        self.maybe_set_primary_index_bounds(expr, bounds)?;
         match expr {
             Expr::BinaryOp {
                 left,
                 op: BinaryOperator::And,
                 right,
             } => {
-                self.find_primary_index_boundaries(left, bounds)?;
-                self.find_primary_index_boundaries(right, bounds)?;
+                self.detect_primary_index_boundaries(left, bounds)?;
+                self.detect_primary_index_boundaries(right, bounds)?;
                 Ok(())
             }
-            Expr::Nested(e) => self.find_primary_index_boundaries(e, bounds),
+            Expr::Nested(e) => self.detect_primary_index_boundaries(e, bounds),
             _ => Ok(()),
         }
     }
@@ -1089,7 +1097,7 @@ impl<C: ContextProvider> AstVisitor for Assembler<'_, C> {
             // expression will mechanically find itself at the last position, as
             // required by the universal query circuit API.
             let mut primary_index_bounded = (false, false);
-            self.find_primary_index_boundaries(where_clause, &mut primary_index_bounded)?;
+            self.detect_primary_index_boundaries(where_clause, &mut primary_index_bounded)?;
             ensure!(
                 primary_index_bounded.0,
                 "min. bound not found for primary index"
