@@ -616,7 +616,7 @@ where
                     &format!(
                         "
                         CREATE VIEW {mapper_table_alias} AS
-                        SELECT * FROM {mapper_table_name}"
+                        SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {mapper_table_name}"
                     ),
                     &[],
                 )
