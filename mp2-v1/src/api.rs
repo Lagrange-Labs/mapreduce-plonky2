@@ -116,21 +116,21 @@ where
         let block_params = self.block_extraction.circuit_data();
         let final_params = self.final_extraction.get_circuit_set();
 
-        println!(
+        log::info!(
             "Contract digest: {:?}",
             contract_params.get_circuit_set_digest()
         );
-        println!(
+        log::info!(
             "Length digest: {:?}",
             length_params.get_circuit_set_digest()
         );
-        println!("Value digest: {:?}", value_params.get_circuit_set_digest());
-        println!(
+        log::info!("Value digest: {:?}", value_params.get_circuit_set_digest());
+        log::info!(
             "Block digest: {:?}",
             block_params.verifier_only.circuit_digest
         );
-        println!("Final digest: {:?}", final_params.get_circuit_set_digest());
-        println!(
+        log::info!("Final digest: {:?}", final_params.get_circuit_set_digest());
+        log::info!(
             "Cells digest: {:?}",
             self.tree_creation
                 .cells_tree
@@ -138,21 +138,21 @@ where
                 .get_circuit_set_digest()
         );
 
-        println!(
+        log::info!(
             "Rows digest: {:?}",
             self.tree_creation
                 .rows_tree
                 .set_vk()
                 .get_circuit_set_digest()
         );
-        println!(
+        log::info!(
             "Block tree digest: {:?}",
             self.tree_creation
                 .block_tree
                 .set_vk()
                 .get_circuit_set_digest()
         );
-        println!(
+        log::info!(
             "IVC digest: {:?}",
             self.tree_creation.ivc.set.get_circuit_set_digest()
         );
