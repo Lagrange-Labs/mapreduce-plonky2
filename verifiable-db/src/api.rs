@@ -48,10 +48,10 @@ pub struct PublicParameters<E: ExtractionPIWrap>
 where
     [(); E::PI::TOTAL_LEN]:,
 {
-    cells_tree: cells_tree::PublicParameters,
-    rows_tree: row_tree::PublicParameters,
-    block_tree: block_tree::PublicParameters<E>,
-    ivc: ivc::PublicParameters,
+    pub cells_tree: cells_tree::PublicParameters,
+    pub rows_tree: row_tree::PublicParameters,
+    pub block_tree: block_tree::PublicParameters<E>,
+    pub ivc: ivc::PublicParameters,
 }
 
 impl<E: ExtractionPIWrap> PublicParameters<E>

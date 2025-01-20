@@ -49,7 +49,7 @@ impl CircuitInput {
 pub struct PublicParameters {
     ivc: CircuitWithUniversalVerifier<F, C, D, 1, RecursiveIVCWires>,
     dummy: CircuitWithUniversalVerifier<F, C, D, 0, DummyWires>,
-    set: RecursiveCircuits<F, C, D>,
+    pub set: RecursiveCircuits<F, C, D>,
 }
 
 impl PublicParameters {

@@ -116,10 +116,12 @@ impl ParamsType {
             }
             ParamsType::Indexing => {
                 info!("parsing the indexing mp2-v1 parameters");
-                let params = bincode::deserialize_from(BufReader::new(
+                let params: PublicParameters = bincode::deserialize_from(BufReader::new(
                     File::open(&path).with_context(|| format!("while opening {path:?}"))?,
                 ))
                 .context("while parsing MP2 parameters")?;
+                // For testing params
+                params.display_circuit_digests();
                 ctx.params = Some(params);
             }
         };
@@ -149,6 +151,8 @@ impl ParamsType {
             ParamsType::Indexing => {
                 info!("building the mp2 indexing parameters");
                 let mp2 = build_circuits_params();
+                // For testing params
+                mp2.display_circuit_digests();
                 ctx.params = Some(mp2);
                 info!("writing the mp2-v1 indexing parameters");
                 Ok(())

@@ -110,6 +110,9 @@ ethers = { git = "https://github.com/Lagrange-Labs/ethers-rs", default-features 
 # Proving is too slow without optimizations
 opt-level = 3
 
+[profile.test]
+opt-level = 3
+
 [profile.release]
 # Reference: https://doc.rust-lang.org/cargo/reference/profiles.html#release
 # Proving is a bottleneck, enable agressive optimizations.

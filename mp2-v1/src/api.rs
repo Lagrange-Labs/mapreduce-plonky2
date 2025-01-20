@@ -108,6 +108,55 @@ where
     pub fn get_value_extraction_params(&self) -> &ValuesExtractionParameters<MAX_COLUMNS> {
         &self.values_extraction
     }
+
+    pub fn display_circuit_digests(&self) {
+        let contract_params = self.contract_extraction.get_circuit_set();
+        let length_params = self.length_extraction.get_circuit_set();
+        let value_params = self.values_extraction.get_circuit_set();
+        let block_params = self.block_extraction.circuit_data();
+        let final_params = self.final_extraction.get_circuit_set();
+
+        println!(
+            "Contract digest: {:?}",
+            contract_params.get_circuit_set_digest()
+        );
+        println!(
+            "Length digest: {:?}",
+            length_params.get_circuit_set_digest()
+        );
+        println!("Value digest: {:?}", value_params.get_circuit_set_digest());
+        println!(
+            "Block digest: {:?}",
+            block_params.verifier_only.circuit_digest
+        );
+        println!("Final digest: {:?}", final_params.get_circuit_set_digest());
+        println!(
+            "Cells digest: {:?}",
+            self.tree_creation
+                .cells_tree
+                .vk_set()
+                .get_circuit_set_digest()
+        );
+
+        println!(
+            "Rows digest: {:?}",
+            self.tree_creation
+                .rows_tree
+                .set_vk()
+                .get_circuit_set_digest()
+        );
+        println!(
+            "Block tree digest: {:?}",
+            self.tree_creation
+                .block_tree
+                .set_vk()
+                .get_circuit_set_digest()
+        );
+        println!(
+            "IVC digest: {:?}",
+            self.tree_creation.ivc.set.get_circuit_set_digest()
+        );
+    }
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
