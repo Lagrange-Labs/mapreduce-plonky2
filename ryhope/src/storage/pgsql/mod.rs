@@ -584,6 +584,25 @@ where
             .map(|_| ())
             .map_err(|err| RyhopeError::from_db(format!("creating table `{table}`"), err))?;
 
+        // create index on `VALID_FROM`
+        connection
+             .execute(&format!(
+                     "CREATE INDEX {table}_index_from ON {table} ({VALID_FROM})"
+                ), &[]
+             ).await
+             .map(|_| ())
+             .with_context(|| format!("unable to create index on table `{table}` for {VALID_FROM}"))?;
+ 
+        // create index on `VALID_UNTIL`
+        connection
+             .execute(&format!(
+                     "CREATE INDEX {table}_index_until ON {table} ({VALID_UNTIL})"
+                 ), &[]
+             ).await
+             .map(|_| ())
+             .with_context(|| format!("unable to create index on table `{table}` for {VALID_UNTIL}"))?;
+
+
         // The meta table will store everything related to the tree itself.
         let meta_table = metadata_table_name(table);
         connection
@@ -601,6 +620,16 @@ where
             .map_err(|err| RyhopeError::from_db(format!("creating table `{meta_table}`"), err))?;
 
         Ok(())?;
+
+        // create index on `VALID_UNTIL`
+       connection
+             .execute(&format!(
+                    "CREATE INDEX {meta_table}_index_until ON {meta_table} ({VALID_UNTIL})"
+                 ), &[]
+            ).await
+             .map(|_| ())
+            .with_context(|| format!("unable to create index on table `{meta_table}` for {VALID_UNTIL}"))?;
+
 
         // Create the mapper table if the mapper table is not external, otherwise
         // create a view for the mapper table name expected for `table` to `mapper_table`.
