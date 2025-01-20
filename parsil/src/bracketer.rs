@@ -50,10 +50,10 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
         None
     } else {
         Some(format!("SELECT {KEY} FROM 
-            {zktable_name} JOIN (
-                SELECT MIN({INCREMENTAL_EPOCH}) as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number}
-            ) as __mapper ON {VALID_FROM} <= epoch AND {VALID_UNTIL} >= epoch
-                           WHERE {sec_index} < '{secondary_lo}'::DECIMAL
+            {zktable_name} 
+            WHERE {VALID_FROM} <= (SELECT MIN({INCREMENTAL_EPOCH}) as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number})
+ 		  AND {VALID_UNTIL} >= (SELECT MIN({INCREMENTAL_EPOCH}) as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number})
+                           AND {sec_index} < '{secondary_lo}'::DECIMAL
                            ORDER BY {sec_index} DESC LIMIT 1"))
     };
 
@@ -62,10 +62,10 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
         None
     } else {
         Some(format!("SELECT {KEY} FROM 
-            {zktable_name} JOIN (
-                SELECT MIN({INCREMENTAL_EPOCH}) as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number}
-            ) as __mapper ON {VALID_FROM} <= epoch AND {VALID_UNTIL} >= epoch
-                           WHERE {sec_index} > '{secondary_hi}'::DECIMAL
+            {zktable_name} 
+            WHERE {VALID_FROM} <= (SELECT MIN({INCREMENTAL_EPOCH}) as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number})
+ 		  AND {VALID_UNTIL} >= (SELECT MIN({INCREMENTAL_EPOCH}) as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number})
+                           AND {sec_index} > '{secondary_hi}'::DECIMAL
                            ORDER BY {sec_index} ASC LIMIT 1"))
     };
 
