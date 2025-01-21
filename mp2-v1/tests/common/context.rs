@@ -108,10 +108,21 @@ impl ParamsType {
         match self {
             ParamsType::Query => {
                 info!("parsing the querying mp2-v1 parameters");
-                let params = bincode::deserialize_from(BufReader::new(
+                let params: QueryParameters<
+                    ROW_TREE_MAX_DEPTH,
+                    INDEX_TREE_MAX_DEPTH,
+                    MAX_NUM_COLUMNS,
+                    MAX_NUM_PREDICATE_OPS,
+                    MAX_NUM_RESULT_OPS,
+                    MAX_NUM_OUTPUTS,
+                    MAX_NUM_ITEMS_PER_OUTPUT,
+                    MAX_NUM_PLACEHOLDERS,
+                > = bincode::deserialize_from(BufReader::new(
                     File::open(&path).with_context(|| format!("while opening {path:?}"))?,
                 ))
                 .context("while parsing MP2 parameters")?;
+                // For testing
+                params.display_digests();
                 ctx.query_params = Some(params);
             }
             ParamsType::Indexing => {
@@ -145,6 +156,8 @@ impl ParamsType {
 
                 info!("building the mp2 querying parameters");
                 let params = QueryParameters::build_params(&index_info)?;
+                // For testing
+                params.display_digests();
                 ctx.query_params = Some(params);
                 Ok(())
             }

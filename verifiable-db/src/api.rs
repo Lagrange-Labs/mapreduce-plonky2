@@ -352,6 +352,23 @@ where
     pub fn final_proof_circuit_data(&self) -> &CircuitData<F, WrapC, D> {
         &self.wrap_circuit.circuit_data
     }
+
+    pub fn display_digests(&self) {
+        info!(
+            "Query params circuit digest: {:?}",
+            self.query_params.get_circuit_set().get_circuit_set_digest()
+        );
+        info!(
+            "Revelation params circuit digst: {:?}",
+            self.revelation_params
+                .get_circuit_set()
+                .get_circuit_set_digest()
+        );
+        info!(
+            "Wrap circuit digest: {:?}",
+            self.wrap_circuit.circuit_data.verifier_only.circuit_digest
+        );
+    }
 }
 
 #[cfg(test)]
