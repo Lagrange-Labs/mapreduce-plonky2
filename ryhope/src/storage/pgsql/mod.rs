@@ -5,7 +5,6 @@ use super::{
 };
 use crate::{
     error::{ensure, RyhopeError},
-    storage::pgsql::storages::DBPool,
     tree::{NodeContext, TreeTopology},
     Epoch, InitSettings, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL,
 };
@@ -13,19 +12,17 @@ use bb8_postgres::PostgresConnectionManager;
 use futures::TryFutureExt;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashSet,
-    fmt::Debug,
-    future::Future,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashSet, fmt::Debug, future::Future, sync::Arc};
 use storages::{NodeProjection, PayloadProjection};
-use tokio_postgres::{NoTls, Transaction};
+use tokio::sync::Mutex;
+use tokio_postgres::{Client, GenericClient, NoTls, Transaction};
 use tracing::*;
 
 mod storages;
 
 const MAX_PGSQL_BIGINT: i64 = i64::MAX;
+
+pub type DBPool = bb8::Pool<PostgresConnectionManager<NoTls>>;
 
 /// A trait that must be implemented by a custom node key. This allows to
 /// (de)serialize any custom key to and fro a PgSQL BYTEA.
@@ -102,15 +99,12 @@ pub trait PayloadInDb: Clone + Send + Sync + Debug + Serialize + for<'a> Deseria
 impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb for T {}
 
 /// If it exists, remove the given table from the current database.
-async fn delete_storage_table(db: DBPool, table: &str) -> Result<(), RyhopeError> {
-    let connection = db.get().await.unwrap();
-    connection
-        .execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
+async fn delete_storage_table<B: GenericClient>(db: &B, table: &str) -> Result<(), RyhopeError> {
+    db.execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
         .await
         .map_err(|err| RyhopeError::from_db(format!("unable to delete table `{table}`"), err))
         .map(|_| ())?;
-    connection
-        .execute(&format!("DROP TABLE IF EXISTS {}_meta", table), &[])
+    db.execute(&format!("DROP TABLE IF EXISTS {}_meta", table), &[])
         .await
         .map_err(|err| RyhopeError::from_db(format!("unable to delete table `{table}`"), err))
         .map(|_| ())
@@ -161,36 +155,82 @@ pub struct SqlStorageSettings {
     pub source: SqlServerConnection,
 }
 
-pub struct PgsqlStorage<T, V>
+/// Return the current epoch for a given table pair. Note that there always will
+/// be a matching row, for the state initialization will always commit the
+/// initial state to the database, even if the tree is left empty.
+///
+/// Fail if the DB query fails.
+async fn fetch_epoch_data<B: GenericClient>(
+    db: &B,
+    table: &str,
+) -> Result<(i64, i64), RyhopeError> {
+    trace!("fetching epoch data for `{table}`");
+    db.query_one(
+        &format!("SELECT MIN({VALID_FROM}), MAX({VALID_UNTIL}) FROM {table}_meta",),
+        &[],
+    )
+    .await
+    .map(|r| (r.get(0), r.get(1)))
+    .map_err(|err| RyhopeError::from_db("fetching current epoch data", err))
+}
+
+/// Initialize a DB pool.
+pub async fn init_db_pool<B: GenericClient>(
+    db_src: &SqlServerConnection,
+) -> Result<B, RyhopeError> {
+    match db_src {
+        SqlServerConnection::NewConnection(db_url) => {
+            info!("Connecting to `{db_url}`");
+            // Connect to the database.
+            let (client, connection) =
+                tokio_postgres::connect("host=localhost user=postgres", NoTls).await?;
+
+            // The connection object performs the actual communication with the database,
+            // so spawn it off to run on its own.
+            tokio::spawn(async move {
+                if let Err(e) = connection.await {
+                    error!("failed to connect to DB: {}", e);
+                }
+            });
+
+            Ok(client)
+        }
+        SqlServerConnection::Pool(pool) => Ok(Box::new(pool.clone().get().await.unwrap())),
+    }
+}
+
+pub struct PgsqlStorage<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     V: PayloadInDb + Send + Sync,
+    B: GenericClient + Send + Sync,
 {
     /// The table in which this tree will be stored
     table: String,
     /// A connection to the PostgreSQL server
-    db: DBPool,
+    db: Arc<Mutex<Box<B>>>,
     /// The current epoch
     epoch: i64,
     /// Tree state information
-    state: CachedDbStore<T::State>,
+    state: CachedDbStore<T::State, B>,
     /// Topological information
-    tree_store: Arc<Mutex<CachedDbTreeStore<T, V>>>,
-    nodes: NodeProjection<T, V>,
-    payloads: PayloadProjection<T, V>,
+    tree_store: Arc<std::sync::Mutex<CachedDbTreeStore<T, V, B>>>,
+    nodes: NodeProjection<T, V, B>,
+    payloads: PayloadProjection<T, V, B>,
     /// If any, the transaction progress
     in_tx: bool,
 }
 
-impl<T, V> FromSettings<T::State> for PgsqlStorage<T, V>
+impl<T, V, B> FromSettings<T::State> for PgsqlStorage<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     T::State: Sync + Clone,
     V: PayloadInDb + Send + Sync,
+    B: GenericClient + Send + Sync,
 {
     type Settings = SqlStorageSettings;
 
@@ -242,68 +282,53 @@ where
     }
 }
 
-/// Return the current epoch for a given table pair. Note that there always will
-/// be a matching row, for the state initialization will always commit the
-/// initial state to the database, even if the tree is left empty.
-///
-/// Fail if the DB query fails.
-async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64), RyhopeError> {
-    trace!("fetching epoch data for `{table}`");
-    let connection = db.get().await.unwrap();
-    connection
-        .query_one(
-            &format!("SELECT MIN({VALID_FROM}), MAX({VALID_UNTIL}) FROM {table}_meta",),
-            &[],
-        )
-        .await
-        .map(|r| (r.get(0), r.get(1)))
-        .map_err(|err| RyhopeError::from_db("fetching current epoch data", err))
-}
-
-impl<T, V> std::fmt::Display for PgsqlStorage<T, V>
+impl<T, V, B> std::fmt::Display for PgsqlStorage<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: PayloadInDb,
     T::Node: Sync + Clone,
     T::State: Sync + Clone,
+    B: GenericClient + Send + Sync,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "PgSqlStorage {}@{}", self.table, self.epoch)
     }
 }
-impl<T, V> PgsqlStorage<T, V>
+
+impl<T, V, B> PgsqlStorage<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: PayloadInDb,
     T::Node: Sync + Clone,
     T::State: Sync + Clone,
+    B: GenericClient + Send + Sync,
 {
     /// Create a new tree storage with the given initial epoch and its
     /// associated tables in the specified table.
     ///
     /// Will fail if the table already exists.
     pub async fn create_new_at(
-        db_src: &SqlServerConnection,
+        db: B,
         table: String,
         tree_state: T::State,
         epoch: Epoch,
-    ) -> Result<Self, RyhopeError> {
+    ) -> Result<PgsqlStorage<T, V, B>, RyhopeError> {
         debug!("creating new table for `{table}` at epoch {epoch}");
-        let db_pool = Self::init_db_pool(db_src).await?;
-
         ensure(
-            fetch_epoch_data(db_pool.clone(), &table).await.is_err(),
+            fetch_epoch_data(&db, &table).await.is_err(),
             format!("table `{table}` already exists"),
         )?;
-        Self::create_tables(db_pool.clone(), &table).await?;
+        Self::create_tables(&db, &table).await?;
 
-        let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
+        let db = Arc::new(Mutex::new(db));
+
+        let tree_store = Arc::new(std::sync::Mutex::new(CachedDbTreeStore::new(
             epoch,
             epoch,
             table.clone(),
-            db_pool.clone(),
+            db.clone(),
         )));
         let nodes = NodeProjection {
             wrapped: tree_store.clone(),
@@ -314,125 +339,15 @@ where
 
         let r = Self {
             table: table.clone(),
-            db: db_pool.clone(),
+            db: db.clone(),
             epoch,
             in_tx: false,
             tree_store,
             nodes,
             payloads,
-            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
-                .await?,
+            state: CachedDbStore::with_value(epoch, table.clone(), db.clone(), tree_state).await?,
         };
         Ok(r)
-    }
-
-    /// Initialize the storage backend from an existing table in database.
-    ///
-    /// Fails if the specified table does not exist.
-    pub async fn load_existing(
-        db_src: &SqlServerConnection,
-        table: String,
-    ) -> Result<Self, RyhopeError> {
-        let db_pool = Self::init_db_pool(db_src).await?;
-
-        let (initial_epoch, latest_epoch) = fetch_epoch_data(db_pool.clone(), &table).await?;
-        debug!("loading `{table}`; latest epoch is {latest_epoch}");
-        let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
-            initial_epoch,
-            latest_epoch,
-            table.clone(),
-            db_pool.clone(),
-        )));
-        let nodes = NodeProjection {
-            wrapped: tree_store.clone(),
-        };
-        let payloads = PayloadProjection {
-            wrapped: tree_store.clone(),
-        };
-
-        let r = Self {
-            table: table.clone(),
-            db: db_pool.clone(),
-            epoch: latest_epoch,
-            state: CachedDbStore::new(initial_epoch, latest_epoch, table.clone(), db_pool.clone()),
-            tree_store,
-            nodes,
-            payloads,
-            in_tx: false,
-        };
-
-        Ok(r)
-    }
-
-    /// Create a new tree storage and its associated table in the specified
-    /// table, deleting it if it already exists.
-    pub async fn reset_at(
-        db_src: &SqlServerConnection,
-        table: String,
-        tree_state: T::State,
-        initial_epoch: Epoch,
-    ) -> Result<Self, RyhopeError> {
-        debug!("resetting table `{table}` at epoch {initial_epoch}");
-        let db_pool = Self::init_db_pool(db_src).await?;
-
-        delete_storage_table(db_pool.clone(), &table).await?;
-        Self::create_tables(db_pool.clone(), &table).await?;
-
-        let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
-            initial_epoch,
-            initial_epoch,
-            table.clone(),
-            db_pool.clone(),
-        )));
-        let nodes = NodeProjection {
-            wrapped: tree_store.clone(),
-        };
-        let payloads = PayloadProjection {
-            wrapped: tree_store.clone(),
-        };
-
-        let r = Self {
-            table: table.clone(),
-            db: db_pool.clone(),
-            epoch: initial_epoch,
-            state: CachedDbStore::with_value(
-                initial_epoch,
-                table.clone(),
-                db_pool.clone(),
-                tree_state,
-            )
-            .await?,
-            tree_store,
-            nodes,
-            payloads,
-            in_tx: false,
-        };
-
-        Ok(r)
-    }
-
-    /// Initialize a DB pool.
-    pub async fn init_db_pool(db_src: &SqlServerConnection) -> Result<DBPool, RyhopeError> {
-        match db_src {
-            SqlServerConnection::NewConnection(db_url) => {
-                info!("Connecting to `{db_url}`");
-                let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
-                    .map_err(|err| {
-                        RyhopeError::from_db(
-                            format!("while connecting to postgreSQL with `{}`", db_url),
-                            err,
-                        )
-                    })?;
-                let db_pool = DBPool::builder()
-                    .build(db_manager)
-                    .await
-                    .map_err(|err| RyhopeError::from_db("creating DB pool", err))?;
-                debug!("connection successful.");
-
-                Ok(db_pool)
-            }
-            SqlServerConnection::Pool(pool) => Ok(pool.clone()),
-        }
     }
 
     /// Create the tables required to store the a tree. For a given tree, two
@@ -458,46 +373,119 @@ where
     ///     the tree at the given epoch range.
     ///
     /// Will fail if the CREATE is not valid (e.g. the table already exists)
-    async fn create_tables(db: DBPool, table: &str) -> Result<(), RyhopeError> {
+    async fn create_tables(db: &B, table: &str) -> Result<(), RyhopeError> {
         let node_columns = <T as DbConnector<V>>::columns()
             .iter()
             .map(|(name, t)| format!("{name} {t},"))
             .join("\n");
 
         // The main table will store all the tree nodes and their payload.
-        let connection = db.get().await.unwrap();
-        connection
-            .execute(
-                &format!(
-                    "CREATE TABLE {table} (
+        db.execute(
+            &format!(
+                "CREATE TABLE {table} (
                    {KEY}          BYTEA NOT NULL,
                    {VALID_FROM}   BIGINT NOT NULL,
                    {VALID_UNTIL}  BIGINT DEFAULT -1,
                    {node_columns}
                    UNIQUE ({KEY}, {VALID_FROM}))"
-                ),
-                &[],
-            )
-            .await
-            .map(|_| ())
-            .map_err(|err| RyhopeError::from_db(format!("creating table `{table}`"), err))?;
+            ),
+            &[],
+        )
+        .await
+        .map(|_| ())
+        .map_err(|err| RyhopeError::from_db(format!("creating table `{table}`"), err))?;
 
         // The meta table will store everything related to the tree itself.
-        connection
-            .execute(
-                &format!(
-                    "CREATE TABLE {table}_meta (
+        db.execute(
+            &format!(
+                "CREATE TABLE {table}_meta (
                    {VALID_FROM}   BIGINT NOT NULL UNIQUE,
                    {VALID_UNTIL}  BIGINT DEFAULT -1,
                    {PAYLOAD}      JSONB)"
-                ),
-                &[],
-            )
-            .await
-            .map(|_| ())
-            .map_err(|err| RyhopeError::from_db(format!("creating table `{table}_meta`"), err))?;
+            ),
+            &[],
+        )
+        .await
+        .map(|_| ())
+        .map_err(|err| RyhopeError::from_db(format!("creating table `{table}_meta`"), err))?;
 
         Ok(())
+    }
+
+    /// Initialize the storage backend from an existing table in database.
+    ///
+    /// Fails if the specified table does not exist.
+    pub async fn load_existing(db: B, table: String) -> Result<Self, RyhopeError> {
+        let (initial_epoch, latest_epoch) = fetch_epoch_data(&db, &table).await?;
+        debug!("loading `{table}`; latest epoch is {latest_epoch}");
+        let db = Arc::new(Mutex::new(db));
+        let tree_store = Arc::new(std::sync::Mutex::new(CachedDbTreeStore::new(
+            initial_epoch,
+            latest_epoch,
+            table.clone(),
+            db.clone(),
+        )));
+        let nodes = NodeProjection {
+            wrapped: tree_store.clone(),
+        };
+        let payloads = PayloadProjection {
+            wrapped: tree_store.clone(),
+        };
+
+        let r = Self {
+            table: table.clone(),
+            db: db.clone(),
+            epoch: latest_epoch,
+            state: CachedDbStore::new(initial_epoch, latest_epoch, table.clone(), db.clone()),
+            tree_store,
+            nodes,
+            payloads,
+            in_tx: false,
+        };
+
+        Ok(r)
+    }
+
+    /// Create a new tree storage and its associated table in the specified
+    /// table, deleting it if it already exists.
+    pub async fn reset_at(
+        db: B,
+        table: String,
+        tree_state: T::State,
+        initial_epoch: Epoch,
+    ) -> Result<Self, RyhopeError> {
+        debug!("resetting table `{table}` at epoch {initial_epoch}");
+        delete_storage_table(&db, &table).await?;
+        Self::create_tables(&db, &table).await?;
+
+        let db = Arc::new(Mutex::new(db));
+
+        let tree_store = Arc::new(std::sync::Mutex::new(CachedDbTreeStore::new(
+            initial_epoch,
+            initial_epoch,
+            table.clone(),
+            db.clone(),
+        )));
+        let nodes = NodeProjection {
+            wrapped: tree_store.clone(),
+        };
+        let payloads = PayloadProjection {
+            wrapped: tree_store.clone(),
+        };
+
+        let r = Self {
+            table: table.clone(),
+            db: db.clone(),
+            epoch: initial_epoch,
+            state: CachedDbStore::with_value(initial_epoch, table.clone(), db.clone(), tree_state)
+                .await?,
+            tree_store,
+            nodes,
+            payloads,
+            in_tx: false,
+        };
+
+        Ok(r)
     }
 
     /// Close the lifetim of a row to `self.epoch`.
@@ -684,13 +672,14 @@ where
     }
 }
 
-impl<T: TreeTopology, V: PayloadInDb> TransactionalStorage for PgsqlStorage<T, V>
+impl<T: TreeTopology, V: PayloadInDb, B> TransactionalStorage for PgsqlStorage<T, V, B>
 where
     V: Send + Sync,
     T: DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Send + Sync + Clone,
     T::State: Send + Sync + Clone,
+    B: GenericClient + Send + Sync,
 {
     fn start_transaction(&mut self) -> Result<(), RyhopeError> {
         if self.in_tx {
@@ -707,8 +696,8 @@ where
             return Err(RyhopeError::NotInATransaction);
         }
         trace!("[{self}] commiting transaction");
-        let pool = self.db.clone();
-        let mut connection = pool.get().await.unwrap();
+        let db = self.db.clone();
+        let mut connection = db.lock().await;
         let mut db_tx = connection
             .transaction()
             .await
@@ -730,13 +719,14 @@ where
     }
 }
 
-impl<T: TreeTopology, V: PayloadInDb> SqlTransactionStorage for PgsqlStorage<T, V>
+impl<T: TreeTopology, V: PayloadInDb, B> SqlTransactionStorage for PgsqlStorage<T, V, B>
 where
     V: Send + Sync,
     T: DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Send + Sync + Clone,
     T::State: Send + Sync + Clone,
+    B: GenericClient + Send + Sync,
 {
     async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<(), RyhopeError> {
         trace!("[{self}] API-facing commit_in called");
@@ -754,16 +744,17 @@ where
     }
 }
 
-impl<T, V> TreeStorage<T> for PgsqlStorage<T, V>
+impl<T, V, B> TreeStorage<T> for PgsqlStorage<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     V: PayloadInDb + Send,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     T::State: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
+    B: GenericClient + Send + Sync,
 {
-    type StateStorage = CachedDbStore<T::State>;
-    type NodeStorage = NodeProjection<T, V>;
+    type StateStorage = CachedDbStore<T::State, B>;
+    type NodeStorage = NodeProjection<T, V, B>;
 
     fn state(&self) -> &Self::StateStorage {
         &self.state
@@ -782,8 +773,9 @@ where
     }
 
     async fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
-        let connection = self.db.get().await.unwrap();
-        connection
+        self.db
+            .lock()
+            .await
             .query(
                 &format!("SELECT {KEY} FROM {} WHERE {VALID_FROM}=$1", self.table),
                 &[&epoch],
@@ -811,7 +803,7 @@ where
     }
 }
 
-impl<T, V> PayloadStorage<T::Key, V> for PgsqlStorage<T, V>
+impl<T, V, B> PayloadStorage<T::Key, V> for PgsqlStorage<T, V, B>
 where
     Self: TreeStorage<T>,
     T: TreeTopology + DbConnector<V>,
@@ -820,8 +812,9 @@ where
     T::Node: Sync + Clone,
     T::State: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
     V: Sync,
+    B: GenericClient + Send + Sync,
 {
-    type DataStorage = PayloadProjection<T, V>;
+    type DataStorage = PayloadProjection<T, V, B>;
 
     fn data(&self) -> &Self::DataStorage {
         &self.payloads
@@ -832,7 +825,7 @@ where
     }
 }
 
-impl<T, V> MetaOperations<T, V> for PgsqlStorage<T, V>
+impl<T, V, B> MetaOperations<T, V> for PgsqlStorage<T, V, B>
 where
     Self: TreeStorage<T>,
     T: TreeTopology + DbConnector<V>,
@@ -841,6 +834,7 @@ where
     T::Node: Sync + Clone,
     T::State: Debug + Sync + Clone + Serialize + for<'a> Deserialize<'a>,
     V: Sync,
+    B: GenericClient + Send + Sync,
 {
     type KeySource = String;
 
