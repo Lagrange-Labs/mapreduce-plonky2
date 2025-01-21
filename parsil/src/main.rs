@@ -6,7 +6,7 @@ use assembler::assemble_static;
 use clap::{Parser, Subcommand};
 use log::Level;
 use parsil::queries::{core_keys_for_index_tree, core_keys_for_row_tree};
-use ryhope::{tree::sbbst::NodeIdx, Epoch};
+use ryhope::{tree::sbbst::NodeIdx, UserEpoch};
 use sqlparser::ast::Query;
 use symbols::{ContextProvider, FileContextProvider};
 use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
@@ -81,7 +81,7 @@ enum Command {
 
         #[arg(short = 'E', long)]
         /// The epoch at which to run the query
-        epoch: Epoch,
+        epoch: UserEpoch,
 
         #[arg(short = 'm', long)]
         /// Primary index lower bound
@@ -90,6 +90,9 @@ enum Command {
         #[arg(short = 'M', long)]
         /// Primary index upper bound
         max_block: i64,
+        #[arg(short = 'n', long)]
+        /// Name of the table to query
+        table_name: String,
     },
 }
 
@@ -100,8 +103,8 @@ enum QueryKind {
 }
 
 fn prepare<C: ContextProvider>(settings: &ParsilSettings<C>, query: &str) -> Result<Query> {
-    let mut query = parser::parse(settings, query)?;
-    expand::expand(&mut query);
+    let mut query = parser::parse(query)?;
+    expand::expand(settings, &mut query);
     Ok(query)
 }
 
@@ -111,6 +114,8 @@ fn main() -> Result<()> {
     let settings = ParsilSettings {
         context: FileContextProvider::from_file("tests/context.json")?,
         placeholders: PlaceholderSettings::with_freestanding(3),
+        limit: None,
+        offset: None,
     };
 
     match args.command {
@@ -178,10 +183,14 @@ fn main() -> Result<()> {
             epoch,
             min_block,
             max_block,
+            table_name,
         } => {
             let mut query = parse_and_validate(&request, &settings)?;
-            let query_index =
-                core_keys_for_index_tree(epoch, (min_block as NodeIdx, max_block as NodeIdx))?;
+            let query_index = core_keys_for_index_tree(
+                epoch,
+                (min_block as NodeIdx, max_block as NodeIdx),
+                &table_name,
+            )?;
             // let query_row = core_keys_for_row_tree(
             //     qeury,
             //     &settings,
