@@ -10,8 +10,10 @@ use crate::{symbols::ContextProvider, ParsilSettings};
 /// given lower bound, and the smallest sec. ind. value larger than the given higher bound.
 ///
 /// The method returns also a preliminary query to be run in order to compute the value of
-/// the parameter to be provided to the two queries. This preliminary query is the same for
-/// both queries.
+/// the epoch parameter to be provided to the two queries. Such a parameter is the actual
+/// epoch in the DB that corresponds to the `block_number` provided as an argument to this
+/// method. Note that the epoch parameter is the same for both queries, so the preliminary
+/// query can be just run once and the result used for either of the two queries.
 ///
 /// If the lower or higher bound are the extrema of the U256 definition domain,
 /// the associated query is `None`, reflecting the impossibility for a node
