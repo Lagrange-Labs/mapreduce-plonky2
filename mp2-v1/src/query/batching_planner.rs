@@ -126,42 +126,41 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
                 .unwrap_or_else(|| {
                     panic!("node with key {index_value} not found in index tree cache")
                 });
-            let proven_rows = if let Some(matching_rows) =
-                row_keys_by_epochs.get(&(index_value as UserEpoch))
-            {
-                let sorted_rows = matching_rows.iter().collect::<BTreeSet<_>>();
-                stream::iter(sorted_rows.iter())
-                    .then(async |&row_key| {
-                        compute_input_for_row(
-                            &row_cache,
-                            row_key,
-                            index_value,
-                            &index_path,
-                            column_ids,
-                        )
+            let proven_rows =
+                if let Some(matching_rows) = row_keys_by_epochs.get(&(index_value as UserEpoch)) {
+                    let sorted_rows = matching_rows.iter().collect::<BTreeSet<_>>();
+                    stream::iter(sorted_rows.iter())
+                        .then(async |&row_key| {
+                            compute_input_for_row(
+                                &row_cache,
+                                row_key,
+                                index_value,
+                                &index_path,
+                                column_ids,
+                            )
+                            .await
+                        })
+                        .collect::<Vec<RowInput>>()
                         .await
-                    })
-                    .collect::<Vec<RowInput>>()
-                    .await
-            } else {
-                let proven_node = non_existence_inputs
-                    .find_row_node_for_non_existence(index_value)
-                    .await
-                    .unwrap_or_else(|e| {
-                        panic!(
+                } else {
+                    let proven_node = non_existence_inputs
+                        .find_row_node_for_non_existence(index_value)
+                        .await
+                        .unwrap_or_else(|e| {
+                            panic!(
                             "node for non-existence not found for index value {index_value}: {e:?}"
                         )
-                    });
-                let row_input = compute_input_for_row(
-                    non_existence_inputs.row_tree,
-                    &proven_node,
-                    index_value,
-                    &index_path,
-                    column_ids,
-                )
-                .await;
-                vec![row_input]
-            };
+                        });
+                    let row_input = compute_input_for_row(
+                        non_existence_inputs.row_tree,
+                        &proven_node,
+                        index_value,
+                        &index_path,
+                        column_ids,
+                    )
+                    .await;
+                    vec![row_input]
+                };
             proven_rows
         })
         .concat()
