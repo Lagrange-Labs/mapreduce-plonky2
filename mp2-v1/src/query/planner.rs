@@ -81,7 +81,7 @@ impl<'a, C: ContextProvider> NonExistenceInput<'a, C> {
             "Preliminary query returned more than one row"
         );
         let param = params[0].get::<_, U256>(0);
-        
+
         // try first with lower node than secondary min query bound
         let to_be_proven_node = match find_node_for_proof(
             self.pool,
