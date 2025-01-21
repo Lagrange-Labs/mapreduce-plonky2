@@ -1,10 +1,9 @@
 use mp2_common::{
     default_config,
-    keccak::{OutputHash, PACKED_HASH_LEN},
+    keccak::OutputHash,
     proof::{deserialize_proof, verify_proof_fixed_circuit, ProofWithVK},
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    u256::UInt256Target,
     utils::{FromTargets, ToTargets},
     C, D, F,
 };
@@ -19,7 +18,7 @@ use plonky2::{
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
-use plonky2_ecgfp5::gadgets::curve::CurveTarget;
+
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
@@ -41,17 +40,6 @@ use anyhow::Result;
 /// between all the final extraction circuits. It should not be used on its own.
 #[derive(Debug, Clone, Copy)]
 pub struct ReceiptExtractionCircuit;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReceiptExtractionWires {
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    pub(crate) dm: CurveTarget,
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    pub(crate) dv: CurveTarget,
-    pub(crate) bh: [Target; PACKED_HASH_LEN],
-    pub(crate) prev_bh: [Target; PACKED_HASH_LEN],
-    pub(crate) bn: UInt256Target,
-}
 
 impl ReceiptExtractionCircuit {
     pub(crate) fn build(
@@ -226,6 +214,7 @@ pub(crate) mod test {
 
     use mp2_common::{
         keccak::PACKED_HASH_LEN,
+        rlp::MAX_KEY_NIBBLE_LEN,
         utils::{Endianness, Packer, ToFields},
     };
     use mp2_test::{
@@ -348,7 +337,7 @@ pub(crate) mod test {
 
         pub(crate) fn random() -> Self {
             let value_h = HashOut::<F>::rand().to_bytes().pack(Endianness::Little);
-            let key = random_vector(64);
+            let key = random_vector(MAX_KEY_NIBBLE_LEN);
             let ptr = usize::MAX;
             let value_dv = Point::rand();
             let value_dm = Point::rand();

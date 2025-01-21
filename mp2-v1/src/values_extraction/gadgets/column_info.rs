@@ -2,8 +2,10 @@
 
 use itertools::{zip_eq, Itertools};
 use mp2_common::{
+    array::Array,
     eth::{left_pad, left_pad32},
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
+    keccak::PACKED_HASH_LEN,
     poseidon::H,
     types::{CBuilder, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer},
@@ -12,13 +14,17 @@ use mp2_common::{
 use plonky2::{
     field::types::{Field, Sample},
     hash::hash_types::{HashOut, HashOutTarget},
-    iop::{target::Target, witness::WitnessWrite},
+    iop::{
+        target::{BoolTarget, Target},
+        witness::WitnessWrite,
+    },
     plonk::config::Hasher,
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{curve::curve::Point, gadgets::curve::CurveTarget};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
-use std::{array, iter::once};
+use std::iter::once;
 
 /// Trait defining common functionality between [`InputColumnInfo`] and [`ExtractedColumnInfo`]
 pub trait ColumnInfo {
@@ -29,12 +35,17 @@ pub trait ColumnInfo {
     fn identifier(&self) -> u64;
 }
 
-/// Column info
+/// This struct is used for information in MPT nodes that isn't explicitly extractable from the node itself, but is used
+/// to prove that we are looking at the correct node. For instance with mapping keys the value stored for a mapping in slot `s` with key
+/// `k` is `keccak(keccak(s) || k)` where we use `||` to represent concatenation.
+///
+/// The metadata for these columns is also calculated slight differently so we seperate them from [`ExtractedColumnInfo`] since we never have to
+/// index into an array to get the value stored in a cell of one of these columns, thus reducing cost when calculating the values digest.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct InputColumnInfo {
     /// This is the information used to identify the data relative to the contract,
     /// for storage extraction its the slot, for receipts its the event signature for example
-    pub extraction_identifier: [F; 8],
+    pub extraction_identifier: [F; PACKED_HASH_LEN],
     /// Column identifier
     pub identifier: F,
     /// Prefix used in computing mpt metadata
@@ -52,7 +63,7 @@ impl InputColumnInfo {
         length: usize,
     ) -> Self {
         let mut extraction_vec = extraction_identifier.pack(Endianness::Little);
-        extraction_vec.resize(8, 0u32);
+        extraction_vec.resize(PACKED_HASH_LEN, 0u32);
         extraction_vec.reverse();
         let extraction_identifier = extraction_vec
             .into_iter()
@@ -128,12 +139,15 @@ impl InputColumnInfo {
     }
 }
 
-/// Column info
+/// This struct stores all the infomation that corresponds to data we actually extract from a MPT Leaf Node.
+/// For instance in a storage leaf `self.extraction_identifier` would be the slot, `self.identifier` is this columns identifier in the table
+/// `self.byte_offset` is how far from the start of the value stored in the node this extracted data begins, `self.length` is the number of bytes the data takes up
+/// and `self.location_offset` is used in storage for signaling that this data is extracted from an object that may span multiple EVM words.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize, Copy)]
 pub struct ExtractedColumnInfo {
     /// This is the information used to identify the data relative to the contract,
     /// for storage extraction its the slot, for receipts its the event signature for example
-    pub extraction_identifier: [F; 8],
+    pub extraction_identifier: [F; PACKED_HASH_LEN],
     /// Column identifier
     pub identifier: F,
     /// The offset in bytes where to extract this column from some predetermined start point,
@@ -141,7 +155,7 @@ pub struct ExtractedColumnInfo {
     /// this would be either the offset from the start of the receipt or from the start of the
     /// relevant log       
     pub byte_offset: F,
-    /// The length (in bits) of the field to extract in the EVM word
+    /// The length in bytes of the field to extract in the EVM word
     pub length: F,
     /// For storage this is the EVM word, for receipts this is either 1 or 0 and indicates whether to
     /// use the relevant log offset or not.
@@ -173,7 +187,7 @@ impl ExtractedColumnInfo {
         location_offset: u32,
     ) -> Self {
         let mut extraction_vec = extraction_identifier.pack(Endianness::Little);
-        extraction_vec.resize(8, 0u32);
+        extraction_vec.resize(PACKED_HASH_LEN, 0u32);
         extraction_vec.reverse();
         let extraction_identifier = extraction_vec
             .into_iter()
@@ -195,7 +209,10 @@ impl ExtractedColumnInfo {
     }
 
     /// Create a sample column info. It could be used in integration tests.
-    pub fn sample_storage(extraction_identifier: &[F; 8], location_offset: F) -> Self {
+    pub fn sample_storage(
+        extraction_identifier: &[F; PACKED_HASH_LEN],
+        location_offset: F,
+    ) -> Self {
         let rng = &mut thread_rng();
 
         let length: usize = rng.gen_range(1..=MAPPING_LEAF_VALUE_LEN);
@@ -213,9 +230,13 @@ impl ExtractedColumnInfo {
         }
     }
 
-    /// Sample a ne [`ExtractedColumnInfo`] at random, if `flag` is `true` then it will be for storage extraction,
+    /// Sample a new [`ExtractedColumnInfo`] at random, if `flag` is `true` then it will be for storage extraction,
     /// if false it will be for receipt extraction.
-    pub fn sample(flag: bool, extraction_identifier: &[F; 8], location_offset: F) -> Self {
+    pub fn sample(
+        flag: bool,
+        extraction_identifier: &[F; PACKED_HASH_LEN],
+        location_offset: F,
+    ) -> Self {
         if flag {
             ExtractedColumnInfo::sample_storage(extraction_identifier, location_offset)
         } else {
@@ -273,13 +294,12 @@ impl ExtractedColumnInfo {
     }
 
     pub fn value_digest(&self, value: &[u8]) -> Point {
-        if self.identifier().0 == 0 {
+        // If the column identifier is zero then its a dummy column. This is because the column identifier
+        // is always computed as the output of a hash which is EXTREMELY unlikely to be exactly zero.
+        if self.identifier() == F::ZERO {
             Point::NEUTRAL
         } else {
-            let bytes = left_pad32(
-                &value[self.byte_offset().0 as usize
-                    ..self.byte_offset().0 as usize + self.length.0 as usize],
-            );
+            let bytes = self.extract_value(value);
 
             let inputs = once(self.identifier())
                 .chain(
@@ -337,7 +357,7 @@ impl ColumnInfo for ExtractedColumnInfo {
 pub struct ExtractedColumnInfoTarget {
     /// This is the information used to identify the data relative to the contract,
     /// for storage extraction its the slot, for receipts its the event signature for example
-    pub(crate) extraction_identifier: [Target; 8],
+    pub(crate) extraction_identifier: [Target; PACKED_HASH_LEN],
     /// Column identifier
     pub(crate) identifier: Target,
     /// The offset in bytes where to extract this column from some predetermined start point,
@@ -375,7 +395,7 @@ impl ExtractedColumnInfoTarget {
         b.map_to_curve_point(&inputs)
     }
 
-    pub fn extraction_id(&self) -> [Target; 8] {
+    pub fn extraction_id(&self) -> [Target; PACKED_HASH_LEN] {
         self.extraction_identifier
     }
 
@@ -394,6 +414,55 @@ impl ExtractedColumnInfoTarget {
     pub fn location_offset(&self) -> Target {
         self.location_offset
     }
+
+    /// Functionality used to conditionally extract data from a slice.
+    /// `conditional` represents whether the value should actually be extracted or not, it should be set to `false` if actual extraction occurs
+    /// `start` is the first index we look at.
+    pub fn extract_value<const VALUE_LEN: usize>(
+        &self,
+        b: &mut CBuilder,
+        conditional: BoolTarget,
+        value: &Array<Target, VALUE_LEN>,
+        start: Target,
+    ) -> Array<U32Target, PACKED_HASH_LEN> {
+        let zero = b.zero();
+        let mut last_byte_found = conditional;
+        // Even if the constant `VALUE_LEN` is larger than 32 this is the maximum size in bytes
+        // of data that we extract per column
+        let mut result_bytes = [zero; 32];
+        result_bytes
+            .iter_mut()
+            .rev()
+            .enumerate()
+            .for_each(|(i, out_byte)| {
+                // offset = info.byte_offset + i
+                let index = b.constant(F::from_canonical_usize(i));
+                let offset = b.sub(start, index);
+                // Set to 0 if found the last byte.
+                let offset = b.select(last_byte_found, zero, offset);
+
+                // Since VALUE_LEN is a constant that is determined at compile time this conditional won't
+                // cause any issues with the circuit.
+                let byte = if VALUE_LEN < 64 {
+                    b.random_access(offset, value.arr.to_vec())
+                } else {
+                    value.random_access_large_array(b, offset)
+                };
+
+                // Now if `last_byte_found` is true we add zero, otherwise add `byte`
+                let to_add = b.select(last_byte_found, zero, byte);
+
+                *out_byte = b.add(*out_byte, to_add);
+                // is_last_byte = offset == last_byte_offset
+                let is_last_byte = b.is_equal(offset, self.byte_offset);
+                // last_byte_found |= is_last_byte
+                last_byte_found = b.or(last_byte_found, is_last_byte);
+            });
+
+        let result_arr = Array::<Target, 32>::from_array(result_bytes);
+
+        Array::<Target, 32>::pack(&result_arr, b, Endianness::Big)
+    }
 }
 
 /// Column info
@@ -401,11 +470,11 @@ impl ExtractedColumnInfoTarget {
 pub struct InputColumnInfoTarget {
     /// This is the information used to identify the data relative to the contract,
     /// for storage extraction its the slot, for receipts its the event signature for example
-    pub extraction_identifier: [Target; 8],
+    pub extraction_identifier: [Target; PACKED_HASH_LEN],
     /// Column identifier
     pub identifier: Target,
     /// Prefix used in computing mpt metadata
-    pub metadata_prefix: [Target; 8],
+    pub metadata_prefix: [Target; PACKED_HASH_LEN],
     /// The length of the field to extract in the EVM word
     pub length: Target,
 }
@@ -456,9 +525,9 @@ pub trait CircuitBuilderColumnInfo {
 
 impl CircuitBuilderColumnInfo for CBuilder {
     fn add_virtual_extracted_column_info(&mut self) -> ExtractedColumnInfoTarget {
-        let extraction_identifier: [Target; 8] = array::from_fn(|_| self.add_virtual_target());
-        let [identifier, byte_offset, length, location_offset] =
-            array::from_fn(|_| self.add_virtual_target());
+        let extraction_identifier: [Target; PACKED_HASH_LEN] = self.add_virtual_target_arr();
+
+        let [identifier, byte_offset, length, location_offset] = self.add_virtual_target_arr();
 
         ExtractedColumnInfoTarget {
             extraction_identifier,
@@ -470,9 +539,11 @@ impl CircuitBuilderColumnInfo for CBuilder {
     }
 
     fn add_virtual_input_column_info(&mut self) -> InputColumnInfoTarget {
-        let extraction_identifier: [Target; 8] = array::from_fn(|_| self.add_virtual_target());
-        let metadata_prefix: [Target; 8] = array::from_fn(|_| self.add_virtual_target());
-        let [identifier, length] = array::from_fn(|_| self.add_virtual_target());
+        let extraction_identifier: [Target; PACKED_HASH_LEN] = self.add_virtual_target_arr();
+
+        let metadata_prefix: [Target; PACKED_HASH_LEN] = self.add_virtual_target_arr();
+
+        let [identifier, length] = self.add_virtual_target_arr();
 
         InputColumnInfoTarget {
             extraction_identifier,

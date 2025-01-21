@@ -9,9 +9,9 @@ use itertools::Itertools;
 
 use alloy::primitives::Address;
 use mp2_common::{
-    eth::{left_pad32, EventLogInfo, StorageSlot},
+    eth::{left_pad32, StorageSlot},
     poseidon::{empty_poseidon_hash, hash_to_int_value, H},
-    types::{GFp, HashOutput},
+    types::HashOutput,
     utils::{Endianness, Packer, ToFields},
     F,
 };
@@ -348,24 +348,24 @@ where
 }
 
 /// Prefix used for making a topic column id.
-const TOPIC_PREFIX: &[u8] = b"topic";
+pub const TOPIC_PREFIX: &[u8] = b"topic";
 /// [`TOPIC_PREFIX`] as a [`str`]
-const TOPIC_NAME: &str = "topic";
+pub const TOPIC_NAME: &str = "topic";
 
 /// Prefix used for making a data column id.
-const DATA_PREFIX: &[u8] = b"data";
+pub const DATA_PREFIX: &[u8] = b"data";
 /// [`DATA_PREFIX`] as a [`str`]
-const DATA_NAME: &str = "data";
+pub const DATA_NAME: &str = "data";
 
 /// Prefix for transaction index
-const TX_INDEX_PREFIX: &[u8] = b"tx index";
+pub const TX_INDEX_PREFIX: &[u8] = b"tx_index";
 /// [`TX_INDEX_PREFIX`] as a [`str`]
-const TX_INDEX_NAME: &str = "tx index";
+pub const TX_INDEX_NAME: &str = "tx_index";
 
 /// Prefix for gas used
-const GAS_USED_PREFIX: &[u8] = b"gas used";
+pub const GAS_USED_PREFIX: &[u8] = b"gas_used";
 /// [`GAS_USED_PREFIX`] as a [`str`]
-const GAS_USED_NAME: &str = "gas used";
+pub const GAS_USED_NAME: &str = "gas_used";
 
 pub fn identifier_block_column() -> ColumnId {
     let inputs: Vec<F> = BLOCK_ID_DST.to_fields();
@@ -539,94 +539,4 @@ pub fn row_unique_data_for_mapping_of_mappings_leaf(
     // row_unique_data = H(outer_key || inner_key)
     let inputs = packed_outer_key.chain(packed_inner_key).collect_vec();
     H::hash_no_pad(&inputs).into()
-}
-
-/// Function that computes the column identifiers for the non-indexed columns together with their names as [`String`]s.
-pub fn compute_non_indexed_receipt_column_ids<const NO_TOPICS: usize, const MAX_DATA: usize>(
-    event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
-) -> Vec<(String, GFp)> {
-    let gas_used_input = [
-        event.address.as_slice(),
-        event.event_signature.as_slice(),
-        GAS_USED_PREFIX,
-    ]
-    .concat()
-    .into_iter()
-    .map(GFp::from_canonical_u8)
-    .collect::<Vec<GFp>>();
-    let gas_used_column_id = H::hash_no_pad(&gas_used_input).elements[0];
-
-    let topic_ids = event
-        .topics
-        .iter()
-        .enumerate()
-        .map(|(j, _)| {
-            let input = [
-                event.address.as_slice(),
-                event.event_signature.as_slice(),
-                TOPIC_PREFIX,
-                &[j as u8 + 1],
-            ]
-            .concat()
-            .into_iter()
-            .map(GFp::from_canonical_u8)
-            .collect::<Vec<GFp>>();
-            (
-                format!("{}_{}", TOPIC_NAME, j + 1),
-                H::hash_no_pad(&input).elements[0],
-            )
-        })
-        .collect::<Vec<(String, GFp)>>();
-
-    let data_ids = event
-        .data
-        .iter()
-        .enumerate()
-        .map(|(j, _)| {
-            let input = [
-                event.address.as_slice(),
-                event.event_signature.as_slice(),
-                DATA_PREFIX,
-                &[j as u8 + 1],
-            ]
-            .concat()
-            .into_iter()
-            .map(GFp::from_canonical_u8)
-            .collect::<Vec<GFp>>();
-            (
-                format!("{}_{}", DATA_NAME, j + 1),
-                H::hash_no_pad(&input).elements[0],
-            )
-        })
-        .collect::<Vec<(String, GFp)>>();
-
-    [
-        vec![(GAS_USED_NAME.to_string(), gas_used_column_id)],
-        topic_ids,
-        data_ids,
-    ]
-    .concat()
-}
-
-pub fn compute_all_receipt_coulmn_ids<const NO_TOPICS: usize, const MAX_DATA: usize>(
-    event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
-) -> Vec<(String, GFp)> {
-    let tx_index_input = [
-        event.address.as_slice(),
-        event.event_signature.as_slice(),
-        TX_INDEX_PREFIX,
-    ]
-    .concat()
-    .into_iter()
-    .map(GFp::from_canonical_u8)
-    .collect::<Vec<GFp>>();
-    let tx_index_column_id = (
-        TX_INDEX_NAME.to_string(),
-        H::hash_no_pad(&tx_index_input).elements[0],
-    );
-
-    let mut other_ids = compute_non_indexed_receipt_column_ids(event);
-    other_ids.insert(0, tx_index_column_id);
-
-    other_ids
 }

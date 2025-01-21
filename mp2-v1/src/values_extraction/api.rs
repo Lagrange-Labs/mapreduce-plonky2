@@ -46,9 +46,9 @@ const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 /// CircuitInput is a wrapper around the different specialized circuits that can
 /// be used to prove a MPT node recursively.
 #[derive(Serialize, Deserialize)]
-pub enum CircuitInput<const NODE_LEN: usize, const MAX_COLUMNS: usize>
+pub enum CircuitInput<const LEAF_LEN: usize, const MAX_COLUMNS: usize>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(LEAF_LEN)]:,
     [(); MAX_COLUMNS - 2]:,
     [(); MAX_COLUMNS - 1]:,
     [(); MAX_COLUMNS - 0]:,
@@ -56,14 +56,14 @@ where
     LeafSingle(LeafSingleCircuit<MAX_COLUMNS>),
     LeafMapping(LeafMappingCircuit<MAX_COLUMNS>),
     LeafMappingOfMappings(LeafMappingOfMappingsCircuit<MAX_COLUMNS>),
-    LeafReceipt(ReceiptLeafCircuit<NODE_LEN, 7>),
+    LeafReceipt(ReceiptLeafCircuit<LEAF_LEN, 7>),
     Extension(ExtensionInput),
     Branch(BranchInput),
 }
 
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize> CircuitInput<NODE_LEN, MAX_COLUMNS>
+impl<const LEAF_LEN: usize, const MAX_COLUMNS: usize> CircuitInput<LEAF_LEN, MAX_COLUMNS>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(LEAF_LEN)]:,
     [(); MAX_COLUMNS - 2]:,
     [(); MAX_COLUMNS - 1]:,
     [(); MAX_COLUMNS - 0]:,
@@ -120,6 +120,9 @@ where
         evm_word: u32,
         table_info: Vec<ExtractedColumnInfo>,
     ) -> Self {
+        // We calculate so called "Input" columns here. These are columns that involve data not explicitly extractable from an MPT node
+        // but are used in proving we are looking at the correct node. For instance mapping keys are used to calculate the position of a leaf node
+        // that we need to extract from, but only the output of a keccak hash of some combination of them is included in the node, hence we feed them in as witness.
         let outer_input_column =
             InputColumnInfo::new(&[slot], outer_key_id, OUTER_KEY_ID_PREFIX, 32);
         let inner_input_column =
@@ -142,16 +145,16 @@ where
     }
 
     /// Create a circuit input for proving a leaf MPT node of a transaction receipt.
-    pub fn new_receipt_leaf<const NO_TOPICS: usize, const MAX_DATA: usize>(
+    pub fn new_receipt_leaf<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
         last_node: &[u8],
         tx_index: u64,
-        event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
+        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
     ) -> Self
     where
-        [(); 7 - 2 - NO_TOPICS - MAX_DATA]:,
+        [(); 7 - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
     {
         CircuitInput::LeafReceipt(
-            ReceiptLeafCircuit::<NODE_LEN, 7>::new::<NO_TOPICS, MAX_DATA>(
+            ReceiptLeafCircuit::<LEAF_LEN, 7>::new::<NO_TOPICS, MAX_DATA_WORDS>(
                 last_node, tx_index, event,
             )
             .expect("Could not construct Receipt Leaf Circuit"),
@@ -180,9 +183,9 @@ where
 /// Most notably, it holds them in a way to use the recursion framework allowing
 /// us to specialize circuits according to the situation.
 #[derive(Eq, PartialEq, Serialize, Deserialize)]
-pub struct PublicParameters<const NODE_LEN: usize, const MAX_COLUMNS: usize>
+pub struct PublicParameters<const LEAF_LEN: usize, const MAX_COLUMNS: usize>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(LEAF_LEN)]:,
     [(); MAX_COLUMNS - 2]:,
     [(); MAX_COLUMNS - 1]:,
     [(); MAX_COLUMNS - 0]:,
@@ -191,7 +194,7 @@ where
     leaf_mapping: CircuitWithUniversalVerifier<F, C, D, 0, LeafMappingWires<MAX_COLUMNS>>,
     leaf_mapping_of_mappings:
         CircuitWithUniversalVerifier<F, C, D, 0, LeafMappingOfMappingsWires<MAX_COLUMNS>>,
-    leaf_receipt: CircuitWithUniversalVerifier<F, C, D, 0, ReceiptLeafWires<NODE_LEN, 7>>,
+    leaf_receipt: CircuitWithUniversalVerifier<F, C, D, 0, ReceiptLeafWires<LEAF_LEN, 7>>,
     extension: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionNodeWires>,
     #[cfg(not(test))]
     branches: BranchCircuits,
@@ -205,10 +208,10 @@ where
 
 /// Public API employed to build the MPT circuits, which are returned in
 /// serialized form.
-pub fn build_circuits_params<const NODE_LEN: usize, const MAX_COLUMNS: usize>(
-) -> PublicParameters<NODE_LEN, MAX_COLUMNS>
+pub fn build_circuits_params<const LEAF_LEN: usize, const MAX_COLUMNS: usize>(
+) -> PublicParameters<LEAF_LEN, MAX_COLUMNS>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(LEAF_LEN)]:,
     [(); MAX_COLUMNS - 2]:,
     [(); MAX_COLUMNS - 1]:,
     [(); MAX_COLUMNS - 0]:,
@@ -219,12 +222,12 @@ where
 /// Public API employed to generate a proof for the circuit specified by
 /// `CircuitInput`, employing the `circuit_params` generated with the
 /// `build_circuits_params` API.
-pub fn generate_proof<const NODE_LEN: usize, const MAX_COLUMNS: usize>(
-    circuit_params: &PublicParameters<NODE_LEN, MAX_COLUMNS>,
-    circuit_type: CircuitInput<NODE_LEN, MAX_COLUMNS>,
+pub fn generate_proof<const LEAF_LEN: usize, const MAX_COLUMNS: usize>(
+    circuit_params: &PublicParameters<LEAF_LEN, MAX_COLUMNS>,
+    circuit_type: CircuitInput<LEAF_LEN, MAX_COLUMNS>,
 ) -> Result<Vec<u8>>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(LEAF_LEN)]:,
     [(); MAX_COLUMNS - 2]:,
     [(); MAX_COLUMNS - 1]:,
     [(); MAX_COLUMNS - 0]:,
@@ -383,9 +386,9 @@ impl_branch_circuits!(TestBranchCircuits, 1, 4, 9);
 /// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 leaf mapping of mappings + 1 leaf receipt
 const MAPPING_CIRCUIT_SET_SIZE: usize = 8;
 
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize> PublicParameters<NODE_LEN, MAX_COLUMNS>
+impl<const LEAF_LEN: usize, const MAX_COLUMNS: usize> PublicParameters<LEAF_LEN, MAX_COLUMNS>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(LEAF_LEN)]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
     [(); MAX_COLUMNS - 2]:,
     [(); MAX_COLUMNS - 1]:,
@@ -416,7 +419,7 @@ where
             circuit_builder.build_circuit::<C, 0, LeafMappingOfMappingsWires<MAX_COLUMNS>>(());
 
         debug!("Building leaf receipt circuit");
-        let leaf_receipt = circuit_builder.build_circuit::<C, 0, ReceiptLeafWires<NODE_LEN, 7>>(());
+        let leaf_receipt = circuit_builder.build_circuit::<C, 0, ReceiptLeafWires<LEAF_LEN, 7>>(());
 
         debug!("Building extension circuit");
         let extension = circuit_builder.build_circuit::<C, 1, ExtensionNodeWires>(());
@@ -453,7 +456,7 @@ where
 
     fn generate_proof(
         &self,
-        circuit_type: CircuitInput<NODE_LEN, MAX_COLUMNS>,
+        circuit_type: CircuitInput<LEAF_LEN, MAX_COLUMNS>,
     ) -> Result<ProofWithVK> {
         let set = &self.get_circuit_set();
         match circuit_type {

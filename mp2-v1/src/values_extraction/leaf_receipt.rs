@@ -5,10 +5,7 @@ use super::{
     public_inputs::{PublicInputs, PublicInputsArgs},
 };
 
-use alloy::{
-    primitives::{Address, Log, B256},
-    rlp::Decodable,
-};
+use alloy::primitives::Address;
 use anyhow::Result;
 use mp2_common::{
     array::{Array, Targetable, Vector, VectorWire},
@@ -126,55 +123,18 @@ where
     [(); MAX_COLUMNS - 2]:,
 {
     /// Create a new [`ReceiptLeafCircuit`] from a [`ReceiptProofInfo`] and a [`EventLogInfo`]
-    pub fn new<const NO_TOPICS: usize, const MAX_DATA: usize>(
+    pub fn new<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
         last_node: &[u8],
         tx_index: u64,
-        event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
+        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
     ) -> Result<Self>
     where
-        [(); MAX_COLUMNS - 2 - NO_TOPICS - MAX_DATA]:,
+        [(); MAX_COLUMNS - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
     {
-        // Convert to Rlp form so we can use provided methods.
-        let node_rlp = rlp::Rlp::new(last_node);
+        // Get the relevant log offset
+        let relevant_log_offset = event.get_log_offset(last_node)?;
 
-        // The actual receipt data is item 1 in the list
-        let (receipt_rlp, receipt_off) = node_rlp.at_with_offset(1)?;
-        // The rlp encoded Receipt is not a list but a string that is formed of the `tx_type` followed by the remaining receipt
-        // data rlp encoded as a list. We retrieve the payload info so that we can work out relevant offsets later.
-        let receipt_str_payload = receipt_rlp.payload_info()?;
-
-        // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
-        let receipt_list = rlp::Rlp::new(&receipt_rlp.data()?[1..]);
-
-        // The logs themselves start are the item at index 3 in this list
-        let (logs_rlp, logs_off) = receipt_list.at_with_offset(3)?;
-
-        // We calculate the offset the that the logs are at from the start of the node
-        let logs_offset = receipt_off + receipt_str_payload.header_len + 1 + logs_off;
-
-        // Now we produce an iterator over the logs with each logs offset.
-        let relevant_log_offset = iter::successors(Some(0usize), |i| Some(i + 1))
-            .map_while(|i| logs_rlp.at_with_offset(i).ok())
-            .find_map(|(log_rlp, log_off)| {
-                let mut bytes = log_rlp.as_raw();
-                let log = Log::decode(&mut bytes).ok()?;
-
-                if log.address == event.address
-                    && log
-                        .data
-                        .topics()
-                        .contains(&B256::from(event.event_signature))
-                {
-                    Some(logs_offset + log_off)
-                } else {
-                    Some(0usize)
-                }
-            })
-            .ok_or(anyhow::anyhow!(
-                "There were no relevant logs in this transaction"
-            ))?;
-
-        let EventLogInfo::<NO_TOPICS, MAX_DATA> {
+        let EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS> {
             size,
             address,
             add_rel_offset,
@@ -526,19 +486,19 @@ mod tests {
 
     fn test_leaf_circuit_helper<
         const NO_TOPICS: usize,
-        const MAX_DATA: usize,
+        const MAX_DATA_WORDS: usize,
         const NODE_LEN: usize,
     >()
     where
         [(); PAD_LEN(NODE_LEN)]:,
-        [(); 7 - 2 - NO_TOPICS - MAX_DATA]:,
+        [(); 7 - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
     {
-        let receipt_proof_infos = generate_receipt_test_info::<NO_TOPICS, MAX_DATA>();
+        let receipt_proof_infos = generate_receipt_test_info::<NO_TOPICS, MAX_DATA_WORDS>();
         let proofs = receipt_proof_infos.proofs();
         let info = proofs.first().unwrap();
         let query = receipt_proof_infos.query();
 
-        let c = ReceiptLeafCircuit::<NODE_LEN, 7>::new::<NO_TOPICS, MAX_DATA>(
+        let c = ReceiptLeafCircuit::<NODE_LEN, 7>::new::<NO_TOPICS, MAX_DATA_WORDS>(
             info.mpt_proof.last().unwrap(),
             info.tx_index,
             &query.event,

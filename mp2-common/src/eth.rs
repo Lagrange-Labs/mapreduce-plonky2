@@ -4,7 +4,7 @@ use alloy::{
     consensus::{ReceiptEnvelope as CRE, ReceiptWithBloom},
     eips::BlockNumberOrTag,
     network::{eip2718::Encodable2718, BlockResponse},
-    primitives::{Address, B256, U256},
+    primitives::{Address, Log, B256, U256},
     providers::{Provider, RootProvider},
     rlp::{Decodable, Encodable as AlloyEncodable},
     rpc::types::{
@@ -16,8 +16,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethereum_types::H256;
 use itertools::Itertools;
-use log::debug;
-use log::warn;
+use log::{debug, warn};
 
 use rlp::{Encodable, Rlp};
 use serde::{Deserialize, Serialize};
@@ -39,7 +38,9 @@ use crate::{
 const RETRY_NUM: usize = 3;
 
 /// The maximum size an additional piece of data can be in bytes.
-const MAX_DATA_SIZE: usize = 32;
+/// It should always be a multiple of 32 since Solidity event data encodes every object in 32 byte chunks
+/// regardless of its true size.
+const MAX_RECEIPT_DATA_SIZE: usize = 32;
 
 /// The size of an event topic rlp encoded.
 const ENCODED_TOPIC_SIZE: usize = 33;
@@ -174,13 +175,13 @@ pub struct ProofQuery {
 
 /// Struct used for storing relevant data to query blocks as they come in.
 /// The constant `NO_TOPICS` is the number of indexed items in the event (excluding the event signature) and
-/// `MAX_DATA` is the number of 32 byte words of data we expect in addition to the topics.
+/// `MAX_DATA_WORDS` is the number of 32 byte words of data we want to extract in addition to the topics.
 #[derive(Debug, Clone)]
-pub struct ReceiptQuery<const NO_TOPICS: usize, const MAX_DATA: usize> {
+pub struct ReceiptQuery<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
     /// The contract that emits the event we care about
     pub contract: Address,
     /// The signature of the event we wish to monitor for
-    pub event: EventLogInfo<NO_TOPICS, MAX_DATA>,
+    pub event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
 }
 
 /// Struct used to store all the information needed for proving a leaf is in the Receipt Trie.
@@ -196,7 +197,7 @@ pub struct ReceiptProofInfo {
 
 /// Contains all the information for an [`Event`] in rlp form
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA: usize> {
+pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
     /// Size in bytes of the whole log rlp encoded
     pub size: usize,
     /// Packed contract address to check
@@ -218,25 +219,25 @@ pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA: usize> {
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    pub data: [usize; MAX_DATA],
+    pub data: [usize; MAX_DATA_WORDS],
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA: usize> EventLogInfo<NO_TOPICS, MAX_DATA> {
+impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS, MAX_DATA_WORDS> {
     /// Create a new instance from a contract [`Address`] and a [`str`] that is the event signature
     pub fn new(contract: Address, event_signature: &str) -> Self {
         // To calculate the total size of the log rlp encoded we use the fact that the address takes 21 bytes to encode, topics
-        // take 33 bytes each to incode and form a list that has length between 33 bytes and 132 bytes and data is a string that has 32 * MAX_DATA length
+        // take 33 bytes each to incode and form a list that has length between 33 bytes and 132 bytes and data is a string that has 32 * MAX_DATA_WORDS length
 
         // If we have more than one topic that is not the event signature the rlp encoding is a list that is over 55 bytes whose total length can be encoded in one byte, so the header length is 2
         // Otherwise its still a list but the header is a single byte.
         let topics_header_len = alloy::rlp::length_of_length((1 + NO_TOPICS) * ENCODED_TOPIC_SIZE);
 
         // If the we have more than one piece of data it is rlp encoded as a string with length greater than 55 bytes
-        let data_header_len = alloy::rlp::length_of_length(MAX_DATA * MAX_DATA_SIZE);
+        let data_header_len = alloy::rlp::length_of_length(MAX_DATA_WORDS * MAX_RECEIPT_DATA_SIZE);
 
         let address_size = 21;
         let topics_size = (1 + NO_TOPICS) * ENCODED_TOPIC_SIZE + topics_header_len;
-        let data_size = MAX_DATA * MAX_DATA_SIZE + data_header_len;
+        let data_size = MAX_DATA_WORDS * MAX_RECEIPT_DATA_SIZE + data_header_len;
 
         let payload_size = address_size + topics_size + data_size;
         let header_size = alloy::rlp::length_of_length(payload_size);
@@ -252,8 +253,8 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> EventLogInfo<NO_TOPICS, MAX_
         let topics: [usize; NO_TOPICS] =
             create_array(|i| sig_rel_offset + (i + 1) * ENCODED_TOPIC_SIZE);
 
-        let data: [usize; MAX_DATA] = create_array(|i| {
-            header_size + address_size + topics_size + data_header_len + (i * MAX_DATA_SIZE)
+        let data: [usize; MAX_DATA_WORDS] = create_array(|i| {
+            header_size + address_size + topics_size + data_header_len + (i * MAX_RECEIPT_DATA_SIZE)
         });
 
         let event_sig = alloy::primitives::keccak256(event_signature.as_bytes());
@@ -267,6 +268,50 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> EventLogInfo<NO_TOPICS, MAX_
             topics,
             data,
         }
+    }
+
+    /// Function used to return the offset from the start of an Receipt Trie Leaf Node to the log relevant to [`EventLogInfo`]
+    pub fn get_log_offset(&self, node: &[u8]) -> Result<usize> {
+        let node_rlp = rlp::Rlp::new(node);
+
+        // The actual receipt data is item 1 in the list
+        let (receipt_rlp, receipt_off) = node_rlp.at_with_offset(1)?;
+        // The rlp encoded Receipt is not a list but a string that is formed of the `tx_type` followed by the remaining receipt
+        // data rlp encoded as a list. We retrieve the payload info so that we can work out relevant offsets later.
+        let receipt_str_payload = receipt_rlp.payload_info()?;
+
+        // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
+        let receipt_list = rlp::Rlp::new(&receipt_rlp.data()?[1..]);
+
+        // The logs themselves start are the item at index 3 in this list
+        let (logs_rlp, logs_off) = receipt_list.at_with_offset(3)?;
+
+        // We calculate the offset the that the logs are at from the start of the node
+        let logs_offset = receipt_off + receipt_str_payload.header_len + 1 + logs_off;
+
+        // Now we produce an iterator over the logs with each logs offset.
+        let relevant_log_offset = std::iter::successors(Some(0usize), |i| Some(i + 1))
+            .map_while(|i| logs_rlp.at_with_offset(i).ok())
+            .find_map(|(log_rlp, log_off)| {
+                let mut bytes = log_rlp.as_raw();
+                let log = Log::decode(&mut bytes).ok()?;
+
+                if log.address == self.address
+                    && log
+                        .data
+                        .topics()
+                        .contains(&B256::from(self.event_signature))
+                {
+                    Some(logs_offset + log_off)
+                } else {
+                    None
+                }
+            })
+            .ok_or(anyhow::anyhow!(
+                "There were no relevant logs in this transaction"
+            ))?;
+
+        Ok(relevant_log_offset)
     }
 }
 
@@ -532,12 +577,12 @@ impl ReceiptProofInfo {
     }
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptQuery<NO_TOPICS, MAX_DATA> {
+impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS, MAX_DATA_WORDS> {
     /// Construct a new [`ReceiptQuery`] from the contract [`Address`] and the event's name as a [`str`].
     pub fn new(contract: Address, event_name: &str) -> Self {
         Self {
             contract,
-            event: EventLogInfo::<NO_TOPICS, MAX_DATA>::new(contract, event_name),
+            event: EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(contract, event_name),
         }
     }
 
@@ -548,6 +593,20 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptQuery<NO_TOPICS, MAX_
         provider: &RootProvider<T>,
         block: BlockNumberOrTag,
     ) -> Result<Vec<ReceiptProofInfo>> {
+        // Retrieve the transaction indices for the relevant logs
+        let tx_indices = self.retrieve_tx_indices(provider, block).await?;
+
+        // Construct the Receipt Trie for this block so we can retrieve MPT proofs.
+        let mut block_util = BlockUtil::fetch(provider, block).await?;
+        ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS>::extract_info(&tx_indices, &mut block_util)
+    }
+
+    /// Function to query for relevant logs at a specific block, it returns a [`BTreeSet`] of the transaction indices that are relevant.
+    pub async fn retrieve_tx_indices<T: Transport + Clone>(
+        &self,
+        provider: &RootProvider<T>,
+        block: BlockNumberOrTag,
+    ) -> Result<BTreeSet<u64>> {
         let filter = Filter::new()
             .select(block)
             .address(self.contract)
@@ -555,14 +614,20 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptQuery<NO_TOPICS, MAX_
         let logs = provider.get_logs(&filter).await?;
 
         // For each of the logs return the transacion its included in, then sort and remove duplicates.
-        let tx_indices = BTreeSet::from_iter(logs.iter().map_while(|log| log.transaction_index));
+        Ok(BTreeSet::from_iter(
+            logs.iter().map_while(|log| log.transaction_index),
+        ))
+    }
 
-        // Construct the Receipt Trie for this block so we can retrieve MPT proofs.
-        let mut block_util = BlockUtil::fetch(provider, block).await?;
+    /// Function that takes a list of transaction indices in the form of a [`BTreeSet`] and a [`BlockUtil`] and returns a list of [`ReceiptProofInfo`]
+    pub fn extract_info(
+        tx_indices: &BTreeSet<u64>,
+        block_util: &mut BlockUtil,
+    ) -> Result<Vec<ReceiptProofInfo>> {
         let mpt_root = block_util.receipts_trie.root_hash()?;
         let proofs = tx_indices
-            .into_iter()
-            .map(|tx_index| {
+            .iter()
+            .map(|&tx_index| {
                 let key = tx_index.rlp_bytes();
 
                 let proof = block_util.receipts_trie.get_proof(&key[..])?;
@@ -601,10 +666,15 @@ impl Rlpable for alloy::consensus::Header {
     }
 }
 
+#[allow(dead_code)]
 pub struct BlockUtil {
+    /// The actual [`Block`] that the rest of the data relates to
     pub block: Block,
+    /// The transactions and Receipts in the block paired together
     pub txs: Vec<TxWithReceipt>,
+    /// The Receipts Trie
     pub receipts_trie: EthTrie<MemoryDB>,
+    /// The Transactions Trie
     pub transactions_trie: EthTrie<MemoryDB>,
 }
 
@@ -686,7 +756,8 @@ impl BlockUtil {
     // recompute the receipts trie by first converting all receipts form RPC type to consensus type
     // since in Alloy these are two different types and RLP functions are only implemented for
     // consensus ones.
-    pub fn check(&mut self) -> Result<()> {
+    #[cfg(test)]
+    fn check(&mut self) -> Result<()> {
         let computed = self.receipts_trie.root_hash()?;
         let tx_computed = self.transactions_trie.root_hash()?;
         let expected = self.block.header.receipts_root;
@@ -887,9 +958,10 @@ mod test {
         test_receipt_query_helper::<3, 2>()
     }
 
-    fn test_receipt_query_helper<const NO_TOPICS: usize, const MAX_DATA: usize>() -> Result<()> {
+    fn test_receipt_query_helper<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>() -> Result<()>
+    {
         // Now for each transaction we fetch the block, then get the MPT Trie proof that the receipt is included and verify it
-        let test_info = generate_receipt_test_info::<NO_TOPICS, MAX_DATA>();
+        let test_info = generate_receipt_test_info::<NO_TOPICS, MAX_DATA_WORDS>();
         let proofs = test_info.proofs();
         let query = test_info.query();
         for proof in proofs.iter() {

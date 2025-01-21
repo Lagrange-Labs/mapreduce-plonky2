@@ -32,10 +32,7 @@ mod key;
 mod leaf_or_extension;
 pub mod utils;
 
-pub use key::{
-    mpt_key_ptr, receipt_key_ptr, MPTKeyWire, MPTKeyWireGeneric, ReceiptKeyWire,
-    MAX_TX_KEY_NIBBLE_LEN,
-};
+pub use key::{mpt_key_ptr, MPTKeyWire, MPTKeyWireGeneric};
 pub use leaf_or_extension::{
     MPTLeafOrExtensionNode, MPTLeafOrExtensionNodeGeneric, MPTLeafOrExtensionWires,
     MPTLeafOrExtensionWiresGeneric, MPTReceiptLeafNode, MPTReceiptLeafWiresGeneric,
@@ -51,7 +48,8 @@ pub const MAX_LEAF_VALUE_LEN: usize = 33;
 
 /// This is the maximum size we allow for the value of Receipt Trie leaf
 /// currently set to be the same as we allow for a branch node in the Storage Trie
-/// minus the length of the key header and key
+/// minus the length of the key header and key. We choose this value as any larger would
+/// result in an additional keccak permutation, thus increasing the circuit size.
 pub const MAX_RECEIPT_LEAF_VALUE_LEN: usize = 503;
 
 /// RLP item size for the extension node
