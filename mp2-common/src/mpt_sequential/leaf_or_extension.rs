@@ -107,7 +107,7 @@ where
 {
     /// MPT node
     pub node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
-    /// MPT root
+    /// MPT hash of this node
     pub root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     /// New MPT key after advancing the current key
     pub key: MPTKeyWireGeneric<KEY_LEN>,

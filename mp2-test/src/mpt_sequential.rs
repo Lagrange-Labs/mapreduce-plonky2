@@ -51,27 +51,29 @@ pub fn generate_random_storage_mpt<const DEPTH: usize, const VALUE_LEN: usize>(
 }
 
 #[derive(Debug, Clone)]
-pub struct ReceiptTestInfo<const NO_TOPICS: usize, const MAX_DATA: usize> {
+pub struct ReceiptTestInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
     /// The query which we have returned proofs for
-    pub query: ReceiptQuery<NO_TOPICS, MAX_DATA>,
+    pub query: ReceiptQuery<NO_TOPICS, MAX_DATA_WORDS>,
     /// The proofs for receipts relating to `self.query`
     pub proofs: Vec<ReceiptProofInfo>,
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptTestInfo<NO_TOPICS, MAX_DATA> {
+impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
+    ReceiptTestInfo<NO_TOPICS, MAX_DATA_WORDS>
+{
     /// Getter for the proofs
     pub fn proofs(&self) -> Vec<ReceiptProofInfo> {
         self.proofs.clone()
     }
     /// Getter for the query
-    pub fn query(&self) -> &ReceiptQuery<NO_TOPICS, MAX_DATA> {
+    pub fn query(&self) -> &ReceiptQuery<NO_TOPICS, MAX_DATA_WORDS> {
         &self.query
     }
 }
 /// This function is used so that we can generate a Receipt Trie for a blog with varying transactions
 /// (i.e. some we are interested in and some we are not).
-pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA: usize>(
-) -> ReceiptTestInfo<NO_TOPICS, MAX_DATA> {
+pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+) -> ReceiptTestInfo<NO_TOPICS, MAX_DATA_WORDS> {
     // Make a contract that emits events so we can pick up on them
     sol! {
         #[allow(missing_docs)]
@@ -191,17 +193,9 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA: usize>
                 4 => event_contract.testTwoData().into_transaction_request(),
                 _ => unreachable!(),
             };
-            let random_two = match (0..5).sample_single(&mut rng) {
-                0 => event_contract.testEmit().into_transaction_request(),
-                1 => event_contract.testTwoIndexed().into_transaction_request(),
-                2 => event_contract.testThreeIndexed().into_transaction_request(),
-                3 => event_contract.testOneData().into_transaction_request(),
-                4 => event_contract.testTwoData().into_transaction_request(),
-                _ => unreachable!(),
-            };
+
             let tx_req = match i % 4 {
-                0 => random,
-                1 => random_two,
+                0 | 1 => random,
                 2 => other_contract.otherEmit().into_transaction_request(),
                 3 => other_contract.twoEmits().into_transaction_request(),
                 _ => unreachable!(),
@@ -227,7 +221,7 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA: usize>
 
         // Finally we guarantee at least three of the event we are going to query for
         for _ in 0..3 {
-            let queried_event_req = match (NO_TOPICS, MAX_DATA) {
+            let queried_event_req = match (NO_TOPICS, MAX_DATA_WORDS) {
                 (1, 0) => event_contract.testEmit().into_transaction_request(),
                 (2, 0) => event_contract.testTwoIndexed().into_transaction_request(),
                 (3, 0) => event_contract.testThreeIndexed().into_transaction_request(),
@@ -267,7 +261,7 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA: usize>
         // We want to get the event signature so we can make a ReceiptQuery
         let all_events = EventEmitter::abi::events();
 
-        let events = match (NO_TOPICS, MAX_DATA) {
+        let events = match (NO_TOPICS, MAX_DATA_WORDS) {
             (1, 0) => all_events.get("testEvent").unwrap(),
             (2, 0) => all_events.get("twoIndexed").unwrap(),
             (3, 0) => all_events.get("threeIndexed").unwrap(),
@@ -276,7 +270,7 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA: usize>
             _ => panic!(),
         };
 
-        let receipt_query = ReceiptQuery::<NO_TOPICS, MAX_DATA>::new(
+        let receipt_query = ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS>::new(
             *event_contract.address(),
             &events[0].signature(),
         );

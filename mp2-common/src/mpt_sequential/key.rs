@@ -17,20 +17,10 @@ use serde::{Deserialize, Serialize};
 
 pub type MPTKeyWire = MPTKeyWireGeneric<MAX_KEY_NIBBLE_LEN>;
 
-pub type ReceiptKeyWire = MPTKeyWireGeneric<MAX_TX_KEY_NIBBLE_LEN>;
-
-pub const MAX_TX_KEY_NIBBLE_LEN: usize = 4;
-
 /// Calculate the pointer from the MPT key.
 pub fn mpt_key_ptr(mpt_key: &[u8]) -> usize {
     let nibbles = Nibbles::from_compact(mpt_key);
     MAX_KEY_NIBBLE_LEN - 1 - nibbles.nibbles().len()
-}
-
-/// Calculate the pointer from the MPT key.
-pub fn receipt_key_ptr(mpt_key: &[u8]) -> usize {
-    let nibbles = Nibbles::from_compact(mpt_key);
-    MAX_TX_KEY_NIBBLE_LEN - 1 - nibbles.nibbles().len()
 }
 
 /// A structure that keeps a running pointer to the portion of the key the circuit

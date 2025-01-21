@@ -671,23 +671,23 @@ pub trait ReceiptExtractionArgs:
     Serialize + for<'de> Deserialize<'de> + Debug + Hash + Eq + PartialEq + Clone + Copy
 {
     const NO_TOPICS: usize;
-    const MAX_DATA: usize;
+    const MAX_DATA_WORDS: usize;
 
     fn new(address: Address, event_signature: &str) -> Self
     where
         Self: Sized;
 
-    fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>;
+    fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>;
 
     fn get_index(&self) -> u64;
 
     fn to_table_rows<PrimaryIndex: Clone>(
         proof_infos: &[ReceiptProofInfo],
-        event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>,
+        event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>,
         block: PrimaryIndex,
     ) -> Vec<TableRowUpdate<PrimaryIndex>>
     where
-        [(); 7 - 2 - Self::NO_TOPICS - Self::MAX_DATA]:,
+        [(); 7 - 2 - Self::NO_TOPICS - Self::MAX_DATA_WORDS]:,
     {
         let metadata = TableMetadata::<7, 2>::from(*event);
 
@@ -767,23 +767,23 @@ pub trait ReceiptExtractionArgs:
     }
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptExtractionArgs
-    for EventLogInfo<NO_TOPICS, MAX_DATA>
+impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptExtractionArgs
+    for EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>
 {
-    const MAX_DATA: usize = MAX_DATA;
+    const MAX_DATA_WORDS: usize = MAX_DATA_WORDS;
     const NO_TOPICS: usize = NO_TOPICS;
 
     fn new(address: Address, event_signature: &str) -> Self
     where
         Self: Sized,
     {
-        EventLogInfo::<NO_TOPICS, MAX_DATA>::new(address, event_signature)
+        EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(address, event_signature)
     }
 
-    fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA }>
+    fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>
     where
         [(); Self::NO_TOPICS]:,
-        [(); Self::MAX_DATA]:,
+        [(); Self::MAX_DATA_WORDS]:,
     {
         let topics: [usize; Self::NO_TOPICS] = self
             .topics
@@ -791,13 +791,13 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptExtractionArgs
             .collect::<Vec<usize>>()
             .try_into()
             .unwrap();
-        let data: [usize; Self::MAX_DATA] = self
+        let data: [usize; Self::MAX_DATA_WORDS] = self
             .data
             .into_iter()
             .collect::<Vec<usize>>()
             .try_into()
             .unwrap();
-        EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA }> {
+        EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }> {
             size: self.size,
             address: self.address,
             add_rel_offset: self.add_rel_offset,
@@ -830,10 +830,13 @@ impl<const NO_TOPICS: usize, const MAX_DATA: usize> ReceiptExtractionArgs
 impl<R: ReceiptExtractionArgs> TableSource for R
 where
     [(); <R as ReceiptExtractionArgs>::NO_TOPICS]:,
-    [(); <R as ReceiptExtractionArgs>::MAX_DATA]:,
-    [(); 7 - 2 - <R as ReceiptExtractionArgs>::NO_TOPICS - <R as ReceiptExtractionArgs>::MAX_DATA]:,
+    [(); <R as ReceiptExtractionArgs>::MAX_DATA_WORDS]:,
+    [(); 7
+        - 2
+        - <R as ReceiptExtractionArgs>::NO_TOPICS
+        - <R as ReceiptExtractionArgs>::MAX_DATA_WORDS]:,
 {
-    type Metadata = EventLogInfo<{ R::NO_TOPICS }, { R::MAX_DATA }>;
+    type Metadata = EventLogInfo<{ R::NO_TOPICS }, { R::MAX_DATA_WORDS }>;
 
     fn can_query(&self) -> bool {
         false
@@ -851,7 +854,7 @@ where
         let event = self.get_event();
         async move {
             let contract_update =
-                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA as u8), 5, 15);
+                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA_WORDS as u8), 5, 15);
 
             let provider = ProviderBuilder::new()
                 .with_recommended_fillers()
@@ -867,7 +870,7 @@ where
             let block_number = ctx.block_number().await;
             let new_block_number = block_number as BlockPrimaryIndex;
 
-            let query = ReceiptQuery::<{ R::NO_TOPICS }, { R::MAX_DATA }> {
+            let query = ReceiptQuery::<{ R::NO_TOPICS }, { R::MAX_DATA_WORDS }> {
                 contract: contract.address(),
                 event,
             };
@@ -924,8 +927,11 @@ where
             let ChangeType::Receipt(relevant, others) = c else {
                 panic!("Need ChangeType::Receipt, got: {:?}", c);
             };
-            let contract_update =
-                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA as u8), relevant, others);
+            let contract_update = ReceiptUpdate::new(
+                (R::NO_TOPICS as u8, R::MAX_DATA_WORDS as u8),
+                relevant,
+                others,
+            );
 
             let provider = ProviderBuilder::new()
                 .with_recommended_fillers()
@@ -941,7 +947,7 @@ where
             let block_number = ctx.block_number().await;
             let new_block_number = block_number as BlockPrimaryIndex;
 
-            let query = ReceiptQuery::<{ R::NO_TOPICS }, { R::MAX_DATA }> {
+            let query = ReceiptQuery::<{ R::NO_TOPICS }, { R::MAX_DATA_WORDS }> {
                 contract: contract.address(),
                 event,
             };

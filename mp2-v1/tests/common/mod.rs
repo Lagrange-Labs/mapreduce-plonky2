@@ -83,64 +83,6 @@ pub struct TableInfo<T: TableSource> {
 
 impl<T: TableSource> TableInfo<T> {
     pub fn metadata_hash(&self) -> MetadataHash {
-        // match &self.source {
-        //     TableSource::Single(args) => {
-        //         let slot = SlotInputs::Simple(args.slot_inputs.clone());
-        //         metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-        //             slot,
-        //             &self.contract_address,
-        //             self.chain_id,
-        //             vec![],
-        //         )
-        //     }
-        //     TableSource::MappingValues(args, _) => {
-        //         let slot_inputs = SlotInputs::Mapping(args.slot_inputs().to_vec());
-        //         metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-        //             slot_inputs,
-        //             &self.contract_address,
-        //             self.chain_id,
-        //             vec![],
-        //         )
-        //     }
-        //     TableSource::MappingStruct(args, _) => {
-        //         let slot_inputs = SlotInputs::Mapping(args.slot_inputs().to_vec());
-        //         metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-        //             slot_inputs,
-        //             &self.contract_address,
-        //             self.chain_id,
-        //             vec![],
-        //         )
-        //     }
-        //     TableSource::MappingOfSingleValueMappings(args) => {
-        //         let slot_inputs = SlotInputs::MappingOfMappings(args.slot_inputs().to_vec());
-        //         metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-        //             slot_inputs,
-        //             &self.contract_address,
-        //             self.chain_id,
-        //             vec![],
-        //         )
-        //     }
-        //     TableSource::MappingOfStructMappings(args) => {
-        //         let slot_inputs = SlotInputs::MappingOfMappings(args.slot_inputs().to_vec());
-        //         metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-        //             slot_inputs,
-        //             &self.contract_address,
-        //             self.chain_id,
-        //             vec![],
-        //         )
-        //     }
-        //     TableSource::Merge(source) => {
-        //         let single = SlotInputs::Simple(source.single.slot_inputs.clone());
-        //         let mapping = SlotInputs::Mapping(source.mapping.slot_inputs().to_vec());
-        //         merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
-        //             self.contract_address,
-        //             self.chain_id,
-        //             vec![],
-        //             single,
-        //             mapping,
-        //         )
-        //     }
-        // }
         self.source
             .metadata_hash(self.contract_address, self.chain_id)
     }

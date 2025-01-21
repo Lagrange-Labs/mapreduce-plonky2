@@ -43,8 +43,14 @@ pub struct InputNode {
 
 // TODO: Specify `NODE_LEN = MAX_LEAF_NODE_LEN` in the generic parameter,
 // but it could not work for using `MAPPING_LEAF_NODE_LEN` constant directly.
+/// We use `512` in as the `NODE_LEN` in [`values_extraction::CircuitInput`] to represent
+/// the maximum length of a Receipt Trie leaf node. The Storage trie leaf node size is now hard coded into
+/// the circuits.
 type ValuesExtractionInput<const MAX_COLUMNS: usize> =
     values_extraction::CircuitInput<512, MAX_COLUMNS>;
+/// We use `512` in as the `NODE_LEN` in [`values_extraction::PublicParameters`] to represent
+/// the maximum length of a Receipt Trie leaf node. The Storage trie leaf node size is now hard coded into
+/// the circuits.
 type ValuesExtractionParameters<const MAX_COLUMNS: usize> =
     values_extraction::PublicParameters<512, MAX_COLUMNS>;
 fn sanity_check() {

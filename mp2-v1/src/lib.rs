@@ -9,17 +9,26 @@
 // stylistic feature
 #![feature(async_closure)]
 use mp2_common::{array::L32, mpt_sequential::PAD_LEN};
-
+/// The maximum length of an MPT Branch Node that we accept, any larger would cause additional keccak permutation to run
+/// resulting in having to have a number of different circuits for different size MPT branch nodes.
 pub const MAX_BRANCH_NODE_LEN: usize = 532;
+/// The maximum length of an MPT Branch Node after its been padded for keccak hashing
 pub const MAX_BRANCH_NODE_LEN_PADDED: usize = PAD_LEN(532);
 /// rlp( rlp(max key 32b) + rlp(max value 32b) ) + 1 for compact encoding
 /// see test_len()
 pub const MAX_EXTENSION_NODE_LEN: usize = 69;
+/// The size of a MPT extension node after it has been padded for keccak hashing.
 pub const MAX_EXTENSION_NODE_LEN_PADDED: usize = PAD_LEN(69);
+/// rlp( rlp(max key 32b) + rlp(max value 32b) ) + 1 for compact encoding
 pub const MAX_LEAF_NODE_LEN: usize = MAX_EXTENSION_NODE_LEN;
+/// The size of a Storage MPT leaf node after it has been padded for keccak hashing
 pub const MAX_LEAF_NODE_LEN_PADDED: usize = PAD_LEN(MAX_LEAF_NODE_LEN);
+/// The maximum size in bytes of a value stored inside an MPT leaf node
 pub const MAX_LEAF_VALUE_LEN: usize = 32;
+/// This is the length of Storage leaf value packed into u32 elements.
 pub const L32_LEAF_VALUE_LEN: usize = L32(MAX_LEAF_VALUE_LEN);
+/// The maximum size of receipt leaf that we accept in the code, any larger causes additiona keccak hashing to occur resulting in
+/// different circuits.
 pub const MAX_RECEIPT_LEAF_NODE_LEN: usize = 512;
 
 pub mod api;

@@ -16,12 +16,15 @@ use mp2_v1::{
         ColumnID,
     },
     values_extraction::{
-        compute_non_indexed_receipt_column_ids, identifier_block_column,
-        identifier_for_inner_mapping_key_column, identifier_for_outer_mapping_key_column,
-        identifier_for_value_column,
+        identifier_block_column, identifier_for_inner_mapping_key_column,
+        identifier_for_outer_mapping_key_column, identifier_for_value_column, DATA_NAME,
+        DATA_PREFIX, GAS_USED_NAME, GAS_USED_PREFIX, TOPIC_NAME, TOPIC_PREFIX,
     },
 };
-use plonky2::field::types::PrimeField64;
+use plonky2::{
+    field::types::{Field, PrimeField64},
+    plonk::config::Hasher,
+};
 use rand::{thread_rng, Rng};
 use ryhope::storage::RoEpochKvStorage;
 
@@ -55,7 +58,13 @@ use alloy::{
     providers::{ext::AnvilApi, ProviderBuilder, RootProvider},
     sol_types::SolEvent,
 };
-use mp2_common::{eth::StorageSlot, proof::ProofWithVK, types::HashOutput};
+use mp2_common::{
+    eth::{EventLogInfo, StorageSlot},
+    poseidon::H,
+    proof::ProofWithVK,
+    types::HashOutput,
+    F,
+};
 
 /// Test slots for single values extraction
 pub(crate) const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
@@ -603,7 +612,7 @@ impl<T: TableSource> TableIndexing<T> {
     where
         T: ReceiptExtractionArgs,
         [(); <T as ReceiptExtractionArgs>::NO_TOPICS]:,
-        [(); <T as ReceiptExtractionArgs>::MAX_DATA]:,
+        [(); <T as ReceiptExtractionArgs>::MAX_DATA_WORDS]:,
     {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
@@ -669,7 +678,7 @@ impl<T: TableSource> TableIndexing<T> {
                 .into_iter()
                 .map(|(name, identifier)| TableColumn {
                     name,
-                    identifier: identifier.to_canonical_u64(),
+                    identifier,
                     index: IndexType::None,
                     multiplier: false,
                 })
@@ -1003,6 +1012,79 @@ impl<T: TableSource> TableIndexing<T> {
     }
 }
 
+/// Function that computes the column identifiers for the non-indexed columns together with their names as [`String`]s.
+pub fn compute_non_indexed_receipt_column_ids<
+    const NO_TOPICS: usize,
+    const MAX_DATA_WORDS: usize,
+>(
+    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+) -> Vec<(String, ColumnID)> {
+    let gas_used_input = [
+        event.address.as_slice(),
+        event.event_signature.as_slice(),
+        GAS_USED_PREFIX,
+    ]
+    .concat()
+    .into_iter()
+    .map(F::from_canonical_u8)
+    .collect::<Vec<F>>();
+    let gas_used_column_id = H::hash_no_pad(&gas_used_input).elements[0];
+
+    let topic_ids = event
+        .topics
+        .iter()
+        .enumerate()
+        .map(|(j, _)| {
+            let input = [
+                event.address.as_slice(),
+                event.event_signature.as_slice(),
+                TOPIC_PREFIX,
+                &[j as u8 + 1],
+            ]
+            .concat()
+            .into_iter()
+            .map(F::from_canonical_u8)
+            .collect::<Vec<F>>();
+            (
+                format!("{}_{}", TOPIC_NAME, j + 1),
+                H::hash_no_pad(&input).elements[0].to_canonical_u64(),
+            )
+        })
+        .collect::<Vec<(String, ColumnID)>>();
+
+    let data_ids = event
+        .data
+        .iter()
+        .enumerate()
+        .map(|(j, _)| {
+            let input = [
+                event.address.as_slice(),
+                event.event_signature.as_slice(),
+                DATA_PREFIX,
+                &[j as u8 + 1],
+            ]
+            .concat()
+            .into_iter()
+            .map(F::from_canonical_u8)
+            .collect::<Vec<F>>();
+            (
+                format!("{}_{}", DATA_NAME, j + 1),
+                H::hash_no_pad(&input).elements[0].to_canonical_u64(),
+            )
+        })
+        .collect::<Vec<(String, ColumnID)>>();
+
+    [
+        vec![(
+            GAS_USED_NAME.to_string(),
+            gas_used_column_id.to_canonical_u64(),
+        )],
+        topic_ids,
+        data_ids,
+    ]
+    .concat()
+}
+
 /// Build the mapping table.
 async fn build_mapping_table(
     ctx: &TestContext,
@@ -1192,7 +1274,9 @@ async fn build_mapping_of_mappings_table(
 #[derive(Debug, Clone, Copy)]
 pub struct ReceiptUpdate {
     pub event_type: (u8, u8),
+    /// The number of events to emit related to the event defined by `event_type`
     pub no_relevant: usize,
+    /// The number of other random events to emit.
     pub no_others: usize,
 }
 

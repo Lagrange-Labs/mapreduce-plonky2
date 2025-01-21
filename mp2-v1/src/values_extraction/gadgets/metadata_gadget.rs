@@ -6,13 +6,10 @@ use super::column_info::{
     CircuitBuilderColumnInfo, ExtractedColumnInfo, ExtractedColumnInfoTarget, InputColumnInfo,
     InputColumnInfoTarget, WitnessWriteColumnInfo,
 };
-use alloy::{
-    primitives::{Log, B256},
-    rlp::Decodable,
-};
+
 use itertools::Itertools;
 use mp2_common::{
-    array::{Array, Targetable, L32},
+    array::{Array, Targetable},
     eth::EventLogInfo,
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::H,
@@ -73,9 +70,6 @@ where
         // Check that we don't have too many columns
         assert!(num_actual_columns <= MAX_COLUMNS);
 
-        // We order the columns so that the location_offset increases, then if two columns have the same location offset
-        // they are ordered by increasing byte offset. Then if byte offset is the same they are ordered such that if `self.is_extracted` is
-        // false they appear first.
         let mut table_info = [ExtractedColumnInfo::default(); { MAX_COLUMNS - INPUT_COLUMNS }];
         table_info
             .iter_mut()
@@ -89,7 +83,7 @@ where
         }
     }
 
-    /// Create a sample MPT metadata. It could be used in integration tests.
+    /// Create a sample MPT metadata. It could be used in testing.
     pub fn sample(
         flag: bool,
         input_prefixes: &[&[u8]; INPUT_COLUMNS],
@@ -207,48 +201,14 @@ where
             })
     }
 
-    pub fn extracted_receipt_value_digest<const NO_TOPICS: usize, const MAX_DATA: usize>(
+    pub fn extracted_receipt_value_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
         &self,
         value: &[u8],
-        event: &EventLogInfo<NO_TOPICS, MAX_DATA>,
+        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
     ) -> Point {
-        // Convert to Rlp form so we can use provided methods.
-        let node_rlp = rlp::Rlp::new(value);
-
-        // The actual receipt data is item 1 in the list
-        let (receipt_rlp, receipt_off) = node_rlp.at_with_offset(1).unwrap();
-        // The rlp encoded Receipt is not a list but a string that is formed of the `tx_type` followed by the remaining receipt
-        // data rlp encoded as a list. We retrieve the payload info so that we can work out relevant offsets later.
-        let receipt_str_payload = receipt_rlp.payload_info().unwrap();
-
-        // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
-        let receipt_list = rlp::Rlp::new(&receipt_rlp.data().unwrap()[1..]);
-
-        // The logs themselves start are the item at index 3 in this list
-        let (logs_rlp, logs_off) = receipt_list.at_with_offset(3).unwrap();
-
-        // We calculate the offset the that the logs are at from the start of the node
-        let logs_offset = receipt_off + receipt_str_payload.header_len + 1 + logs_off;
-
-        // Now we produce an iterator over the logs with each logs offset.
-        #[allow(clippy::unnecessary_find_map)]
-        let relevant_log_offset = std::iter::successors(Some(0usize), |i| Some(i + 1))
-            .map_while(|i| logs_rlp.at_with_offset(i).ok())
-            .find_map(|(log_rlp, log_off)| {
-                let mut bytes = log_rlp.as_raw();
-                let log = Log::decode(&mut bytes).expect("Couldn't decode log");
-
-                if log.address == event.address
-                    && log
-                        .data
-                        .topics()
-                        .contains(&B256::from(event.event_signature))
-                {
-                    Some(logs_offset + log_off)
-                } else {
-                    Some(0usize)
-                }
-            })
+        // Get the relevant log offset
+        let relevant_log_offset = event
+            .get_log_offset(value)
             .expect("No relevant log in the provided value");
 
         self.extracted_columns()
@@ -297,14 +257,25 @@ where
             F::from_canonical_usize(columns_metadata.num_actual_columns),
         );
     }
+
+    /// Create a new instance of [`TableMetadata`] from an [`EventLogInfo`]. Events
+    /// always have two input columns relating to the transaction index and gas used for the transaction.
+    pub fn from_event_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+    ) -> TableMetadata<MAX_COLUMNS, 2>
+    where
+        [(); MAX_COLUMNS - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
+    {
+        TableMetadata::<MAX_COLUMNS, 2>::from(*event)
+    }
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA: usize, const MAX_COLUMNS: usize>
-    From<EventLogInfo<NO_TOPICS, MAX_DATA>> for TableMetadata<MAX_COLUMNS, 2>
+impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize, const MAX_COLUMNS: usize>
+    From<EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>> for TableMetadata<MAX_COLUMNS, 2>
 where
-    [(); MAX_COLUMNS - 2 - NO_TOPICS - MAX_DATA]:,
+    [(); MAX_COLUMNS - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
 {
-    fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA>) -> Self {
+    fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>) -> Self {
         let extraction_id = event.event_signature;
 
         let tx_index_input = [
@@ -477,6 +448,9 @@ where
 
     /// Computes the value digest and metadata digest for the extracted columns from the supplied value
     /// Outputs are ordered as `(MetadataDigest, ValueDigest)`.
+    /// The inputs `location_no_offset` and `location` represent the MPT key for the slot of this variable without an evm word offset
+    /// and the MPT key of the current leaf node respectively. To determine whether we should extract a value or not we check to see if
+    /// `location_no_offset + column.loction_offset == location`, if this is true we extract, if false we dummy the value.
     pub(crate) fn extracted_digests<const VALUE_LEN: usize>(
         &self,
         b: &mut CBuilder,
@@ -521,11 +495,7 @@ where
 
                 // last_byte_found lets us know whether we continue extracting or not.
                 // Hence if we want to extract values `extract` will be true so `last_byte_found` should be false
-                let mut last_byte_found = b.not(correct);
-
-                // Even if the constant `VALUE_LEN` is larger than 32 this is the maximum size in bytes
-                // of data that we extract per column
-                let mut result_bytes = [zero; 32];
+                let last_byte_found = b.not(correct);
 
                 // We iterate over the result bytes in reverse order, the first element that we want to access
                 // from `value` is `value[MAPPING_LEAF_VALUE_LEN - column.byte_offset - column.length]` and then
@@ -535,46 +505,14 @@ where
 
                 let start = b.sub(last_byte_offset, one);
 
-                result_bytes
-                    .iter_mut()
-                    .rev()
-                    .enumerate()
-                    .for_each(|(i, out_byte)| {
-                        // offset = info.byte_offset + i
-                        let index = b.constant(F::from_canonical_usize(i));
-                        let offset = b.sub(start, index);
-                        // Set to 0 if found the last byte.
-                        let offset = b.select(last_byte_found, zero, offset);
-
-                        // Since VALUE_LEN is a constant that is determined at compile time this conditional won't
-                        // cause any issues with the circuit.
-                        let byte = if VALUE_LEN < 64 {
-                            b.random_access(offset, value.arr.to_vec())
-                        } else {
-                            value.random_access_large_array(b, offset)
-                        };
-
-                        // Now if `last_byte_found` is true we add zero, otherwise add `byte`
-                        let to_add = b.select(last_byte_found, zero, byte);
-
-                        *out_byte = b.add(*out_byte, to_add);
-                        // is_last_byte = offset == last_byte_offset
-                        let is_last_byte = b.is_equal(offset, column.byte_offset);
-                        // last_byte_found |= is_last_byte
-                        last_byte_found = b.or(last_byte_found, is_last_byte);
-                    });
-
-                let result_arr = Array::<Target, 32>::from_array(result_bytes);
-
-                let result_packed: Array<U32Target, { L32(32) }> =
-                    Array::<Target, 32>::pack(&result_arr, b, Endianness::Big);
+                let result_packed = column.extract_value(b, last_byte_found, value, start);
 
                 let inputs = once(column.identifier)
                     .chain(result_packed.arr.iter().map(|t| t.to_target()))
                     .collect_vec();
                 let value_digest = b.map_to_curve_point(&inputs);
-                let negated = b.not(correct_location);
-                let value_selector = b.or(negated, selector);
+                let value_selector = b.not(correct);
+
                 (
                     b.curve_select(selector, curve_zero, column_digest),
                     b.curve_select(value_selector, curve_zero, value_digest),
@@ -619,14 +557,6 @@ where
 
                 let location = b.add(log_offset, column.byte_offset());
 
-                // last_byte_found lets us know whether we continue extracting or not.
-                // If `selector` is false then we have data to extract
-                let mut last_byte_found = selector;
-
-                // Even if the constant `VALUE_LEN` is larger than 32 this is the maximum size in bytes
-                // of data that we extract per column
-                let mut result_bytes = [zero; 32];
-
                 // We iterate over the result bytes in reverse order, the first element that we want to access
                 // from `value` is `value[location + column.length - 1]` and then
                 // we keep extracting until we reach `value[location]`.
@@ -635,39 +565,8 @@ where
 
                 let start = b.sub(last_byte_offset, one);
 
-                result_bytes
-                    .iter_mut()
-                    .rev()
-                    .enumerate()
-                    .for_each(|(i, out_byte)| {
-                        // offset = info.byte_offset + i
-                        let index = b.constant(F::from_canonical_usize(i));
-                        let offset = b.sub(start, index);
-                        // Set to 0 if found the last byte.
-                        let offset = b.select(last_byte_found, zero, offset);
-
-                        // Since VALUE_LEN is a constant that is determined at compile time this conditional won't
-                        // cause any issues with the circuit.
-                        let byte = if VALUE_LEN < 64 {
-                            b.random_access(offset, value.arr.to_vec())
-                        } else {
-                            value.random_access_large_array(b, offset)
-                        };
-
-                        // Now if `last_byte_found` is true we add zero, otherwise add `byte`
-                        let to_add = b.select(last_byte_found, zero, byte);
-
-                        *out_byte = b.add(*out_byte, to_add);
-                        // is_last_byte = offset == last_byte_offset
-                        let is_last_byte = b.is_equal(offset, column.byte_offset);
-                        // last_byte_found |= is_last_byte
-                        last_byte_found = b.or(last_byte_found, is_last_byte);
-                    });
-
-                let result_arr = Array::<Target, 32>::from_array(result_bytes);
-
-                let result_packed: Array<U32Target, { L32(32) }> =
-                    Array::<Target, 32>::pack(&result_arr, b, Endianness::Big);
+                // Extract the value if selector is false
+                let result_packed = column.extract_value(b, selector, value, start);
 
                 let inputs = once(column.identifier)
                     .chain(result_packed.arr.iter().map(|t| t.to_target()))

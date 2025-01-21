@@ -55,13 +55,7 @@ where
         let headers = decode_fixed_list::<_, D, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
 
         let (new_mpt_key, hash, is_valid, _) =
-            // MPTCircuit::<1, NODE_LEN, MAX_KEY_NIBBLE_LEN>
-            advance_key_branch(
-                b,
-                &node.arr,
-                &child_proof.mpt_key(),
-                &headers,
-            );
+            advance_key_branch(b, &node.arr, &child_proof.mpt_key(), &headers);
 
         // We always enforce it's a branch node, i.e. that it has 17 entries.
         b.connect(is_valid.target, ttrue.target);

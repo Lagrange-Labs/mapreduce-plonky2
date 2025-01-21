@@ -55,10 +55,10 @@ impl ProofData {
     }
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA: usize> Extractable
-    for EventLogInfo<NO_TOPICS, MAX_DATA>
+impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
+    for EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>
 where
-    [(); 7 - 2 - NO_TOPICS - MAX_DATA]:,
+    [(); 7 - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
 {
     async fn create_update_tree<T: Transport + Clone>(
         &self,
@@ -66,7 +66,7 @@ where
         epoch: u64,
         provider: &RootProvider<T, Ethereum>,
     ) -> Result<UpdateTree<B256>> {
-        let query = ReceiptQuery::<NO_TOPICS, MAX_DATA> {
+        let query = ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS> {
             contract,
             event: *self,
         };
@@ -95,7 +95,7 @@ where
         [(); MAX_COLUMNS - 1]:,
         [(); MAX_COLUMNS - 0]:,
     {
-        let query = ReceiptQuery::<NO_TOPICS, MAX_DATA> {
+        let query = ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS> {
             contract,
             event: *self,
         };
