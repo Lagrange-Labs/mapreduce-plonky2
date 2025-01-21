@@ -9,6 +9,10 @@ use crate::{symbols::ContextProvider, ParsilSettings};
 /// Return two queries, respectively returning the largest sec. ind. value smaller than the
 /// given lower bound, and the smallest sec. ind. value larger than the given higher bound.
 ///
+/// The method returns also a preliminary query to be run in order to compute the value of
+/// the parameter to be provided to the two queries. This preliminary query is the same for
+/// both queries.
+///
 /// If the lower or higher bound are the extrema of the U256 definition domain,
 /// the associated query is `None`, reflecting the impossibility for a node
 /// satisfying the condition to exist in the database.
@@ -17,7 +21,7 @@ pub fn bracket_secondary_index<C: ContextProvider>(
     settings: &ParsilSettings<C>,
     block_number: i64,
     bounds: &QueryBounds,
-) -> (Option<String>, Option<String>) {
+) -> (String, Option<String>, Option<String>) {
     let secondary_lo = bounds.min_query_secondary().value();
     let secondary_hi = bounds.max_query_secondary().value();
     _bracket_secondary_index(
@@ -35,11 +39,16 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
     block_number: i64,
     secondary_lo: &U256,
     secondary_hi: &U256,
-) -> (Option<String>, Option<String>) {
+) -> (String, Option<String>, Option<String>) {
     let zk_table = settings.context.fetch_table(table_name).unwrap();
     let zktable_name = &zk_table.zktable_name;
     let mapper_table_name = mapper_table_name(zktable_name);
     let sec_ind_column = zk_table.secondary_index_column().id;
+
+    let preliminary_query = format!("
+        SELECT {INCREMENTAL_EPOCH} as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number} LIMIT 1;
+        "
+    );
 
     // A simple alias for the sec. ind. values
     let sec_index = format!("({PAYLOAD} -> 'cells' -> '{sec_ind_column}' ->> 'value')::NUMERIC");
@@ -49,25 +58,27 @@ pub(crate) fn _bracket_secondary_index<C: ContextProvider>(
     let largest_below = if *secondary_lo == U256::ZERO {
         None
     } else {
-        Some(format!("SELECT {KEY} FROM 
+        Some(format!(
+            "SELECT {KEY} FROM 
             {zktable_name} 
-            WHERE {VALID_FROM} <= (SELECT MIN({INCREMENTAL_EPOCH}) as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number})
- 		  AND {VALID_UNTIL} >= (SELECT MIN({INCREMENTAL_EPOCH}) as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number})
-                           AND {sec_index} < '{secondary_lo}'::DECIMAL
-                           ORDER BY {sec_index} DESC LIMIT 1"))
+            WHERE {VALID_FROM} <= $1 AND {VALID_UNTIL} >= $1
+                AND {sec_index} < '{secondary_lo}'::DECIMAL
+                ORDER BY {sec_index} DESC LIMIT 1"
+        ))
     };
 
     // Symmetric situation for the upper bound.
     let smallest_above = if *secondary_hi == U256::MAX {
         None
     } else {
-        Some(format!("SELECT {KEY} FROM 
+        Some(format!(
+            "SELECT {KEY} FROM 
             {zktable_name} 
-            WHERE {VALID_FROM} <= (SELECT MIN({INCREMENTAL_EPOCH}) as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number})
- 		  AND {VALID_UNTIL} >= (SELECT MIN({INCREMENTAL_EPOCH}) as epoch FROM {mapper_table_name} WHERE {USER_EPOCH} = {block_number})
-                           AND {sec_index} > '{secondary_hi}'::DECIMAL
-                           ORDER BY {sec_index} ASC LIMIT 1"))
+            WHERE {VALID_FROM} <= $1 AND {VALID_UNTIL} >= $1
+                AND {sec_index} > '{secondary_hi}'::DECIMAL
+                ORDER BY {sec_index} ASC LIMIT 1"
+        ))
     };
 
-    (largest_below, smallest_above)
+    (preliminary_query, largest_below, smallest_above)
 }

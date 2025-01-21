@@ -1,5 +1,5 @@
 use alloy::primitives::U256;
-use anyhow::Context;
+use anyhow::{ensure, Context};
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use core::hash::Hash;
@@ -68,25 +68,41 @@ impl<'a, C: ContextProvider> NonExistenceInput<'a, C> {
         &self,
         primary: BlockPrimaryIndex,
     ) -> anyhow::Result<RowTreeKey> {
-        let (query_for_min, query_for_max) = bracket_secondary_index(
+        let (preliminary_query, query_for_min, query_for_max) = bracket_secondary_index(
             &self.table_name,
             self.settings,
             primary as UserEpoch,
             &self.bounds,
         );
 
+        let params = execute_row_query(self.pool, &preliminary_query, &[]).await?;
+        ensure!(
+            params.len() == 1,
+            "Preliminary query returned more than one row"
+        );
+        let param = params[0].get::<_, U256>(0);
+        
         // try first with lower node than secondary min query bound
-        let to_be_proven_node =
-            match find_node_for_proof(self.pool, self.row_tree, query_for_min, primary, true)
-                .await?
-            {
-                Some(node) => node,
-                None => {
-                    find_node_for_proof(self.pool, self.row_tree, query_for_max, primary, false)
-                        .await?
-                        .expect("No valid node found to prove non-existence, something is wrong")
-                }
-            };
+        let to_be_proven_node = match find_node_for_proof(
+            self.pool,
+            self.row_tree,
+            query_for_min.map(|q| (q, param)),
+            primary,
+            true,
+        )
+        .await?
+        {
+            Some(node) => node,
+            None => find_node_for_proof(
+                self.pool,
+                self.row_tree,
+                query_for_max.map(|q| (q, param)),
+                primary,
+                false,
+            )
+            .await?
+            .expect("No valid node found to prove non-existence, something is wrong"),
+        };
 
         Ok(to_be_proven_node)
     }
@@ -457,14 +473,15 @@ async fn get_predecessor_node_with_same_value(
 async fn find_node_for_proof(
     db: &DBPool,
     row_tree: &MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
-    query: Option<String>,
+    query_with_param: Option<(String, U256)>,
     primary: BlockPrimaryIndex,
     is_min_query: bool,
 ) -> anyhow::Result<Option<RowTreeKey>> {
-    if query.is_none() {
+    let rows = if let Some((query, param)) = query_with_param {
+        execute_row_query(db, &query, &[param]).await?
+    } else {
         return Ok(None);
-    }
-    let rows = execute_row_query(db, &query.unwrap(), &[]).await?;
+    };
     if rows.is_empty() {
         // no node found, return None
         return Ok(None);
