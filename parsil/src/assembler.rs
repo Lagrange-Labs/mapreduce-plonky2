@@ -358,11 +358,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     ///   - sid <[=] <placeholder>
     ///   - sid >[=] <placeholder>
     ///   - sid = <placeholder>
-    fn maybe_set_secondary_index_boundary(
-        &mut self,
-        expr: &Expr,
-        bounds: &mut Bounds,
-    ) -> Result<()> {
+    fn maybe_set_secondary_index_bounds(&mut self, expr: &Expr, bounds: &mut Bounds) -> Result<()> {
         fn plus_one(expr: &Expr) -> Expr {
             Expr::BinaryOp {
                 left: Box::new(expr.clone()),
@@ -502,7 +498,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     /// combinators are traversed, as any other one would not statically
     /// guarantee the predominance of the bound.
     fn find_secondary_index_boundaries(&mut self, expr: &Expr, bounds: &mut Bounds) -> Result<()> {
-        self.maybe_set_secondary_index_boundary(expr, bounds)?;
+        self.maybe_set_secondary_index_bounds(expr, bounds)?;
         match expr {
             Expr::BinaryOp {
                 left,
