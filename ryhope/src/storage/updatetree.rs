@@ -55,8 +55,14 @@ impl<K: Clone + Hash + Eq> UpdateTree<K> {
         &mut self.nodes[i]
     }
 
-    pub fn node_from_key(&self, k: &K) -> Option<&UpdateTreeNode<K>> {
-        self.idx.get(k).map(|i| self.node(*i))
+    /// Return `true` if `k` is included in this `UpdateTree`.
+    pub fn contains_key(&self, k: &K) -> bool {
+        self.idx.contains_key(k)
+    }
+
+    /// Return an iterator over the key contained in this `UpdateTree`.
+    pub fn nodes<'a>(&'a self) -> impl Iterator<Item = &'a K> {
+        self.nodes.iter().map(|n| &n.k)
     }
 }
 
@@ -68,10 +74,6 @@ impl<K: Debug + Clone + Hash + Eq> UpdateTree<K> {
             nodes: Vec::new(),
             idx: Default::default(),
         }
-    }
-
-    pub fn impacted_keys(&self) -> Vec<K> {
-        self.nodes.iter().map(|n| n.k.clone()).collect()
     }
 
     /// Instantiate a new `UpdateTree` containing all the provided paths.
@@ -123,7 +125,7 @@ impl<K: Debug + Clone + Hash + Eq> UpdateTree<K> {
             } else {
                 let new_i = self.nodes.len();
                 if self.idx.insert(k.clone(), new_i).is_some() {
-                    panic!("duplicated key found in path");
+                    panic!("duplicated key found in path: {k:?}");
                 }
                 self.node_mut(current).children.insert(new_i);
                 // we add a children to current, so `is_path_end` should be false
@@ -402,7 +404,7 @@ impl<K: Clone + Hash + Eq + Debug> WorkplanItem<K> {
 /// `next()` to return their parents on its next invokation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UpdatePlan<T: Debug + Clone + Hash + Eq> {
-    pub t: UpdateTree<T>,
+    t: UpdateTree<T>,
     batch_size: usize,
     anchors: Vec<T>,
 }
@@ -419,6 +421,11 @@ impl<T: Debug + Clone + Hash + Eq> UpdatePlan<T> {
             t,
             batch_size: max_subtree_size,
         }
+    }
+
+    /// Return a non-mutable reference to the tree this plan is build around.
+    pub fn tree(&self) -> &UpdateTree<T> {
+        &self.t
     }
 
     /// Mark the given item as having been completed. Its dependent will not be

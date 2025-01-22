@@ -1,5 +1,6 @@
 use anyhow::*;
 use futures::{stream, StreamExt};
+use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::proof::ProofWithVK;
 use mp2_v1::{
@@ -241,10 +242,10 @@ impl TestContext {
         let must_move_all_proofs = !(cells_update.previous_row_key == cells_update.new_row_key
             || cells_update.previous_row_key == Default::default());
         // impacted keys by the update
-        let impacted_keys = cells_update.to_update.impacted_keys();
-        println!(
+        let impacted_keys = cells_update.to_update.nodes().collect_vec();
+        debug!(
             "  -- -CELL TREE impacted keys in new update: {:?}",
-            cells_update.to_update.impacted_keys()
+            impacted_keys
         );
         let updated_cells = CellCollection(
             all_cells
@@ -260,7 +261,7 @@ impl TestContext {
                     }
 
                     let tree_key = table.columns.cells_tree_index_of(*id);
-                    println!(
+                    debug!(
                         " --- CELL TREE key {} index of {id} vs secondary id {} vs table.secondary_id {}",
                         tree_key,
                         previous_row.payload.secondary_index_column,
@@ -269,7 +270,7 @@ impl TestContext {
                     // we need to update the primary on the impacted cells at least, OR on all the cells if
                     // we are moving all the proofs to a new row key which happens when doing an DELETE +
                     // INSERT
-                    if must_move_all_proofs || impacted_keys.contains(&tree_key) {
+                    if must_move_all_proofs || impacted_keys.contains(&&tree_key) {
                         new_cell.primary = primary;
                         debug!("CELL INFO: Updated key {tree_key} to new block {primary}")
                     }
