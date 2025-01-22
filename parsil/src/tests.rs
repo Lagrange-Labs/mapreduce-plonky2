@@ -1,5 +1,5 @@
 #![allow(clippy::single_element_loop)]
-use crate::assembler::{assemble_dynamic, DynamicCircuitPis};
+use crate::assembler::{assemble_dynamic, assemble_static, DynamicCircuitPis};
 use crate::isolator;
 use crate::utils::ParsilSettingsBuilder;
 use crate::{
@@ -35,6 +35,56 @@ type TestFileContextProvider = FileContextProvider<
 >;
 
 #[test]
+fn prim_index_bounds() -> Result<()> {
+    fn check(query: &str) -> Result<()> {
+        let settings = ParsilSettings {
+            context: TestFileContextProvider::from_file("tests/context.json")?,
+            placeholders: PlaceholderSettings::with_freestanding(3),
+            limit: None,
+            offset: None,
+        };
+        let query = parse_and_validate(query, &settings)?;
+        assemble_static(&query, &settings).map(|_| ())
+    }
+
+    assert!(check(
+        "SELECT pipo FROM table1 WHERE block = $1 OR block BETWEEN $MIN_BLOCK AND $MAX_BLOCK;"
+    )
+    .is_err());
+    assert!(check(
+        "SELECT pipo FROM table1 WHERE block = pipo + 5 OR block BETWEEN $MIN_BLOCK AND $MAX_BLOCK"
+    )
+    .is_err());
+    assert!(
+        check("SELECT pipo FROM table1 WHERE block = pipo + 5 AND block BETWEEN 10 AND 15")
+            .is_err()
+    );
+    assert!(check(
+        "SELECT pipo FROM table1 WHERE block = pipo + 5 AND block BETWEEN $MIN_BLOCK AND $MAX_BLOCK"
+    )
+    .is_ok());
+    assert!(check(
+        "SELECT pipo FROM table1 WHERE block = pipo + 5 AND block BETWEEN $MIN_BLOCK AND $1"
+    )
+    .is_err());
+    assert!(check("SELECT pipo FROM table1 WHERE block < $MAX_BLOCK").is_err());
+    assert!(check("SELECT pipo FROM table1 WHERE block > $MIN_BLOCK").is_err());
+    assert!(
+        check("SELECT pipo FROM table1 WHERE block < $MAX_BLOCK AND block > $MIN_BLOCK").is_err()
+    );
+    assert!(
+        check("SELECT pipo FROM table1 WHERE block <= $MAX_BLOCK AND block >= $MIN_BLOCK").is_ok()
+    );
+    assert!(
+        check("SELECT pipo FROM table1 WHERE block >= $MIN_BLOCK AND block <= $MAX_BLOCK").is_ok()
+    );
+    assert!(
+        check("SELECT pipo FROM table1 WHERE block >= $MAX_BLOCK AND block <= $MIN_BLOCK").is_err()
+    );
+    Ok(())
+}
+
+#[test]
 fn must_accept() -> Result<()> {
     let settings = ParsilSettings {
         context: TestFileContextProvider::from_file("tests/context.json")?,
@@ -44,23 +94,23 @@ fn must_accept() -> Result<()> {
     };
 
     for q in [
-        "SELECT foo FROM table2",
-        "SELECT foo FROM table2 WHERE bar < 3",
-        "SELECT foo, * FROM table2",
-        "SELECT AVG(foo) FROM table2 WHERE block BETWEEN 43 and 68",
+        "SELECT foo FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK",
+        "SELECT foo FROM table2 WHERE bar < 3 AND block BETWEEN $MIN_BLOCK AND $MAX_BLOCK",
+        "SELECT foo, * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK",
+        "SELECT AVG(foo) FROM table2 WHERE block BETWEEN $MIN_BLOCK and $MAX_BLOCK",
         // "SELECT 25",
-        "SELECT AVG(foo), MIN(bar) FROM table2 WHERE block = 3",
+        "SELECT AVG(foo), MIN(bar) FROM table2 WHERE block = 3 AND block BETWEEN $MIN_BLOCK AND $MAX_BLOCK",
         // "SELECT '0x1122334455667788990011223344556677889900112233445566778899001122'",
         // "SELECT '0x'",
         // "SELECT '1234567'",
         // "SELECT '0b01001'",
         // "SELECT '0o1234567'",
-        "SELECT foo, bar FROM table2 WHERE block = 3",
-        "SELECT foo FROM table2 WHERE block IN (1, 2, 4)",
-        "SELECT bar FROM table2 WHERE NOT block BETWEEN 12 AND 15",
-        "SELECT a, c FROM table2 AS tt (a, b, c)",
+        "SELECT foo, bar FROM table2 WHERE block = 3 AND block BETWEEN $MIN_BLOCK AND $MAX_BLOCK",
+        "SELECT foo FROM table2 WHERE block IN (1, 2, 4) AND block BETWEEN $MIN_BLOCK AND $MAX_BLOCK",
+        "SELECT bar FROM table2 WHERE NOT block BETWEEN 12 AND 15 AND block BETWEEN $MIN_BLOCK AND $MAX_BLOCK",
+        "SELECT a, c FROM table2 AS tt (a, b, c) WHERE a BETWEEN $MIN_BLOCK AND $MAX_BLOCK",
     ] {
-        parse_and_validate(q, &settings)?;
+        parse_and_validate(dbg!(q), &settings)?;
     }
     Ok(())
 }
@@ -130,7 +180,7 @@ fn ref_query() -> Result<()> {
         .build()
         .unwrap();
 
-    let q = "SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99";
+    let q = "SELECT AVG(C1+C2/(C2*C3)), SUM(C1+C2), MIN(C1+$1), MAX(C4-2), AVG(C5) FROM T WHERE block  BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND (C5 > 5 AND C1*C3 <= C4+C5 OR C3 == $2) AND C2 >= 75 AND C2 < 99";
     let _query = parse_and_validate(q, &settings)?;
     Ok(())
 }
@@ -175,7 +225,7 @@ fn isolation() {
 
     assert_eq!(
         isolated_to_string(
-            "SELECT * FROM table2 WHERE block BETWEEN 1 AND 5", 
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK",
             None,
             None
         ),
@@ -185,7 +235,7 @@ fn isolation() {
     // Drop references to other columns
     assert_eq!(
         isolated_to_string(
-            "SELECT * FROM table2 WHERE block BETWEEN 1 AND 5 AND 3 = 4 OR bar = 5",
+            "SELECT * FROM table2 WHERE (block BETWEEN $MIN_BLOCK AND $MAX_BLOCK) AND (3 = 4 OR bar = 5)",
             None,
             None
         ),
@@ -225,7 +275,7 @@ fn isolation() {
     // Both secondary index bounds
     assert_eq!(
         isolated_to_string(
-            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo = 50", 
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND foo = 50",
             Some(U256::from(45)),
             Some(U256::from(56))
         ),
@@ -235,7 +285,7 @@ fn isolation() {
     // Ignore any other primary index predicate
     assert_eq!(
         isolated_to_string(
-            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND block = 50", 
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND block = 50",
             None,
             None
         ),
@@ -245,7 +295,7 @@ fn isolation() {
     // Nicholas's example
     assert_eq!(
         isolated_to_string(
-            "SELECT * FROM table2 WHERE block BETWEEN 5 AND 10 AND (foo = 4 OR foo = 15) AND bar = 12",
+            "SELECT * FROM table2 WHERE block BETWEEN $MIN_BLOCK AND $MAX_BLOCK AND (foo = 4 OR foo = 15) AND bar = 12",
             None,
             None),
         format!("SELECT * FROM table2 WHERE table2.block >= $MIN_BLOCK AND table2.block <= $MAX_BLOCK LIMIT {MAX_NUM_OUTPUTS}")

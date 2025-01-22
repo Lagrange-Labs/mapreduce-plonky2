@@ -387,7 +387,7 @@ mod tests {
             output_no_aggregation::Circuit as NoAggOutputCircuit,
             output_with_aggregation::Circuit as AggOutputCircuit,
             universal_circuit_inputs::{
-                BasicOperation, ColumnCell, InputOperand, OutputItem, PlaceholderId, Placeholders,
+                BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders,
                 ResultStructure, RowCells,
             },
             universal_query_circuit::placeholder_hash,
@@ -468,14 +468,14 @@ mod tests {
         let min_query_secondary = U256::from(75);
         let max_query_secondary = U256::from(97686754);
         // define placeholders
-        let first_placeholder_id = PlaceholderId::Generic(0);
+        let first_placeholder_id = PlaceholderIdentifier::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
         let mut placeholders = Placeholders::new_empty(min_query_primary, max_query_primary);
         [first_placeholder_id, second_placeholder_id]
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is max query bound + 1, since the bound is C2 < $3, rather than C2 <= $3
-        let third_placeholder_id = PlaceholderId::Generic(2);
+        let third_placeholder_id = PlaceholderIdentifier::Generic(2);
         placeholders.insert(third_placeholder_id, max_query_secondary + U256::from(1));
         let bounds = QueryBounds::new(
             &placeholders,
@@ -984,14 +984,14 @@ mod tests {
         let min_query_secondary = U256::from(42);
         let max_query_secondary = U256::from(43);
         // define placeholders
-        let first_placeholder_id = PlaceholderId::Generic(0);
+        let first_placeholder_id = PlaceholderIdentifier::Generic(0);
         let second_placeholder_id = PlaceholderIdentifier::Generic(1);
         let mut placeholders = Placeholders::new_empty(min_query_primary, max_query_primary);
         [first_placeholder_id, second_placeholder_id]
             .iter()
             .for_each(|id| placeholders.insert(*id, gen_random_u256(rng)));
         // 3-rd placeholder is the min query bound
-        let third_placeholder_id = PlaceholderId::Generic(2);
+        let third_placeholder_id = PlaceholderIdentifier::Generic(2);
         placeholders.insert(third_placeholder_id, min_query_secondary);
         let query_bounds = QueryBounds::new(
             &placeholders,
