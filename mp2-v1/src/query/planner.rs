@@ -9,7 +9,7 @@ use mp2_common::types::HashOutput;
 use parsil::{bracketer::bracket_secondary_index, symbols::ContextProvider, ParsilSettings};
 use ryhope::{
     storage::{
-        pgsql::{PgsqlStorage, ToFromBytea},
+        pgsql::{DbBackend, PgsqlStorage, ToFromBytea},
         updatetree::UpdateTree,
         FromSettings, PayloadStorage, TransactionalStorage, TreeStorage, WideLineage,
     },
@@ -17,7 +17,7 @@ use ryhope::{
     Epoch, MerkleTreeKvDb, NodePayload,
 };
 use std::{fmt::Debug, future::Future};
-use tokio_postgres::{row::Row as PsqlRow, types::ToSql, NoTls};
+use tokio_postgres::{row::Row as PsqlRow, types::ToSql, GenericClient, NoTls};
 use verifiable_db::query::{
     api::TreePathInputs,
     utils::{ChildPosition, NodeInfo, QueryBounds},
@@ -31,7 +31,7 @@ use crate::indexing::{
 
 /// There is only the PSQL storage fully supported for the non existence case since one needs to
 /// executor particular requests on the DB in this case.
-pub type DBRowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
+pub struct DBRowStorage<B: DbBackend>();
 /// The type of connection to psql backend
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 
@@ -40,8 +40,12 @@ pub struct NonExistenceInfo<K: Clone + std::hash::Hash + std::cmp::Eq> {
 }
 
 #[derive(Clone)]
-pub struct NonExistenceInput<'a, C: ContextProvider> {
-    pub(crate) row_tree: &'a MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
+pub struct NonExistenceInput<'a, C: ContextProvider, B: DbBackend> {
+    pub(crate) row_tree: &'a MerkleTreeKvDb<
+        RowTree,
+        RowPayload<BlockPrimaryIndex>,
+        PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>, B>,
+    >,
     pub(crate) table_name: String,
     pub(crate) pool: &'a DBPool,
     pub(crate) settings: &'a ParsilSettings<C>,

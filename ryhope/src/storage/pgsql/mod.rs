@@ -11,11 +11,12 @@ use crate::{
 use bb8_postgres::PostgresConnectionManager;
 use futures::TryFutureExt;
 use itertools::Itertools;
+use postgres_types::ToSql;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, future::Future, sync::Arc};
 use storages::{NodeProjection, PayloadProjection};
 use tokio::sync::Mutex;
-use tokio_postgres::{Client, GenericClient, NoTls, Transaction};
+use tokio_postgres::{Client, GenericClient, NoTls, ToStatement, Transaction};
 use tracing::*;
 
 mod storages;
@@ -23,6 +24,7 @@ mod storages;
 const MAX_PGSQL_BIGINT: i64 = i64::MAX;
 
 pub type DBPool = bb8::Pool<PostgresConnectionManager<NoTls>>;
+pub trait DbBackend: GenericClient + Send + Sync {}
 
 /// A trait that must be implemented by a custom node key. This allows to
 /// (de)serialize any custom key to and fro a PgSQL BYTEA.
@@ -148,11 +150,36 @@ pub enum SqlServerConnection {
 }
 
 /// The settings required to instantiate a [`PgsqlStorage`] from a PgSQL server.
-pub struct SqlStorageSettings {
+pub struct SqlStorageSettings<T> {
     /// The table to use.
-    pub table: String,
+    pub(crate) table: String,
     /// A way to connect to the DB server
-    pub source: SqlServerConnection,
+    pub(crate) source: T,
+}
+impl SqlStorageSettings<Client> {
+    pub fn from_client(source: Client, table: String) -> Self {
+        Self { table, source }
+    }
+
+    pub async fn from_url(db_url: &str, table: String) -> Result<Self, RyhopeError> {
+        // Connect to the database.
+        let (client, connection) = tokio_postgres::connect(db_url, NoTls)
+            .await
+            .map_err(|e| RyhopeError::from_db("connecting to database", e))?;
+
+        // The connection object performs the actual communication with the database,
+        // so spawn it off to run on its own.
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                error!("failed to connect to DB: {}", e);
+            }
+        });
+
+        Ok(Self {
+            table,
+            source: client,
+        })
+    }
 }
 
 /// Return the current epoch for a given table pair. Note that there always will
@@ -174,30 +201,30 @@ async fn fetch_epoch_data<B: GenericClient>(
     .map_err(|err| RyhopeError::from_db("fetching current epoch data", err))
 }
 
-/// Initialize a DB pool.
-pub async fn init_db_pool<B: GenericClient>(
-    db_src: &SqlServerConnection,
-) -> Result<B, RyhopeError> {
-    match db_src {
-        SqlServerConnection::NewConnection(db_url) => {
-            info!("Connecting to `{db_url}`");
-            // Connect to the database.
-            let (client, connection) =
-                tokio_postgres::connect("host=localhost user=postgres", NoTls).await?;
+// /// Initialize a DB pool.
+// pub async fn init_db_pool<B: GenericClient>(
+//     db_src: &SqlServerConnection,
+// ) -> Result<B, RyhopeError> {
+//     match db_src {
+//         SqlServerConnection::NewConnection(db_url) => {
+//             info!("Connecting to `{db_url}`");
+//             // Connect to the database.
+//             let (client, connection) =
+//                 tokio_postgres::connect("host=localhost user=postgres", NoTls).await?;
 
-            // The connection object performs the actual communication with the database,
-            // so spawn it off to run on its own.
-            tokio::spawn(async move {
-                if let Err(e) = connection.await {
-                    error!("failed to connect to DB: {}", e);
-                }
-            });
+//             // The connection object performs the actual communication with the database,
+//             // so spawn it off to run on its own.
+//             tokio::spawn(async move {
+//                 if let Err(e) = connection.await {
+//                     error!("failed to connect to DB: {}", e);
+//                 }
+//             });
 
-            Ok(client)
-        }
-        SqlServerConnection::Pool(pool) => Ok(Box::new(pool.clone().get().await.unwrap())),
-    }
-}
+//             Ok(client)
+//         }
+//         SqlServerConnection::Pool(pool) => Ok(Box::new(pool.clone().get().await.unwrap())),
+//     }
+// }
 
 pub struct PgsqlStorage<T, V, B>
 where
@@ -210,7 +237,7 @@ where
     /// The table in which this tree will be stored
     table: String,
     /// A connection to the PostgreSQL server
-    db: Arc<Mutex<Box<B>>>,
+    db: Arc<Mutex<B>>,
     /// The current epoch
     epoch: i64,
     /// Tree state information
@@ -223,16 +250,15 @@ where
     in_tx: bool,
 }
 
-impl<T, V, B> FromSettings<T::State> for PgsqlStorage<T, V, B>
+impl<T, V> FromSettings<T::State> for PgsqlStorage<T, V, Client>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     T::State: Sync + Clone,
     V: PayloadInDb + Send + Sync,
-    B: GenericClient + Send + Sync,
 {
-    type Settings = SqlStorageSettings;
+    type Settings = SqlStorageSettings<Client>;
 
     async fn from_settings(
         init_settings: InitSettings<T::State>,
@@ -240,11 +266,11 @@ where
     ) -> Result<Self, RyhopeError> {
         match init_settings {
             InitSettings::MustExist => {
-                Self::load_existing(&storage_settings.source, storage_settings.table).await
+                Self::load_existing(storage_settings.source, storage_settings.table).await
             }
             InitSettings::MustNotExist(tree_state) => {
                 Self::create_new_at(
-                    &storage_settings.source,
+                    storage_settings.source,
                     storage_settings.table,
                     tree_state,
                     0,
@@ -253,7 +279,7 @@ where
             }
             InitSettings::MustNotExistAt(tree_state, epoch) => {
                 Self::create_new_at(
-                    &storage_settings.source,
+                    storage_settings.source,
                     storage_settings.table,
                     tree_state,
                     epoch,
@@ -262,7 +288,7 @@ where
             }
             InitSettings::Reset(tree_settings) => {
                 Self::reset_at(
-                    &storage_settings.source,
+                    storage_settings.source,
                     storage_settings.table,
                     tree_settings,
                     0,
@@ -271,7 +297,65 @@ where
             }
             InitSettings::ResetAt(tree_settings, initial_epoch) => {
                 Self::reset_at(
-                    &storage_settings.source,
+                    storage_settings.source,
+                    storage_settings.table,
+                    tree_settings,
+                    initial_epoch,
+                )
+                .await
+            }
+        }
+    }
+}
+
+impl<'a, T, V> FromSettings<T::State> for PgsqlStorage<T, V, Transaction<'a>>
+where
+    T: TreeTopology + DbConnector<V>,
+    T::Key: ToFromBytea,
+    T::Node: Sync + Clone,
+    T::State: Sync + Clone,
+    V: PayloadInDb + Send + Sync,
+{
+    type Settings = SqlStorageSettings<Transaction<'a>>;
+
+    async fn from_settings(
+        init_settings: InitSettings<T::State>,
+        storage_settings: Self::Settings,
+    ) -> Result<Self, RyhopeError> {
+        match init_settings {
+            InitSettings::MustExist => {
+                Self::load_existing(storage_settings.source, storage_settings.table).await
+            }
+            InitSettings::MustNotExist(tree_state) => {
+                Self::create_new_at(
+                    storage_settings.source,
+                    storage_settings.table,
+                    tree_state,
+                    0,
+                )
+                .await
+            }
+            InitSettings::MustNotExistAt(tree_state, epoch) => {
+                Self::create_new_at(
+                    storage_settings.source,
+                    storage_settings.table,
+                    tree_state,
+                    epoch,
+                )
+                .await
+            }
+            InitSettings::Reset(tree_settings) => {
+                Self::reset_at(
+                    storage_settings.source,
+                    storage_settings.table,
+                    tree_settings,
+                    0,
+                )
+                .await
+            }
+            InitSettings::ResetAt(tree_settings, initial_epoch) => {
+                Self::reset_at(
+                    storage_settings.source,
                     storage_settings.table,
                     tree_settings,
                     initial_epoch,
