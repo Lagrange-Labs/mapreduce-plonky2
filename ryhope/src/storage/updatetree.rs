@@ -61,7 +61,7 @@ impl<K: Clone + Hash + Eq> UpdateTree<K> {
     }
 
     /// Return an iterator over the key contained in this `UpdateTree`.
-    pub fn nodes<'a>(&'a self) -> impl Iterator<Item = &'a K> {
+    pub fn nodes(&self) -> impl Iterator<Item = &K> {
         self.nodes.iter().map(|n| &n.k)
     }
 }
