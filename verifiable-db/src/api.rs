@@ -68,6 +68,26 @@ where
     pub fn empty_cell_tree_proof(&self) -> Result<Vec<u8>> {
         self.cells_tree.empty_cell_tree_proof()
     }
+
+    /// Get the cell tree params
+    pub fn get_cells_params(&self) -> &cells_tree::PublicParameters {
+        &self.cells_tree
+    }
+
+    /// Get the rows tree params
+    pub fn get_row_params(&self) -> &row_tree::PublicParameters {
+        &self.rows_tree
+    }
+
+    /// Get the cell tree params
+    pub fn get_block_params(&self) -> &block_tree::PublicParameters<E> {
+        &self.block_tree
+    }
+
+    /// Get the IVS params
+    pub fn get_ivc_params(&self) -> &ivc::PublicParameters {
+        &self.ivc
+    }
 }
 
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.

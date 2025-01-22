@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use plonky2::{
     field::extension::Extendable,
@@ -160,12 +160,8 @@ pub(crate) fn check_circuit_digest_target<
 #[serde(bound = "")]
 /// Data structure employed by the recursion framework to store and manage the set of circuits whose proofs
 /// can be verified with the universal verifier bound to such a set
-pub(crate) struct CircuitSet<
-    F: RichField + Extendable<D>,
-    C: GenericConfig<D, F = F>,
-    const D: usize,
-> {
-    circuit_digests_to_leaf_indexes: HashMap<Vec<F>, usize>,
+pub struct CircuitSet<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> {
+    circuit_digests_to_leaf_indexes: BTreeMap<Vec<u64>, usize>,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     mt: MerkleTree<F, C::Hasher>,
 }
@@ -174,13 +170,21 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> C
 where
     C::Hasher: AlgebraicHasher<F>,
 {
+    pub fn get_hash_map(&self) -> &BTreeMap<Vec<u64>, usize> {
+        &self.circuit_digests_to_leaf_indexes
+    }
+
+    pub fn get_merkle_tree(&self) -> &MerkleTree<F, C::Hasher> {
+        &self.mt
+    }
+
     pub(crate) fn build_circuit_set(circuit_digests: Vec<<C::Hasher as Hasher<F>>::Hash>) -> Self {
-        let (circuit_digests_to_leaf_indexes, mut leaves): (HashMap<Vec<F>, usize>, Vec<_>) =
+        let (circuit_digests_to_leaf_indexes, mut leaves): (BTreeMap<Vec<u64>, usize>, Vec<_>) =
             circuit_digests
                 .iter()
                 .enumerate()
                 .map(|(index, hash)| {
-                    let hash_to_fes = hash.to_vec();
+                    let hash_to_fes = hash.to_vec().iter().map(|x| x.to_canonical_u64()).collect();
                     ((hash_to_fes, index), hash.to_vec())
                 })
                 .unzip();
@@ -195,7 +199,13 @@ where
     }
 
     fn leaf_index(&self, digest: &[F]) -> Option<usize> {
-        self.circuit_digests_to_leaf_indexes.get(digest).cloned()
+        let digest_u64 = digest
+            .iter()
+            .map(|x| x.to_canonical_u64())
+            .collect::<Vec<u64>>();
+        self.circuit_digests_to_leaf_indexes
+            .get(&digest_u64)
+            .cloned()
     }
 
     /// set a `CircuitSetMembershipTargets` to prove membership of `circuit_digest` in the set of
@@ -289,7 +299,7 @@ mod tests {
 
     use super::*;
     use mp2_common::{C, D, F};
-    use plonky2::field::types::Sample;
+    use plonky2::field::types::{Field, Sample};
 
     #[test]
     fn test_circuit_set_gadgets() {
@@ -332,7 +342,12 @@ mod tests {
                 .iter()
                 .zip(circuit_membership_targets.iter().zip(elements))
                 .for_each(|(&el_t, (membership_t, el))| {
-                    let el = HashOut::from_vec(el.clone());
+                    let el_f = el
+                        .iter()
+                        .copied()
+                        .map(F::from_canonical_u64)
+                        .collect::<Vec<F>>();
+                    let el = HashOut::from_vec(el_f);
                     pw.set_hash_target(el_t, el);
                     circuit_set
                         .set_circuit_membership_target(&mut pw, membership_t, el)

@@ -127,10 +127,13 @@ impl PublicParameters {
             CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(config, CIRCUIT_SET_SIZE);
 
         let leaf = builder.build_circuit(());
+        println!("built leaf");
         let full_node = builder.build_circuit(());
+        println!("built full");
         let partial_node = builder.build_circuit(());
+        println!("built partial");
         let empty_node = builder.build_circuit(());
-
+        println!("built empty");
         let set = RecursiveCircuits::new_from_circuit_digests(vec![
             leaf.get_verifier_data().circuit_digest,
             full_node.get_verifier_data().circuit_digest,
@@ -144,6 +147,51 @@ impl PublicParameters {
             .unwrap();
         let empty_node_proof = ProofWithVK::from((proof, empty_node.get_verifier_data().clone()));
 
+        // let wires_cap = &empty_node_proof.proof.proof.wires_cap;
+        // let perm_cap = &empty_node_proof.proof.proof.plonk_zs_partial_products_cap;
+        // println!("Empty node proof wires cap: {:?}", wires_cap);
+        // println!("Empty node proof perm cap: {:?}", perm_cap);
+        let leaf_len = bincode::serialize(&leaf).unwrap().len();
+        let full_node_len = bincode::serialize(&full_node).unwrap().len();
+        let partial_node_len = bincode::serialize(&partial_node).unwrap().len();
+        let empty_node_len = bincode::serialize(&empty_node).unwrap().len();
+        let set_len = bincode::serialize(&set).unwrap().len();
+        let proof_with_pi_len = bincode::serialize(&empty_node_proof.proof).unwrap().len();
+        // let vk_len = bincode::serialize(&empty_node_proof.vk).unwrap().len();
+
+        println!("After leaf: {}", leaf_len);
+        println!("After full_node: {}", leaf_len + full_node_len);
+        println!(
+            "After partial_node: {}",
+            leaf_len + full_node_len + partial_node_len
+        );
+        println!(
+            "After empty_ndoe: {}",
+            leaf_len + full_node_len + partial_node_len + empty_node_len
+        );
+        println!(
+            "After set: {}",
+            leaf_len + full_node_len + partial_node_len + empty_node_len + set_len
+        );
+        println!(
+            "After proof: {}",
+            leaf_len
+                + full_node_len
+                + partial_node_len
+                + empty_node_len
+                + set_len
+                + proof_with_pi_len
+        );
+        // println!(
+        //     "After vk: {}",
+        //     leaf_len
+        //         + full_node_len
+        //         + partial_node_len
+        //         + empty_node_len
+        //         + set_len
+        //         + proof_with_pi_len
+        //         + vk_len
+        // );
         PublicParameters {
             leaf,
             full_node,
@@ -415,5 +463,18 @@ mod tests {
         }
 
         proof
+    }
+
+    #[test]
+    fn test_cells_params_serialisation() {
+        let params = PublicParameters::build();
+        let ser = bincode::serialize(&params).unwrap();
+
+        let params_2 = PublicParameters::build();
+        let ser_2 = bincode::serialize(&params_2).unwrap();
+
+        for (i, (&byte_1, &byte_2)) in ser.iter().zip(ser_2.iter()).enumerate() {
+            assert_eq!(byte_1, byte_2, "Bytes not equal at index: {}", i);
+        }
     }
 }

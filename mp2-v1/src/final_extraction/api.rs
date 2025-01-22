@@ -349,4 +349,37 @@ mod tests {
         .unwrap();
         proof_pis.check_proof_public_inputs(proof.proof(), TableDimension::Compound, Some(len_dm));
     }
+
+    #[test]
+    fn test_final_params_serialisation() {
+        let block_circuit = TestDummyCircuit::<BLOCK_SET_NUM_IO>::build();
+        let values_params = TestingRecursiveCircuits::<F, C, D, VALUE_SET_NUM_IO>::default();
+        let contract_params = TestingRecursiveCircuits::<F, C, D, CONTRACT_SET_NUM_IO>::default();
+        let length_params = TestingRecursiveCircuits::<F, C, D, LENGTH_SET_NUM_IO>::default();
+        let params = PublicParameters::build(
+            block_circuit.circuit_data().verifier_data(),
+            contract_params.get_recursive_circuit_set(),
+            values_params.get_recursive_circuit_set(),
+            length_params.get_recursive_circuit_set(),
+        );
+
+        let params_bytes = bincode::serialize(&params).unwrap();
+
+        let block_circuit = TestDummyCircuit::<BLOCK_SET_NUM_IO>::build();
+        let values_params = TestingRecursiveCircuits::<F, C, D, VALUE_SET_NUM_IO>::default();
+        let contract_params = TestingRecursiveCircuits::<F, C, D, CONTRACT_SET_NUM_IO>::default();
+        let length_params = TestingRecursiveCircuits::<F, C, D, LENGTH_SET_NUM_IO>::default();
+        let params = PublicParameters::build(
+            block_circuit.circuit_data().verifier_data(),
+            contract_params.get_recursive_circuit_set(),
+            values_params.get_recursive_circuit_set(),
+            length_params.get_recursive_circuit_set(),
+        );
+
+        let params_bytes_2 = bincode::serialize(&params).unwrap();
+
+        for (i, (byte_1, byte_2)) in params_bytes.iter().zip(params_bytes_2.iter()).enumerate() {
+            assert_eq!(*byte_1, *byte_2, "Bytes were not equal at index: {}", i);
+        }
+    }
 }
