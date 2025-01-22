@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use parsil::symbols::ContextProvider;
 use ryhope::{
-    storage::{updatetree::UpdateTree, WideLineage},
+    storage::{pgsql::DbBackend, updatetree::UpdateTree, WideLineage},
     Epoch,
 };
 use serde::{Deserialize, Serialize};
@@ -88,27 +88,32 @@ pub async fn generate_chunks_and_update_tree<
     const CHUNK_SIZE: usize,
     const NUM_CHUNKS: usize,
     C: ContextProvider,
+    B: DbBackend,
 >(
     row_cache: WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     index_cache: WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     column_ids: &ColumnIDs,
-    non_existence_inputs: NonExistenceInput<'_, C>,
+    non_existence_inputs: NonExistenceInput<'_, C, B>,
     epoch: Epoch,
 ) -> Result<(
     HashMap<UTKey<NUM_CHUNKS>, Vec<RowInput>>,
     UTForChunks<NUM_CHUNKS>,
 )> {
-    let chunks =
-        generate_chunks::<CHUNK_SIZE, C>(row_cache, index_cache, column_ids, non_existence_inputs)
-            .await?;
+    let chunks = generate_chunks::<CHUNK_SIZE, C, B>(
+        row_cache,
+        index_cache,
+        column_ids,
+        non_existence_inputs,
+    )
+    .await?;
     Ok(UTForChunksBuilder { chunks }.build_update_tree_with_base_chunks(epoch))
 }
 
-async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
+async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider, B: DbBackend>(
     row_cache: WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     index_cache: WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     column_ids: &ColumnIDs,
-    non_existence_inputs: NonExistenceInput<'_, C>,
+    non_existence_inputs: NonExistenceInput<'_, C, B>,
 ) -> Result<Vec<Vec<RowInput>>> {
     let index_keys_by_epochs = index_cache.keys_by_epochs();
     assert_eq!(index_keys_by_epochs.len(), 1);
@@ -194,8 +199,8 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
 ///
 ///     B           C           D
 ///
-/// E   F   G       H   I  
-/// ```  
+/// E   F   G       H   I
+/// ```
 /// The nodes in this tree will be identified by the following keys:
 /// ```text
 ///                             (0,0)
@@ -203,7 +208,7 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
 ///        (1,0)                (1,1)               (1,2)
 ///
 /// (2,0)  (2,1)  (2,2)         (2,3)  (2,4)
-/// ```      
+/// ```
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize,
 )]

@@ -11,12 +11,11 @@ use crate::{
 use bb8_postgres::PostgresConnectionManager;
 use futures::TryFutureExt;
 use itertools::Itertools;
-use postgres_types::ToSql;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, future::Future, sync::Arc};
 use storages::{NodeProjection, PayloadProjection};
 use tokio::sync::Mutex;
-use tokio_postgres::{Client, GenericClient, NoTls, ToStatement, Transaction};
+use tokio_postgres::{Client, GenericClient, NoTls, Transaction};
 use tracing::*;
 
 mod storages;
@@ -363,6 +362,24 @@ where
                 .await
             }
         }
+    }
+}
+
+impl<T, V, B: DbBackend> FromSettings<T::State> for PgsqlStorage<T, V, B>
+where
+    T: TreeTopology + DbConnector<V>,
+    T::Key: ToFromBytea,
+    T::Node: Sync + Clone,
+    T::State: Sync + Clone,
+    V: PayloadInDb + Send + Sync,
+{
+    type Settings = ();
+
+    fn from_settings(
+        _init_settings: InitSettings<T::State>,
+        _storage_settings: Self::Settings,
+    ) -> impl Future<Output = Result<Self, RyhopeError>> {
+        async move { unimplemented!() }
     }
 }
 

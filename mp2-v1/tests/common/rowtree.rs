@@ -15,7 +15,6 @@ use ryhope::{
     storage::{
         pgsql::PgsqlStorage,
         updatetree::{Next, UpdateTree},
-        RoEpochKvStorage,
     },
     MerkleTreeKvDb,
 };
@@ -66,8 +65,8 @@ impl From<&SecondaryIndexCell> for RowTreeKey {
     }
 }
 
-pub type RowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
-pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
+pub type RowStorage<B> = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>, B>;
+pub type MerkleRowTree<B> = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage<B>>;
 
 impl TestContext {
     /// Given a row tree (i.e. secondary index tree) and its update tree, prove

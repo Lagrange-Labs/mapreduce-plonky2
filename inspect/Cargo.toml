@@ -13,6 +13,7 @@ itertools.workspace = true
 serde.workspace = true
 tabled.workspace = true
 tokio.workspace = true
+tokio-postgres.workspace = true
 
 ryhope = { path = "../ryhope" }
 mp2_v1 = { path = "../mp2-v1" }

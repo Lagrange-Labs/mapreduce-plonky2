@@ -17,7 +17,7 @@ use ryhope::{
     Epoch, MerkleTreeKvDb, NodePayload,
 };
 use std::{fmt::Debug, future::Future};
-use tokio_postgres::{row::Row as PsqlRow, types::ToSql, GenericClient, NoTls};
+use tokio_postgres::{row::Row as PsqlRow, types::ToSql, NoTls};
 use verifiable_db::query::{
     api::TreePathInputs,
     utils::{ChildPosition, NodeInfo, QueryBounds},
@@ -31,9 +31,11 @@ use crate::indexing::{
 
 /// There is only the PSQL storage fully supported for the non existence case since one needs to
 /// executor particular requests on the DB in this case.
-pub struct DBRowStorage<B: DbBackend>();
+pub type DBRowStorage<B> = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>, B>;
 /// The type of connection to psql backend
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
+
+type RowTreeKvDb<B> = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage<B>>;
 
 pub struct NonExistenceInfo<K: Clone + std::hash::Hash + std::cmp::Eq> {
     pub proving_plan: UpdateTree<K>,
@@ -41,20 +43,16 @@ pub struct NonExistenceInfo<K: Clone + std::hash::Hash + std::cmp::Eq> {
 
 #[derive(Clone)]
 pub struct NonExistenceInput<'a, C: ContextProvider, B: DbBackend> {
-    pub(crate) row_tree: &'a MerkleTreeKvDb<
-        RowTree,
-        RowPayload<BlockPrimaryIndex>,
-        PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>, B>,
-    >,
+    pub(crate) row_tree: &'a RowTreeKvDb<B>,
     pub(crate) table_name: String,
     pub(crate) pool: &'a DBPool,
     pub(crate) settings: &'a ParsilSettings<C>,
     pub(crate) bounds: QueryBounds,
 }
 
-impl<'a, C: ContextProvider> NonExistenceInput<'a, C> {
+impl<'a, C: ContextProvider, B: DbBackend> NonExistenceInput<'a, C, B> {
     pub fn new(
-        row_tree: &'a MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
+        row_tree: &'a RowTreeKvDb<B>,
         table_name: String,
         pool: &'a DBPool,
         settings: &'a ParsilSettings<C>,
@@ -412,8 +410,8 @@ where
 // this method returns the `NodeContext` of the successor of the node provided as input,
 // if the successor exists in the row tree and it stores the same value of the input node (i.e., `value`);
 // returns `None` otherwise, as it means that the input node can be used to prove non-existence
-async fn get_successor_node_with_same_value(
-    row_tree: &MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
+async fn get_successor_node_with_same_value<B: DbBackend>(
+    row_tree: &RowTreeKvDb<B>,
     node_ctx: &NodeContext<RowTreeKey>,
     value: U256,
     primary: BlockPrimaryIndex,
@@ -435,8 +433,8 @@ async fn get_successor_node_with_same_value(
 // this method returns the `NodeContext` of the predecessor of the node provided as input,
 // if the predecessor exists in the row tree and it stores the same value of the input node (i.e., `value`);
 // returns `None` otherwise, as it means that the input node can be used to prove non-existence
-async fn get_predecessor_node_with_same_value(
-    row_tree: &MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
+async fn get_predecessor_node_with_same_value<B: DbBackend>(
+    row_tree: &RowTreeKvDb<B>,
     node_ctx: &NodeContext<RowTreeKey>,
     value: U256,
     primary: BlockPrimaryIndex,
@@ -455,9 +453,9 @@ async fn get_predecessor_node_with_same_value(
         })
 }
 
-async fn find_node_for_proof(
+async fn find_node_for_proof<B: DbBackend>(
     db: &DBPool,
-    row_tree: &MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
+    row_tree: &RowTreeKvDb<B>,
     query: Option<String>,
     primary: BlockPrimaryIndex,
     is_min_query: bool,
