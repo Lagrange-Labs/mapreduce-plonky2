@@ -502,7 +502,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
             {
                 match op {
                     // $PI > x
-                    BinaryOperator::Gt | BinaryOperator::GtEq => {
+                    BinaryOperator::GtEq => {
                         let bound = self.expression_to_boundary(right)?;
                         if matches!(
                             bound,
@@ -512,7 +512,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         }
                     }
                     // $PI < x
-                    BinaryOperator::Lt | BinaryOperator::LtEq => {
+                    BinaryOperator::LtEq => {
                         let bound = self.expression_to_boundary(right)?;
 
                         if matches!(
