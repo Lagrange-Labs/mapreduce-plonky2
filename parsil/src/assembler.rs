@@ -6,8 +6,6 @@
 //!
 //! 2. wrap the original query into a CTE to expand CoW row spans into
 //!    individual column for each covered block number.
-use std::cmp::Ordering;
-
 use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
@@ -30,6 +28,22 @@ use crate::{
     utils::{str_to_u256, ParsilSettings},
     visitor::{AstVisitor, Visit},
 };
+
+/// Replace `current` with `Some(other)` if (i) `current` is empty, or (ii)
+/// `other` is smaller than the value in `current`.
+fn maybe_replace_min<T: PartialOrd>(current: &mut Option<T>, other: T) {
+    if current.as_ref().map(|x| other < *x).unwrap_or(false) || current.is_none() {
+        *current = Some(other);
+    }
+}
+
+/// Replace `current` with `Some(other)` if (i) `current` is empty, or (ii)
+/// `other` is larger than the value in `current`.
+fn maybe_replace_max<T: PartialOrd>(current: &mut Option<T>, other: T) {
+    if current.as_ref().map(|x| other > *x).unwrap_or(false) || current.is_none() {
+        *current = Some(other);
+    }
+}
 
 /// A Wire carry data that can be injected in universal query circuits. It
 /// carries an index, whose sginification depends on the type of wire.
@@ -390,21 +404,9 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         } else {
                             right
                         };
-                        let bound = Some(self.expression_to_boundary(right)?);
+                        let bound = self.expression_to_boundary(right)?;
 
-                        if bounds.low.is_some() {
-                            match bound.partial_cmp(&bounds.low) {
-                                // If $sid > x, $sid > y and y > x, then $sid > y
-                                Some(Ordering::Greater) => bounds.low = bound,
-                                // If $sid > x, $sid > y and x > y, then $sid > x
-                                Some(_) => {}
-                                // impossible to say which is higher between two
-                                // conflicting low bounds
-                                None => bounds.low = None,
-                            };
-                        } else {
-                            bounds.low = bound;
-                        }
+                        maybe_replace_max(&mut bounds.low, bound);
                     }
                     // $sid < x
                     BinaryOperator::Lt | BinaryOperator::LtEq => {
@@ -413,30 +415,15 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         } else {
                             right
                         };
-                        let bound = Some(self.expression_to_boundary(right)?);
+                        let bound = self.expression_to_boundary(right)?;
 
-                        if bounds.high.is_some() {
-                            match bound.partial_cmp(&bounds.high) {
-                                Some(Ordering::Less) => bounds.high = bound,
-                                // impossible to say which is lower between two
-                                // conflicting high bounds
-                                Some(_) => {}
-                                None => bounds.low = None,
-                            }
-                        } else {
-                            bounds.high = bound;
-                        }
+                        maybe_replace_min(&mut bounds.low, bound);
                     }
                     // $sid = x
                     BinaryOperator::Eq => {
-                        let bound = Some(self.expression_to_boundary(right)?);
-                        if bounds.low.is_some() && bounds.high.is_some() {
-                            bounds.low = None;
-                            bounds.high = None;
-                        } else {
-                            bounds.low = bound.clone();
-                            bounds.high = bound;
-                        }
+                        let bound = self.expression_to_boundary(right)?;
+                        maybe_replace_min(&mut bounds.high, bound.clone());
+                        maybe_replace_max(&mut bounds.low, bound);
                     }
                     _ => {}
                 }
@@ -449,13 +436,9 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         } else {
                             left
                         };
-                        let bound = Some(self.expression_to_boundary(left)?);
+                        let bound = self.expression_to_boundary(left)?;
 
-                        if bounds.high.is_some() {
-                            bounds.high = None;
-                        } else {
-                            bounds.high = bound;
-                        }
+                        maybe_replace_min(&mut bounds.high, bound);
                     }
                     // x < $sid
                     BinaryOperator::Lt | BinaryOperator::LtEq => {
@@ -464,26 +447,15 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         } else {
                             left
                         };
-                        let bound = Some(self.expression_to_boundary(left)?);
+                        let bound = self.expression_to_boundary(left)?;
 
-                        if bounds.low.is_some() {
-                            // impossible to say which is lower between two
-                            // conflicting high bounds
-                            bounds.low = None;
-                        } else {
-                            bounds.low = bound;
-                        }
+                        maybe_replace_max(&mut bounds.high, bound);
                     }
                     // x = $sid
                     BinaryOperator::Eq => {
-                        let bound = Some(self.expression_to_boundary(left)?);
-                        if bounds.low.is_some() && bounds.high.is_some() {
-                            bounds.low = None;
-                            bounds.high = None;
-                        } else {
-                            bounds.low = bound.clone();
-                            bounds.high = bound;
-                        }
+                        let bound = self.expression_to_boundary(left)?;
+                        maybe_replace_max(&mut bounds.high, bound.clone());
+                        maybe_replace_min(&mut bounds.high, bound);
                     }
                     _ => {}
                 }

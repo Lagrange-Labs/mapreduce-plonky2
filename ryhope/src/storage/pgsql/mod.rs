@@ -20,7 +20,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use storages::{NodeProjection, PayloadProjection};
-use tokio_postgres::{GenericClient, NoTls, Transaction};
+use tokio_postgres::{NoTls, Transaction};
 use tracing::*;
 
 mod storages;
