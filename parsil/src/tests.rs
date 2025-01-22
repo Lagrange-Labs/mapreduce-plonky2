@@ -70,13 +70,16 @@ fn prim_index_bounds() -> Result<()> {
     assert!(check("SELECT pipo FROM table1 WHERE block < MAX_BLOCK").is_err());
     assert!(check("SELECT pipo FROM table1 WHERE block > $MIN_BLOCK").is_err());
     assert!(
-        check("SELECT pipo FROM table1 WHERE block < $MAX_BLOCK AND block > $MIN_BLOCK").is_ok()
+        check("SELECT pipo FROM table1 WHERE block < $MAX_BLOCK AND block > $MIN_BLOCK").is_err()
     );
     assert!(
-        check("SELECT pipo FROM table1 WHERE block > $MIN_BLOCK AND block < $MAX_BLOCK").is_ok()
+        check("SELECT pipo FROM table1 WHERE block <= $MAX_BLOCK AND block >= $MIN_BLOCK").is_ok()
     );
     assert!(
-        check("SELECT pipo FROM table1 WHERE block > $MAX_BLOCK AND block < $MIN_BLOCK").is_err()
+        check("SELECT pipo FROM table1 WHERE block >= $MIN_BLOCK AND block <= $MAX_BLOCK").is_ok()
+    );
+    assert!(
+        check("SELECT pipo FROM table1 WHERE block >= $MAX_BLOCK AND block <= $MIN_BLOCK").is_err()
     );
     Ok(())
 }
