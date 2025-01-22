@@ -417,13 +417,13 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         };
                         let bound = self.expression_to_boundary(right)?;
 
-                        maybe_replace_min(&mut bounds.low, bound);
+                        maybe_replace_min(&mut bounds.high, bound);
                     }
                     // $sid = x
                     BinaryOperator::Eq => {
                         let bound = self.expression_to_boundary(right)?;
-                        maybe_replace_min(&mut bounds.high, bound.clone());
-                        maybe_replace_max(&mut bounds.low, bound);
+                        bounds.low = Some(bound.clone());
+                        bounds.high = Some(bound);
                     }
                     _ => {}
                 }
@@ -449,13 +449,13 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         };
                         let bound = self.expression_to_boundary(left)?;
 
-                        maybe_replace_max(&mut bounds.high, bound);
+                        maybe_replace_max(&mut bounds.low, bound);
                     }
                     // x = $sid
                     BinaryOperator::Eq => {
                         let bound = self.expression_to_boundary(left)?;
-                        maybe_replace_max(&mut bounds.high, bound.clone());
-                        maybe_replace_min(&mut bounds.high, bound);
+                        bounds.low = Some(bound.clone());
+                        bounds.high = Some(bound);
                     }
                     _ => {}
                 }
