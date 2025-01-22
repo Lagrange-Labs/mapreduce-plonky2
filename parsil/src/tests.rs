@@ -67,7 +67,7 @@ fn prim_index_bounds() -> Result<()> {
         "SELECT pipo FROM table1 WHERE block = pipo + 5 AND block BETWEEN $MIN_BLOCK AND $1"
     )
     .is_err());
-    assert!(check("SELECT pipo FROM table1 WHERE block < MAX_BLOCK").is_err());
+    assert!(check("SELECT pipo FROM table1 WHERE block < $MAX_BLOCK").is_err());
     assert!(check("SELECT pipo FROM table1 WHERE block > $MIN_BLOCK").is_err());
     assert!(
         check("SELECT pipo FROM table1 WHERE block < $MAX_BLOCK AND block > $MIN_BLOCK").is_err()

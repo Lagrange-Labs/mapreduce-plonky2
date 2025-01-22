@@ -289,11 +289,11 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         }
     }
 
-    /// Return whether the given `Symbol` encodes the secondary index column.
-    fn is_symbol_kind(s: &Symbol<Wire>, _kind: ColumnKind) -> bool {
+    /// Return whether the given `Symbol` encodes the given kind of column.
+    fn is_symbol_kind(s: &Symbol<Wire>, target: ColumnKind) -> bool {
         match s {
-            Symbol::Column { kind, .. } => *kind == _kind,
-            Symbol::Alias { to, .. } => Self::is_symbol_kind(to, _kind),
+            Symbol::Column { kind, .. } => *kind == target,
+            Symbol::Alias { to, .. } => Self::is_symbol_kind(to, target),
             _ => false,
         }
     }
