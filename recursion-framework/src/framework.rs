@@ -125,11 +125,6 @@ where
     pub fn get_circuit_set_digest(&self) -> CircuitSetDigest<F, C, D> {
         CircuitSetDigest::from(&self.circuit_set)
     }
-
-    /// Gets the circuit set
-    pub fn get_circuit_set(&self) -> &CircuitSet<F, C, D> {
-        &self.circuit_set
-    }
 }
 
 /// This method should be called on each base circuit to be included in the sets of circuits that is

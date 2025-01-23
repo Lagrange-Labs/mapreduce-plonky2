@@ -108,10 +108,11 @@ impl PublicParameters {
         ProofWithVK::from((proof, self.ivc.circuit_data().verifier_only.clone())).serialize()
     }
 
+    /// Getter for the [`RecursiveCircuits`]
     pub fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
         &self.set
     }
-
+    /// Getter for the IVC proof [`CircuitData`]
     pub fn get_ivc_circuit_data(&self) -> &CircuitData<F, C, D> {
         self.ivc.circuit_data()
     }

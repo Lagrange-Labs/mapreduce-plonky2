@@ -79,12 +79,12 @@ where
         &self.rows_tree
     }
 
-    /// Get the cell tree params
+    /// Get the block tree params
     pub fn get_block_params(&self) -> &block_tree::PublicParameters<E> {
         &self.block_tree
     }
 
-    /// Get the IVS params
+    /// Get the IVC params
     pub fn get_ivc_params(&self) -> &ivc::PublicParameters {
         &self.ivc
     }

@@ -114,29 +114,6 @@ impl PublicParameters {
             branch.get_verifier_data().circuit_digest,
         ]);
 
-        let leaf_ser = bincode::serialize(&leaf).unwrap();
-        let extension_ser = bincode::serialize(&extension).unwrap();
-        let branch_ser = bincode::serialize(&branch).unwrap();
-        let set_ser = bincode::serialize(&set).unwrap();
-
-        let leaf_len = leaf_ser.len();
-        let ext_len = extension_ser.len();
-        let branch_len = branch_ser.len();
-        let set_len = set_ser.len();
-        println!("Leaf length: {}", leaf_len);
-        println!("Extension length: {}", ext_len);
-        println!("cumulative length after extension: {}", leaf_len + ext_len);
-        println!("Branch len: {}", branch_len);
-        println!(
-            "cumulative length after branch: {}",
-            leaf_len + ext_len + branch_len
-        );
-        println!("set len: {}", set_len);
-        println!(
-            "cumulative length after set: {}",
-            leaf_len + ext_len + branch_len + set_len
-        );
-
         PublicParameters {
             leaf,
             extension,
@@ -357,20 +334,5 @@ mod tests {
         }
 
         Ok(())
-    }
-
-    #[test]
-    fn test_params_serialisation() {
-        let params = build_circuits_params();
-        let serialized = bincode::serialize(&params).unwrap();
-        println!("Contract params length serialized: {}", serialized.len());
-
-        let params = build_circuits_params();
-        let serialized_2 = bincode::serialize(&params).unwrap();
-        println!("Contract params length serialized: {}", serialized_2.len());
-
-        for (i, (&byte_1, &byte_2)) in serialized.iter().zip(serialized_2.iter()).enumerate() {
-            assert_eq!(byte_1, byte_2, "Bytes not equal at index: {}", i);
-        }
     }
 }

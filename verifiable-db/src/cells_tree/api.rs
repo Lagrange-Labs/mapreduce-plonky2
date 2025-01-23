@@ -97,14 +97,37 @@ fn new_child_input(
     }
 }
 
-/// Main struct holding the different circuit parameters for each of the circuits defined here.
 #[derive(Serialize, Deserialize)]
-pub struct PublicParameters {
+struct ParametersInner {
     leaf: CircuitWithUniversalVerifier<F, C, D, 0, LeafWires>,
     full_node: CircuitWithUniversalVerifier<F, C, D, 2, FullNodeWires>,
     partial_node: CircuitWithUniversalVerifier<F, C, D, 1, PartialNodeWires>,
     empty_node: CircuitWithUniversalVerifier<F, C, D, 0, EmptyNodeWires>,
     set: RecursiveCircuits<F, C, D>,
+}
+
+impl From<ParametersInner> for PublicParameters {
+    fn from(value: ParametersInner) -> Self {
+        // Generate the proof for the empty node. It could be reused.
+        let proof = value
+            .set
+            .generate_proof(&value.empty_node, [], [], EmptyNodeCircuit)
+            .unwrap();
+        let empty_node_proof =
+            ProofWithVK::from((proof, value.empty_node.get_verifier_data().clone()));
+        Self {
+            inner: value,
+            empty_node_proof,
+        }
+    }
+}
+
+/// Main struct holding the different circuit parameters for each of the circuits defined here.
+#[derive(Serialize, Deserialize)]
+#[serde(from = "ParametersInner")]
+pub struct PublicParameters {
+    inner: ParametersInner,
+    #[serde(skip_serializing)]
     empty_node_proof: ProofWithVK,
 }
 
@@ -127,13 +150,13 @@ impl PublicParameters {
             CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(config, CIRCUIT_SET_SIZE);
 
         let leaf = builder.build_circuit(());
-        println!("built leaf");
+
         let full_node = builder.build_circuit(());
-        println!("built full");
+
         let partial_node = builder.build_circuit(());
-        println!("built partial");
+
         let empty_node = builder.build_circuit(());
-        println!("built empty");
+
         let set = RecursiveCircuits::new_from_circuit_digests(vec![
             leaf.get_verifier_data().circuit_digest,
             full_node.get_verifier_data().circuit_digest,
@@ -147,71 +170,28 @@ impl PublicParameters {
             .unwrap();
         let empty_node_proof = ProofWithVK::from((proof, empty_node.get_verifier_data().clone()));
 
-        // let wires_cap = &empty_node_proof.proof.proof.wires_cap;
-        // let perm_cap = &empty_node_proof.proof.proof.plonk_zs_partial_products_cap;
-        // println!("Empty node proof wires cap: {:?}", wires_cap);
-        // println!("Empty node proof perm cap: {:?}", perm_cap);
-        let leaf_len = bincode::serialize(&leaf).unwrap().len();
-        let full_node_len = bincode::serialize(&full_node).unwrap().len();
-        let partial_node_len = bincode::serialize(&partial_node).unwrap().len();
-        let empty_node_len = bincode::serialize(&empty_node).unwrap().len();
-        let set_len = bincode::serialize(&set).unwrap().len();
-        let proof_with_pi_len = bincode::serialize(&empty_node_proof.proof).unwrap().len();
-        // let vk_len = bincode::serialize(&empty_node_proof.vk).unwrap().len();
-
-        println!("After leaf: {}", leaf_len);
-        println!("After full_node: {}", leaf_len + full_node_len);
-        println!(
-            "After partial_node: {}",
-            leaf_len + full_node_len + partial_node_len
-        );
-        println!(
-            "After empty_ndoe: {}",
-            leaf_len + full_node_len + partial_node_len + empty_node_len
-        );
-        println!(
-            "After set: {}",
-            leaf_len + full_node_len + partial_node_len + empty_node_len + set_len
-        );
-        println!(
-            "After proof: {}",
-            leaf_len
-                + full_node_len
-                + partial_node_len
-                + empty_node_len
-                + set_len
-                + proof_with_pi_len
-        );
-        // println!(
-        //     "After vk: {}",
-        //     leaf_len
-        //         + full_node_len
-        //         + partial_node_len
-        //         + empty_node_len
-        //         + set_len
-        //         + proof_with_pi_len
-        //         + vk_len
-        // );
         PublicParameters {
-            leaf,
-            full_node,
-            partial_node,
-            empty_node,
-            set,
+            inner: ParametersInner {
+                leaf,
+                full_node,
+                partial_node,
+                empty_node,
+                set,
+            },
             empty_node_proof,
         }
     }
 
     pub fn vk_set(&self) -> &RecursiveCircuits<F, C, D> {
-        &self.set
+        &self.inner.set
     }
     pub fn generate_proof(&self, circuit_type: CircuitInput) -> Result<Vec<u8>> {
-        let set = &self.set;
+        let set = &self.inner.set;
 
         let proof_with_vk = match circuit_type {
             CircuitInput::Leaf(leaf) => {
-                let proof = set.generate_proof(&self.leaf, [], [], leaf)?;
-                (proof, self.leaf.get_verifier_data().clone())
+                let proof = set.generate_proof(&self.inner.leaf, [], [], leaf)?;
+                (proof, self.inner.leaf.get_verifier_data().clone())
             }
             CircuitInput::FullNode(node) => {
                 let child_proofs = node.get_child_proofs()?;
@@ -223,12 +203,12 @@ impl PublicParameters {
                 let (child_pis, child_vks): (Vec<_>, Vec<_>) =
                     child_proofs.into_iter().map(|p| (p.proof, p.vk)).unzip();
                 let proof = set.generate_proof(
-                    &self.full_node,
+                    &self.inner.full_node,
                     child_pis.try_into().unwrap(),
                     array::from_fn(|i| &child_vks[i]),
                     node.input.into(),
                 )?;
-                (proof, self.full_node.get_verifier_data().clone())
+                (proof, self.inner.full_node.get_verifier_data().clone())
             }
             CircuitInput::PartialNode(node) => {
                 let mut child_proofs = node.get_child_proofs()?;
@@ -239,12 +219,12 @@ impl PublicParameters {
                 );
                 let (child_proof, child_vk) = child_proofs.pop().unwrap().into();
                 let proof = set.generate_proof(
-                    &self.partial_node,
+                    &self.inner.partial_node,
                     [child_proof],
                     [&child_vk],
                     node.input.into(),
                 )?;
-                (proof, self.partial_node.get_verifier_data().clone())
+                (proof, self.inner.partial_node.get_verifier_data().clone())
             }
         };
 
@@ -463,18 +443,5 @@ mod tests {
         }
 
         proof
-    }
-
-    #[test]
-    fn test_cells_params_serialisation() {
-        let params = PublicParameters::build();
-        let ser = bincode::serialize(&params).unwrap();
-
-        let params_2 = PublicParameters::build();
-        let ser_2 = bincode::serialize(&params_2).unwrap();
-
-        for (i, (&byte_1, &byte_2)) in ser.iter().zip(ser_2.iter()).enumerate() {
-            assert_eq!(byte_1, byte_2, "Bytes not equal at index: {}", i);
-        }
     }
 }

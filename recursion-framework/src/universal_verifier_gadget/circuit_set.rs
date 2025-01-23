@@ -170,14 +170,6 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize> C
 where
     C::Hasher: AlgebraicHasher<F>,
 {
-    pub fn get_hash_map(&self) -> &BTreeMap<Vec<u64>, usize> {
-        &self.circuit_digests_to_leaf_indexes
-    }
-
-    pub fn get_merkle_tree(&self) -> &MerkleTree<F, C::Hasher> {
-        &self.mt
-    }
-
     pub(crate) fn build_circuit_set(circuit_digests: Vec<<C::Hasher as Hasher<F>>::Hash>) -> Self {
         let (circuit_digests_to_leaf_indexes, mut leaves): (BTreeMap<Vec<u64>, usize>, Vec<_>) =
             circuit_digests
