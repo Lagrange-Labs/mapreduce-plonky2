@@ -213,7 +213,7 @@ pub(crate) async fn prove_query(
                     GlobalCircuitInput::Query(input),
                 )
             } else {
-                let children_keys = workplan.t.get_children_keys(k);
+                let children_keys = workplan.tree().get_children_keys(k);
                 info!("children keys: {:?}", children_keys);
                 // fetch the proof for each child from the storage
                 let child_proofs = children_keys

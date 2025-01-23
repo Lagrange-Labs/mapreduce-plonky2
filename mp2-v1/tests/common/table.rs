@@ -351,8 +351,8 @@ impl Table {
             .await
             .expect("can't apply cells update");
         println!(
-            "Cell trees root hash after updates (impacted key {:?}): {:?}",
-            cell_update.impacted_keys(),
+            "Cell trees root hash after updates (impacted keys {:?}): {:?}",
+            cell_update.nodes().collect_vec(),
             hex::encode(&cell_tree.root_data().await?.unwrap().hash[..])
         );
         Ok(CellsUpdateResult {
