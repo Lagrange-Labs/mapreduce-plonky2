@@ -63,6 +63,11 @@ where
         };
         Ok(bincode::serialize(&params_info)?)
     }
+
+    /// Get the proof of an empty node.
+    pub fn empty_cell_tree_proof(&self) -> Result<Vec<u8>> {
+        self.cells_tree.empty_cell_tree_proof()
+    }
 }
 
 /// Instantiate the circuits employed for the verifiable DB stage of LPN, and return their corresponding parameters.

@@ -74,7 +74,7 @@ pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
 impl TableIndexing {
     pub(crate) async fn merge_table_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> anyhow::Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -197,7 +197,7 @@ impl TableIndexing {
 
     pub(crate) async fn single_value_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> anyhow::Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -281,7 +281,7 @@ impl TableIndexing {
 
     pub(crate) async fn mapping_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> anyhow::Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -464,7 +464,7 @@ impl TableIndexing {
         ctx: &mut TestContext,
         genesis_change: Vec<TableRowUpdate<BlockPrimaryIndex>>,
         changes: Vec<ChangeType>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         // Call the contract function to set the test data.
         log::info!("Applying initial updates to contract done");
         let bn = self.source.latest_epoch(ctx).await;
@@ -526,7 +526,12 @@ impl TableIndexing {
                     let previous_row = match new_cells.previous_row_key != Default::default() {
                         true => Row {
                             k: new_cells.previous_row_key.clone(),
-                            payload: self.table.row.fetch(&new_cells.previous_row_key).await,
+                            payload: self
+                                .table
+                                .row
+                                .try_fetch(&new_cells.previous_row_key)
+                                .await?
+                                .unwrap(),
                         },
                         false => Row::default(),
                     };
@@ -544,7 +549,7 @@ impl TableIndexing {
                             new_cell_collection,
                             tree_update,
                         )
-                        .await;
+                        .await?;
                     TreeRowUpdate::Insertion(Row {
                         k: new_row_key,
                         payload: row_payload,
@@ -561,7 +566,7 @@ impl TableIndexing {
                         .table
                         .row
                         .try_fetch(&new_cells.previous_row_key)
-                        .await
+                        .await?
                         .expect("unable to find previous row");
                     let new_cell_collection = row_update.updated_cells_collection(
                         self.table.columns.secondary_column().identifier,
@@ -580,7 +585,7 @@ impl TableIndexing {
                             new_cell_collection,
                             tree_update,
                         )
-                        .await;
+                        .await?;
                     TreeRowUpdate::Update(Row {
                         k: new_row_key,
                         payload: row_payload,
