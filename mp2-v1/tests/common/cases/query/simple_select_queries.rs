@@ -262,7 +262,7 @@ pub(crate) async fn prove_single_row<T: TreeFetcher<RowTreeKey, RowPayload<Block
     let rest_cells = columns
         .non_indexed_columns()
         .iter()
-        .map(|tc| tc.identifier)
+        .map(|tc| tc.identifier())
         .filter_map(|id| {
             row_payload
                 .cells

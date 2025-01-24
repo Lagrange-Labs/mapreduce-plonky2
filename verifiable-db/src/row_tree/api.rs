@@ -246,6 +246,7 @@ mod test {
     use crate::cells_tree;
     use itertools::Itertools;
     use mp2_common::{
+        group_hashing::weierstrass_to_point,
         poseidon::{empty_poseidon_hash, H},
         utils::ToFields,
         F,
@@ -404,7 +405,8 @@ mod test {
         // Check individual digest
         assert_eq!(
             pi.individual_digest_point(),
-            row_digest.individual_vd.to_weierstrass()
+            (row_digest.individual_vd + weierstrass_to_point(&child_pi.individual_digest_point()))
+                .to_weierstrass()
         );
         // Check multiplier digest
         assert_eq!(
@@ -469,7 +471,10 @@ mod test {
         // Check individual digest
         assert_eq!(
             pi.individual_digest_point(),
-            row_digest.individual_vd.to_weierstrass()
+            (row_digest.individual_vd
+                + weierstrass_to_point(&left_pi.individual_digest_point())
+                + weierstrass_to_point(&right_pi.individual_digest_point()))
+            .to_weierstrass()
         );
         // Check multiplier digest
         assert_eq!(

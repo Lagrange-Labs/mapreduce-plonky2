@@ -1,32 +1,16 @@
 //! Test utilities for Values Extraction (C.1)
 
 use super::{storage_trie::TestStorageTrie, TestContext};
-use crate::common::StorageSlotInfo;
-use alloy::{
-    eips::BlockNumberOrTag,
-    primitives::{Address, U256},
-};
+use alloy::{eips::BlockNumberOrTag, primitives::Address, providers::Provider};
+use itertools::Itertools;
 use log::info;
-use mp2_common::{
-    eth::{ProofQuery, StorageSlot},
-    mpt_sequential::utils::bytes_to_nibbles,
-    F,
-};
-use mp2_v1::{
-    api::SlotInput,
-    values_extraction::{
-        gadgets::{column_info::ColumnInfo, metadata_gadget::MetadataGadget},
-        identifier_for_value_column,
-        public_inputs::PublicInputs,
-    },
-};
+use mp2_common::{mpt_sequential::utils::bytes_to_nibbles, F};
+use mp2_v1::values_extraction::{public_inputs::PublicInputs, StorageSlotInfo};
 use plonky2::field::types::Field;
 
-type MappingKey = Vec<u8>;
-
 impl TestContext {
-    /// Generate the Values Extraction (C.1) proof for single variables.
-    pub(crate) async fn prove_single_values_extraction(
+    /// Generate the Values Extraction proof for single or mapping variables.
+    pub(crate) async fn prove_values_extraction(
         &self,
         contract_address: &Address,
         bn: BlockNumberOrTag,
@@ -42,19 +26,19 @@ impl TestContext {
                 .await;
         }
 
-        info!("Prove the test storage trie including the simple slots {slots:?}");
-        let proof_value = trie.prove_value(self.params(), &self.b);
+        let chain_id = self.rpc.get_chain_id().await.unwrap();
+        let proof_value = trie.prove_value(contract_address, chain_id, self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::new(&proof_value.proof().public_inputs);
-        assert_eq!(pi.n(), F::from_canonical_usize(slots.len()));
         assert_eq!(pi.root_hash(), trie.root_hash());
+        assert_eq!(pi.n(), F::from_canonical_usize(slots.len()));
         {
-            let exp_key = StorageSlot::Simple(slots[0].slot().slot() as usize).mpt_key_vec();
-            let exp_key: Vec<_> = bytes_to_nibbles(&exp_key)
+            let exp_key = slots[0].slot().mpt_key_vec();
+            let exp_key = bytes_to_nibbles(&exp_key)
                 .into_iter()
                 .map(F::from_canonical_u8)
-                .collect();
+                .collect_vec();
 
             let (key, ptr) = pi.mpt_key_info();
             assert_eq!(key, exp_key);
@@ -62,89 +46,5 @@ impl TestContext {
         }
 
         proof_value.serialize().unwrap()
-    }
-
-    /// Generate the Values Extraction (C.1) proof for mapping variables.
-    pub(crate) async fn prove_mapping_values_extraction(
-        &self,
-        contract_address: &Address,
-        chain_id: u64,
-        slot_input: &SlotInput,
-        mapping_keys: Vec<MappingKey>,
-    ) -> Vec<u8> {
-        let first_mapping_key = mapping_keys[0].clone();
-        let storage_slot_number = mapping_keys.len();
-
-        // Initialize the test trie.
-        let mut trie = TestStorageTrie::new();
-        info!("mapping mpt proving: Initialized the test storage trie");
-
-        // Compute the column identifier for the value column.
-        let column_identifier =
-            identifier_for_value_column(slot_input, contract_address, chain_id, vec![]);
-        // Compute the table metadata information.
-        let slot = slot_input.slot();
-        let evm_word = slot_input.evm_word();
-        let table_info = vec![ColumnInfo::new(
-            slot,
-            column_identifier,
-            slot_input.byte_offset(),
-            slot_input.bit_offset(),
-            slot_input.length(),
-            evm_word,
-        )];
-        let metadata = MetadataGadget::new(table_info, &[column_identifier], evm_word);
-
-        // Query the slot and add the node path to the trie.
-        let slot = slot as usize;
-        for mapping_key in mapping_keys {
-            let query = ProofQuery::new_mapping_slot(*contract_address, slot, mapping_key.clone());
-            let response = self
-                .query_mpt_proof(&query, BlockNumberOrTag::Number(self.block_number().await))
-                .await;
-
-            // Get the nodes to prove. Reverse to the sequence from leaf to root.
-            let nodes: Vec<_> = response.storage_proof[0]
-                .proof
-                .iter()
-                .rev()
-                .map(|node| node.to_vec())
-                .collect();
-
-            let sslot = StorageSlot::Mapping(mapping_key.clone(), slot);
-            info!(
-                "Save the mapping key {:?} (value {}) on slot {} to the test storage trie",
-                U256::from_be_slice(&mapping_key),
-                response.storage_proof[0].value,
-                slot
-            );
-
-            // TODO: Check if we could use the column identifier as the
-            // outer key ID for mapping values.
-            let outer_key_id = Some(column_identifier);
-            let slot_info = StorageSlotInfo::new(sslot, metadata.clone(), outer_key_id, None);
-            trie.add_slot(slot_info, nodes);
-        }
-
-        info!("Prove the test storage trie including the mapping slots ({slot}, ...)");
-        let proof = trie.prove_value(self.params(), &self.b);
-
-        // Check the public inputs.
-        let pi = PublicInputs::new(&proof.proof().public_inputs);
-        assert_eq!(pi.n(), F::from_canonical_usize(storage_slot_number));
-        assert_eq!(pi.root_hash(), trie.root_hash());
-        {
-            let exp_key = StorageSlot::Mapping(first_mapping_key, slot).mpt_key_vec();
-            let exp_key: Vec<_> = bytes_to_nibbles(&exp_key)
-                .into_iter()
-                .map(F::from_canonical_u8)
-                .collect();
-
-            let (key, ptr) = pi.mpt_key_info();
-            assert_eq!(key, exp_key);
-            assert_eq!(ptr, F::NEG_ONE);
-        }
-
-        proof.serialize().expect("can't serialize mpt proof")
     }
 }
