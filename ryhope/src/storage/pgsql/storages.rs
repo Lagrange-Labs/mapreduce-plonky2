@@ -1,4 +1,5 @@
 use crate::{
+    error::{ensure, RyhopeError},
     storage::{
         EpochKvStorage, EpochStorage, RoEpochKvStorage, SqlTransactionStorage,
         TransactionalStorage, TreeStorage, WideLineage,
@@ -9,7 +10,6 @@ use crate::{
     },
     Epoch, EPOCH, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL,
 };
-use anyhow::*;
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use itertools::Itertools;
@@ -68,7 +68,7 @@ where
         k: &Self::Key,
         birth_epoch: Epoch,
         v: &Self::Node,
-    ) -> impl Future<Output = Result<()>>;
+    ) -> impl Future<Output = Result<(), RyhopeError>>;
 
     /// Within a PgSQL transaction, update the value associated at the given
     /// epoch to the given key.
@@ -78,7 +78,7 @@ where
         k: &Self::Key,
         epoch: Epoch,
         v: V,
-    ) -> impl Future<Output = Result<()>> {
+    ) -> impl Future<Output = Result<(), RyhopeError>> {
         async move {
             db_tx
             .execute(
@@ -89,8 +89,8 @@ where
                 &[&k.to_bytea(), &epoch, &Json(v)],
             )
             .await
-            .map(|_| ())
-            .context("while updating payload")
+                .map(|_| ())
+                .map_err(|err| RyhopeError::from_db("while updating payload", err))
         }
     }
 
@@ -100,13 +100,13 @@ where
         table: &str,
         k: &Self::Key,
         epoch: Epoch,
-    ) -> impl Future<Output = Result<Option<Self::Node>>> + Send;
+    ) -> impl Future<Output = Result<Option<Self::Node>, RyhopeError>> + Send;
 
     fn fetch_all_keys(
         db: DBPool,
         table: &str,
         epoch: Epoch,
-    ) -> impl Future<Output = Result<Vec<Self::Key>>> + Send {
+    ) -> impl Future<Output = Result<Vec<Self::Key>, RyhopeError>> + Send {
         async move {
             let connection = db.get().await.unwrap();
             Ok(connection
@@ -118,7 +118,7 @@ where
                     &[&epoch],
                 )
                 .await
-                .context("while fetching all keys from database")?
+                .map_err(|err| RyhopeError::from_db("while fetching all keys from database", err))?
                 .iter()
                 .map(|row| Self::Key::from_bytea(row.get::<_, Vec<u8>>(0)))
                 .collect())
@@ -130,7 +130,7 @@ where
         db: DBPool,
         table: &str,
         epoch: Epoch,
-    ) -> impl Future<Output = Result<Option<Self::Key>>> + Send {
+    ) -> impl Future<Output = Result<Option<Self::Key>, RyhopeError>> + Send {
         async move {
             let connection = db.get().await.unwrap();
             Ok(connection
@@ -142,7 +142,7 @@ where
                     &[&epoch],
                 )
                 .await
-                .context("while fetching all keys from database")?
+                .map_err(|err| RyhopeError::from_db("while fetching all keys from DB", err))?
                 .iter()
                 .map(|row| Self::Key::from_bytea(row.get::<_, Vec<u8>>(0)))
                 .collect::<Vec<_>>().into_iter().next())
@@ -154,7 +154,7 @@ where
         db: DBPool,
         table: &str,
         epoch: Epoch,
-    ) -> impl Future<Output = Result<HashMap<Self::Key, V>>> + std::marker::Send {
+    ) -> impl Future<Output = Result<HashMap<Self::Key, V>, RyhopeError>> + std::marker::Send {
         async move {
             let connection = db.get().await.unwrap();
             Ok(connection
@@ -166,7 +166,7 @@ where
                     &[&epoch],
                 )
                 .await
-                .context("while fetching all pairs from database")?
+                .map_err(|err| RyhopeError::from_db("while fetching all pairs from database", err))?
                 .iter()
                 .map(|row| (Self::Key::from_bytea(row.get::<_, Vec<u8>>(0)), row.get::<_, Json<V>>(1).0))
                 .collect())
@@ -179,7 +179,7 @@ where
         table: &str,
         k: &Self::Key,
         epoch: Epoch,
-    ) -> impl std::future::Future<Output = Result<Option<V>>> + std::marker::Send {
+    ) -> impl std::future::Future<Output = Result<Option<V>, RyhopeError>> + std::marker::Send {
         async move {
             let connection = db.get().await.unwrap();
             connection
@@ -190,24 +190,26 @@ where
                 ),
                 &[&(k.to_bytea()), &epoch],
             )
-            .await
-            .context("while fetching payload from database")
+                .await
+                .map_err(|err| RyhopeError::from_db("fetching payload from DB", err))
             .and_then(|rows| match rows.len() {
                 0 => Ok(None),
                 1 => Ok(Some(rows[0].get::<_, Json<V>>(0).0)),
-                _ => bail!("internal coherency error: {:?}", rows),
+                _ => Err(RyhopeError::internal(format!("internal coherency error: {:?}", rows))),
             })
         }
     }
 
     /// Given a PgSQL row, extract a value from it.
-    fn payload_from_row(row: &Row) -> Result<V> {
+    fn payload_from_row(row: &Row) -> Result<V, RyhopeError> {
         row.try_get::<_, Json<V>>(PAYLOAD)
             .map(|x| x.0)
-            .context("while parsing payload from row")
+            .map_err(|err| {
+                RyhopeError::invalid_format(format!("parsing payload from {row:?}"), err)
+            })
     }
 
-    fn node_from_row(row: &Row) -> Result<Self::Node>;
+    fn node_from_row(row: &Row) -> Self::Node;
 
     fn wide_lineage_between<S: TreeStorage<Self>>(
         &self,
@@ -216,7 +218,7 @@ where
         table: &str,
         keys_query: &str,
         bounds: (Epoch, Epoch),
-    ) -> impl Future<Output = Result<WideLineage<Self::Key, V>>>;
+    ) -> impl Future<Output = Result<WideLineage<Self::Key, V>, RyhopeError>>;
 
     /// Return the value associated to the given key at the given epoch.
     #[allow(clippy::type_complexity)]
@@ -226,7 +228,7 @@ where
         db: DBPool,
         table: &str,
         data: I,
-    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<Self::Key>, V)>>> + Send;
+    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<Self::Key>, V)>, RyhopeError>> + Send;
 }
 
 /// Implementation of a [`DbConnector`] for a tree over `K` with empty nodes.
@@ -244,7 +246,7 @@ where
         table: &str,
         k: &NodeIdx,
         epoch: Epoch,
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<()>, RyhopeError> {
         let connection = db.get().await.unwrap();
         connection
             .query(
@@ -255,17 +257,15 @@ where
                 &[&k.to_bytea(), &epoch],
             )
             .await
-            .context("while fetching node")
+            .map_err(|e| RyhopeError::from_db("while fetching node", e))
             .and_then(|rows| match rows.len() {
                 0 => Ok(None),
                 1 => Ok(Some(())),
-                _ => bail!("internal coherency error"),
+                _ => Err(RyhopeError::internal("internal coherency error")),
             })
     }
 
-    fn node_from_row(_r: &Row) -> Result<()> {
-        Ok(())
-    }
+    fn node_from_row(_r: &Row) {}
 
     async fn create_node_in_tx(
         db_tx: &tokio_postgres::Transaction<'_>,
@@ -273,7 +273,7 @@ where
         k: &NodeIdx,
         birth_epoch: Epoch,
         _n: &(),
-    ) -> Result<()> {
+    ) -> Result<(), RyhopeError> {
         db_tx
             .execute(
                 &format!(
@@ -285,7 +285,7 @@ where
                 &[&k.to_bytea(), &birth_epoch, &MAX_PGSQL_BIGINT],
             )
             .await
-            .map_err(|e| anyhow!("failed to insert new node row: {e:?}"))
+            .map_err(|err| RyhopeError::from_db("inserting new node row", err))
             .map(|_| ())
     }
 
@@ -296,7 +296,7 @@ where
         table: &str,
         keys_query: &str,
         bounds: (Epoch, Epoch),
-    ) -> Result<WideLineage<NodeIdx, V>> {
+    ) -> Result<WideLineage<NodeIdx, V>, RyhopeError> {
         // In the SBBST case, parsil will not be able to inject the table name;
         // so we do it here.
         let keys_query = format!("{keys_query} FROM {table}");
@@ -304,10 +304,15 @@ where
         let core_keys = db
             .get()
             .await
-            .context("failed to get a connection")?
+            .map_err(|err| RyhopeError::from_bb8("getting a connection", err))?
             .query(&keys_query, &[])
             .await
-            .with_context(|| format!("failed to execute `{}` on `{}`", keys_query, table))?
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!("failed to execute `{}` on `{}`", keys_query, table),
+                    err,
+                )
+            })?
             .iter()
             .map(|row| (row.get::<_, i64>(EPOCH), row.get::<_, i64>(KEY) as NodeIdx))
             .collect::<Vec<_>>();
@@ -315,10 +320,10 @@ where
         // The SBBST can compute all the wide lineage in closed form
         let ascendances = self
             .ascendance(core_keys.iter().map(|(_epoch, key)| key).cloned(), s)
-            .await;
+            .await?;
         let mut touched_keys = HashSet::new();
         for n in ascendances.into_iter() {
-            touched_keys.extend(self.descendance(s, &n, 2).await);
+            touched_keys.extend(self.descendance(s, &n, 2).await?);
         }
 
         // Fetch all the payloads for the wide lineage in one fell swoop
@@ -331,7 +336,7 @@ where
         let rows = db
             .get()
             .await
-            .context("failed to get a connection")?
+            .map_err(|err| RyhopeError::from_bb8("getting a connection", err))?
             .query(
                 &payload_query,
                 &[
@@ -344,7 +349,7 @@ where
                 ],
             )
             .await
-            .context("failed to fetch payload for touched keys")?;
+            .map_err(|err| RyhopeError::from_db("fetching payload for touched keys", err))?;
 
         // Assemble the final result
         #[allow(clippy::type_complexity)]
@@ -353,15 +358,11 @@ where
             (HashMap<NodeIdx, NodeContext<NodeIdx>>, HashMap<NodeIdx, V>),
         > = HashMap::new();
         for row in &rows {
-            let epoch = row
-                .try_get::<_, i64>("epoch")
-                .context("while fetching epoch from row")?;
-            let key = row
-                .try_get::<_, Vec<u8>>(KEY)
-                .map(NodeIdx::from_bytea)
-                .context("while fetching key from row")?;
+            let epoch = row.get::<_, i64>("epoch");
+            let key = NodeIdx::from_bytea(row.get::<_, Vec<u8>>(KEY));
+
             let payload = Self::payload_from_row(row)?;
-            let context = self.node_context(&key, s).await.unwrap();
+            let context = self.node_context(&key, s).await?.unwrap();
 
             let h_epoch = epoch_lineages.entry(epoch).or_default();
             h_epoch.0.insert(key, context);
@@ -383,7 +384,7 @@ where
         db: DBPool,
         table: &str,
         data: I,
-    ) -> Result<Vec<(Epoch, NodeContext<Self::Key>, V)>> {
+    ) -> Result<Vec<(Epoch, NodeContext<Self::Key>, V)>, RyhopeError> {
         let data = data.into_iter().collect::<Vec<_>>();
         let connection = db.get().await.unwrap();
         let immediate_table = data
@@ -408,14 +409,14 @@ where
            )),
             &[],
         )
-           .await
-           .context("while fetching payload from database")?
+            .await
+            .map_err(|err| RyhopeError::from_db("fetching payload from DB", err))?
             .iter() {
                let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
                let epoch = row.get::<_, Epoch>(1);
                 let v = row.get::<_, Option<Json<V>>>(2).map(|x| x.0);
                 if let Some(v) = v {
-                    r.push((epoch, self.node_context(&k, s).await.unwrap() , v));
+                    r.push((epoch, self.node_context(&k, s).await?.unwrap() , v));
                 }
             }
         Ok(r)
@@ -450,7 +451,7 @@ where
         table: &str,
         k: &K,
         epoch: Epoch,
-    ) -> Result<Option<Self::Node>> {
+    ) -> Result<Option<Self::Node>, RyhopeError> {
         let connection = db.get().await.unwrap();
         connection
             .query(
@@ -462,7 +463,7 @@ where
                 &[&k.to_bytea(), &epoch],
             )
             .await
-            .context("while fetching node")
+            .map_err(|err| RyhopeError::from_db("fetching node", err))
             .and_then(|rows| match rows.len() {
                 0 => Ok(None),
                 1 => {
@@ -472,27 +473,23 @@ where
                         parent: r.get::<_, Option<Vec<u8>>>(0).map(|p| K::from_bytea(p)),
                         left: r.get::<_, Option<Vec<u8>>>(1).map(|p| K::from_bytea(p)),
                         right: r.get::<_, Option<Vec<u8>>>(2).map(|p| K::from_bytea(p)),
-                        subtree_size: r.get::<_, i64>(3).try_into()?,
+                        subtree_size: r.get::<_, i64>(3) as usize,
                     }))
                 }
-                _ => bail!("internal coherency error"),
+                _ => Err(RyhopeError::fatal("internal coherency error")),
             })
     }
 
-    fn node_from_row(row: &Row) -> Result<Self::Node> {
-        Ok(Self::Node {
-            k: K::from_bytea(row.try_get::<_, Vec<u8>>(KEY)?),
-            subtree_size: row.try_get::<_, i64>(SUBTREE_SIZE)?.try_into().unwrap(),
-            parent: row
-                .try_get::<_, Option<Vec<u8>>>(PARENT)?
-                .map(K::from_bytea),
-            left: row
-                .try_get::<_, Option<Vec<u8>>>(LEFT_CHILD)?
-                .map(K::from_bytea),
+    fn node_from_row(row: &Row) -> Self::Node {
+        Self::Node {
+            k: K::from_bytea(row.get::<_, Vec<u8>>(KEY)),
+            subtree_size: row.get::<_, i64>(SUBTREE_SIZE).try_into().unwrap(),
+            parent: row.get::<_, Option<Vec<u8>>>(PARENT).map(K::from_bytea),
+            left: row.get::<_, Option<Vec<u8>>>(LEFT_CHILD).map(K::from_bytea),
             right: row
-                .try_get::<_, Option<Vec<u8>>>(RIGHT_CHILD)?
+                .get::<_, Option<Vec<u8>>>(RIGHT_CHILD)
                 .map(K::from_bytea),
-        })
+        }
     }
 
     async fn create_node_in_tx(
@@ -501,7 +498,7 @@ where
         k: &K,
         birth_epoch: Epoch,
         n: &Self::Node,
-    ) -> Result<()> {
+    ) -> Result<(), RyhopeError> {
         db_tx
             .execute(
                 &format!(
@@ -521,7 +518,7 @@ where
                 ],
             )
             .await
-            .map_err(|e| anyhow!("failed to insert new node row: {e:?}"))
+            .map_err(|err| RyhopeError::from_db("inserting new node row", err))
             .map(|_| ())
     }
 
@@ -532,11 +529,12 @@ where
         table: &str,
         keys_query: &str,
         bounds: (Epoch, Epoch),
-    ) -> Result<WideLineage<K, V>> {
-        ensure!(
+    ) -> Result<WideLineage<K, V>, RyhopeError> {
+        ensure(
             !keys_query.contains('$'),
-            "unexpected placeholder found in keys_query"
-        );
+            "unexpected placeholder found in keys_query",
+        )?;
+
         // Call the mega-query doing everything
         let query = format!(
             include_str!("wide_lineage.sql"),
@@ -557,10 +555,13 @@ where
         let rows = connection
             .query(&query, &[&bounds.0, &bounds.1])
             .await
-            .with_context(|| {
-                format!(
-                    "while fetching wide lineage for {table} [[{}, {}]] with: {query}",
-                    bounds.0, bounds.1
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!(
+                        "while fetching wide lineage for {table} [[{}, {}]] with: {query}",
+                        bounds.0, bounds.1
+                    ),
+                    err,
                 )
             })?;
 
@@ -573,14 +574,13 @@ where
         > = HashMap::new();
 
         for row in &rows {
-            let is_core = row
-                .try_get::<_, i32>("is_core")
-                .context("while fetching core flag from row")?
-                > 0;
-            let epoch = row
-                .try_get::<_, i64>(EPOCH)
-                .context("while fetching epoch from row")?;
-            let node = <Self as DbConnector<V>>::node_from_row(row)?;
+            let is_core = row.try_get::<_, i32>("is_core").map_err(|err| {
+                RyhopeError::invalid_format(format!("fetching `is_core` flag from {row:?}"), err)
+            })? > 0;
+            let epoch = row.try_get::<_, i64>(EPOCH).map_err(|err| {
+                RyhopeError::invalid_format(format!("fetching `epoch` from {row:?}"), err)
+            })?;
+            let node = <Self as DbConnector<V>>::node_from_row(row);
             let payload = Self::payload_from_row(row)?;
             if is_core {
                 core_keys.push((epoch, node.k.clone()));
@@ -614,7 +614,7 @@ where
         db: DBPool,
         table: &str,
         data: I,
-    ) -> Result<Vec<(Epoch, NodeContext<Self::Key>, V)>> {
+    ) -> Result<Vec<(Epoch, NodeContext<Self::Key>, V)>, RyhopeError> {
         let data = data.into_iter().collect::<Vec<_>>();
         let connection = db.get().await.unwrap();
         let immediate_table = data
@@ -643,7 +643,7 @@ where
                 &[],
             )
             .await
-            .context("while fetching payload from database")?
+            .map_err(|err| RyhopeError::from_db("fetching payload from DB", err))?
             .iter()
         {
             let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
@@ -698,7 +698,12 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
     /// Initialize a new store, with the given state. The initial state is
     /// immediately persisted, as the DB representation of the payload must be
     /// valid even if it is never modified further by the user.
-    pub async fn with_value(initial_epoch: Epoch, table: String, db: DBPool, t: T) -> Result<Self> {
+    pub async fn with_value(
+        initial_epoch: Epoch,
+        table: String,
+        db: DBPool,
+        t: T,
+    ) -> Result<Self, RyhopeError> {
         {
             let connection = db.get().await.unwrap();
             connection
@@ -710,7 +715,10 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
                     ),
                     &[&initial_epoch, &Json(t.clone())],
                 )
-                .await?;
+                .await
+                .map_err(|err| {
+                    RyhopeError::from_db(format!("initializing new store in `{}`", table), err)
+                })?;
         }
 
         Ok(Self {
@@ -724,8 +732,11 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
         })
     }
 
-    async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
-        ensure!(self.in_tx, "not in a transaction");
+    async fn commit_in_transaction(
+        &mut self,
+        db_tx: &mut Transaction<'_>,
+    ) -> Result<(), RyhopeError> {
+        ensure(self.in_tx, "not in a transaction")?;
         trace!("[{self}] commiting in transaction");
 
         if self.dirty {
@@ -739,7 +750,10 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
                     ),
                     &[&(self.epoch + 1), &Json(state)],
                 )
-                .await?;
+                .await
+                .map_err(|err| {
+                    RyhopeError::from_db(format!("updating {}_meta", self.table), err)
+                })?;
         } else {
             db_tx
                 .query(
@@ -749,7 +763,10 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
                     ),
                     &[&(self.epoch)],
                 )
-                .await?;
+                .await
+                .map_err(|err| {
+                    RyhopeError::from_db(format!("updating {}_meta", self.table), err)
+                })?;
         }
 
         Ok(())
@@ -776,16 +793,22 @@ impl<T> TransactionalStorage for CachedDbStore<T>
 where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
 {
-    fn start_transaction(&mut self) -> Result<()> {
+    fn start_transaction(&mut self) -> Result<(), RyhopeError> {
         trace!("[{self}] starting transaction");
-        ensure!(!self.in_tx, "already in a transaction");
+        if self.in_tx {
+            return Err(RyhopeError::AlreadyInTransaction);
+        }
 
         self.in_tx = true;
         Ok(())
     }
 
-    async fn commit_transaction(&mut self) -> Result<()> {
+    async fn commit_transaction(&mut self) -> Result<(), RyhopeError> {
         trace!("[{self}] committing transaction");
+        if !self.in_tx {
+            return Err(RyhopeError::NotInATransaction);
+        }
+
         let pool = self.db.clone();
         let mut connection = pool.get().await.unwrap();
         let mut db_tx = connection
@@ -799,7 +822,7 @@ where
         } else {
             self.on_commit_failed()
         };
-        err.context("while commiting transaction")
+        err.map_err(|err| RyhopeError::from_db("commiting transaction", err))
     }
 }
 
@@ -816,7 +839,10 @@ impl<T> SqlTransactionStorage for CachedDbStore<T>
 where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
 {
-    async fn commit_in(&mut self, tx: &mut tokio_postgres::Transaction<'_>) -> Result<()> {
+    async fn commit_in(
+        &mut self,
+        tx: &mut tokio_postgres::Transaction<'_>,
+    ) -> Result<(), RyhopeError> {
         trace!("[{self}] commit_in");
         self.commit_in_transaction(tx).await
     }
@@ -836,18 +862,18 @@ impl<T> EpochStorage<T> for CachedDbStore<T>
 where
     T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a> + Send,
 {
-    async fn fetch(&self) -> T {
+    async fn fetch(&self) -> Result<T, RyhopeError> {
         trace!("[{self}] fetching payload");
         if self.cache.read().await.is_none() {
-            let state = self.fetch_at(self.epoch).await;
+            let state = self.fetch_at(self.epoch).await?;
             let _ = self.cache.write().await.replace(state.clone());
-            state
+            Ok(state)
         } else {
-            self.cache.read().await.to_owned().unwrap()
+            Ok(self.cache.read().await.clone().unwrap())
         }
     }
 
-    async fn fetch_at(&self, epoch: Epoch) -> T {
+    async fn fetch_at(&self, epoch: Epoch) -> Result<T, RyhopeError> {
         trace!("[{self}] fetching payload at {}", epoch);
         let connection = self.db.get().await.unwrap();
         connection
@@ -861,38 +887,44 @@ where
             .await
             .and_then(|row| row.try_get::<_, Json<T>>(0))
             .map(|x| x.0)
-            .with_context(|| {
-                anyhow!(
-                    "failed to fetch state from `{}_meta` at epoch `{}`",
-                    self.table,
-                    epoch
-                )
-            }).unwrap()
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!(
+                        "failed to fetch state from `{}_meta` at epoch `{}`",
+                        self.table,
+                        epoch
+                    ),
+                    err)
+            })
     }
 
-    async fn store(&mut self, t: T) {
+    async fn store(&mut self, t: T) -> Result<(), RyhopeError> {
         trace!("[{self}] storing {t:?}");
         self.dirty = true;
         let _ = self.cache.write().await.insert(t);
+        Ok(())
     }
 
     fn current_epoch(&self) -> Epoch {
         self.epoch
     }
 
-    async fn rollback_to(&mut self, new_epoch: Epoch) -> Result<()> {
-        ensure!(
+    async fn rollback_to(&mut self, new_epoch: Epoch) -> Result<(), RyhopeError> {
+        ensure(
             new_epoch >= self.initial_epoch,
-            "unable to rollback to {} before initial epoch {}",
-            new_epoch,
-            self.initial_epoch
-        );
-        ensure!(
+            format!(
+                "unable to rollback to {} before initial epoch {}",
+                new_epoch, self.initial_epoch
+            ),
+        )?;
+        ensure(
             new_epoch < self.current_epoch(),
-            "unable to rollback into the future: requested epoch ({}) > current epoch ({})",
-            new_epoch,
-            self.current_epoch()
-        );
+            format!(
+                "unable to rollback into the future: requested epoch ({}) > current epoch ({})",
+                new_epoch,
+                self.current_epoch()
+            ),
+        )?;
 
         let _ = self.cache.get_mut().take();
         let mut connection = self.db.get().await.unwrap();
@@ -909,15 +941,25 @@ where
                 ),
                 &[&new_epoch],
             )
-            .await?;
+            .await
+            .map_err(|err| {
+                RyhopeError::from_db(format!("time-stamping `{}_meta`", self.table), err)
+            })?;
         // Delete nodes that would not have been born yet
         db_tx
             .query(
                 &format!("DELETE FROM {}_meta WHERE {VALID_FROM} > $1", self.table),
                 &[&new_epoch],
             )
-            .await?;
-        db_tx.commit().await?;
+            .await
+            .map_err(|err| {
+                RyhopeError::from_db(format!("reaping nodes `{}_meta`", self.table), err)
+            })?;
+
+        db_tx
+            .commit()
+            .await
+            .map_err(|err| RyhopeError::from_db("committing transaction", err))?;
         self.epoch = new_epoch;
 
         Ok(())
@@ -1008,28 +1050,30 @@ where
                 &[&epoch],
             )
             .await
-            .ok()
             .map(|row| row.get::<_, i64>(0))
-            .unwrap_or(0)
+            .map_err(|err| RyhopeError::from_db("counting rows", err))
+            .unwrap()
             .try_into()
-            .context("while counting rows")
             .unwrap()
     }
 
-    pub(super) async fn rollback_to(&mut self, new_epoch: Epoch) -> Result<()> {
+    pub(super) async fn rollback_to(&mut self, new_epoch: Epoch) -> Result<(), RyhopeError> {
         trace!("[{self}] rolling back to {new_epoch}");
-        ensure!(
+        ensure(
             new_epoch >= self.initial_epoch,
-            "unable to rollback to {} before initial epoch {}",
-            new_epoch,
-            self.initial_epoch
-        );
-        ensure!(
+            format!(
+                "unable to rollback to {} before initial epoch {}",
+                new_epoch, self.initial_epoch
+            ),
+        )?;
+        ensure(
             new_epoch < self.current_epoch(),
-            "unable to rollback into the future: requested epoch ({}) > current epoch ({})",
-            new_epoch,
-            self.current_epoch()
-        );
+            format!(
+                "unable to rollback into the future: requested epoch ({}) > current epoch ({})",
+                new_epoch,
+                self.current_epoch()
+            ),
+        )?;
 
         self.nodes_cache.clear();
         self.payload_cache.clear();
@@ -1047,15 +1091,22 @@ where
                 ),
                 &[&new_epoch],
             )
-            .await?;
+            .await
+            .map_err(|err| RyhopeError::from_db(format!("time-stamping {}", self.table), err))?;
+
         // Delete nodes that would not have been born yet
         db_tx
             .query(
                 &format!("DELETE FROM {} WHERE {VALID_FROM} > $1", self.table),
                 &[&new_epoch],
             )
-            .await?;
-        db_tx.commit().await?;
+            .await
+            .map_err(|err| RyhopeError::from_db(format!("reaping `{}`", self.table), err))?;
+
+        db_tx
+            .commit()
+            .await
+            .map_err(|err| RyhopeError::from_db("committing transaction", err))?;
         self.epoch = new_epoch;
 
         Ok(())
@@ -1104,7 +1155,7 @@ where
         &self,
         k: &T::Key,
         epoch: Epoch,
-    ) -> impl Future<Output = Option<T::Node>> + Send {
+    ) -> impl Future<Output = Result<Option<T::Node>, RyhopeError>> + Send {
         trace!("[{self}] fetching {k:?}@{epoch}",);
         let db = self.wrapped.lock().unwrap().db.clone();
         let table = self.wrapped.lock().unwrap().table.to_owned();
@@ -1113,7 +1164,7 @@ where
                 // Directly returns the value if it is already in cache, fetch it from
                 // the DB otherwise.
                 let value = self.wrapped.lock().unwrap().nodes_cache.get(k).cloned();
-                if let Some(Some(cached_value)) = value {
+                Ok(if let Some(Some(cached_value)) = value {
                     Some(cached_value.into_value())
                 } else if let Some(value) = T::fetch_node_at(db, &table, k, epoch).await.unwrap() {
                     let mut guard = self.wrapped.lock().unwrap();
@@ -1123,9 +1174,9 @@ where
                     Some(value)
                 } else {
                     None
-                }
+                })
             } else {
-                T::fetch_node_at(db, &table, k, epoch).await.unwrap()
+                T::fetch_node_at(db, &table, k, epoch).await
             }
         }
     }
@@ -1144,28 +1195,20 @@ where
         T::fetch_a_key(db, &table, epoch).await.unwrap()
     }
 
-    async fn pairs_at(&self, _epoch: Epoch) -> Result<HashMap<T::Key, T::Node>> {
+    async fn pairs_at(&self, _epoch: Epoch) -> Result<HashMap<T::Key, T::Node>, RyhopeError> {
         unimplemented!("should never be used");
     }
 
-    async fn fetch(&self, k: &T::Key) -> T::Node {
-        self.fetch_at(k, self.current_epoch()).await
-    }
-
-    async fn try_fetch(&self, k: &T::Key) -> Option<T::Node> {
+    async fn try_fetch(&self, k: &T::Key) -> Result<Option<T::Node>, RyhopeError> {
         self.try_fetch_at(k, self.current_epoch()).await
     }
 
-    async fn fetch_at(&self, k: &T::Key, epoch: Epoch) -> T::Node {
-        self.try_fetch_at(k, epoch).await.unwrap()
+    async fn contains(&self, k: &T::Key) -> Result<bool, RyhopeError> {
+        self.try_fetch(k).await.map(|x| x.is_some())
     }
 
-    async fn contains(&self, k: &T::Key) -> bool {
-        self.try_fetch(k).await.is_some()
-    }
-
-    async fn contains_at(&self, k: &T::Key, epoch: Epoch) -> bool {
-        self.try_fetch_at(k, epoch).await.is_some()
+    async fn contains_at(&self, k: &T::Key, epoch: Epoch) -> Result<bool, RyhopeError> {
+        self.try_fetch_at(k, epoch).await.map(|x| x.is_some())
     }
 }
 impl<T, V> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
@@ -1177,17 +1220,21 @@ where
 {
     delegate::delegate! {
         to self.wrapped.lock().unwrap() {
-            async fn rollback_to(&mut self, epoch: Epoch) -> Result<()>;
+            async fn rollback_to(&mut self, epoch: Epoch) -> Result<(), RyhopeError>;
         }
     }
 
-    fn remove(&mut self, k: T::Key) -> impl Future<Output = Result<()>> + Send {
+    fn remove(&mut self, k: T::Key) -> impl Future<Output = Result<(), RyhopeError>> + Send {
         trace!("[{self}] removing {k:?} from cache",);
         self.wrapped.lock().unwrap().nodes_cache.insert(k, None);
         async { Ok(()) }
     }
 
-    fn update(&mut self, k: T::Key, new_value: T::Node) -> impl Future<Output = Result<()>> + Send {
+    fn update(
+        &mut self,
+        k: T::Key,
+        new_value: T::Node,
+    ) -> impl Future<Output = Result<(), RyhopeError>> + Send {
         trace!("[{self}] updating cache {k:?} -> {new_value:?}");
         // If the operation is already present from a read, replace it with the
         // new value.
@@ -1199,7 +1246,11 @@ where
         async { Ok(()) }
     }
 
-    fn store(&mut self, k: T::Key, value: T::Node) -> impl Future<Output = Result<()>> + Send {
+    fn store(
+        &mut self,
+        k: T::Key,
+        value: T::Node,
+    ) -> impl Future<Output = Result<(), RyhopeError>> + Send {
         trace!("[{self}] storing {k:?} -> {value:?} in cache");
         // If the operation is already present from a read, replace it with the
         // new value.
@@ -1211,17 +1262,20 @@ where
         async { Ok(()) }
     }
 
-    async fn update_with<F: Fn(&mut T::Node) + Send + Sync>(&mut self, k: T::Key, updater: F)
+    async fn update_with<F: Fn(&mut T::Node) + Send + Sync>(
+        &mut self,
+        k: T::Key,
+        updater: F,
+    ) -> Result<(), RyhopeError>
     where
         Self: Sync + Send,
     {
-        let mut v = self.fetch(&k).await;
-        updater(&mut v);
-        self.update(k, v).await.unwrap();
-    }
-
-    fn rollback(&mut self) -> impl Future<Output = Result<()>> {
-        self.rollback_to(self.current_epoch() - 1)
+        if let Some(mut v) = self.try_fetch(&k).await? {
+            updater(&mut v);
+            self.update(k, v).await
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -1265,7 +1319,11 @@ where
         }
     }
 
-    fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> impl Future<Output = Option<V>> + Send {
+    fn try_fetch_at(
+        &self,
+        k: &T::Key,
+        epoch: Epoch,
+    ) -> impl Future<Output = Result<Option<V>, RyhopeError>> + Send {
         trace!("[{self}] attempting to fetch payload for {k:?}@{epoch}");
         let db = self.wrapped.lock().unwrap().db.clone();
         let table = self.wrapped.lock().unwrap().table.to_owned();
@@ -1275,19 +1333,19 @@ where
                 // the DB otherwise.
                 let value = self.wrapped.lock().unwrap().payload_cache.get(k).cloned();
                 if let Some(Some(cached_value)) = value {
-                    Some(cached_value.into_value())
+                    Ok(Some(cached_value.into_value()))
                 } else if let Some(value) = T::fetch_payload_at(db, &table, k, epoch).await.unwrap()
                 {
                     let mut guard = self.wrapped.lock().unwrap();
                     guard
                         .payload_cache
                         .insert(k.clone(), Some(CachedValue::Read(value.clone())));
-                    Some(value)
+                    Ok(Some(value))
                 } else {
-                    None
+                    Ok(None)
                 }
             } else {
-                T::fetch_payload_at(db, &table, k, epoch).await.unwrap()
+                T::fetch_payload_at(db, &table, k, epoch).await
             }
         }
     }
@@ -1306,7 +1364,7 @@ where
         T::fetch_a_key(db, &table, epoch).await.unwrap()
     }
 
-    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, V>> {
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, V>, RyhopeError> {
         let db = self.wrapped.lock().unwrap().db.clone();
         let table = self.wrapped.lock().unwrap().table.to_owned();
 
@@ -1322,17 +1380,21 @@ where
 {
     delegate::delegate! {
         to self.wrapped.lock().unwrap() {
-            async fn rollback_to(&mut self, epoch: Epoch) -> Result<()>;
+            async fn rollback_to(&mut self, epoch: Epoch) -> Result<(), RyhopeError>;
         }
     }
 
-    fn remove(&mut self, k: T::Key) -> impl Future<Output = Result<()>> + Send {
+    fn remove(&mut self, k: T::Key) -> impl Future<Output = Result<(), RyhopeError>> + Send {
         trace!("[{self}] removing {k:?} from cache");
         self.wrapped.lock().unwrap().nodes_cache.insert(k, None);
         async { Ok(()) }
     }
 
-    fn update(&mut self, k: T::Key, new_value: V) -> impl Future<Output = Result<()>> + Send {
+    fn update(
+        &mut self,
+        k: T::Key,
+        new_value: V,
+    ) -> impl Future<Output = Result<(), RyhopeError>> + Send {
         trace!("[{self}] updating cache {k:?} -> {new_value:?}");
         // If the operation is already present from a read, replace it with the
         // new value.
@@ -1344,7 +1406,11 @@ where
         async { Ok(()) }
     }
 
-    fn store(&mut self, k: T::Key, value: V) -> impl Future<Output = Result<()>> + Send {
+    fn store(
+        &mut self,
+        k: T::Key,
+        value: V,
+    ) -> impl Future<Output = Result<(), RyhopeError>> + Send {
         trace!("[{self}] storing {k:?} -> {value:?} in cache",);
         // If the operation is already present from a read, replace it with the
         // new value.

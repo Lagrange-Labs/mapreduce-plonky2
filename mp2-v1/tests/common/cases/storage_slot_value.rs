@@ -10,7 +10,7 @@ use mp2_common::{
 };
 use mp2_v1::api::SlotInput;
 use rand::{thread_rng, Rng};
-use std::{array, os::unix::thread};
+use std::array;
 
 /// Abstract for the value saved in the storage slot.
 /// It could be a single value as Uint256 or a Struct.
@@ -71,7 +71,7 @@ pub struct LargeStruct {
 impl StorageSlotValue for LargeStruct {
     fn sample() -> Self {
         let rng = &mut thread_rng();
-        let field1 = U256::from_limbs(rng.gen());
+        let field1 = U256::from(rng.gen::<u128>()); // sample a u128 to avoid overflows in queries
         let [field2, field3] = array::from_fn(|_| rng.gen());
 
         Self {
@@ -134,15 +134,6 @@ impl LargeStruct {
             field2,
             field3,
         }
-    }
-
-    pub fn to_bytes(&self) -> Vec<u8> {
-        self.field1
-            .to_be_bytes::<{ U256::BYTES }>()
-            .into_iter()
-            .chain(self.field2.to_be_bytes())
-            .chain(self.field3.to_be_bytes())
-            .collect()
     }
 
     pub fn slot_inputs(slot: u8) -> Vec<SlotInput> {

@@ -5,9 +5,7 @@ use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     ivc,
     query::{self, api::Parameters as QueryParams, pi_len as query_pi_len},
-    revelation::{
-        self, api::Parameters as RevelationParams, num_query_io, pi_len as revelation_pi_len,
-    },
+    revelation::{self, api::Parameters as RevelationParams, pi_len as revelation_pi_len},
     row_tree::{self},
 };
 use anyhow::Result;
@@ -64,6 +62,11 @@ where
             preprocessing_vk: self.ivc.get_ivc_circuit_data().verifier_only.clone(),
         };
         Ok(bincode::serialize(&params_info)?)
+    }
+
+    /// Get the proof of an empty node.
+    pub fn empty_cell_tree_proof(&self) -> Result<Vec<u8>> {
+        self.cells_tree.empty_cell_tree_proof()
     }
 }
 
@@ -193,24 +196,35 @@ where
 
 #[derive(Serialize, Deserialize)]
 pub struct QueryParameters<
-    const ROW_TREE_MAX_DEPTH: usize,
-    const INDEX_TREE_MAX_DEPTH: usize,
-    const MAX_NUM_COLUMNS: usize,
-    const MAX_NUM_PREDICATE_OPS: usize,
-    const MAX_NUM_RESULT_OPS: usize,
-    const MAX_NUM_OUTPUTS: usize,
-    const MAX_NUM_ITEMS_PER_OUTPUT: usize,
-    const MAX_NUM_PLACEHOLDERS: usize,
+    const NUM_CHUNKS: usize, // Maximum number of chunks that can be aggregated in a single proof
+    const NUM_ROWS: usize,   // Maximum number of rows that can be proven in a single proof
+    const ROW_TREE_MAX_DEPTH: usize, // Maximum depth of rows tree supported in circuits
+    const INDEX_TREE_MAX_DEPTH: usize, // Maximum depth of index tree supported in circuits
+    const MAX_NUM_COLUMNS: usize, // Maximum number of columns for a table supported in circuits
+    const MAX_NUM_PREDICATE_OPS: usize, // Maximum number of operations that can be employed in a query
+    // to evaluate the filtering predicate (i.e, the operations in `WHERE` clause of the query)
+    const MAX_NUM_RESULT_OPS: usize, // Maximum number of operations that can be employed in a query
+    // to compute the results of the query in each row (i.e, the operations in the `SELECT` clause of the query)
+    const MAX_NUM_OUTPUTS: usize, // Maximum number of outputs that can be returned for a query with a single
+    // proof. It basically corresponds to the maximum value that can be used for `LIMIT` keyword
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize, // Maximum number of items that can be returned for each output row of the
+    // query (i.e., the maximum number of items that can be specified in the `SELECT` clause of the query)
+    const MAX_NUM_PLACEHOLDERS: usize, // Maximum number of placeholders (including the special block range
+                                       // placeholders) that can be employed in a query
 > where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
+    [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
 {
     query_params: QueryParams<
+        NUM_CHUNKS,
+        NUM_ROWS,
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
         MAX_NUM_COLUMNS,
         MAX_NUM_PREDICATE_OPS,
         MAX_NUM_RESULT_OPS,
@@ -233,6 +247,8 @@ pub struct QueryParameters<
 #[derive(Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum QueryCircuitInput<
+    const NUM_CHUNKS: usize,
+    const NUM_ROWS: usize,
     const ROW_TREE_MAX_DEPTH: usize,
     const INDEX_TREE_MAX_DEPTH: usize,
     const MAX_NUM_COLUMNS: usize,
@@ -249,6 +265,10 @@ pub enum QueryCircuitInput<
 {
     Query(
         query::api::CircuitInput<
+            NUM_CHUNKS,
+            NUM_ROWS,
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
@@ -270,6 +290,8 @@ pub enum QueryCircuitInput<
 }
 
 impl<
+        const NUM_CHUNKS: usize,
+        const NUM_ROWS: usize,
         const ROW_TREE_MAX_DEPTH: usize,
         const INDEX_TREE_MAX_DEPTH: usize,
         const MAX_NUM_COLUMNS: usize,
@@ -280,6 +302,8 @@ impl<
         const MAX_NUM_PLACEHOLDERS: usize,
     >
     QueryParameters<
+        NUM_CHUNKS,
+        NUM_ROWS,
         ROW_TREE_MAX_DEPTH,
         INDEX_TREE_MAX_DEPTH,
         MAX_NUM_COLUMNS,
@@ -292,7 +316,6 @@ impl<
 where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); num_query_io::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
@@ -306,7 +329,8 @@ where
         let query_params = QueryParams::build();
         info!("Building the revelation circuit parameters...");
         let revelation_params = RevelationParams::build(
-            query_params.get_circuit_set(),
+            query_params.get_circuit_set(), // unused, so we provide same query params
+            query_params.get_universal_circuit().data.verifier_data(),
             &params_info.preprocessing_circuit_set,
             &params_info.preprocessing_vk,
         );
@@ -323,6 +347,8 @@ where
     pub fn generate_proof(
         &self,
         input: QueryCircuitInput<
+            NUM_CHUNKS,
+            NUM_ROWS,
             ROW_TREE_MAX_DEPTH,
             INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,
@@ -339,7 +365,7 @@ where
                 let proof = self.revelation_params.generate_proof(
                     input,
                     self.query_params.get_circuit_set(),
-                    Some(&self.query_params),
+                    Some(self.query_params.get_universal_circuit()),
                 )?;
                 self.wrap_circuit.generate_proof(
                     self.revelation_params.get_circuit_set(),
@@ -361,6 +387,8 @@ mod tests {
     use std::{fs::File, io::BufReader};
 
     // Constants associating with test data.
+    const NUM_CHUNKS: usize = 5;
+    const NUM_ROWS: usize = 5;
     const MAX_NUM_COLUMNS: usize = 20;
     const MAX_NUM_PREDICATE_OPS: usize = 20;
     const MAX_NUM_RESULT_OPS: usize = 20;
@@ -381,6 +409,8 @@ mod tests {
         let file = File::open(QUERY_PARAMS_FILE_PATH).unwrap();
         let reader = BufReader::new(file);
         let query_params: QueryParameters<
+            NUM_CHUNKS,
+            NUM_ROWS,
             ROW_TREE_MAX_DEPTH,
             INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,

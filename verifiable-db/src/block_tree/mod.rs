@@ -4,6 +4,8 @@ mod membership;
 mod parent;
 mod public_inputs;
 
+use std::iter::once;
+
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
@@ -26,12 +28,11 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, config::Hasher},
 };
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
+
 use plonky2_ecgfp5::{
     curve::{curve::Point, scalar_field::Scalar},
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
-use std::iter::once;
-
 pub use public_inputs::PublicInputs;
 
 /// Common function to compute the digest of the block tree which uses a special format using
@@ -76,9 +77,9 @@ pub fn compute_final_digest(
 }
 
 /// Compute the final digest target.
-pub(crate) fn compute_final_digest_target<'a, E>(
+pub(crate) fn compute_final_digest_target<E>(
     b: &mut CBuilder,
-    extraction_pi: &E::PI<'a>,
+    extraction_pi: &E::PI<'_>,
     rows_tree_pi: &row_tree::PublicInputs<Target>,
 ) -> CurveTarget
 where
@@ -224,7 +225,7 @@ pub(crate) mod tests {
         rows_tree_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestFinalDigestCircuit<'a> {
+    impl UserCircuit<F, D> for TestFinalDigestCircuit<'_> {
         // Extraction PI + rows tree PI
         type Wires = (Vec<Target>, Vec<Target>);
 

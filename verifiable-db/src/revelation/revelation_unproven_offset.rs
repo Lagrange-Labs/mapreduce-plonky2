@@ -16,7 +16,7 @@ use mp2_common::{
     default_config,
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::{flatten_poseidon_hash_target, H},
-    proof::ProofWithVK,
+    proof::verify_proof_fixed_circuit,
     public_inputs::PublicInputCommon,
     serialization::{
         deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
@@ -24,17 +24,17 @@ use mp2_common::{
     },
     types::{CBuilder, HashOutput},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{Fieldable, SelectHashBuilder, ToTargets},
+    utils::{Fieldable, HashBuilder, ToTargets},
     C, D, F,
 };
 use plonky2::{
-    field::types::PrimeField64,
     hash::hash_types::HashOutTarget,
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
+        circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData},
         config::Hasher,
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
@@ -42,34 +42,81 @@ use plonky2::{
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
-    framework::{
-        RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
-    },
+    framework::{RecursiveCircuits, RecursiveCircuitsVerifierGagdet},
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
-        aggregation::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
-        api::CircuitInput as QueryCircuitInput,
-        computational_hash_ids::{AggregationOperation, ColumnIDs, ResultIdentifier},
+        computational_hash_ids::{ColumnIDs, ResultIdentifier},
         merkle_path::{MerklePathGadget, MerklePathTargetInputs},
-        pi_len,
-        public_inputs::PublicInputs as QueryProofPublicInputs,
+        public_inputs::PublicInputsUniversalCircuit as QueryProofPublicInputs,
         universal_circuit::{
             build_cells_tree,
-            universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure},
+            universal_circuit_inputs::{
+                BasicOperation, ColumnCell, Placeholders, ResultStructure, RowCells,
+            },
+            universal_query_circuit::{UniversalCircuitInput, UniversalQueryCircuitInputs},
         },
+        utils::{ChildPosition, NodeInfo, QueryBounds},
     },
 };
 
 use super::{
-    num_query_io, pi_len as revelation_pi_len,
+    pi_len as revelation_pi_len,
     placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
-    revelation_without_results_tree::CircuitBuilderParams,
     PublicInputs, NUM_PREPROCESSING_IO,
 };
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+/// Data structure containing all the information needed to verify the membership of
+/// a row in a tree representing a table
+pub struct RowPath {
+    /// Info about the node of the row tree storing the row
+    pub(crate) row_node_info: NodeInfo,
+    /// Info about the nodes in the path of the rows tree for the node storing the row; The `ChildPosition` refers to
+    /// the position of the previous node in the path as a child of the current node
+    pub(crate) row_tree_path: Vec<(NodeInfo, ChildPosition)>,
+    /// Hash of the siblings of the node in the rows tree path (except for the root)
+    pub(crate) row_path_siblings: Vec<Option<HashOutput>>,
+    /// Info about the node of the index tree storing the rows tree containing the row
+    pub(crate) index_node_info: NodeInfo,
+    /// Info about the nodes in the path of the index tree for the index_node; The `ChildPosition` refers to
+    /// the position of the previous node in the path as a child of the current node
+    pub(crate) index_tree_path: Vec<(NodeInfo, ChildPosition)>,
+    /// Hash of the siblings of the nodes in the index tree path (except for the root)
+    pub(crate) index_path_siblings: Vec<Option<HashOutput>>,
+}
+
+impl RowPath {
+    /// Instantiate a new instance of `RowPath` for a given proven row from the following input data:
+    /// - `row_node_info`: data about the node of the row tree storing the row
+    /// - `row_tree_path`: data about the nodes in the path of the rows tree for the node storing the row;
+    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
+    /// - `row_path_siblings`: hash of the siblings of the node in the rows tree path (except for the root)
+    /// - `index_node_info`: data about the node of the index tree storing the rows tree containing the row
+    /// - `index_tree_path`: data about the nodes in the path of the index tree for the index_node;
+    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
+    /// - `index_path_siblings`: hash of the siblings of the nodes in the index tree path (except for the root)
+    pub fn new(
+        row_node_info: NodeInfo,
+        row_tree_path: Vec<(NodeInfo, ChildPosition)>,
+        row_path_siblings: Vec<Option<HashOutput>>,
+        index_node_info: NodeInfo,
+        index_tree_path: Vec<(NodeInfo, ChildPosition)>,
+        index_path_siblings: Vec<Option<HashOutput>>,
+    ) -> Self {
+        Self {
+            row_node_info,
+            row_tree_path,
+            row_path_siblings,
+            index_node_info,
+            index_tree_path,
+            index_path_siblings,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Target for all the information about nodes in the path needed by this revelation circuit
@@ -102,6 +149,26 @@ impl NodeInfoTarget {
             .for_each(|(&target, value)| pw.set_hash_target(target, value));
         pw.set_u256_target(&self.node_min, inputs.min);
         pw.set_u256_target(&self.node_max, inputs.max);
+    }
+}
+
+/// Data structure containing the parameters found in tabular
+/// queries that specify which outputs should be returned
+#[derive(Clone, Debug)]
+pub(crate) struct TabularQueryOutputModifiers {
+    limit: u32,
+    offset: u32,
+    /// Boolean flag specifying whether DISTINCT keyword must be applied to results
+    distinct: bool,
+}
+
+impl TabularQueryOutputModifiers {
+    pub(crate) fn new(limit: u32, offset: u32, distinct: bool) -> Self {
+        Self {
+            limit,
+            offset,
+            distinct,
+        }
     }
 }
 
@@ -143,6 +210,7 @@ pub(crate) struct RevelationWires<
         deserialize_with = "deserialize_array"
     )]
     is_row_node_leaf: [BoolTarget; L],
+    index_column_ids: [Target; 2],
     #[serde(
         serialize_with = "serialize_array",
         deserialize_with = "deserialize_array"
@@ -203,6 +271,8 @@ pub struct RevelationCircuit<
     /// Info about the nodes of the index tree that stores the rows trees where each of
     /// the L rows being proven are located
     index_node_info: [NodeInfo; L],
+    /// Identifiers of the indexed columns
+    index_column_ids: [F; 2],
     /// Actual number of items per-row included in the results.
     num_actual_items_per_row: usize,
     /// Ids of the output items included in the results for each row
@@ -226,55 +296,6 @@ pub struct RevelationCircuit<
     check_placeholder_inputs: CheckPlaceholderGadget<PH, PP>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
-/// Data structure containing all the information needed to verify the membership of
-/// a row in a tree representing a table
-pub struct RowPath {
-    /// Info about the node of the row tree storing the row
-    row_node_info: NodeInfo,
-    /// Info about the nodes in the path of the rows tree for the node storing the row; The `ChildPosition` refers to
-    /// the position of the previous node in the path as a child of the current node
-    row_tree_path: Vec<(NodeInfo, ChildPosition)>,
-    /// Hash of the siblings of the node in the rows tree path (except for the root)
-    row_path_siblings: Vec<Option<HashOutput>>,
-    /// Info about the node of the index tree storing the rows tree containing the row
-    index_node_info: NodeInfo,
-    /// Info about the nodes in the path of the index tree for the index_node; The `ChildPosition` refers to
-    /// the position of the previous node in the path as a child of the current node
-    index_tree_path: Vec<(NodeInfo, ChildPosition)>,
-    /// Hash of the siblings of the nodes in the index tree path (except for the root)
-    index_path_siblings: Vec<Option<HashOutput>>,
-}
-
-impl RowPath {
-    /// Instantiate a new instance of `RowPath` for a given proven row from the following input data:
-    /// - `row_node_info`: data about the node of the row tree storing the row
-    /// - `row_tree_path`: data about the nodes in the path of the rows tree for the node storing the row;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
-    /// - `row_path_siblings`: hash of the siblings of the node in the rows tree path (except for the root)
-    /// - `index_node_info`: data about the node of the index tree storing the rows tree containing the row
-    /// - `index_tree_path`: data about the nodes in the path of the index tree for the index_node;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
-    /// - `index_path_siblings`: hash of the siblings of the nodes in the index tree path (except for the root)
-    pub fn new(
-        row_node_info: NodeInfo,
-        row_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        row_path_siblings: Vec<Option<HashOutput>>,
-        index_node_info: NodeInfo,
-        index_tree_path: Vec<(NodeInfo, ChildPosition)>,
-        index_path_siblings: Vec<Option<HashOutput>>,
-    ) -> Self {
-        Self {
-            row_node_info,
-            row_tree_path,
-            row_path_siblings,
-            index_node_info,
-            index_tree_path,
-            index_path_siblings,
-        }
-    }
-}
-
 impl<
         const ROW_TREE_MAX_DEPTH: usize,
         const INDEX_TREE_MAX_DEPTH: usize,
@@ -290,11 +311,10 @@ where
 {
     pub(crate) fn new(
         row_paths: [RowPath; L],
+        index_column_ids: [F; 2],
         item_ids: &[F],
         results: [Vec<U256>; L],
-        limit: u32,
-        offset: u32,
-        distinct: bool,
+        query_modifiers: TabularQueryOutputModifiers,
         placeholder_inputs: CheckPlaceholderGadget<PH, PP>,
     ) -> Result<Self> {
         let mut row_tree_paths = [MerklePathGadget::<ROW_TREE_MAX_DEPTH>::default(); L];
@@ -338,12 +358,13 @@ where
             index_tree_paths,
             row_node_info,
             index_node_info,
+            index_column_ids,
             num_actual_items_per_row,
             ids: padded_ids.try_into().unwrap(),
             results: results.try_into().unwrap(),
-            limit,
-            offset,
-            distinct,
+            limit: query_modifiers.limit,
+            offset: query_modifiers.offset,
+            distinct: query_modifiers.distinct,
             check_placeholder_inputs: placeholder_inputs,
         })
     }
@@ -366,8 +387,12 @@ where
                                                        // computed by the universal query circuit
                                                        // closure to access the output items of the i-th result
         let get_result = |i| &results[S * i..S * (i + 1)];
-        let [min_query, max_query] = b.add_virtual_u256_arr_unsafe(); // unsafe should be ok since they are later included in placeholder hash
+        let (min_query_primary, max_query_primary) = (
+            row_proofs[0].min_primary_target(),
+            row_proofs[0].max_primary_target(),
+        );
         let [limit, offset] = b.add_virtual_target_arr();
+        let index_column_ids = b.add_virtual_target_arr();
         let tree_hash = original_tree_proof.merkle_hash();
         let zero = b.zero();
         let one = b.one();
@@ -385,7 +410,6 @@ where
         // this is a requirement to ensure that the check for DISTINCT is sound
         let mut only_matching_rows = _true;
         row_proofs.iter().enumerate().for_each(|(i, row_proof)| {
-            let index_ids = row_proof.index_ids_target();
             let is_matching_row = b.is_equal(row_proof.num_matching_rows_target(), one);
             // ensure that once `is_matching_row = false`, then it will be false for all
             // subsequent iterations
@@ -401,8 +425,8 @@ where
                     .flat_map(|hash| hash.to_targets())
                     .chain(row_node_info[i].node_min.to_targets())
                     .chain(row_node_info[i].node_max.to_targets())
-                    .chain(once(index_ids[1]))
-                    .chain(row_proof.min_value_target().to_targets())
+                    .chain(once(index_column_ids[1]))
+                    .chain(row_proof.secondary_index_value_target().to_targets())
                     .chain(row_proof.tree_hash_target().to_targets())
                     .collect_vec();
                 let row_node_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
@@ -412,7 +436,7 @@ where
                     &row_node_hash,
                 )
             };
-            let row_path_wires = MerklePathGadget::build(b, row_node_hash, index_ids[1]);
+            let row_path_wires = MerklePathGadget::build(b, row_node_hash, index_column_ids[1]);
             let row_tree_root = row_path_wires.root;
             // compute hash of the index node storing the rows tree containing the current row
             let index_node_hash = {
@@ -422,13 +446,13 @@ where
                     .flat_map(|hash| hash.to_targets())
                     .chain(index_node_info[i].node_min.to_targets())
                     .chain(index_node_info[i].node_max.to_targets())
-                    .chain(once(index_ids[0]))
-                    .chain(row_proof.index_value_target().to_targets())
+                    .chain(once(index_column_ids[0]))
+                    .chain(row_proof.primary_index_value_target().to_targets())
                     .chain(row_tree_root.to_targets())
                     .collect_vec();
                 b.hash_n_to_hash_no_pad::<H>(inputs)
             };
-            let index_path_wires = MerklePathGadget::build(b, index_node_hash, index_ids[0]);
+            let index_path_wires = MerklePathGadget::build(b, index_node_hash, index_column_ids[0]);
             // if the current row is valid, check that the root is the same of the original tree, completing
             // membership proof for the current row; otherwise, we don't care
             let root = b.select_hash(is_matching_row, &index_path_wires.root, &tree_hash);
@@ -436,14 +460,6 @@ where
 
             row_paths.push(row_path_wires.inputs);
             index_paths.push(index_path_wires.inputs);
-            // check that the primary index value for the current row is within the query
-            // bounds (only if the row is valid)
-            let index_value = row_proof.index_value_target();
-            let greater_than_min = b.is_less_or_equal_than_u256(&min_query, &index_value);
-            let smaller_than_max = b.is_less_or_equal_than_u256(&index_value, &max_query);
-            let in_range = b.and(greater_than_min, smaller_than_max);
-            let in_range = b.and(is_matching_row, in_range);
-            b.connect(in_range.target, is_matching_row.target);
 
             // enforce DISTINCT only for actual results: we enforce the i-th actual result is strictly smaller
             // than the (i+1)-th actual result
@@ -489,6 +505,9 @@ where
             // the proofs
             b.connect_hashes(row_proof.computational_hash_target(), computational_hash);
             b.connect_hashes(row_proof.placeholder_hash_target(), placeholder_hash);
+            // check that query bounds on primary index are the same for all the proofs
+            b.enforce_equal_u256(&row_proof.min_primary_target(), &min_query_primary);
+            b.enforce_equal_u256(&row_proof.max_primary_target(), &max_query_primary);
 
             overflow = b.or(overflow, row_proof.overflow_flag_target());
         });
@@ -499,19 +518,19 @@ where
             let inputs = placeholder_hash
                 .to_targets()
                 .into_iter()
-                .chain(min_query.to_targets())
-                .chain(max_query.to_targets())
+                .chain(min_query_primary.to_targets())
+                .chain(max_query_primary.to_targets())
                 .collect_vec();
             b.hash_n_to_hash_no_pad::<H>(inputs)
         };
         let check_placeholder_wires = CheckPlaceholderGadget::build(b, &final_placeholder_hash);
 
         b.enforce_equal_u256(
-            &min_query,
+            &min_query_primary,
             &check_placeholder_wires.input_wires.placeholder_values[0],
         );
         b.enforce_equal_u256(
-            &max_query,
+            &max_query_primary,
             &check_placeholder_wires.input_wires.placeholder_values[1],
         );
 
@@ -566,6 +585,7 @@ where
             row_node_info,
             index_node_info,
             is_row_node_leaf,
+            index_column_ids,
             is_item_included,
             ids,
             results,
@@ -614,6 +634,7 @@ where
             .zip(wires.results.iter())
             .for_each(|(&value, target)| pw.set_u256_target(target, value));
         pw.set_target_arr(&wires.ids, &self.ids);
+        pw.set_target_arr(&wires.index_column_ids, &self.index_column_ids);
         pw.set_target(wires.limit, self.limit.to_field());
         pw.set_target(wires.offset, self.offset.to_field());
         pw.set_bool_target(wires.distinct, self.distinct);
@@ -637,7 +658,7 @@ pub(crate) fn generate_dummy_row_proof_inputs<
     placeholders: &Placeholders,
     query_bounds: &QueryBounds,
 ) -> Result<
-    QueryCircuitInput<
+    UniversalCircuitInput<
         MAX_NUM_COLUMNS,
         MAX_NUM_PREDICATE_OPS,
         MAX_NUM_RESULT_OPS,
@@ -648,55 +669,45 @@ where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
-    // we generate a dummy proof for a dummy node of the index tree with an index value out of range
-    let query_hashes = QueryHashNonExistenceCircuits::new::<
-        MAX_NUM_COLUMNS,
-        MAX_NUM_PREDICATE_OPS,
-        MAX_NUM_RESULT_OPS,
-        MAX_NUM_ITEMS_PER_OUTPUT,
-    >(
-        column_ids,
-        predicate_operations,
-        results,
-        placeholders,
-        query_bounds,
-        false,
-    )?;
-    // we generate info about the proven index-tree node; we can use all dummy values, except for the
-    // node value which must be out of the query range
-    let node_value = query_bounds.max_query_primary() + U256::from(1);
-    let node_info = NodeInfo::new(
-        &HashOutput::default(),
-        None, // no children, for simplicity
-        None,
-        node_value,
-        U256::default(),
-        U256::default(),
-    );
-    // The query has no aggregation operations, so by construction of the circuits we
-    // know that the first aggregate operation is ID, while the remaining ones are dummies
-    let aggregation_ops = once(AggregationOperation::IdOp)
-        .chain(repeat(AggregationOperation::default()))
-        .take(MAX_NUM_ITEMS_PER_OUTPUT)
+    // we generate dummy column cells; we can use all dummy values, except for the
+    // primary index value which must be in the query range
+    let primary_index_value = query_bounds.min_query_primary();
+    let primary_index_column = ColumnCell {
+        value: primary_index_value,
+        id: column_ids.primary,
+    };
+    let secondary_index_column = ColumnCell {
+        value: U256::default(),
+        id: column_ids.secondary,
+    };
+    let non_indexed_columns = column_ids
+        .non_indexed_columns()
+        .iter()
+        .map(|id| ColumnCell::new(*id, U256::default()))
         .collect_vec();
-    QueryCircuitInput::new_non_existence_input(
-        node_info,
-        None,
-        None,
-        node_value,
-        &[
-            column_ids.primary.to_canonical_u64(),
-            column_ids.secondary.to_canonical_u64(),
-        ],
-        &aggregation_ops,
-        query_hashes,
+    let cells = RowCells::new(
+        primary_index_column,
+        secondary_index_column,
+        non_indexed_columns,
+    );
+    let universal_query_circuit = UniversalQueryCircuitInputs::new(
+        &cells,
+        predicate_operations,
+        placeholders,
         false,
         query_bounds,
-        placeholders,
-    )
+        results,
+        true, // we generate proof for a dummy row
+    )?;
+    Ok(UniversalCircuitInput::QueryNoAgg(universal_query_circuit))
+}
+
+pub struct CircuitBuilderParams {
+    pub(crate) universal_query_vk: VerifierCircuitData<F, C, D>,
+    pub(crate) preprocessing_circuit_set: RecursiveCircuits<F, C, D>,
+    pub(crate) preprocessing_vk: VerifierOnlyCircuitData<C, D>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -714,10 +725,10 @@ pub struct RecursiveCircuitWires<
 {
     revelation_circuit: RevelationWires<ROW_TREE_MAX_DEPTH, INDEX_TREE_MAX_DEPTH, L, S, PH, PP>,
     #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
     )]
-    row_verifiers: [RecursiveCircuitsVerifierTarget<D>; L],
+    row_verifiers: [ProofWithPublicInputsTarget<D>; L],
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     preprocessing_proof: ProofWithPublicInputsTarget<D>,
 }
@@ -740,7 +751,7 @@ pub struct RecursiveCircuitInputs<
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
     )]
-    pub(crate) row_proofs: [ProofWithVK; L],
+    pub(crate) row_proofs: [ProofWithPublicInputs<F, C, D>; L],
     pub(crate) preprocessing_proof: ProofWithPublicInputs<F, C, D>,
     pub(crate) query_circuit_set: RecursiveCircuits<F, C, D>,
 }
@@ -758,7 +769,6 @@ where
     [(); ROW_TREE_MAX_DEPTH - 1]:,
     [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); S * L]:,
-    [(); num_query_io::<S>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     type CircuitBuilderParams = CircuitBuilderParams;
@@ -772,11 +782,8 @@ where
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let row_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, { num_query_io::<S>() }>::new(
-            default_config(),
-            &builder_parameters.query_circuit_set,
-        );
-        let row_verifiers = [0; L].map(|_| row_verifier.verify_proof_in_circuit_set(builder));
+        let row_verifiers = [0; L]
+            .map(|_| verify_proof_fixed_circuit(builder, &builder_parameters.universal_query_vk));
         let preprocessing_verifier =
             RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PREPROCESSING_IO>::new(
                 default_config(),
@@ -788,11 +795,7 @@ where
         );
         let row_pis = row_verifiers
             .iter()
-            .map(|verifier| {
-                QueryProofPublicInputs::from_slice(
-                    verifier.get_public_input_targets::<F, { num_query_io::<S>() }>(),
-                )
-            })
+            .map(|verifier| QueryProofPublicInputs::from_slice(&verifier.public_inputs))
             .collect_vec();
         let preprocessing_pi =
             OriginalTreePublicInputs::from_slice(&preprocessing_proof.public_inputs);
@@ -808,8 +811,7 @@ where
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
         for (verifier_target, row_proof) in self.row_verifiers.iter().zip(inputs.row_proofs) {
-            let (proof, verifier_data) = (&row_proof).into();
-            verifier_target.set_target(pw, &inputs.query_circuit_set, proof, verifier_data)?;
+            pw.set_proof_with_pis_target(verifier_target, &row_proof);
         }
         pw.set_proof_with_pis_target(&self.preprocessing_proof, &inputs.preprocessing_proof);
         inputs.inputs.assign(pw, &self.revelation_circuit);
@@ -853,14 +855,19 @@ mod tests {
             PublicInputs as OriginalTreePublicInputs,
         },
         query::{
-            aggregation::{ChildPosition, NodeInfo},
-            public_inputs::{PublicInputs as QueryProofPublicInputs, QueryPublicInputs},
+            pi_len as query_pi_len,
+            public_inputs::{
+                PublicInputsUniversalCircuit as QueryProofPublicInputs,
+                QueryPublicInputsUniversalCircuit,
+            },
+            utils::{ChildPosition, NodeInfo},
         },
         revelation::{
-            num_query_io, revelation_unproven_offset::RowPath, tests::TestPlaceholders,
+            revelation_unproven_offset::{RowPath, TabularQueryOutputModifiers},
+            tests::TestPlaceholders,
             NUM_PREPROCESSING_IO,
         },
-        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
+        test_utils::random_aggregation_operations,
     };
 
     use super::{RevelationCircuit, RevelationWires};
@@ -907,7 +914,7 @@ mod tests {
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let row_pis_raw: [Vec<Target>; L] = (0..L)
-                .map(|_| c.add_virtual_targets(num_query_io::<S>()))
+                .map(|_| c.add_virtual_targets(query_pi_len::<S>()))
                 .collect_vec()
                 .try_into()
                 .unwrap();
@@ -935,7 +942,7 @@ mod tests {
 
     // test function for this revelation circuit. If `distinct` is true, then the
     // results are enforced to be distinct
-    async fn test_revelation_unproven_offset_circuit() {
+    async fn test_revelation_unproven_offset_circuit(distinct: bool) {
         const ROW_TREE_MAX_DEPTH: usize = 10;
         const INDEX_TREE_MAX_DEPTH: usize = 10;
         const L: usize = 5;
@@ -943,51 +950,44 @@ mod tests {
         const PH: usize = 10;
         const PP: usize = 30;
         let ops = random_aggregation_operations::<S>();
-        let mut row_pis = random_aggregation_public_inputs(&ops);
+        let mut row_pis = QueryProofPublicInputs::sample_from_ops(&ops);
         let rng = &mut thread_rng();
         let mut original_tree_pis = (0..NUM_PREPROCESSING_IO)
             .map(|_| rng.gen())
             .collect::<Vec<u32>>()
             .to_fields();
+        let index_ids = F::rand_array();
         const NUM_PLACEHOLDERS: usize = 5;
         let test_placeholders = TestPlaceholders::sample(NUM_PLACEHOLDERS);
-        let (index_ids, computational_hash) = {
+        let computational_hash = {
             let row_pi_0 = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[0]);
-            let index_ids = row_pi_0.index_ids();
-            let computational_hash = row_pi_0.computational_hash();
-
-            (index_ids, computational_hash)
+            row_pi_0.computational_hash()
         };
         let placeholder_hash = test_placeholders.query_placeholder_hash;
-        // set same index_ids, computational hash and placeholder hash for all proofs; set also num matching rows to 1
-        // for all proofs
+        let min_query_primary = test_placeholders.min_query;
+        let max_query_primary = test_placeholders.max_query;
+        // set same primary index query bounds, computational hash and placeholder hash for all proofs;
+        // set also num matching rows to 1 for all proofs
         row_pis.iter_mut().for_each(|pis| {
-            let [index_id_range, ch_range, ph_range, count_range] = [
-                QueryPublicInputs::IndexIds,
-                QueryPublicInputs::ComputationalHash,
-                QueryPublicInputs::PlaceholderHash,
-                QueryPublicInputs::NumMatching,
+            let [min_primary_range, max_primary_range, ch_range, ph_range, count_range] = [
+                QueryPublicInputsUniversalCircuit::MinPrimary,
+                QueryPublicInputsUniversalCircuit::MaxPrimary,
+                QueryPublicInputsUniversalCircuit::ComputationalHash,
+                QueryPublicInputsUniversalCircuit::PlaceholderHash,
+                QueryPublicInputsUniversalCircuit::NumMatching,
             ]
             .map(QueryProofPublicInputs::<F, S>::to_range);
-            pis[index_id_range].copy_from_slice(&index_ids);
+            pis[min_primary_range].copy_from_slice(&min_query_primary.to_fields());
+            pis[max_primary_range].copy_from_slice(&max_query_primary.to_fields());
             pis[ch_range].copy_from_slice(&computational_hash.to_fields());
             pis[ph_range].copy_from_slice(&placeholder_hash.to_fields());
             pis[count_range].copy_from_slice(&[F::ONE]);
         });
-        let index_value_range =
-            QueryProofPublicInputs::<F, S>::to_range(QueryPublicInputs::IndexValue);
-        let hash_range = QueryProofPublicInputs::<F, S>::to_range(QueryPublicInputs::TreeHash);
-        let min_query = test_placeholders.min_query;
-        let max_query = test_placeholders.max_query;
-        // closure that modifies a set of row public inputs to ensure that the index value lies
-        // within the query bounds; the new index value set in the public inputs is returned by the closure
-        let enforce_index_value_in_query_range = |pis: &mut [F], index_value: U256| {
-            let query_range_size = max_query - min_query + U256::from(1);
-            let new_index_value = min_query + index_value % query_range_size;
-            pis[index_value_range.clone()].copy_from_slice(&new_index_value.to_fields());
-            assert!(new_index_value >= min_query && new_index_value <= max_query);
-            new_index_value
-        };
+        let hash_range =
+            QueryProofPublicInputs::<F, S>::to_range(QueryPublicInputsUniversalCircuit::TreeHash);
+        let index_value_range = QueryProofPublicInputs::<F, S>::to_range(
+            QueryPublicInputsUniversalCircuit::PrimaryIndexValue,
+        );
         // build a test tree containing the rows 0..5 found in row_pis
         // Index tree:
         //          A
@@ -1004,7 +1004,7 @@ mod tests {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[1]);
             let embedded_tree_hash =
                 HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap();
-            let node_value = row_pi.min_value();
+            let node_value = row_pi.secondary_index_value();
             NodeInfo::new(
                 &embedded_tree_hash,
                 None,
@@ -1019,10 +1019,10 @@ mod tests {
         row_pis[1][hash_range.clone()].copy_from_slice(&node_1_hash.to_fields());
         let node_0 = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[0]);
-            let embedded_tree_hash = HashOutput::try_from(row_pi.tree_hash().to_bytes()).unwrap();
-            let node_value = row_pi.min_value();
+            let embedded_tree_hash = HashOutput::from(row_pi.tree_hash());
+            let node_value = row_pi.secondary_index_value();
             // left child is node 1
-            let left_child_hash = HashOutput::try_from(node_1_hash.to_bytes()).unwrap();
+            let left_child_hash = HashOutput::from(node_1_hash);
             NodeInfo::new(
                 &embedded_tree_hash,
                 Some(&left_child_hash),
@@ -1034,9 +1034,8 @@ mod tests {
         };
         let node_2 = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[2]);
-            let embedded_tree_hash =
-                HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap();
-            let node_value = row_pi.min_value();
+            let embedded_tree_hash = HashOutput::from(gen_random_field_hash::<F>());
+            let node_value = row_pi.secondary_index_value();
             NodeInfo::new(
                 &embedded_tree_hash,
                 None,
@@ -1051,9 +1050,8 @@ mod tests {
         row_pis[2][hash_range.clone()].copy_from_slice(&node_2_hash.to_fields());
         let node_4 = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[4]);
-            let embedded_tree_hash =
-                HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap();
-            let node_value = row_pi.min_value();
+            let embedded_tree_hash = HashOutput::from(gen_random_field_hash::<F>());
+            let node_value = row_pi.secondary_index_value();
             NodeInfo::new(
                 &embedded_tree_hash,
                 None,
@@ -1068,8 +1066,7 @@ mod tests {
         row_pis[4][hash_range.clone()].copy_from_slice(&node_4_hash.to_fields());
         let node_5 = {
             // can use all dummy values for this node, since there is no proof associated to it
-            let embedded_tree_hash =
-                HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap();
+            let embedded_tree_hash = HashOutput::from(gen_random_field_hash::<F>());
             let [node_value, node_min, node_max] = array::from_fn(|_| gen_random_u256(rng));
             NodeInfo::new(
                 &embedded_tree_hash,
@@ -1080,13 +1077,12 @@ mod tests {
                 node_max,
             )
         };
-        let node_4_hash = HashOutput::try_from(node_4_hash.to_bytes()).unwrap();
-        let node_5_hash =
-            HashOutput::try_from(node_5.compute_node_hash(index_ids[1]).to_bytes()).unwrap();
+        let node_4_hash = HashOutput::from(node_4_hash);
+        let node_5_hash = HashOutput::from(node_5.compute_node_hash(index_ids[1]));
         let node_3 = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[3]);
-            let embedded_tree_hash = HashOutput::try_from(row_pi.tree_hash().to_bytes()).unwrap();
-            let node_value = row_pi.min_value();
+            let embedded_tree_hash = HashOutput::from(row_pi.tree_hash());
+            let node_value = row_pi.secondary_index_value();
             NodeInfo::new(
                 &embedded_tree_hash,
                 Some(&node_4_hash), // left child is node 4
@@ -1098,10 +1094,8 @@ mod tests {
         };
         let node_b = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[2]);
-            let embedded_tree_hash =
-                HashOutput::try_from(node_2.compute_node_hash(index_ids[1]).to_bytes()).unwrap();
-            let index_value = row_pi.index_value();
-            let node_value = enforce_index_value_in_query_range(&mut row_pis[2], index_value);
+            let embedded_tree_hash = HashOutput::from(node_2.compute_node_hash(index_ids[1]));
+            let node_value = row_pi.primary_index_value();
             NodeInfo::new(
                 &embedded_tree_hash,
                 None,
@@ -1112,13 +1106,12 @@ mod tests {
             )
         };
         let node_c = {
-            let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[4]);
-            let embedded_tree_hash =
-                HashOutput::try_from(node_3.compute_node_hash(index_ids[1]).to_bytes()).unwrap();
-            let index_value = row_pi.index_value();
-            let node_value = enforce_index_value_in_query_range(&mut row_pis[4], index_value);
-            // we need also to set index value PI in row_pis[3] to the same value of row_pis[4], as they are in the same index tree
-            row_pis[3][index_value_range.clone()].copy_from_slice(&node_value.to_fields());
+            let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[3]);
+            let embedded_tree_hash = HashOutput::from(node_3.compute_node_hash(index_ids[1]));
+            let node_value = row_pi.primary_index_value();
+            // we need to set index value in `row_pis[4]` to the same value of `row_pis[3]`, as
+            // they are in the same index tree
+            row_pis[4][index_value_range.clone()].copy_from_slice(&node_value.to_fields());
             NodeInfo::new(
                 &embedded_tree_hash,
                 None,
@@ -1128,17 +1121,14 @@ mod tests {
                 node_value,
             )
         };
-        let node_b_hash =
-            HashOutput::try_from(node_b.compute_node_hash(index_ids[0]).to_bytes()).unwrap();
-        let node_c_hash =
-            HashOutput::try_from(node_c.compute_node_hash(index_ids[0]).to_bytes()).unwrap();
+        let node_b_hash = HashOutput::from(node_b.compute_node_hash(index_ids[0]));
+        let node_c_hash = HashOutput::from(node_c.compute_node_hash(index_ids[0]));
         let node_a = {
             let row_pi = QueryProofPublicInputs::<_, S>::from_slice(&row_pis[0]);
-            let embedded_tree_hash =
-                HashOutput::try_from(node_0.compute_node_hash(index_ids[1]).to_bytes()).unwrap();
-            let index_value = row_pi.index_value();
-            let node_value = enforce_index_value_in_query_range(&mut row_pis[0], index_value);
-            // we need also to set index value PI in row_pis[1] to the same value of row_pis[0], as they are in the same index tree
+            let embedded_tree_hash = HashOutput::from(node_0.compute_node_hash(index_ids[1]));
+            let node_value = row_pi.primary_index_value();
+            // we need to set index value in `row_pis[1]` to the same value of `row_pis[0]`, as
+            // they are in the same index tree
             row_pis[1][index_value_range].copy_from_slice(&node_value.to_fields());
             NodeInfo::new(
                 &embedded_tree_hash,
@@ -1155,8 +1145,17 @@ mod tests {
 
         // sample final results and set order-agnostic digests in row_pis proofs accordingly
         const NUM_ACTUAL_ITEMS_PER_OUTPUT: usize = 4;
-        let mut results: [[U256; NUM_ACTUAL_ITEMS_PER_OUTPUT]; L] =
-            array::from_fn(|_| array::from_fn(|_| gen_random_u256(rng)));
+        let mut results: [[U256; NUM_ACTUAL_ITEMS_PER_OUTPUT]; L] = if distinct {
+            // generate all the output values distinct from each other; generating at
+            // random will make them distinct with overwhelming probability
+            array::from_fn(|_| array::from_fn(|_| gen_random_u256(rng)))
+        } else {
+            // generate some values which are the same
+            let mut res = array::from_fn(|_| array::from_fn(|_| gen_random_u256(rng)));
+            res[L - 1] = res[0];
+            res
+        };
+
         // sort them to ensure that DISTINCT constraints are satisfied
         results.sort_by(|a, b| {
             let (is_smaller, is_eq) = is_less_than_or_equal_to_u256_arr(a, b);
@@ -1202,8 +1201,9 @@ mod tests {
             .await;
 
         row_pis.iter_mut().zip(digests).for_each(|(pis, digest)| {
-            let values_range =
-                QueryProofPublicInputs::<F, S>::to_range(QueryPublicInputs::OutputValues);
+            let values_range = QueryProofPublicInputs::<F, S>::to_range(
+                QueryPublicInputsUniversalCircuit::OutputValues,
+            );
             pis[values_range.start..values_range.start + CURVE_TARGET_LEN]
                 .copy_from_slice(&digest.to_fields())
         });
@@ -1254,11 +1254,10 @@ mod tests {
             TestRevelationCircuit::<ROW_TREE_MAX_DEPTH, INDEX_TREE_MAX_DEPTH, L, S, PH, PP> {
                 circuit: RevelationCircuit::new(
                     [row_path_0, row_path_1, row_path_2, row_path_3, row_path_4],
+                    index_ids,
                     &ids,
                     results.map(|res| res.to_vec()),
-                    0,
-                    0,
-                    false,
+                    TabularQueryOutputModifiers::new(0, 0, false),
                     test_placeholders.check_placeholder_inputs,
                 )
                 .unwrap(),
@@ -1271,11 +1270,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_revelation_unproven_offset_circuit_no_distinct() {
-        test_revelation_unproven_offset_circuit().await
+        test_revelation_unproven_offset_circuit(false).await
     }
 
     #[tokio::test]
     async fn test_revelation_unproven_offset_circuit_distinct() {
-        test_revelation_unproven_offset_circuit().await
+        test_revelation_unproven_offset_circuit(true).await
     }
 }

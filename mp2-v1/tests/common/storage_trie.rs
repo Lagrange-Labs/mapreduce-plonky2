@@ -57,11 +57,11 @@ impl<'a> ProvingContext<'a> {
     ) -> Self {
         Self {
             contract_address,
+            chain_id,
             params,
             slots,
             variable_slot,
             b: bench,
-            chain_id,
         }
     }
 }
@@ -265,14 +265,18 @@ impl TrieNode {
                             values_extraction::CircuitInput::new_mapping_of_mappings_leaf(
                                 node.clone(),
                                 *slot as u8,
-                                outer_mapping_key.clone(),
-                                inner_mapping_key.clone(),
-                                slot_info
-                                    .outer_key_id(ctx.contract_address, ctx.chain_id, vec![])
-                                    .unwrap(),
-                                slot_info
-                                    .inner_key_id(ctx.contract_address, ctx.chain_id, vec![])
-                                    .unwrap(),
+                                (
+                                    outer_mapping_key.clone(),
+                                    slot_info
+                                        .outer_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                                        .unwrap(),
+                                ),
+                                (
+                                    inner_mapping_key.clone(),
+                                    slot_info
+                                        .inner_key_id(ctx.contract_address, ctx.chain_id, vec![])
+                                        .unwrap(),
+                                ),
                                 slot_info.evm_word(),
                                 slot_info.table_info().to_vec(),
                             ),
