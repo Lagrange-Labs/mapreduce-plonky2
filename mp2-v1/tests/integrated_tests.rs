@@ -154,7 +154,10 @@ async fn integrated_indexing() -> Result<()> {
     // save columns information and table information in JSON so querying test can pick up
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
     write_table_info(MERGE_TABLE_INFO_FILE, merged.table_info())?;
-    write_table_info(MAPPING_OF_MAPPING_TABLE_INFO_FILE, mapping_of_struct_mappings.table_info())?;
+    write_table_info(
+        MAPPING_OF_MAPPING_TABLE_INFO_FILE,
+        mapping_of_struct_mappings.table_info(),
+    )?;
 
     Ok(())
 }
