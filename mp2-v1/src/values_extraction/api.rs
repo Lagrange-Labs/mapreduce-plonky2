@@ -1006,10 +1006,8 @@ mod tests {
                                 &extracted_column_identifiers,
                                 value,
                                 evm_word,
-                                outer_mapping_key.clone(),
-                                inner_mapping_key.clone(),
-                                test_slot.outer_key_id,
-                                test_slot.inner_key_id,
+                                (outer_mapping_key.clone(), test_slot.outer_key_id),
+                                (inner_mapping_key.clone(), test_slot.inner_key_id),
                             );
 
                             let circuit_input = CircuitInput::new_mapping_of_mappings_leaf(

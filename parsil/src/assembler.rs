@@ -15,11 +15,11 @@ use sqlparser::ast::{
     SelectItem, SetExpr, TableAlias, TableFactor, UnaryOperator, Value,
 };
 use verifiable_db::query::{
-    aggregation::{QueryBoundSource, QueryBounds},
     computational_hash_ids::{AggregationOperation, Operation, PlaceholderIdentifier},
     universal_circuit::universal_circuit_inputs::{
         BasicOperation, InputOperand, OutputItem, Placeholders, ResultStructure,
     },
+    utils::{QueryBoundSource, QueryBounds},
 };
 
 use crate::{
@@ -28,6 +28,22 @@ use crate::{
     utils::{str_to_u256, ParsilSettings},
     visitor::{AstVisitor, Visit},
 };
+
+/// Replace `current` with `Some(other)` if (i) `current` is empty, or (ii)
+/// `other` is smaller than the value in `current`.
+fn maybe_replace_min<T: PartialOrd>(current: &mut Option<T>, other: T) {
+    if current.as_ref().map(|x| other < *x).unwrap_or(false) || current.is_none() {
+        *current = Some(other);
+    }
+}
+
+/// Replace `current` with `Some(other)` if (i) `current` is empty, or (ii)
+/// `other` is larger than the value in `current`.
+fn maybe_replace_max<T: PartialOrd>(current: &mut Option<T>, other: T) {
+    if current.as_ref().map(|x| other > *x).unwrap_or(false) || current.is_none() {
+        *current = Some(other);
+    }
+}
 
 /// A Wire carry data that can be injected in universal query circuits. It
 /// carries an index, whose sginification depends on the type of wire.
@@ -149,6 +165,7 @@ pub(crate) struct Assembler<'a, C: ContextProvider> {
     /// The query-global column storage, mapping a column index to a
     /// cryptographic column ID.
     columns: Vec<u64>,
+    /// If any, the boundaries of the secondary index
     secondary_index_bounds: Bounds,
     /// Flag specifying whether DISTINCT keyword is employed in the query
     distinct: bool,
@@ -272,25 +289,43 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
         }
     }
 
-    /// Return whether the given `Symbol` encodes the secondary index column.
-    fn is_symbol_secondary_idx(s: &Symbol<Wire>) -> bool {
+    /// Return whether the given `Symbol` encodes the given kind of column.
+    fn is_symbol_kind(s: &Symbol<Wire>, target: ColumnKind) -> bool {
         match s {
-            Symbol::Column { kind, .. } => *kind == ColumnKind::SecondaryIndex,
-            Symbol::Alias { to, .. } => Self::is_symbol_secondary_idx(to),
+            Symbol::Column { kind, .. } => *kind == target,
+            Symbol::Alias { to, .. } => Self::is_symbol_kind(to, target),
             _ => false,
         }
+    }
+
+    /// Return whether, in the current scope, the given expression refers to the
+    /// primary index.
+    fn is_primary_index(&self, expr: &Expr) -> Result<bool> {
+        Ok(match expr {
+            Expr::Identifier(s) => Self::is_symbol_kind(
+                &self.scopes.resolve_freestanding(s)?,
+                ColumnKind::PrimaryIndex,
+            ),
+            Expr::CompoundIdentifier(c) => {
+                Self::is_symbol_kind(&self.scopes.resolve_compound(c)?, ColumnKind::PrimaryIndex)
+            }
+
+            _ => false,
+        })
     }
 
     /// Return whether, in the current scope, the given expression refers to the
     /// secondary index.
     fn is_secondary_index(&self, expr: &Expr) -> Result<bool> {
         Ok(match expr {
-            Expr::Identifier(s) => {
-                Self::is_symbol_secondary_idx(&self.scopes.resolve_freestanding(s)?)
-            }
-            Expr::CompoundIdentifier(c) => {
-                Self::is_symbol_secondary_idx(&self.scopes.resolve_compound(c)?)
-            }
+            Expr::Identifier(s) => Self::is_symbol_kind(
+                &self.scopes.resolve_freestanding(s)?,
+                ColumnKind::SecondaryIndex,
+            ),
+            Expr::CompoundIdentifier(c) => Self::is_symbol_kind(
+                &self.scopes.resolve_compound(c)?,
+                ColumnKind::SecondaryIndex,
+            ),
 
             _ => false,
         })
@@ -337,7 +372,7 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     ///   - sid <[=] <placeholder>
     ///   - sid >[=] <placeholder>
     ///   - sid = <placeholder>
-    fn maybe_set_secondary_index_boundary(&mut self, expr: &Expr) -> Result<()> {
+    fn maybe_set_secondary_index_bounds(&mut self, expr: &Expr, bounds: &mut Bounds) -> Result<()> {
         fn plus_one(expr: &Expr) -> Expr {
             Expr::BinaryOp {
                 left: Box::new(expr.clone()),
@@ -369,15 +404,9 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         } else {
                             right
                         };
-                        let bound = Some(self.expression_to_boundary(right)?);
+                        let bound = self.expression_to_boundary(right)?;
 
-                        if self.secondary_index_bounds.low.is_some() {
-                            // impossible to say which is higher between two
-                            // conflicting low bounds
-                            self.secondary_index_bounds.low = None;
-                        } else {
-                            self.secondary_index_bounds.low = bound;
-                        }
+                        maybe_replace_max(&mut bounds.low, bound);
                     }
                     // $sid < x
                     BinaryOperator::Lt | BinaryOperator::LtEq => {
@@ -386,28 +415,15 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         } else {
                             right
                         };
-                        let bound = Some(self.expression_to_boundary(right)?);
+                        let bound = self.expression_to_boundary(right)?;
 
-                        if self.secondary_index_bounds.high.is_some() {
-                            // impossible to say which is lower between two
-                            // conflicting high bounds
-                            self.secondary_index_bounds.high = None;
-                        } else {
-                            self.secondary_index_bounds.high = bound;
-                        }
+                        maybe_replace_min(&mut bounds.high, bound);
                     }
                     // $sid = x
                     BinaryOperator::Eq => {
-                        let bound = Some(self.expression_to_boundary(right)?);
-                        if self.secondary_index_bounds.low.is_some()
-                            && self.secondary_index_bounds.high.is_some()
-                        {
-                            self.secondary_index_bounds.low = None;
-                            self.secondary_index_bounds.high = None;
-                        } else {
-                            self.secondary_index_bounds.low = bound.clone();
-                            self.secondary_index_bounds.high = bound;
-                        }
+                        let bound = self.expression_to_boundary(right)?;
+                        bounds.low = Some(bound.clone());
+                        bounds.high = Some(bound);
                     }
                     _ => {}
                 }
@@ -420,13 +436,9 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         } else {
                             left
                         };
-                        let bound = Some(self.expression_to_boundary(left)?);
+                        let bound = self.expression_to_boundary(left)?;
 
-                        if self.secondary_index_bounds.high.is_some() {
-                            self.secondary_index_bounds.high = None;
-                        } else {
-                            self.secondary_index_bounds.high = bound;
-                        }
+                        maybe_replace_min(&mut bounds.high, bound);
                     }
                     // x < $sid
                     BinaryOperator::Lt | BinaryOperator::LtEq => {
@@ -435,28 +447,15 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
                         } else {
                             left
                         };
-                        let bound = Some(self.expression_to_boundary(left)?);
+                        let bound = self.expression_to_boundary(left)?;
 
-                        if self.secondary_index_bounds.low.is_some() {
-                            // impossible to say which is lower between two
-                            // conflicting high bounds
-                            self.secondary_index_bounds.low = None;
-                        } else {
-                            self.secondary_index_bounds.low = bound;
-                        }
+                        maybe_replace_max(&mut bounds.low, bound);
                     }
                     // x = $sid
                     BinaryOperator::Eq => {
-                        let bound = Some(self.expression_to_boundary(left)?);
-                        if self.secondary_index_bounds.low.is_some()
-                            && self.secondary_index_bounds.high.is_some()
-                        {
-                            self.secondary_index_bounds.low = None;
-                            self.secondary_index_bounds.high = None;
-                        } else {
-                            self.secondary_index_bounds.low = bound.clone();
-                            self.secondary_index_bounds.high = bound;
-                        }
+                        let bound = self.expression_to_boundary(left)?;
+                        bounds.low = Some(bound.clone());
+                        bounds.high = Some(bound);
                     }
                     _ => {}
                 }
@@ -470,19 +469,114 @@ impl<'a, C: ContextProvider> Assembler<'a, C> {
     /// to extract putative bounds on the secondary index. Only `AND`
     /// combinators are traversed, as any other one would not statically
     /// guarantee the predominance of the bound.
-    fn find_secondary_index_boundaries(&mut self, expr: &Expr) -> Result<()> {
-        self.maybe_set_secondary_index_boundary(expr)?;
+    fn find_secondary_index_boundaries(&mut self, expr: &Expr, bounds: &mut Bounds) -> Result<()> {
+        self.maybe_set_secondary_index_bounds(expr, bounds)?;
         match expr {
             Expr::BinaryOp {
                 left,
                 op: BinaryOperator::And,
                 right,
             } => {
-                self.find_secondary_index_boundaries(left)?;
-                self.find_secondary_index_boundaries(right)?;
+                self.find_secondary_index_boundaries(left, bounds)?;
+                self.find_secondary_index_boundaries(right, bounds)?;
                 Ok(())
             }
-            Expr::Nested(e) => self.find_secondary_index_boundaries(e),
+            Expr::Nested(e) => self.find_secondary_index_boundaries(e, bounds),
+            _ => Ok(()),
+        }
+    }
+
+    /// If `expr` defines a definite boundary on the primary index, update the
+    /// adequate member of the `bounds` tuple.
+    fn maybe_set_primary_index_bounds(
+        &mut self,
+        expr: &Expr,
+        bounds: &mut (bool, bool),
+    ) -> Result<()> {
+        if let Expr::BinaryOp { left, op, right } = expr {
+            if self.is_primary_index(left)?
+                // SID can only be computed from constants and placeholders
+                && self.is_expr_static(right)?
+                // SID can only be defined by up to one level of BasicOperation
+                && Self::depth(right) <= 1
+            {
+                match op {
+                    // $PI > x
+                    BinaryOperator::GtEq => {
+                        let bound = self.expression_to_boundary(right)?;
+                        if matches!(
+                            bound,
+                            QueryBoundSource::Placeholder(PlaceholderIdentifier::MinQueryOnIdx1)
+                        ) {
+                            bounds.0 = true;
+                        }
+                    }
+                    // $PI < x
+                    BinaryOperator::LtEq => {
+                        let bound = self.expression_to_boundary(right)?;
+
+                        if matches!(
+                            bound,
+                            QueryBoundSource::Placeholder(PlaceholderIdentifier::MaxQueryOnIdx1)
+                        ) {
+                            bounds.1 = true;
+                        }
+                    }
+                    _ => {}
+                }
+            } else if self.is_primary_index(right)? && self.is_expr_static(left)? {
+                match op {
+                    // x > $PI
+                    BinaryOperator::Gt | BinaryOperator::GtEq => {
+                        let bound = self.expression_to_boundary(right)?;
+
+                        if matches!(
+                            bound,
+                            QueryBoundSource::Placeholder(PlaceholderIdentifier::MaxQueryOnIdx1)
+                        ) {
+                            bounds.1 = true;
+                        }
+                    }
+                    // x < $PI
+                    BinaryOperator::Lt | BinaryOperator::LtEq => {
+                        let bound = self.expression_to_boundary(right)?;
+                        if matches!(
+                            bound,
+                            QueryBoundSource::Placeholder(PlaceholderIdentifier::MinQueryOnIdx1)
+                        ) {
+                            bounds.0 = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Recursively traverses the given expression (typically a WHERE clause) to
+    /// ensure that the [MIN_BLOCK, MAX_BLOCK] boundaries are enforced on the
+    /// primary index.
+    ///   * `expr`: the [`Expr`] to traverse;
+    ///   * `bound`: whether the (low, high) bound for the prim. ind. have been found.
+    fn detect_primary_index_boundaries(
+        &mut self,
+        expr: &Expr,
+        bounds: &mut (bool, bool),
+    ) -> Result<()> {
+        self.maybe_set_primary_index_bounds(expr, bounds)?;
+        match expr {
+            Expr::BinaryOp {
+                left,
+                op: BinaryOperator::And,
+                right,
+            } => {
+                self.detect_primary_index_boundaries(left, bounds)?;
+                self.detect_primary_index_boundaries(right, bounds)?;
+                Ok(())
+            }
+            Expr::Nested(e) => self.detect_primary_index_boundaries(e, bounds),
             _ => Ok(()),
         }
     }
@@ -968,9 +1062,22 @@ impl<C: ContextProvider> AstVisitor for Assembler<'_, C> {
         self.distinct = select.distinct.is_some();
         if let Some(where_clause) = select.selection.as_ref() {
             // As the expression are traversed depth-first, the top level
-            // expression will mechnically find itself at the last position, as
+            // expression will mechanically find itself at the last position, as
             // required by the universal query circuit API.
-            self.find_secondary_index_boundaries(where_clause)?;
+            let mut primary_index_bounded = (false, false);
+            self.detect_primary_index_boundaries(where_clause, &mut primary_index_bounded)?;
+            ensure!(
+                primary_index_bounded.0,
+                "min. bound not found for primary index"
+            );
+            ensure!(
+                primary_index_bounded.1,
+                "max. bound not found for primary index"
+            );
+
+            let mut secondary_index_bounds = Default::default();
+            self.find_secondary_index_boundaries(where_clause, &mut secondary_index_bounds)?;
+            self.secondary_index_bounds = secondary_index_bounds;
             self.compile(where_clause, &mut StorageTarget::Predicate)?;
         }
         self.exit_scope()
