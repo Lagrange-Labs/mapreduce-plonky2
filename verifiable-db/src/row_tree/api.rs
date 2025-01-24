@@ -208,8 +208,7 @@ impl CircuitInput {
         is_multiplier: bool,
         mpt_metadata: HashOut<F>,
         row_unique_data: HashOut<F>,
-        left_proof: Vec<u8>,
-        right_proof: Vec<u8>,
+        child_proofs: (Vec<u8>, Vec<u8>),
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
         let cell = Cell::new(
@@ -221,11 +220,13 @@ impl CircuitInput {
         let row = SecondaryIndexCell::new(cell, row_unique_data);
         Ok(CircuitInput::Full {
             witness: row.into(),
-            left_proof,
-            right_proof,
+            left_proof: child_proofs.0,
+            right_proof: child_proofs.1,
             cells_proof,
         })
     }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn partial(
         identifier: u64,
         value: U256,
@@ -460,8 +461,7 @@ mod test {
             false,
             mpt_metadata,
             row_unique_data,
-            child_proof[0].to_vec(),
-            child_proof[1].to_vec(),
+            (child_proof[0].to_vec(), child_proof[1].to_vec()),
             p.cells_proof_vk().serialize()?,
         )?;
         let left_proof = ProofWithVK::deserialize(&child_proof[0])?;

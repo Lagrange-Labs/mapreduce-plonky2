@@ -4,26 +4,25 @@ use crate::cells_tree::{Cell, CellWire, PublicInputs as CellsPublicInputs};
 use derive_more::Constructor;
 use itertools::Itertools;
 use mp2_common::{
-    poseidon::{empty_poseidon_hash, hash_to_int_target, hash_to_int_value, H, HASH_TO_INT_LEN},
+    poseidon::{empty_poseidon_hash, hash_to_int_target, H, HASH_TO_INT_LEN},
     serialization::{deserialize, serialize},
     types::{CBuilder, CURVE_TARGET_LEN},
     u256::UInt256Target,
-    utils::{FromFields, ToFields, ToTargets},
+    utils::{FromFields, ToTargets},
     F,
 };
 use num::BigUint;
 use plonky2::{
-    field::types::{Field, PrimeField64},
+    field::types::PrimeField64,
     hash::hash_types::{HashOut, HashOutTarget},
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::config::Hasher,
 };
 use plonky2_ecdsa::gadgets::{biguint::BigUintTarget, nonnative::CircuitBuilderNonNative};
 use plonky2_ecgfp5::{
-    curve::{curve::Point, scalar_field::Scalar},
+    curve::curve::Point,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
 use serde::{Deserialize, Serialize};
@@ -77,50 +76,6 @@ impl SecondaryIndexCell {
     pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &SecondaryIndexCellWire) {
         self.cell.assign(pw, &wires.cell);
         pw.set_hash_target(wires.row_unique_data, self.row_unique_data);
-    }
-
-    pub(crate) fn digest(&self, cells_pi: &CellsPublicInputs<F>) -> RowDigest {
-        let metadata_digests = self.cell.split_metadata_digest();
-        let values_digests = self.cell.split_values_digest();
-
-        let metadata_digests = metadata_digests.accumulate(&cells_pi.split_metadata_digest_point());
-        let values_digests = values_digests.accumulate(&cells_pi.split_values_digest_point());
-
-        // Compute row ID for individual cells:
-        // row_id_individual = H2Int(row_unique_data || individual_md)
-        let inputs = self
-            .row_unique_data
-            .to_fields()
-            .into_iter()
-            .chain(metadata_digests.individual.to_fields())
-            .collect_vec();
-        let hash = H::hash_no_pad(&inputs);
-        let row_id_individual = hash_to_int_value(hash);
-        let row_id_individual = Scalar::from_noncanonical_biguint(row_id_individual);
-
-        // Multiply row ID to individual value digest:
-        // individual_vd = row_id_individual * individual_vd
-        let individual_vd = values_digests.individual * row_id_individual;
-
-        // Multiplier is always employed for set of scalar variables, and `row_unique_data`
-        // for such a set is always `H("")``, so we can hardocode it in the circuit:
-        // row_id_multiplier = H2Int(H("") || multiplier_md)
-        let empty_hash = empty_poseidon_hash();
-        let inputs = empty_hash
-            .to_fields()
-            .into_iter()
-            .chain(metadata_digests.multiplier.to_fields())
-            .collect_vec();
-        let hash = H::hash_no_pad(&inputs);
-        let row_id_multiplier = hash_to_int_value(hash);
-
-        let multiplier_vd = values_digests.multiplier;
-
-        RowDigest {
-            row_id_multiplier,
-            individual_vd,
-            multiplier_vd,
-        }
     }
 }
 
@@ -201,9 +156,17 @@ impl SecondaryIndexCellWire {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use mp2_common::{utils::FromFields, C, D, F};
+    use mp2_common::{
+        poseidon::hash_to_int_value,
+        utils::{FromFields, ToFields},
+        C, D, F,
+    };
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::field::types::Sample;
+    use plonky2::{
+        field::types::{Field, Sample},
+        plonk::config::Hasher,
+    };
+    use plonky2_ecgfp5::curve::scalar_field::Scalar;
     use rand::{thread_rng, Rng};
 
     impl SecondaryIndexCell {
@@ -213,6 +176,51 @@ pub(crate) mod tests {
 
             SecondaryIndexCell::new(cell, row_unique_data)
         }
+
+        pub(crate) fn digest(&self, cells_pi: &CellsPublicInputs<F>) -> RowDigest {
+            let metadata_digests = self.cell.split_metadata_digest();
+            let values_digests = self.cell.split_values_digest();
+
+            let metadata_digests =
+                metadata_digests.accumulate(&cells_pi.split_metadata_digest_point());
+            let values_digests = values_digests.accumulate(&cells_pi.split_values_digest_point());
+
+            // Compute row ID for individual cells:
+            // row_id_individual = H2Int(row_unique_data || individual_md)
+            let inputs = self
+                .row_unique_data
+                .to_fields()
+                .into_iter()
+                .chain(metadata_digests.individual.to_fields())
+                .collect_vec();
+            let hash = H::hash_no_pad(&inputs);
+            let row_id_individual = hash_to_int_value(hash);
+            let row_id_individual = Scalar::from_noncanonical_biguint(row_id_individual);
+
+            // Multiply row ID to individual value digest:
+            // individual_vd = row_id_individual * individual_vd
+            let individual_vd = values_digests.individual * row_id_individual;
+
+            // Multiplier is always employed for set of scalar variables, and `row_unique_data`
+            // for such a set is always `H("")``, so we can hardocode it in the circuit:
+            // row_id_multiplier = H2Int(H("") || multiplier_md)
+            let empty_hash = empty_poseidon_hash();
+            let inputs = empty_hash
+                .to_fields()
+                .into_iter()
+                .chain(metadata_digests.multiplier.to_fields())
+                .collect_vec();
+            let hash = H::hash_no_pad(&inputs);
+            let row_id_multiplier = hash_to_int_value(hash);
+
+            let multiplier_vd = values_digests.multiplier;
+
+            RowDigest {
+                row_id_multiplier,
+                individual_vd,
+                multiplier_vd,
+            }
+        }
     }
 
     #[derive(Clone, Debug)]
@@ -221,7 +229,7 @@ pub(crate) mod tests {
         cells_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestRowCircuit<'a> {
+    impl UserCircuit<F, D> for TestRowCircuit<'_> {
         // Row wire + cells PI
         type Wires = (SecondaryIndexCellWire, Vec<Target>);
 

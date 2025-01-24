@@ -196,7 +196,7 @@ pub(crate) mod tests {
         child_metadata_digest: &'a SplitDigestPoint,
     }
 
-    impl<'a> UserCircuit<F, D> for TestCellCircuit<'a> {
+    impl UserCircuit<F, D> for TestCellCircuit<'_> {
         // Cell wire + child values digest + child metadata digest
         type Wires = (CellWire, SplitDigestTarget, SplitDigestTarget);
 

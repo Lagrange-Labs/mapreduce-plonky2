@@ -207,10 +207,7 @@ pub mod tests {
         *,
     };
     use crate::{
-        block_tree::{
-            compute_final_digest,
-            tests::{TestPIField, TestPITargets},
-        },
+        block_tree::tests::{compute_final_digest, TestPIField, TestPITargets},
         extraction,
     };
     use alloy::primitives::U256;

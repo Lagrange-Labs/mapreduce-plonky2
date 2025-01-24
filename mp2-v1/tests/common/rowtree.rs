@@ -240,8 +240,7 @@ impl TestContext {
                         HashOut::rand(),
                         // TODO: row_unique_data
                         HashOut::rand(),
-                        left_proof,
-                        right_proof,
+                        (left_proof, right_proof),
                         cell_tree_proof,
                     )
                     .unwrap(),

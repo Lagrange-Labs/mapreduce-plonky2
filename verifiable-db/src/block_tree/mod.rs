@@ -10,22 +10,15 @@ use crate::{
 };
 pub use api::{CircuitInput, PublicParameters};
 use mp2_common::{
-    group_hashing::{
-        circuit_hashed_scalar_mul, field_hashed_scalar_mul, weierstrass_to_point,
-        CircuitBuilderGroupHashing,
-    },
+    group_hashing::{circuit_hashed_scalar_mul, CircuitBuilderGroupHashing},
     poseidon::hash_to_int_target,
     types::CBuilder,
-    utils::ToFields,
     CHasher, D, F,
 };
-use plonky2::{field::types::Field, iop::target::Target, plonk::circuit_builder::CircuitBuilder};
+use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
 
-use plonky2_ecgfp5::{
-    curve::{curve::Point, scalar_field::Scalar},
-    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
-};
+use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget};
 pub use public_inputs::PublicInputs;
 
 /// Common function to compute the digest of the block tree which uses a special format using
@@ -41,30 +34,10 @@ pub(crate) fn compute_index_digest(
     b.curve_scalar_mul(base, &scalar)
 }
 
-/// Compute the final digest value.
-pub(crate) fn compute_final_digest(
-    is_merge_case: bool,
-    rows_tree_pi: &row_tree::PublicInputs<F>,
-) -> Point {
-    let individual_digest = weierstrass_to_point(&rows_tree_pi.individual_digest_point());
-    if !is_merge_case {
-        return individual_digest;
-    }
-
-    // Compute the final row digest from rows_tree_proof for merge case:
-    // multiplier_digest = rows_tree_proof.row_id_multiplier * rows_tree_proof.multiplier_vd
-    let multiplier_vd = weierstrass_to_point(&rows_tree_pi.multiplier_digest_point());
-    let row_id_multiplier = Scalar::from_noncanonical_biguint(rows_tree_pi.row_id_multiplier());
-    let multiplier_digest = multiplier_vd * row_id_multiplier;
-    // rows_digest_merge = multiplier_digest * rows_tree_proof.DR
-    let individual_digest = weierstrass_to_point(&rows_tree_pi.individual_digest_point());
-    field_hashed_scalar_mul(multiplier_digest.to_fields(), individual_digest)
-}
-
 /// Compute the final digest target.
-pub(crate) fn compute_final_digest_target<'a, E>(
+pub(crate) fn compute_final_digest_target<E>(
     b: &mut CBuilder,
-    extraction_pi: &E::PI<'a>,
+    extraction_pi: &E::PI<'_>,
     rows_tree_pi: &row_tree::PublicInputs<Target>,
 ) -> CurveTarget
 where
@@ -109,6 +82,7 @@ pub(crate) mod tests {
     use crate::row_tree;
     use alloy::primitives::U256;
     use mp2_common::{
+        group_hashing::{field_hashed_scalar_mul, weierstrass_to_point},
         keccak::PACKED_HASH_LEN,
         poseidon::HASH_TO_INT_LEN,
         types::CBuilder,
@@ -128,7 +102,7 @@ pub(crate) mod tests {
             witness::{PartialWitness, WitnessWrite},
         },
     };
-    use plonky2_ecgfp5::curve::curve::Point;
+    use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
     use rand::{rngs::ThreadRng, thread_rng, Rng};
     use std::array;
 
@@ -197,13 +171,33 @@ pub(crate) mod tests {
         .to_vec()
     }
 
+    /// Compute the final digest value.
+    pub(crate) fn compute_final_digest(
+        is_merge_case: bool,
+        rows_tree_pi: &row_tree::PublicInputs<F>,
+    ) -> Point {
+        let individual_digest = weierstrass_to_point(&rows_tree_pi.individual_digest_point());
+        if !is_merge_case {
+            return individual_digest;
+        }
+
+        // Compute the final row digest from rows_tree_proof for merge case:
+        // multiplier_digest = rows_tree_proof.row_id_multiplier * rows_tree_proof.multiplier_vd
+        let multiplier_vd = weierstrass_to_point(&rows_tree_pi.multiplier_digest_point());
+        let row_id_multiplier = Scalar::from_noncanonical_biguint(rows_tree_pi.row_id_multiplier());
+        let multiplier_digest = multiplier_vd * row_id_multiplier;
+        // rows_digest_merge = multiplier_digest * rows_tree_proof.DR
+        let individual_digest = weierstrass_to_point(&rows_tree_pi.individual_digest_point());
+        field_hashed_scalar_mul(multiplier_digest.to_fields(), individual_digest)
+    }
+
     #[derive(Clone, Debug)]
     struct TestFinalDigestCircuit<'a> {
         extraction_pi: &'a [F],
         rows_tree_pi: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestFinalDigestCircuit<'a> {
+    impl UserCircuit<F, D> for TestFinalDigestCircuit<'_> {
         // Extraction PI + rows tree PI
         type Wires = (Vec<Target>, Vec<Target>);
 
