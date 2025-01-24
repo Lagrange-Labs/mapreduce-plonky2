@@ -41,11 +41,11 @@ impl TestContext {
         t: &MerkleIndexTree,
         ut: UpdateTree<BlockTreeKey>,
         added_index: &IndexNode<BlockPrimaryIndex>,
-    ) -> IndexProofIdentifier<BlockPrimaryIndex> {
+    ) -> anyhow::Result<IndexProofIdentifier<BlockPrimaryIndex>> {
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(wk)) = workplan.next() {
             let k = wk.k();
-            let (context, node) = t.fetch_with_context(k).await;
+            let (context, node) = t.fetch_with_context(k).await?.unwrap();
             let row_proof_key = RowProofIdentifier {
                 table: table_id.clone(),
                 tree_key: node.row_tree_root_key,
@@ -131,14 +131,14 @@ impl TestContext {
                 // It's ok to fetch the node at the same epoch because for the block tree
                 // we know it's the left children now so the min and max didn't change, we
                 // didn't insert anything new below
-                let (prev_ctx, previous_node) = t.fetch_with_context(previous_key).await;
+                let (prev_ctx, previous_node) = t.fetch_with_context(previous_key).await?.unwrap();
                 let prev_left_hash = match prev_ctx.left {
-                    Some(kk) => t.fetch(&kk).await.node_hash,
+                    Some(kk) => t.try_fetch(&kk).await?.unwrap().node_hash,
                     None => empty_poseidon_hash().to_bytes().try_into().unwrap(),
                 };
 
                 let prev_right_hash = match prev_ctx.right {
-                    Some(kk) => t.fetch(&kk).await.node_hash,
+                    Some(kk) => t.try_fetch(&kk).await?.unwrap().node_hash,
                     None => empty_poseidon_hash().to_bytes().try_into().unwrap(),
                 };
 
@@ -165,9 +165,9 @@ impl TestContext {
                 // here we are simply proving the new updated nodes from the new node to
                 // the root. We fetch the same node but at the previous version of the
                 // tree to prove the update.
-                let previous_node = t.fetch_at(k, t.current_epoch() - 1).await;
+                let previous_node = t.try_fetch_at(k, t.current_epoch() - 1).await?.unwrap();
                 let left_key = context.left.expect("should always be a left child");
-                let left_node = t.fetch(&left_key).await;
+                let left_node = t.try_fetch(&left_key).await?.unwrap();
                 // this should be one of the nodes we just proved in this loop before
                 let right_key = context.right.expect("should always be a right child");
                 let right_proof = self
@@ -204,7 +204,7 @@ impl TestContext {
 
             workplan.done(&wk).unwrap();
         }
-        let root = t.root().await.unwrap();
+        let root = t.root().await?.unwrap();
         let root_proof_key = IndexProofIdentifier {
             table: table_id.clone(),
             tree_key: root,
@@ -215,7 +215,7 @@ impl TestContext {
             .storage
             .get_proof_exact(&ProofKey::Index(root_proof_key.clone()))
             .unwrap();
-        root_proof_key
+        Ok(root_proof_key)
     }
 
     pub(crate) async fn prove_update_index_tree(
@@ -223,9 +223,9 @@ impl TestContext {
         bn: BlockPrimaryIndex,
         table: &Table,
         ut: UpdateTree<BlockTreeKey>,
-    ) -> IndexProofIdentifier<BlockPrimaryIndex> {
-        let row_tree_root = table.row.root().await.unwrap();
-        let row_payload = table.row.fetch(&row_tree_root).await;
+    ) -> anyhow::Result<IndexProofIdentifier<BlockPrimaryIndex>> {
+        let row_tree_root = table.row.root().await?.unwrap();
+        let row_payload = table.row.try_fetch(&row_tree_root).await?.unwrap();
         let row_root_proof_key = RowProofIdentifier {
             table: table.public_name.clone(),
             tree_key: row_tree_root,

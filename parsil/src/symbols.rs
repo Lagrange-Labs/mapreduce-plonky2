@@ -326,7 +326,7 @@ pub enum Symbol<Payload: Debug + Clone> {
 impl<P: Debug + Clone> Symbol<P> {
     /// Return, if any, the [`Handle`] under which a symbol is known in the
     /// current scope.
-    fn handle(&self) -> Option<&Handle> {
+    pub(crate) fn handle(&self) -> Option<&Handle> {
         match self {
             Symbol::Column { handle, .. } => Some(handle),
             Symbol::Alias { from, .. } => Some(from),

@@ -2,10 +2,9 @@
 //! states of a tree at given epochs.
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 
-use anyhow::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{tree::TreeTopology, Epoch};
+use crate::{error::RyhopeError, tree::TreeTopology, Epoch};
 
 use super::{EpochKvStorage, EpochStorage, RoEpochKvStorage, TransactionalStorage, TreeStorage};
 
@@ -30,11 +29,11 @@ impl<
 where
     T: Send,
 {
-    fn start_transaction(&mut self) -> Result<()> {
+    fn start_transaction(&mut self) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 
-    async fn commit_transaction(&mut self) -> Result<()> {
+    async fn commit_transaction(&mut self) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 }
@@ -50,7 +49,7 @@ where
         self.1
     }
 
-    async fn fetch_at(&self, epoch: Epoch) -> T {
+    async fn fetch_at(&self, epoch: Epoch) -> Result<T, RyhopeError> {
         if epoch != self.1 {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
@@ -61,15 +60,15 @@ where
         }
     }
 
-    async fn fetch(&self) -> T {
+    async fn fetch(&self) -> Result<T, RyhopeError> {
         self.0.fetch_at(self.1).await
     }
 
-    async fn store(&mut self, _: T) {
+    async fn store(&mut self, _: T) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 
-    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 }
@@ -95,7 +94,7 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStor
         self.current_epoch
     }
 
-    async fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Option<T::Node> {
+    async fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Result<Option<T::Node>, RyhopeError> {
         if epoch > self.current_epoch {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
@@ -104,10 +103,6 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStor
         } else {
             self.wrapped.try_fetch_at(k, self.current_epoch).await
         }
-    }
-
-    async fn fetch(&self, k: &T::Key) -> T::Node {
-        self.wrapped.fetch_at(k, self.current_epoch).await
     }
 
     async fn size_at(&self, epoch: Epoch) -> usize {
@@ -122,7 +117,7 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStor
         self.wrapped.random_key_at(epoch).await
     }
 
-    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, T::Node>> {
+    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, T::Node>, RyhopeError> {
         if epoch > self.current_epoch {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
@@ -137,19 +132,19 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStor
 impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> EpochKvStorage<T::Key, T::Node>
     for KvStorageAt<'_, T, S>
 {
-    async fn remove(&mut self, _: T::Key) -> Result<()> {
+    async fn remove(&mut self, _: T::Key) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 
-    async fn update(&mut self, _: T::Key, _: T::Node) -> Result<()> {
+    async fn update(&mut self, _: T::Key, _: T::Node) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 
-    async fn store(&mut self, _: T::Key, _: T::Node) -> Result<()> {
+    async fn store(&mut self, _: T::Key, _: T::Node) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 
-    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 }
@@ -212,7 +207,7 @@ where
         self.wrapped.born_at(epoch).await
     }
 
-    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, _epoch: Epoch) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 }

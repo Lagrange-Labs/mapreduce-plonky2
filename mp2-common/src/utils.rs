@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField};
+use plonky2::hash::hash_types::{HashOut, HashOutTarget, RichField, NUM_HASH_OUT_ELTS};
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -18,31 +18,31 @@ use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTa
 use sha3::Digest;
 use sha3::Keccak256;
 
+use crate::serialization::circuit_data_serialization::SerializableRichField;
 use crate::{
     array::Targetable,
     group_hashing::EXTENSION_DEGREE,
     poseidon::{HashableField, H},
     types::HashOutput,
-    ProofTuple, D, F,
+    ProofTuple,
 };
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
 const TWO_POWER_24: usize = 16777216;
 
-#[allow(dead_code)]
-trait ConnectSlice {
-    fn connect_slice(&mut self, a: &[Target], b: &[Target]);
+// check that the closure $f actually panics, printing $msg as error message if the function
+// did not panic; this macro is employed in tests in place of #[should_panic] to ensure that a
+// panic occurred in the expected function rather than in other parts of the test
+#[macro_export]
+macro_rules! check_panic {
+    ($f: expr, $msg: expr) => {{
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe($f));
+        assert!(result.is_err(), $msg);
+    }};
 }
 
-impl ConnectSlice for CircuitBuilder<F, D> {
-    fn connect_slice(&mut self, a: &[Target], b: &[Target]) {
-        assert_eq!(a.len(), b.len());
-        for (ai, bi) in a.iter().zip(b) {
-            self.connect(*ai, *bi);
-        }
-    }
-}
+pub use check_panic;
 
 pub fn verify_proof_tuple<
     F: RichField + Extendable<D>,
@@ -330,7 +330,7 @@ pub fn pack_and_compute_poseidon_target<F: HashableField + Extendable<D>, const 
     b.hash_n_to_hash_no_pad::<H>(packed)
 }
 
-pub trait SelectHashBuilder {
+pub trait HashBuilder {
     /// Select `first_hash` or `second_hash` as output depending on the Boolean `cond`
     fn select_hash(
         &mut self,
@@ -338,9 +338,12 @@ pub trait SelectHashBuilder {
         first_hash: &HashOutTarget,
         second_hash: &HashOutTarget,
     ) -> HashOutTarget;
+
+    /// Determine whether `first_hash == second_hash`
+    fn hash_eq(&mut self, first_hash: &HashOutTarget, second_hash: &HashOutTarget) -> BoolTarget;
 }
 
-impl<F: RichField + Extendable<D>, const D: usize> SelectHashBuilder for CircuitBuilder<F, D> {
+impl<F: RichField + Extendable<D>, const D: usize> HashBuilder for CircuitBuilder<F, D> {
     fn select_hash(
         &mut self,
         cond: BoolTarget,
@@ -356,6 +359,28 @@ impl<F: RichField + Extendable<D>, const D: usize> SelectHashBuilder for Circuit
                 .collect_vec(),
         )
     }
+
+    fn hash_eq(&mut self, first_hash: &HashOutTarget, second_hash: &HashOutTarget) -> BoolTarget {
+        let _true = self._true();
+        first_hash
+            .elements
+            .iter()
+            .zip(second_hash.elements.iter())
+            .fold(_true, |acc, (first, second)| {
+                let is_eq = self.is_equal(*first, *second);
+                self.and(acc, is_eq)
+            })
+    }
+}
+
+pub trait SelectTarget {
+    /// Return `first` if `cond` is true, `second` otherwise
+    fn select<F: SerializableRichField<D>, const D: usize>(
+        b: &mut CircuitBuilder<F, D>,
+        cond: &BoolTarget,
+        first: &Self,
+        second: &Self,
+    ) -> Self;
 }
 
 pub trait ToFields<F: RichField> {
@@ -419,10 +444,16 @@ impl<F: RichField> Fieldable<F> for u64 {
 }
 
 pub trait FromTargets {
+    /// Number of targets necessary to instantiate `Self`
+    const NUM_TARGETS: usize;
+
+    /// Number of targets in `t` must be at least `Self::NUM_TARGETS`
     fn from_targets(t: &[Target]) -> Self;
 }
 
 impl FromTargets for HashOutTarget {
+    const NUM_TARGETS: usize = NUM_HASH_OUT_ELTS;
+
     fn from_targets(t: &[Target]) -> Self {
         HashOutTarget {
             elements: create_array(|i| t[i]),
@@ -773,39 +804,14 @@ impl<F: RichField + Extendable<D>, const D: usize> SliceConnector for CircuitBui
     }
 }
 
-/// Convert an Uint32 target to Uint8 targets.
-pub(crate) fn unpack_u32_to_u8_targets<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    u: Target,
-    endianness: Endianness,
-) -> Vec<Target> {
-    let zero = b.zero();
-    let mut bits = b.split_le(u, u32::BITS as usize);
-    match endianness {
-        Endianness::Big => bits.reverse(),
-        Endianness::Little => (),
-    };
-    bits.chunks(8)
-        .map(|chunk| {
-            // let bits: Box<dyn Iterator<Item = &BoolTarget>> = match endianness {
-            let bits: Box<dyn Iterator<Item = _>> = match endianness {
-                Endianness::Big => Box::new(chunk.iter()),
-                Endianness::Little => Box::new(chunk.iter().rev()),
-            };
-            bits.fold(zero, |acc, bit| b.mul_const_add(F::TWO, acc, bit.target))
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod test {
-    use super::{bits_to_num, unpack_u32_to_u8_targets, Packer, TargetsConnector, ToFields};
-    use crate::types::CBuilder;
+    use super::{bits_to_num, Packer, ToFields};
     use crate::utils::{
         greater_than, greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits,
         Endianness, PackerTarget,
     };
-    use crate::{default_config, C, D, F};
+    use crate::{C, D, F};
     use alloy::primitives::Address;
     use anyhow::Result;
     use plonky2::field::goldilocks_field::GoldilocksField;
@@ -815,7 +821,6 @@ mod test {
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use rand::{thread_rng, Rng, RngCore};
-    use std::array;
 
     #[test]
     fn test_pack() {
@@ -1030,47 +1035,6 @@ mod test {
         builder.register_public_input(result.target);
 
         let data = builder.build::<C>();
-        let proof = data.prove(pw)?;
-        data.verify(proof)
-    }
-
-    #[test]
-    fn test_unpack_u32_to_u8_targets() -> Result<()> {
-        let rng = &mut thread_rng();
-        let u32_value: u32 = rng.gen();
-        let big_endian_u8_values = u32_value.to_be_bytes().to_fields();
-        let little_endian_u8_values = u32_value.to_le_bytes().to_fields();
-
-        let config = default_config();
-        let mut builder = CBuilder::new(config);
-        let b = &mut builder;
-
-        let [exp_big_endian_u8_targets, exp_little_endian_u8_targets] =
-            array::from_fn(|_| b.add_virtual_target_arr::<4>());
-
-        let u32_target = b.constant(F::from_canonical_u32(u32_value));
-        let real_big_endian_u8_targets = unpack_u32_to_u8_targets(b, u32_target, Endianness::Big);
-        let real_little_endian_u8_targets =
-            unpack_u32_to_u8_targets(b, u32_target, Endianness::Little);
-
-        b.connect_targets(
-            real_big_endian_u8_targets,
-            exp_big_endian_u8_targets.to_vec(),
-        );
-        b.connect_targets(
-            real_little_endian_u8_targets,
-            exp_little_endian_u8_targets.to_vec(),
-        );
-
-        let data = builder.build::<C>();
-        let mut pw = PartialWitness::new();
-        [
-            (big_endian_u8_values, exp_big_endian_u8_targets),
-            (little_endian_u8_values, exp_little_endian_u8_targets),
-        ]
-        .into_iter()
-        .for_each(|(values, targets)| pw.set_target_arr(&targets, &values));
-
         let proof = data.prove(pw)?;
         data.verify(proof)
     }

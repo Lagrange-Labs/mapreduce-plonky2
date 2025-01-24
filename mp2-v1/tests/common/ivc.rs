@@ -4,7 +4,6 @@ use super::{
     proof_storage::{IndexProofIdentifier, ProofKey, ProofStorage},
     table::TableID,
 };
-use anyhow::Result;
 use mp2_common::{proof::ProofWithVK, types::HashOutput, F};
 use mp2_v1::{api, indexing::block::BlockPrimaryIndex};
 use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
@@ -17,9 +16,9 @@ impl TestContext {
         bn: BlockPrimaryIndex,
         index_tree: &MerkleIndexTree,
         expected_metadata_hash: &HashOutput,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         // load the block proof of the current block
-        let root_key = index_tree.root().await.unwrap();
+        let root_key = index_tree.root().await?.unwrap();
         let index_root_key = ProofKey::Index(IndexProofIdentifier {
             table: table_id.clone(),
             tree_key: root_key,

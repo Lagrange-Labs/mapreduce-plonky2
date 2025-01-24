@@ -47,8 +47,8 @@ pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 pub struct StorageSlotInfo<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
     slot: StorageSlot,
     metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    outer_key_id: u64,
-    inner_key_id: u64,
+    outer_key_id: ColumnId,
+    inner_key_id: ColumnId,
 }
 
 impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
@@ -57,8 +57,8 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
     pub fn new(
         slot: StorageSlot,
         metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-        outer_key_id: Option<u64>,
-        inner_key_id: Option<u64>,
+        outer_key_id: Option<ColumnId>,
+        inner_key_id: Option<ColumnId>,
     ) -> Self {
         let [outer_key_id, inner_key_id] =
             [outer_key_id, inner_key_id].map(|key_id| key_id.unwrap_or_default());
@@ -78,16 +78,16 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
         &self.metadata
     }
 
-    pub fn outer_key_id(&self) -> u64 {
+    pub fn outer_key_id(&self) -> ColumnId {
         self.outer_key_id
     }
 
-    pub fn inner_key_id(&self) -> u64 {
+    pub fn inner_key_id(&self) -> ColumnId {
         self.inner_key_id
     }
 }
 
-pub fn identifier_block_column() -> u64 {
+pub fn identifier_block_column() -> ColumnId {
     let inputs: Vec<F> = BLOCK_ID_DST.to_fields();
     H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
 }
@@ -100,7 +100,7 @@ pub fn identifier_for_value_column(
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
-) -> u64 {
+) -> ColumnId {
     let inputs = once(input.slot)
         .chain(input.byte_offset.to_be_bytes())
         .chain(input.bit_offset.to_be_bytes())
@@ -122,7 +122,7 @@ pub fn identifier_for_mapping_key_column(
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
-) -> u64 {
+) -> ColumnId {
     compute_id_with_prefix(KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
@@ -133,7 +133,7 @@ pub fn identifier_for_outer_mapping_key_column(
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
-) -> u64 {
+) -> ColumnId {
     compute_id_with_prefix(OUTER_KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
@@ -144,7 +144,7 @@ pub fn identifier_for_inner_mapping_key_column(
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
-) -> u64 {
+) -> ColumnId {
     compute_id_with_prefix(INNER_KEY_ID_PREFIX, slot, contract_address, chain_id, extra)
 }
 
@@ -155,7 +155,7 @@ fn compute_id_with_prefix(
     contract_address: &Address,
     chain_id: u64,
     extra: Vec<u8>,
-) -> u64 {
+) -> ColumnId {
     let inputs: Vec<F> = prefix
         .iter()
         .cloned()
@@ -183,7 +183,7 @@ pub fn compute_leaf_single_metadata_digest<
 /// Compute the values digest for single variable leaf.
 pub fn compute_leaf_single_values_digest<const MAX_FIELD_PER_EVM: usize>(
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[u64],
+    extracted_column_identifiers: &[ColumnId],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
 ) -> Digest {
     let num_actual_columns = F::from_canonical_usize(table_info.len());
@@ -212,7 +212,7 @@ pub fn compute_leaf_mapping_metadata_digest<
 >(
     table_info: Vec<ColumnInfo>,
     slot: u8,
-    key_id: u64,
+    key_id: ColumnId,
 ) -> Digest {
     // We don't need `extracted_column_identifiers` and `evm_word` to compute the metadata digest.
     let metadata_digest =
@@ -241,9 +241,9 @@ pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
     table_info: Vec<ColumnInfo>,
     extracted_column_identifiers: &[u64],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
-    mapping_key: Vec<u8>,
+    mapping_key: MappingKey,
     evm_word: u32,
-    key_id: u64,
+    key_id: ColumnId,
 ) -> Digest {
     // We add key column to number of actual columns.
     let num_actual_columns = F::from_canonical_usize(table_info.len() + 1);
@@ -286,8 +286,8 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
 >(
     table_info: Vec<ColumnInfo>,
     slot: u8,
-    outer_key_id: u64,
-    inner_key_id: u64,
+    outer_key_id: ColumnId,
+    inner_key_id: ColumnId,
 ) -> Digest {
     // We don't need `extracted_column_identifiers` and `evm_word` to compute the metadata digest.
     let metadata_digest =
@@ -318,16 +318,17 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest<
     metadata_digest + inner_key_digest + outer_key_digest
 }
 
+pub type MappingKey = Vec<u8>;
+pub type ColumnId = u64;
+
 /// Compute the values digest for mapping of mappings leaf.
 pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: usize>(
     table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[u64],
+    extracted_column_identifiers: &[ColumnId],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
     evm_word: u32,
-    outer_mapping_key: Vec<u8>,
-    inner_mapping_key: Vec<u8>,
-    outer_key_id: u64,
-    inner_key_id: u64,
+    outer_mapping_data: (MappingKey, ColumnId),
+    inner_mapping_data: (MappingKey, ColumnId),
 ) -> Digest {
     // Add inner key and outer key columns to the number of actual columns.
     let num_actual_columns = F::from_canonical_usize(table_info.len() + 2);
@@ -336,16 +337,17 @@ pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: u
             .digest();
 
     // Compute the outer and inner key values digests.
-    let [packed_outer_key, packed_inner_key] = [outer_mapping_key, inner_mapping_key].map(|key| {
-        left_pad32(&key)
-            .pack(Endianness::Big)
-            .into_iter()
-            .map(F::from_canonical_u32)
-    });
+    let [packed_outer_key, packed_inner_key] =
+        [outer_mapping_data.0, inner_mapping_data.0].map(|key| {
+            left_pad32(&key)
+                .pack(Endianness::Big)
+                .into_iter()
+                .map(F::from_canonical_u32)
+        });
     if evm_word == 0 {
         let [outer_key_digest, inner_key_digest] = [
-            (outer_key_id, packed_outer_key.clone()),
-            (inner_key_id, packed_inner_key.clone()),
+            (outer_mapping_data.1, packed_outer_key.clone()),
+            (inner_mapping_data.1, packed_inner_key.clone()),
         ]
         .map(|(key_id, packed_key)| {
             // D(key_id || pack(key))

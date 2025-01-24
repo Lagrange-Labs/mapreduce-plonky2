@@ -28,7 +28,8 @@ use super::{
         self,
         query::{
             INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
-            MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH,
+            MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, NUM_CHUNKS, NUM_ROWS,
+            ROW_TREE_MAX_DEPTH,
         },
     },
     proof_storage::ProofKV,
@@ -57,6 +58,8 @@ pub(crate) struct TestContext {
     pub(crate) params: Option<PublicParameters>,
     pub(crate) query_params: Option<
         verifiable_db::api::QueryParameters<
+            NUM_CHUNKS,
+            NUM_ROWS,
             ROW_TREE_MAX_DEPTH,
             INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,

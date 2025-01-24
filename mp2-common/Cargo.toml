@@ -10,6 +10,7 @@ bincode.workspace = true
 derive_more.workspace = true
 eth_trie.workspace = true
 ethereum-types.workspace = true
+git-version.workspace = true
 hashbrown.workspace = true
 hex.workspace = true
 itertools.workspace = true

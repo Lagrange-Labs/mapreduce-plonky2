@@ -59,6 +59,8 @@ pub type OutputHash = Array<U32Target, PACKED_HASH_LEN>;
 pub type OutputByteHash = Array<Target, HASH_LEN>;
 
 impl FromTargets for OutputHash {
+    const NUM_TARGETS: usize = PACKED_HASH_LEN;
+
     fn from_targets(t: &[Target]) -> Self {
         OutputHash::from_array(array::from_fn(|i| U32Target(t[i])))
     }

@@ -144,5 +144,5 @@ pub async fn compute_cells_tree_hash(cells: Vec<TestCell>) -> HashOut<F> {
     }
     let cell_tree = build_cell_tree(cells).await.unwrap().0;
 
-    cell_tree.root_data().await.unwrap().hash
+    cell_tree.root_data().await.unwrap().unwrap().hash
 }

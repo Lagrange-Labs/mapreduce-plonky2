@@ -214,6 +214,7 @@ impl CircuitInput {
             cells_proof,
         })
     }
+
     pub fn partial(
         identifier: u64,
         value: U256,

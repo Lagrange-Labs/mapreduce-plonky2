@@ -363,10 +363,8 @@ mod tests {
             &extracted_column_identifiers,
             value.clone().try_into().unwrap(),
             evm_word,
-            outer_key.clone(),
-            inner_key.clone(),
-            outer_key_id,
-            inner_key_id,
+            (outer_key.clone(), outer_key_id),
+            (inner_key.clone(), inner_key_id),
         );
         let slot = MappingSlot::new(slot, outer_key.clone());
         let c = LeafCircuit {

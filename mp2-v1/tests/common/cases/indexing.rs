@@ -1,8 +1,6 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
-use anyhow::Result;
-use itertools::Itertools;
 use log::{debug, info};
 use mp2_v1::{
     api::SlotInput,
@@ -24,7 +22,7 @@ use crate::common::{
         identifier_for_mapping_key_column,
         table_source::{
             single_var_slot_info, LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs,
-            MergeSource, SingleValuesExtractionArgs, UniqueMappingEntry, DEFAULT_ADDRESS,
+            MergeSource, SingleValuesExtractionArgs, DEFAULT_ADDRESS,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
@@ -33,8 +31,7 @@ use crate::common::{
         CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TreeRowUpdate,
         TreeUpdateType,
     },
-    MetadataGadget, StorageSlotInfo, TableInfo, TestContext, TEST_MAX_COLUMNS,
-    TEST_MAX_FIELD_PER_EVM,
+    TableInfo, TestContext,
 };
 
 use super::{
@@ -46,14 +43,7 @@ use alloy::{
     primitives::{Address, U256},
     providers::ProviderBuilder,
 };
-use mp2_common::{
-    eth::{ProofQuery, StorageSlot},
-    proof::ProofWithVK,
-    types::{HashOutput, ADDRESS_LEN},
-    F,
-};
-use plonky2::field::types::Field;
-use std::{assert_matches::assert_matches, str::FromStr, sync::atomic::AtomicU64};
+use mp2_common::{eth::StorageSlot, proof::ProofWithVK, types::HashOutput};
 
 /// Test slots for single values extraction
 const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
@@ -73,12 +63,15 @@ const LENGTH_VALUE: u8 = 2;
 const CONTRACT_SLOT: usize = 1;
 
 /// Test slot for single Struct extractin
+#[allow(dead_code)]
 const SINGLE_STRUCT_SLOT: usize = 6;
 
 /// Test slot for mapping Struct extraction
+#[allow(dead_code)]
 const MAPPING_STRUCT_SLOT: usize = 7;
 
 /// Test slot for mapping of mappings extraction
+#[allow(dead_code)]
 const MAPPING_OF_MAPPINGS_SLOT: usize = 8;
 
 /// human friendly name about the column containing the block number
@@ -89,7 +82,7 @@ pub(crate) const MAPPING_KEY_COLUMN: &str = "map_key";
 impl TableIndexing {
     pub(crate) async fn merge_table_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> anyhow::Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -147,7 +140,7 @@ impl TableIndexing {
         let single_columns = SINGLE_SLOTS
             .iter()
             .enumerate()
-            .filter_map(|(i, slot)| {
+            .map(|(i, slot)| {
                 let slot_input = SlotInput::new(
                     *slot, // byte_offset
                     0,     // bit_offset
@@ -157,14 +150,14 @@ impl TableIndexing {
                 );
                 let identifier =
                     identifier_for_value_column(&slot_input, contract_address, chain_id, vec![]);
-                Some(TableColumn {
+                TableColumn {
                     name: format!("column_{}", i),
                     identifier,
                     index: IndexType::None,
                     // ALL single columns are "multiplier" since we do tableA * D(tableB), i.e. all
                     // entries of table A are repeated for each entry of table B.
                     multiplier: true,
-                })
+                }
             })
             .collect::<Vec<_>>();
         let mapping_column = vec![TableColumn {
@@ -229,7 +222,7 @@ impl TableIndexing {
 
     pub(crate) async fn single_value_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> anyhow::Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -330,7 +323,7 @@ impl TableIndexing {
 
     pub(crate) async fn mapping_test_case(
         ctx: &mut TestContext,
-    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+    ) -> anyhow::Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -447,7 +440,7 @@ impl TableIndexing {
         ctx: &mut TestContext,
         genesis_change: Vec<TableRowUpdate<BlockPrimaryIndex>>,
         changes: Vec<ChangeType>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         // Call the contract function to set the test data.
         log::info!("Applying initial updates to contract done");
         let bn = ctx.block_number().await as BlockPrimaryIndex;
@@ -488,7 +481,7 @@ impl TableIndexing {
         // example
         updates: Vec<TableRowUpdate<BlockPrimaryIndex>>,
         expected_metadata_hash: &HashOutput,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let current_block = ctx.block_number().await as BlockPrimaryIndex;
         // apply the new cells to the trees
         // NOTE ONLY the rest of the cells, not including the secondary one !
@@ -509,7 +502,12 @@ impl TableIndexing {
                     let previous_row = match new_cells.previous_row_key != Default::default() {
                         true => Row {
                             k: new_cells.previous_row_key.clone(),
-                            payload: self.table.row.fetch(&new_cells.previous_row_key).await,
+                            payload: self
+                                .table
+                                .row
+                                .try_fetch(&new_cells.previous_row_key)
+                                .await?
+                                .unwrap(),
                         },
                         false => Row::default(),
                     };
@@ -527,7 +525,7 @@ impl TableIndexing {
                             new_cell_collection,
                             tree_update,
                         )
-                        .await;
+                        .await?;
                     TreeRowUpdate::Insertion(Row {
                         k: new_row_key,
                         payload: row_payload,
@@ -544,7 +542,7 @@ impl TableIndexing {
                         .table
                         .row
                         .try_fetch(&new_cells.previous_row_key)
-                        .await
+                        .await?
                         .expect("unable to find previous row");
                     let new_cell_collection = row_update.updated_cells_collection(
                         self.table.columns.secondary_column().identifier,
@@ -563,7 +561,7 @@ impl TableIndexing {
                             new_cell_collection,
                             tree_update,
                         )
-                        .await;
+                        .await?;
                     TreeRowUpdate::Update(Row {
                         k: new_row_key,
                         payload: row_payload,
@@ -623,7 +621,7 @@ impl TableIndexing {
         &self,
         ctx: &mut TestContext,
         bn: BlockPrimaryIndex,
-    ) -> Result<HashOutput> {
+    ) -> anyhow::Result<HashOutput> {
         let contract_proof_key = ProofKey::ContractExtraction((self.contract.address, bn));
         let contract_proof = match ctx.storage.get_proof_exact(&contract_proof_key) {
             Ok(proof) => {
