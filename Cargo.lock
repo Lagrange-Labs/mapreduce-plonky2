@@ -6963,6 +6963,7 @@ dependencies = [
  "log",
  "mp2_common",
  "mp2_test",
+ "num",
  "plonky2",
  "plonky2_crypto",
  "plonky2_ecdsa",
