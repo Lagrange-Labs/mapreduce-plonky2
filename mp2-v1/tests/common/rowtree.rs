@@ -150,10 +150,8 @@ impl TestContext {
                         id,
                         value,
                         multiplier,
-                        // TODO: mpt_metadata
-                        HashOut::rand(),
                         // TODO: row_unique_data
-                        HashOut::rand(),
+                        HashOut::rand().into(),
                         cell_tree_proof,
                     )
                     .unwrap(),
@@ -190,10 +188,8 @@ impl TestContext {
                         value,
                         multiplier,
                         context.left.is_some(),
-                        // TODO: mpt_metadata
-                        HashOut::rand(),
                         // TODO: row_unique_data
-                        HashOut::rand(),
+                        HashOut::rand().into(),
                         child_proof,
                         cell_tree_proof,
                     )
@@ -236,11 +232,10 @@ impl TestContext {
                         id,
                         value,
                         multiplier,
-                        // TODO: mpt_metadata
-                        HashOut::rand(),
                         // TODO: row_unique_data
-                        HashOut::rand(),
-                        (left_proof, right_proof),
+                        HashOut::rand().into(),
+                        left_proof,
+                        right_proof,
                         cell_tree_proof,
                     )
                     .unwrap(),

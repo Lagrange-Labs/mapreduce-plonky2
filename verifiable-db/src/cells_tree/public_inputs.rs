@@ -13,6 +13,7 @@ use plonky2::{
     iop::target::Target,
 };
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
+use std::iter::once;
 
 pub enum CellsTreePublicInputs {
     // `H : F[4]` - Poseidon hash of the subtree at this node
@@ -21,10 +22,10 @@ pub enum CellsTreePublicInputs {
     IndividualValuesDigest,
     // - `multiplier_vd : Digest` - Cumulative digest of values of cells accumulated as multiplier
     MultiplierValuesDigest,
-    // - `individual_md : Digest` - Cumulative digest of metadata of cells accumulated as individual
-    IndividualMetadataDigest,
-    // - `multiplier_md : Digest` - Cumulative digest of metadata of cells accumulated as multiplier
-    MultiplierMetadataDigest,
+    // - `individual_counter : F` - Counter of the number of cells accumulated so far as individual
+    IndividualCounter,
+    // - `multiplier_counter : F` - Counter of the number of cells accumulated so far as multiplier
+    MultiplierCounter,
 }
 
 /// Public inputs for Cells Tree Construction
@@ -33,19 +34,19 @@ pub struct PublicInputs<'a, T> {
     pub(crate) h: &'a [T],
     pub(crate) individual_vd: &'a [T],
     pub(crate) multiplier_vd: &'a [T],
-    pub(crate) individual_md: &'a [T],
-    pub(crate) multiplier_md: &'a [T],
+    pub(crate) individual_cnt: &'a T,
+    pub(crate) multiplier_cnt: &'a T,
 }
 
-const NUM_PUBLIC_INPUTS: usize = CellsTreePublicInputs::MultiplierMetadataDigest as usize + 1;
+const NUM_PUBLIC_INPUTS: usize = CellsTreePublicInputs::MultiplierCounter as usize + 1;
 
 impl<'a, T: Clone> PublicInputs<'a, T> {
     const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
         Self::to_range(CellsTreePublicInputs::NodeHash),
         Self::to_range(CellsTreePublicInputs::IndividualValuesDigest),
         Self::to_range(CellsTreePublicInputs::MultiplierValuesDigest),
-        Self::to_range(CellsTreePublicInputs::IndividualMetadataDigest),
-        Self::to_range(CellsTreePublicInputs::MultiplierMetadataDigest),
+        Self::to_range(CellsTreePublicInputs::IndividualCounter),
+        Self::to_range(CellsTreePublicInputs::MultiplierCounter),
     ];
 
     const SIZES: [usize; NUM_PUBLIC_INPUTS] = [
@@ -55,10 +56,10 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         CURVE_TARGET_LEN,
         // Cumulative digest of values of cells accumulated as multiplier
         CURVE_TARGET_LEN,
-        // Cumulative digest of metadata of cells accumulated as individual
-        CURVE_TARGET_LEN,
-        // Cumulative digest of metadata of cells accumulated as multiplier
-        CURVE_TARGET_LEN,
+        // Counter of the number of cells accumulated so far as individual
+        1,
+        // Counter of the number of cells accumulated so far as multiplier
+        1,
     ];
 
     pub(crate) const fn to_range(pi: CellsTreePublicInputs) -> PublicInputRange {
@@ -73,7 +74,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
     }
 
     pub const fn total_len() -> usize {
-        Self::to_range(CellsTreePublicInputs::MultiplierMetadataDigest).end
+        Self::to_range(CellsTreePublicInputs::MultiplierCounter).end
     }
 
     pub fn to_node_hash_raw(&self) -> &[T] {
@@ -88,12 +89,12 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         self.multiplier_vd
     }
 
-    pub fn to_individual_metadata_digest_raw(&self) -> &[T] {
-        self.individual_md
+    pub fn to_individual_counter_raw(&self) -> &T {
+        self.individual_cnt
     }
 
-    pub fn to_multiplier_metadata_digest_raw(&self) -> &[T] {
-        self.multiplier_md
+    pub fn to_multiplier_counter_raw(&self) -> &T {
+        self.multiplier_cnt
     }
 
     pub fn from_slice(input: &'a [T]) -> Self {
@@ -107,8 +108,8 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
             h: &input[Self::PI_RANGES[0].clone()],
             individual_vd: &input[Self::PI_RANGES[1].clone()],
             multiplier_vd: &input[Self::PI_RANGES[2].clone()],
-            individual_md: &input[Self::PI_RANGES[3].clone()],
-            multiplier_md: &input[Self::PI_RANGES[4].clone()],
+            individual_cnt: &input[Self::PI_RANGES[3].clone()][0],
+            multiplier_cnt: &input[Self::PI_RANGES[4].clone()][0],
         }
     }
 
@@ -116,15 +117,15 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
         h: &'a [T],
         individual_vd: &'a [T],
         multiplier_vd: &'a [T],
-        individual_md: &'a [T],
-        multiplier_md: &'a [T],
+        individual_cnt: &'a T,
+        multiplier_cnt: &'a T,
     ) -> Self {
         Self {
             h,
             individual_vd,
             multiplier_vd,
-            individual_md,
-            multiplier_md,
+            individual_cnt,
+            multiplier_cnt,
         }
     }
 
@@ -133,8 +134,8 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
             .iter()
             .chain(self.individual_vd)
             .chain(self.multiplier_vd)
-            .chain(self.individual_md)
-            .chain(self.multiplier_md)
+            .chain(once(self.individual_cnt))
+            .chain(once(self.multiplier_cnt))
             .cloned()
             .collect()
     }
@@ -147,8 +148,8 @@ impl PublicInputCommon for PublicInputs<'_, Target> {
         cb.register_public_inputs(self.h);
         cb.register_public_inputs(self.individual_vd);
         cb.register_public_inputs(self.multiplier_vd);
-        cb.register_public_inputs(self.individual_md);
-        cb.register_public_inputs(self.multiplier_md);
+        cb.register_public_input(*self.individual_cnt);
+        cb.register_public_input(*self.multiplier_cnt);
     }
 }
 
@@ -165,14 +166,6 @@ impl PublicInputs<'_, Target> {
         CurveTarget::from_targets(self.multiplier_vd)
     }
 
-    pub fn individual_metadata_digest_target(&self) -> CurveTarget {
-        CurveTarget::from_targets(self.individual_md)
-    }
-
-    pub fn multiplier_metadata_digest_target(&self) -> CurveTarget {
-        CurveTarget::from_targets(self.multiplier_md)
-    }
-
     pub fn split_values_digest_target(&self) -> SplitDigestTarget {
         SplitDigestTarget {
             individual: self.individual_values_digest_target(),
@@ -180,11 +173,12 @@ impl PublicInputs<'_, Target> {
         }
     }
 
-    pub fn split_metadata_digest_target(&self) -> SplitDigestTarget {
-        SplitDigestTarget {
-            individual: self.individual_metadata_digest_target(),
-            multiplier: self.multiplier_metadata_digest_target(),
-        }
+    pub fn individual_counter_target(&self) -> Target {
+        *self.to_individual_counter_raw()
+    }
+
+    pub fn multiplier_counter_target(&self) -> Target {
+        *self.to_multiplier_counter_raw()
     }
 }
 
@@ -201,14 +195,6 @@ impl PublicInputs<'_, F> {
         WeierstrassPoint::from_fields(self.multiplier_vd)
     }
 
-    pub fn individual_metadata_digest_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(self.individual_md)
-    }
-
-    pub fn multiplier_metadata_digest_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(self.multiplier_md)
-    }
-
     pub fn split_values_digest_point(&self) -> SplitDigestPoint {
         SplitDigestPoint {
             individual: weierstrass_to_point(&self.individual_values_digest_point()),
@@ -216,11 +202,12 @@ impl PublicInputs<'_, F> {
         }
     }
 
-    pub fn split_metadata_digest_point(&self) -> SplitDigestPoint {
-        SplitDigestPoint {
-            individual: weierstrass_to_point(&self.individual_metadata_digest_point()),
-            multiplier: weierstrass_to_point(&self.multiplier_metadata_digest_point()),
-        }
+    pub fn individual_counter(&self) -> F {
+        *self.to_individual_counter_raw()
+    }
+
+    pub fn multiplier_counter(&self) -> F {
+        *self.to_multiplier_counter_raw()
     }
 }
 
@@ -241,7 +228,7 @@ pub(crate) mod tests {
     };
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
-    use std::array;
+    use std::slice;
 
     impl PublicInputs<'_, F> {
         pub(crate) fn sample(is_multiplier: bool) -> Vec<F> {
@@ -250,30 +237,20 @@ pub(crate) mod tests {
             let h = random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
 
             let point_zero = WeierstrassPoint::NEUTRAL.to_fields();
-            let [values_digest, metadata_digest] =
-                array::from_fn(|_| Point::sample(rng).to_weierstrass().to_fields());
-            let [individual_vd, multiplier_vd, individual_md, multiplier_md] = if is_multiplier {
-                [
-                    point_zero.clone(),
-                    values_digest,
-                    point_zero,
-                    metadata_digest,
-                ]
+            let values_digest = Point::sample(rng).to_weierstrass().to_fields();
+            let [individual_vd, multiplier_vd] = if is_multiplier {
+                [point_zero.clone(), values_digest]
             } else {
-                [
-                    values_digest,
-                    point_zero.clone(),
-                    metadata_digest,
-                    point_zero,
-                ]
+                [values_digest, point_zero]
             };
+            let [individual_cnt, multiplier_cnt] = F::rand_array();
 
             PublicInputs::new(
                 &h,
                 &individual_vd,
                 &multiplier_vd,
-                &individual_md,
-                &multiplier_md,
+                &individual_cnt,
+                &multiplier_cnt,
             )
             .to_vec()
         }
@@ -324,12 +301,12 @@ pub(crate) mod tests {
             pi.to_multiplier_values_digest_raw(),
         );
         assert_eq!(
-            &exp_pi[PublicInputs::<F>::to_range(CellsTreePublicInputs::IndividualMetadataDigest)],
-            pi.to_individual_metadata_digest_raw(),
+            &exp_pi[PublicInputs::<F>::to_range(CellsTreePublicInputs::IndividualCounter)],
+            slice::from_ref(pi.to_individual_counter_raw()),
         );
         assert_eq!(
-            &exp_pi[PublicInputs::<F>::to_range(CellsTreePublicInputs::MultiplierMetadataDigest)],
-            pi.to_multiplier_metadata_digest_raw(),
+            &exp_pi[PublicInputs::<F>::to_range(CellsTreePublicInputs::MultiplierCounter)],
+            slice::from_ref(pi.to_multiplier_counter_raw()),
         );
     }
 }

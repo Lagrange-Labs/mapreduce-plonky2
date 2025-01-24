@@ -82,6 +82,7 @@ where
 {
     pub fn build(b: &mut CBuilder) -> LeafMappingWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM> {
         let zero = b.zero();
+        let one = b.one();
 
         let key_id = b.add_virtual_target();
         let metadata = MetadataGadget::build(b);
@@ -99,8 +100,10 @@ where
         // Left pad the leaf value.
         let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
 
-        // Compute the metadata digest.
-        let metadata_digest = metadata.digest(b, slot.mapping_slot);
+        // Compute the metadata digest and number of actual columns.
+        let (metadata_digest, num_actual_columns) = metadata.digest_info(b, slot.mapping_slot);
+        // We add key column to number of actual columns.
+        let num_actual_columns = b.add(num_actual_columns, one);
 
         // key_column_md = H( "\0KEY" || slot)
         let key_id_prefix = b.constant(F::from_canonical_u32(u32::from_be_bytes(
@@ -139,11 +142,11 @@ where
         // Compute the unique data to identify a row is the mapping key.
         // row_unique_data = H(pack(left_pad32(key))
         let row_unique_data = b.hash_n_to_hash_no_pad::<CHasher>(packed_mapping_key);
-        // row_id = H2int(row_unique_data || metadata_digest)
+        // row_id = H2int(row_unique_data || num_actual_columns)
         let inputs = row_unique_data
             .to_targets()
             .into_iter()
-            .chain(metadata_digest.to_targets())
+            .chain(once(num_actual_columns))
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         let row_id = hash_to_int_target(b, hash);
@@ -222,7 +225,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::{
         tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
@@ -309,7 +311,6 @@ mod tests {
         >(table_info.clone(), slot, key_id);
         // Compute the values digest.
         let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-            &metadata_digest,
             table_info,
             &extracted_column_identifiers,
             value.clone().try_into().unwrap(),

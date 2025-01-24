@@ -27,10 +27,12 @@ pub struct PartialNodeCircuit(Cell);
 impl PartialNodeCircuit {
     pub fn build(b: &mut CBuilder, p: PublicInputs<Target>) -> PartialNodeWires {
         let cell = CellWire::new(b);
-        let metadata_digests =
-            cell.split_and_accumulate_metadata_digest(b, &p.split_metadata_digest_target());
         let values_digests =
             cell.split_and_accumulate_values_digest(b, &p.split_values_digest_target());
+
+        let is_individual = cell.is_individual(b);
+        let individual_cnt = b.add(is_individual.target, p.individual_counter_target());
+        let multiplier_cnt = b.add(cell.is_multiplier().target, p.multiplier_counter_target());
 
         /*
         # since there is no sorting constraint among the nodes of this tree, to simplify
@@ -54,8 +56,8 @@ impl PartialNodeCircuit {
             &h.to_targets(),
             &values_digests.individual.to_targets(),
             &values_digests.multiplier.to_targets(),
-            &metadata_digests.individual.to_targets(),
-            &metadata_digests.multiplier.to_targets(),
+            &individual_cnt,
+            &multiplier_cnt,
         )
         .register(b);
 
@@ -97,7 +99,7 @@ mod tests {
     use itertools::Itertools;
     use mp2_common::{poseidon::H, utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{iop::witness::WitnessWrite, plonk::config::Hasher};
+    use plonky2::{field::types::Field, iop::witness::WitnessWrite, plonk::config::Hasher};
 
     #[derive(Clone, Debug)]
     struct TestPartialNodeCircuit<'a> {
@@ -138,22 +140,20 @@ mod tests {
         let cell = Cell::sample(is_multiplier);
         let id = cell.identifier;
         let value = cell.value;
-        let values_digests = cell.split_values_digest();
-        let metadata_digests = cell.split_metadata_digest();
 
-        let child_pi = &PublicInputs::<F>::sample(is_child_multiplier);
+        let child_proof = &PublicInputs::<F>::sample(is_child_multiplier);
+        let child_pi = PublicInputs::from_slice(child_proof);
+
+        let values_digests =
+            cell.split_and_accumulate_values_digest(child_pi.split_values_digest_point());
 
         let test_circuit = TestPartialNodeCircuit {
             c: cell.into(),
-            child_pi,
+            child_pi: child_proof,
         };
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        let child_pi = PublicInputs::from_slice(child_pi);
-
-        let values_digests = values_digests.accumulate(&child_pi.split_values_digest_point());
-        let metadata_digests = metadata_digests.accumulate(&child_pi.split_metadata_digest_point());
 
         // Check the node hash
         {
@@ -180,15 +180,16 @@ mod tests {
             pi.multiplier_values_digest_point(),
             values_digests.multiplier.to_weierstrass(),
         );
-        // Check individual metadata digest
+        // Check individual counter
+        let multiplier_cnt = F::from_bool(is_multiplier);
         assert_eq!(
-            pi.individual_metadata_digest_point(),
-            metadata_digests.individual.to_weierstrass(),
+            pi.individual_counter(),
+            F::ONE - multiplier_cnt + child_pi.individual_counter(),
         );
-        // Check multiplier metadata digest
+        // Check multiplier counter
         assert_eq!(
-            pi.multiplier_metadata_digest_point(),
-            metadata_digests.multiplier.to_weierstrass(),
+            pi.multiplier_counter(),
+            multiplier_cnt + child_pi.multiplier_counter(),
         );
     }
 }
