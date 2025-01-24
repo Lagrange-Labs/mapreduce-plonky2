@@ -1,11 +1,12 @@
 //! Main APIs and related structures
 
-use std::iter::once;
+use std::{collections::BTreeSet, iter::once};
 
 use crate::{
     block_extraction,
     contract_extraction::{self, compute_metadata_digest as contract_metadata_digest},
     final_extraction,
+    indexing::ColumnID,
     length_extraction::{
         self, compute_metadata_digest as length_metadata_digest, LengthCircuitInput,
     },
@@ -20,11 +21,14 @@ use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     digest::Digest,
+    group_hashing::map_to_curve_point,
     poseidon::H,
     types::HashOutput,
     utils::{Fieldable, ToFields},
+    F,
 };
 use plonky2::{
+    field::types::Field,
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };
@@ -146,6 +150,9 @@ pub fn generate_proof(params: &PublicParameters, input: CircuitInput) -> Result<
                         length_circuit_set,
                     )
                 }
+                final_extraction::CircuitInput::NoProvable(input) => {
+                    params.final_extraction.generate_no_provable_proof(input)
+                }
             }
         }
         CircuitInput::CellsTree(input) => verifiable_db::api::generate_proof(
@@ -247,4 +254,37 @@ pub fn metadata_hash(
     let contract_digest = contract_metadata_digest(contract_address);
     // compute final hash
     combine_digest_and_block(contract_digest + value_digest)
+}
+
+// compute metadata digest for a table including no provable extraction data:
+// it corresponds to the digest of the column identifiers
+pub(crate) fn no_provable_metadata_digest<I: IntoIterator<Item = ColumnID>>(
+    column_ids: I,
+) -> Digest {
+    map_to_curve_point(
+        &column_ids
+            .into_iter()
+            .collect::<BTreeSet<_>>() // collect into a BTreeSet to ensure they are hashed
+            // in a deterministic order
+            .into_iter()
+            .map(F::from_canonical_u64)
+            .collect_vec(),
+    )
+}
+
+/// Compute the metadata hash for a table including no provable extraction data.
+/// The input is the set of the column identifiers of the table
+pub fn no_provable_metadata_hash<I: IntoIterator<Item = ColumnID>>(column_ids: I) -> MetadataHash {
+    let metadata_digest = no_provable_metadata_digest(column_ids);
+    // Add the prefix to the metadata digest to ensure the metadata digest
+    // will keep track of whether we use this dummy circuit or not.
+    // It's similar logic as the dummy circuit of final extraction.
+    let prefix = final_extraction::DUMMY_METADATA_DIGEST_PREFIX.to_fields();
+    let inputs = prefix
+        .into_iter()
+        .chain(metadata_digest.to_fields())
+        .collect_vec();
+    let digest = map_to_curve_point(&inputs);
+
+    combine_digest_and_block(digest)
 }
