@@ -19,7 +19,6 @@ use plonky2_ecgfp5::{
     curve::curve::Point,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
-use rand::{thread_rng, Rng};
 use std::{array, iter::once};
 
 /// Number of lookup tables for getting the first bits or last bits of a byte as a big-endian integer
@@ -298,21 +297,6 @@ impl<const MAX_FIELD_PER_EVM: usize> ColumnGadgetData<MAX_FIELD_PER_EVM> {
         }
     }
 
-    /// Create a sample data. It could be used in integration tests.
-    pub fn sample() -> Self {
-        let rng = &mut thread_rng();
-
-        let value = array::from_fn(|_| F::from_canonical_u8(rng.gen()));
-        let table_info = array::from_fn(|_| ColumnInfo::sample());
-        let num_extracted_columns = rng.gen_range(1..=MAX_FIELD_PER_EVM);
-
-        Self {
-            value,
-            table_info,
-            num_extracted_columns,
-        }
-    }
-
     /// Compute the values digest.
     pub fn digest(&self) -> Point {
         let value = self
@@ -417,6 +401,7 @@ pub(crate) mod tests {
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2_ecgfp5::gadgets::curve::PartialWitnessCurve;
+    use rand::{thread_rng, Rng};
 
     #[derive(Clone, Debug)]
     pub(crate) struct ColumnGadgetTarget<const MAX_FIELD_PER_EVM: usize> {
@@ -475,6 +460,23 @@ pub(crate) mod tests {
                 .iter()
                 .enumerate()
                 .for_each(|(i, t)| self.set_bool_target(*t, i < data.num_extracted_columns));
+        }
+    }
+
+    impl<const MAX_FIELD_PER_EVM: usize> ColumnGadgetData<MAX_FIELD_PER_EVM> {
+        /// Create a sample data. It could be used in integration tests.
+        pub(crate) fn sample() -> Self {
+            let rng = &mut thread_rng();
+
+            let value = array::from_fn(|_| F::from_canonical_u8(rng.gen()));
+            let table_info = array::from_fn(|_| ColumnInfo::sample());
+            let num_extracted_columns = rng.gen_range(1..=MAX_FIELD_PER_EVM);
+
+            Self {
+                value,
+                table_info,
+                num_extracted_columns,
+            }
         }
     }
 

@@ -70,50 +70,6 @@ impl SecondaryIndexCell {
         self.cell.assign(pw, &wires.cell);
         pw.set_hash_target(wires.row_unique_data, self.row_unique_data);
     }
-
-    #[cfg(test)]
-    pub(crate) fn digest(&self, cells_pi: &CellsPublicInputs<F>) -> RowDigest {
-        use itertools::Itertools;
-        use mp2_common::{poseidon::hash_to_int_value, utils::ToFields, F};
-        use plonky2::{field::types::Field, plonk::config::Hasher};
-        use plonky2_ecgfp5::curve::scalar_field::Scalar;
-
-        let values_digests = self
-            .cell
-            .split_and_accumulate_values_digest(cells_pi.split_values_digest_point());
-
-        // individual_counter = p.individual_counter + is_individual
-        let individual_cnt =
-            cells_pi.individual_counter() + F::from_bool(self.cell.is_individual());
-
-        // multiplier_counter = p.multiplier_counter + not is_individual
-        let multiplier_cnt =
-            cells_pi.multiplier_counter() + F::from_bool(self.cell.is_multiplier());
-
-        // Compute row ID for individual cells:
-        // row_id_individual = H2Int(row_unique_data || individual_counter)
-        let inputs = self
-            .row_unique_data
-            .to_fields()
-            .into_iter()
-            .chain(once(individual_cnt))
-            .collect_vec();
-        let hash = H::hash_no_pad(&inputs);
-        let row_id_individual = hash_to_int_value(hash);
-        let row_id_individual = Scalar::from_noncanonical_biguint(row_id_individual);
-
-        // Multiply row ID to individual value digest:
-        // individual_vd = row_id_individual * individual_vd
-        let individual_vd = values_digests.individual * row_id_individual;
-
-        let multiplier_vd = values_digests.multiplier;
-
-        RowDigest {
-            multiplier_cnt,
-            individual_vd,
-            multiplier_vd,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -185,9 +141,18 @@ impl SecondaryIndexCellWire {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use mp2_common::{utils::FromFields, C, D, F};
+    use itertools::Itertools;
+    use mp2_common::{
+        poseidon::hash_to_int_value,
+        utils::{FromFields, ToFields},
+        C, D, F,
+    };
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::field::types::Sample;
+    use plonky2::{
+        field::types::{Field, Sample},
+        plonk::config::Hasher,
+    };
+    use plonky2_ecgfp5::curve::scalar_field::Scalar;
     use rand::{thread_rng, Rng};
 
     impl SecondaryIndexCell {
@@ -196,6 +161,44 @@ pub(crate) mod tests {
             let row_unique_data = HashOut::rand();
 
             SecondaryIndexCell::new(cell, row_unique_data)
+        }
+
+        pub(crate) fn digest(&self, cells_pi: &CellsPublicInputs<F>) -> RowDigest {
+            let values_digests = self
+                .cell
+                .split_and_accumulate_values_digest(cells_pi.split_values_digest_point());
+
+            // individual_counter = p.individual_counter + is_individual
+            let individual_cnt =
+                cells_pi.individual_counter() + F::from_bool(self.cell.is_individual());
+
+            // multiplier_counter = p.multiplier_counter + not is_individual
+            let multiplier_cnt =
+                cells_pi.multiplier_counter() + F::from_bool(self.cell.is_multiplier());
+
+            // Compute row ID for individual cells:
+            // row_id_individual = H2Int(row_unique_data || individual_counter)
+            let inputs = self
+                .row_unique_data
+                .to_fields()
+                .into_iter()
+                .chain(once(individual_cnt))
+                .collect_vec();
+            let hash = H::hash_no_pad(&inputs);
+            let row_id_individual = hash_to_int_value(hash);
+            let row_id_individual = Scalar::from_noncanonical_biguint(row_id_individual);
+
+            // Multiply row ID to individual value digest:
+            // individual_vd = row_id_individual * individual_vd
+            let individual_vd = values_digests.individual * row_id_individual;
+
+            let multiplier_vd = values_digests.multiplier;
+
+            RowDigest {
+                multiplier_cnt,
+                individual_vd,
+                multiplier_vd,
+            }
         }
     }
 

@@ -3,12 +3,12 @@
 use crate::{
     query::{
         computational_hash_ids::{AggregationOperation, ResultIdentifier},
-        public_inputs::PublicInputs as QueryProofPI,
         universal_circuit::ComputationalHashTarget,
     },
     results_tree::{
         binding::public_inputs::PublicInputs,
         construction::public_inputs::PublicInputs as ResultsConstructionProofPI,
+        old_public_inputs::PublicInputs as QueryProofPI,
     },
 };
 use mp2_common::{
@@ -99,12 +99,14 @@ impl<const S: usize> BindingResultsCircuit<S> {
 mod tests {
     use super::*;
     use crate::{
-        query::pi_len as query_pi_len,
-        results_tree::construction::{
-            public_inputs::ResultsConstructionPublicInputs,
-            tests::{pi_len, random_results_construction_public_inputs},
+        results_tree::{
+            construction::{
+                public_inputs::ResultsConstructionPublicInputs,
+                tests::{pi_len, random_results_construction_public_inputs},
+            },
+            tests::random_aggregation_public_inputs,
         },
-        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
+        test_utils::random_aggregation_operations,
     };
     use itertools::Itertools;
     use mp2_common::{poseidon::H, utils::ToFields, C, D, F};
@@ -117,7 +119,7 @@ mod tests {
 
     const S: usize = 20;
 
-    const QUERY_PI_LEN: usize = query_pi_len::<S>();
+    const QUERY_PI_LEN: usize = QueryProofPI::<F, S>::total_len();
     const RESULTS_CONSTRUCTION_PI_LEN: usize = pi_len::<S>();
 
     #[derive(Clone, Debug)]

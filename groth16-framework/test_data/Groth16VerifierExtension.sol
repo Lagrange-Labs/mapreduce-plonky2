@@ -48,11 +48,11 @@ contract Groth16VerifierExtension is Verifier {
     // TODO: These constants are possible to be changed depending on user queries exploration.
     // Once we know which queries users are mostly doing, we'll be able to modify these constants.
     // Maximum number of the results
-    uint32 constant MAX_NUM_OUTPUTS = 3;
+    uint32 constant MAX_NUM_OUTPUTS = 5;
     // Maximum number of the items per result
     uint32 constant MAX_NUM_ITEMS_PER_OUTPUT = 5;
     // Maximum number of the placeholders
-    uint32 constant MAX_NUM_PLACEHOLDERS = 10;
+    uint32 constant MAX_NUM_PLACEHOLDERS = 5;
 
     // The start uint256 offset of the public inputs in calldata.
     // groth16_proof_number (8) + groth16_input_number (3)

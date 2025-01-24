@@ -586,7 +586,7 @@ impl TableIndexing {
         ctx: &mut TestContext,
         genesis_change: Vec<TableRowUpdate<BlockPrimaryIndex>>,
         changes: Vec<ChangeType>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         // Call the contract function to set the test data.
         log::info!("Applying initial updates to contract done");
         let bn = ctx.block_number().await as BlockPrimaryIndex;
@@ -630,7 +630,7 @@ impl TableIndexing {
         // example
         updates: Vec<TableRowUpdate<BlockPrimaryIndex>>,
         expected_metadata_hash: &HashOutput,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let current_block = ctx.block_number().await as BlockPrimaryIndex;
         // apply the new cells to the trees
         // NOTE ONLY the rest of the cells, not including the secondary one !
@@ -651,7 +651,12 @@ impl TableIndexing {
                     let previous_row = match new_cells.previous_row_key != Default::default() {
                         true => Row {
                             k: new_cells.previous_row_key.clone(),
-                            payload: self.table.row.fetch(&new_cells.previous_row_key).await,
+                            payload: self
+                                .table
+                                .row
+                                .try_fetch(&new_cells.previous_row_key)
+                                .await?
+                                .unwrap(),
                         },
                         false => Row::default(),
                     };
@@ -669,7 +674,7 @@ impl TableIndexing {
                             new_cell_collection,
                             tree_update,
                         )
-                        .await;
+                        .await?;
                     TreeRowUpdate::Insertion(Row {
                         k: new_row_key,
                         payload: row_payload,
@@ -686,7 +691,7 @@ impl TableIndexing {
                         .table
                         .row
                         .try_fetch(&new_cells.previous_row_key)
-                        .await
+                        .await?
                         .expect("unable to find previous row");
                     let new_cell_collection = row_update.updated_cells_collection(
                         self.table.columns.secondary_column().identifier(),
@@ -705,7 +710,7 @@ impl TableIndexing {
                             new_cell_collection,
                             tree_update,
                         )
-                        .await;
+                        .await?;
                     TreeRowUpdate::Update(Row {
                         k: new_row_key,
                         payload: row_payload,
@@ -765,7 +770,7 @@ impl TableIndexing {
         &self,
         ctx: &mut TestContext,
         bn: BlockPrimaryIndex,
-    ) -> Result<HashOutput> {
+    ) -> anyhow::Result<HashOutput> {
         let contract_proof_key = ProofKey::ContractExtraction((self.contract.address, bn));
         let contract_proof = match ctx.storage.get_proof_exact(&contract_proof_key) {
             Ok(proof) => {

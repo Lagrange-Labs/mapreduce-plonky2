@@ -1,40 +1,40 @@
-use std::iter::once;
+use std::{array, cmp::Ordering, iter::once};
 
 use alloy::primitives::U256;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, HashPermutation},
-    proof::ProofWithVK,
-    serialization::{deserialize_long_array, serialize_long_array},
-    types::HashOutput,
-    utils::{Fieldable, ToFields},
-    F,
+    serialization::{
+        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
+        serialize_long_array,
+    },
+    types::{CBuilder, HashOutput},
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    utils::{Fieldable, ToFields, ToTargets},
+    CHasher, F,
 };
 use plonky2::{
-    hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
+    hash::{
+        hash_types::{HashOut, HashOutTarget},
+        hashing::hash_n_to_hash_no_pad,
+    },
+    iop::{
+        target::Target,
+        witness::{PartialWitness, WitnessWrite},
+    },
     plonk::config::GenericHashOut,
 };
 use serde::{Deserialize, Serialize};
 
-pub(crate) mod child_proven_single_path_node;
-pub(crate) mod embedded_tree_proven_single_path_node;
-pub(crate) mod full_node_index_leaf;
-pub(crate) mod full_node_with_one_child;
-pub(crate) mod full_node_with_two_children;
-pub(crate) mod non_existence_inter;
-mod output_computation;
-pub(crate) mod partial_node;
-mod utils;
-
 use super::{
-    api::CircuitInput,
     computational_hash_ids::{ColumnIDs, Identifiers, PlaceholderIdentifier},
     universal_circuit::{
-        universal_circuit_inputs::{BasicOperation, PlaceholderId, Placeholders, ResultStructure},
+        universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure},
         universal_query_circuit::{
-            placeholder_hash, placeholder_hash_without_query_bounds, QueryBound,
+            placeholder_hash, placeholder_hash_without_query_bounds, UniversalCircuitInput,
         },
+        universal_query_gadget::QueryBound,
         ComputationalHash, PlaceholderHash,
     },
 };
@@ -64,7 +64,7 @@ pub enum QueryBoundSource {
     // Query bound is a constant
     Constant(U256),
     /// Query bound taken from placeholder with id
-    Placeholder(PlaceholderId),
+    Placeholder(PlaceholderIdentifier),
     /// Query bound computed with a basic operation
     Operation(BasicOperation),
 }
@@ -72,6 +72,34 @@ pub enum QueryBoundSource {
 impl From<&QueryBoundSecondary> for QueryBoundSource {
     fn from(value: &QueryBoundSecondary) -> Self {
         value.source.clone()
+    }
+}
+
+impl PartialOrd for QueryBoundSource {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (QueryBoundSource::Constant(x), QueryBoundSource::Constant(y)) => Some(x.cmp(y)),
+            (QueryBoundSource::Constant(_), QueryBoundSource::Placeholder(_))
+            | (QueryBoundSource::Constant(_), QueryBoundSource::Operation(_))
+            | (QueryBoundSource::Placeholder(_), QueryBoundSource::Constant(_)) => None,
+            (QueryBoundSource::Placeholder(p1), QueryBoundSource::Placeholder(p2)) => {
+                if p1 == p2 {
+                    Some(Ordering::Equal)
+                } else {
+                    None
+                }
+            }
+            (QueryBoundSource::Placeholder(_), QueryBoundSource::Operation(_))
+            | (QueryBoundSource::Operation(_), QueryBoundSource::Constant(_))
+            | (QueryBoundSource::Operation(_), QueryBoundSource::Placeholder(_)) => None,
+            (QueryBoundSource::Operation(op1), QueryBoundSource::Operation(op2)) => {
+                if op1 == op2 {
+                    Some(Ordering::Equal)
+                } else {
+                    None
+                }
+            }
+        }
     }
 }
 
@@ -216,6 +244,89 @@ impl NodeInfo {
         )
     }
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct NodeInfoTarget {
+    /// The hash of the embedded tree at this node. It can be the hash of the row tree if this node is a node in
+    /// the index tree, or it can be a hash of the cells tree if this node is a node in a rows tree
+    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
+    pub(crate) embedded_tree_hash: HashOutTarget,
+    /// Hashes of the children of the current node, first left child and then right child hash. The hash of left/right child
+    /// is the empty hash (i.e., H("")) if there is no corresponding left/right child for the current node
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    pub(crate) child_hashes: [HashOutTarget; 2],
+    /// value stored in the node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
+    pub(crate) value: UInt256Target,
+    /// minimum value associated to the current node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
+    pub(crate) min: UInt256Target,
+    /// minimum value associated to the current node. It can be a primary index value if the node is a node in the index tree,
+    /// a secondary index value if the node is a node in a rows tree
+    pub(crate) max: UInt256Target,
+}
+
+impl NodeInfoTarget {
+    #[allow(dead_code)]
+    pub(crate) fn build(b: &mut CBuilder) -> Self {
+        let [value, min, max] = b.add_virtual_u256_arr();
+        let [left_child_hash, right_child_hash, embedded_tree_hash] =
+            array::from_fn(|_| b.add_virtual_hash());
+        Self {
+            embedded_tree_hash,
+            child_hashes: [left_child_hash, right_child_hash],
+            value,
+            min,
+            max,
+        }
+    }
+
+    /// Build an instance of `Self` without range-check the `UInt256Target`s
+    pub(crate) fn build_unsafe(b: &mut CBuilder) -> Self {
+        let [value, min, max] = b.add_virtual_u256_arr_unsafe();
+        let [left_child_hash, right_child_hash, embedded_tree_hash] =
+            array::from_fn(|_| b.add_virtual_hash());
+        Self {
+            embedded_tree_hash,
+            child_hashes: [left_child_hash, right_child_hash],
+            value,
+            min,
+            max,
+        }
+    }
+
+    pub(crate) fn compute_node_hash(&self, b: &mut CBuilder, index_id: Target) -> HashOutTarget {
+        let inputs = self.child_hashes[0]
+            .to_targets()
+            .into_iter()
+            .chain(self.child_hashes[1].to_targets())
+            .chain(self.min.to_targets())
+            .chain(self.max.to_targets())
+            .chain(once(index_id))
+            .chain(self.value.to_targets())
+            .chain(self.embedded_tree_hash.to_targets())
+            .collect_vec();
+        b.hash_n_to_hash_no_pad::<CHasher>(inputs)
+    }
+
+    pub(crate) fn set_target(&self, pw: &mut PartialWitness<F>, inputs: &NodeInfo) {
+        [
+            (self.embedded_tree_hash, inputs.embedded_tree_hash),
+            (self.child_hashes[0], inputs.child_hashes[0]),
+            (self.child_hashes[1], inputs.child_hashes[1]),
+        ]
+        .into_iter()
+        .for_each(|(target, value)| pw.set_hash_target(target, value));
+        pw.set_u256_target_arr(
+            &[self.min.clone(), self.max.clone(), self.value.clone()],
+            &[inputs.min, inputs.max, inputs.value],
+        );
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// enum to specify whether a node is the left or right child of another node
 pub enum ChildPosition {
@@ -223,125 +334,12 @@ pub enum ChildPosition {
     Right,
 }
 
-impl ChildPosition {
-    // convert `self` to a flag specifying whether a node is the left child of another node or not
-    pub(crate) fn to_flag(self) -> bool {
-        match self {
-            ChildPosition::Left => true,
-            ChildPosition::Right => false,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct CommonInputs {
-    pub(crate) is_rows_tree_node: bool,
-    pub(crate) min_query: U256,
-    pub(crate) max_query: U256,
-}
-
-impl CommonInputs {
-    pub(crate) fn new(is_rows_tree_node: bool, query_bounds: &QueryBounds) -> Self {
-        Self {
-            is_rows_tree_node,
-            min_query: if is_rows_tree_node {
-                query_bounds.min_query_secondary.value
-            } else {
-                query_bounds.min_query_primary
-            },
-            max_query: if is_rows_tree_node {
-                query_bounds.max_query_secondary.value
-            } else {
-                query_bounds.max_query_primary
-            },
-        }
-    }
-}
-/// Input data structure for circuits employed for nodes where both the children and the embedded tree are proven
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TwoProvenChildNodeInput {
-    /// Proof for the left child of the node being proven
-    pub(crate) left_child_proof: ProofWithVK,
-    /// Proof for the right child of the node being proven
-    pub(crate) right_child_proof: ProofWithVK,
-    /// Proof for the embedded tree stored in the current node
-    pub(crate) embedded_tree_proof: ProofWithVK,
-    /// Common inputs shared across all the circuits
-    pub(crate) common: CommonInputs,
-}
-/// Input data structure for circuits employed for nodes where one child and the embedded tree are proven
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OneProvenChildNodeInput {
-    /// Data related to the child not associated with a proof, if any
-    pub(crate) unproven_child: Option<NodeInfo>,
-    /// Proof for the proven child
-    pub(crate) proven_child_proof: ChildProof,
-    /// Proof for the embedded tree stored in the current node
-    pub(crate) embedded_tree_proof: ProofWithVK,
-    /// Common inputs shared across all the circuits
-    pub(crate) common: CommonInputs,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-/// Data structure representing a proof for a child node
-pub struct ChildProof {
-    /// Actual proof
-    pub(crate) proof: ProofWithVK,
-    /// Flag specifying whether the child associated with `proof` is the left or right child of its parent
-    pub(crate) child_position: ChildPosition,
-}
-
-impl ChildProof {
-    pub fn new(proof: Vec<u8>, child_position: ChildPosition) -> Result<ChildProof> {
-        Ok(Self {
-            proof: ProofWithVK::deserialize(&proof)?,
-            child_position,
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-/// Enum employed to specify whether a proof refers to a child node or the embedded tree stored in a node
-pub enum SubProof {
-    /// Proof refer to a child
-    Child(ChildProof),
-    /// Proof refer to the embedded tree stored in the node: can be either the proof for a single row
-    /// (if proving a rows tree node) of the proof for the root node of a rows tree (if proving an index tree node)
-    Embedded(ProofWithVK),
-}
-
-impl SubProof {
-    /// Initialize a new `SubProof::Child`
-    pub fn new_child_proof(proof: Vec<u8>, child_position: ChildPosition) -> Result<Self> {
-        Ok(SubProof::Child(ChildProof::new(proof, child_position)?))
-    }
-
-    /// Initialize a new `SubProof::Embedded`
-    pub fn new_embedded_tree_proof(proof: Vec<u8>) -> Result<Self> {
-        Ok(SubProof::Embedded(ProofWithVK::deserialize(&proof)?))
-    }
-}
-
-/// Input data structure for circuits employed for nodes where only one among children node and embedded tree is proven
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SinglePathInput {
-    /// Data about the left child of the node being proven, if any
-    pub(crate) left_child: Option<NodeInfo>,
-    /// Data about the right child of the node being proven, if any
-    pub(crate) right_child: Option<NodeInfo>,
-    /// Data about the node being proven
-    pub(crate) node_info: NodeInfo,
-    /// Proof of either a child node or of the embedded tree stored in the current node
-    pub(crate) subtree_proof: SubProof,
-    /// Common inputs shared across all the circuits
-    pub(crate) common: CommonInputs,
-}
-
 /// Data structure containing the computational hash and placeholder hash to be provided as input to
 /// non-existence circuits. These hashes are computed from the query specific data provided as input
 /// to the initialization method of this data structure
 pub struct QueryHashNonExistenceCircuits {
-    computational_hash: ComputationalHash,
-    placeholder_hash: PlaceholderHash,
+    pub(crate) computational_hash: ComputationalHash,
+    pub(crate) placeholder_hash: PlaceholderHash,
 }
 
 impl QueryHashNonExistenceCircuits {
@@ -381,7 +379,7 @@ impl QueryHashNonExistenceCircuits {
                     .into(),
             )
         };
-        let placeholder_hash_ids = CircuitInput::<
+        let placeholder_hash_ids = UniversalCircuitInput::<
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
@@ -446,23 +444,30 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
 pub(crate) mod tests {
     use crate::query::{
         computational_hash_ids::{AggregationOperation, Identifiers},
-        public_inputs::PublicInputs,
+        public_inputs::PublicInputsQueryCircuits,
+        universal_circuit::universal_query_gadget::{CurveOrU256, OutputValues},
     };
     use alloy::primitives::U256;
-    use mp2_common::{array::ToField, group_hashing::add_curve_point, utils::ToFields, F};
+    use itertools::Itertools;
+    use mp2_common::{
+        array::ToField,
+        group_hashing::add_curve_point,
+        utils::{FromFields, ToFields},
+        F,
+    };
     use plonky2_ecgfp5::curve::curve::Point;
 
-    /// Compute the output values and the overflow number at the specified index by
-    /// the proofs. It's the test function corresponding to `compute_output_item`.
-    pub(crate) fn compute_output_item_value<const S: usize>(
+    /// Aggregate the i-th output values found in `outputs` according to the aggregation operation
+    /// with identifier `op`. It's the test function corresponding to `OutputValuesTarget::aggregate_outputs`
+    pub(crate) fn aggregate_output_values<const S: usize>(
         i: usize,
-        proofs: &[&PublicInputs<F, S>],
+        outputs: &[OutputValues<S>],
+        op: F,
     ) -> (Vec<F>, u32)
     where
         [(); S - 1]:,
     {
-        let proof0 = &proofs[0];
-        let op = proof0.operation_ids()[i];
+        let out0 = &outputs[0];
 
         let [op_id, op_min, op_max, op_sum, op_avg] = [
             AggregationOperation::IdOp,
@@ -479,22 +484,17 @@ pub(crate) mod tests {
         let is_op_sum = op == op_sum;
         let is_op_avg = op == op_avg;
 
-        // Check that the all proofs are employing the same aggregation operation.
-        proofs[1..]
-            .iter()
-            .for_each(|p| assert_eq!(p.operation_ids()[i], op));
-
         // Compute the SUM, MIN or MAX value.
         let mut sum_overflow = 0;
-        let mut output = proof0.value_at_index(i);
+        let mut output = out0.value_at_index(i);
         if i == 0 && is_op_id {
             // If it's the first proof and the operation is ID,
             // the value is a curve point not a Uint256.
             output = U256::ZERO;
         }
-        for p in proofs[1..].iter() {
+        for out in outputs[1..].iter() {
             // Get the current proof value.
-            let mut value = p.value_at_index(i);
+            let mut value = out.value_at_index(i);
             if i == 0 && is_op_id {
                 // If it's the first proof and the operation is ID,
                 // the value is a curve point not a Uint256.
@@ -520,14 +520,14 @@ pub(crate) mod tests {
         if i == 0 {
             // We always accumulate order-agnostic digest of the proofs for the first item.
             output = if is_op_id {
-                let points: Vec<_> = proofs
+                let points: Vec<_> = outputs
                     .iter()
-                    .map(|p| Point::decode(p.first_value_as_curve_point().encode()).unwrap())
+                    .map(|out| Point::decode(out.first_value_as_curve_point().encode()).unwrap())
                     .collect();
                 add_curve_point(&points).to_fields()
             } else {
                 // Pad the current output to ``CURVE_TARGET_LEN` for the first item.
-                PublicInputs::<_, S>::pad_slice_to_curve_len(&output)
+                CurveOrU256::from_slice(&output).to_vec()
             };
         }
 
@@ -540,5 +540,30 @@ pub(crate) mod tests {
         };
 
         (output, overflow)
+    }
+
+    /// Compute the output values and the overflow number at the specified index by
+    /// the proofs. It's the test function corresponding to `compute_output_item`.
+    pub(crate) fn compute_output_item_value<const S: usize>(
+        i: usize,
+        proofs: &[&PublicInputsQueryCircuits<F, S>],
+    ) -> (Vec<F>, u32)
+    where
+        [(); S - 1]:,
+    {
+        let proof0 = &proofs[0];
+        let op = proof0.operation_ids()[i];
+
+        // Check that the all proofs are employing the same aggregation operation.
+        proofs[1..]
+            .iter()
+            .for_each(|p| assert_eq!(p.operation_ids()[i], op));
+
+        let outputs = proofs
+            .iter()
+            .map(|p| OutputValues::from_fields(p.to_values_raw()))
+            .collect_vec();
+
+        aggregate_output_values(i, &outputs, op)
     }
 }

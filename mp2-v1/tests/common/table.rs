@@ -170,7 +170,7 @@ impl From<&TableColumns> for ColumnIDs {
 }
 
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
-async fn new_db_pool(db_url: &str) -> Result<DBPool> {
+async fn new_db_pool(db_url: &str) -> anyhow::Result<DBPool> {
     let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
         .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url))?;
 
@@ -228,7 +228,7 @@ impl Table {
         )
         .await
         .unwrap();
-        let genesis = index_tree.storage_state().await.shift;
+        let genesis = index_tree.storage_state().await?.shift;
         columns.self_assert();
 
         Ok(Self {
@@ -337,12 +337,12 @@ impl Table {
         &mut self,
         update: CellsUpdate<BlockPrimaryIndex>,
         update_type: TreeUpdateType,
-    ) -> Result<CellsUpdateResult<BlockPrimaryIndex>> {
+    ) -> anyhow::Result<CellsUpdateResult<BlockPrimaryIndex>> {
         // fetch previous row or return 0 cells in case of init
         let previous_cells = self
             .row
             .try_fetch(&update.previous_row_key)
-            .await
+            .await?
             .map(|row_node| row_node.cells)
             // if it happens, it must be because of init time
             .or_else(|| Some(CellCollection::default()))
@@ -391,9 +391,9 @@ impl Table {
             .await
             .expect("can't apply cells update");
         println!(
-            "Cell trees root hash after updates (impacted key {:?}): {:?}",
-            cell_update.impacted_keys(),
-            hex::encode(&cell_tree.root_data().await.unwrap().hash[..])
+            "Cell trees root hash after updates (impacted keys {:?}): {:?}",
+            cell_update.nodes().collect_vec(),
+            hex::encode(&cell_tree.root_data().await?.unwrap().hash[..])
         );
         Ok(CellsUpdateResult {
             previous_row_key: update.previous_row_key,
@@ -408,7 +408,7 @@ impl Table {
         &mut self,
         new_primary: BlockPrimaryIndex,
         updates: Vec<TreeRowUpdate>,
-    ) -> Result<RowUpdateResult> {
+    ) -> anyhow::Result<RowUpdateResult> {
         let current_epoch = self.row.current_epoch();
         let out = self
             .row
@@ -422,13 +422,15 @@ impl Table {
                             TreeRowUpdate::Update(row) => {
                                 t.update(row.k.clone(), row.payload.clone()).await?;
                             }
-                            TreeRowUpdate::Deletion(row_key) => match t.try_fetch(&row_key).await {
-                                // sanity check
-                                Some(_) => {
-                                    t.remove(row_key.clone()).await?;
+                            TreeRowUpdate::Deletion(row_key) => {
+                                match t.try_fetch(&row_key).await? {
+                                    // sanity check
+                                    Some(_) => {
+                                        t.remove(row_key.clone()).await?;
+                                    }
+                                    None => panic!("can't delete a row key that does not exist"),
                                 }
-                                None => panic!("can't delete a row key that does not exist"),
-                            },
+                            }
                             TreeRowUpdate::Insertion(row) => {
                                 t.store(row.k.clone(), row.payload.clone()).await?;
                             }
@@ -441,7 +443,7 @@ impl Table {
                     // update.
                     let filtered_rows = stream::iter(dirties.into_iter())
                         .then(|row_key| async {
-                            let mut row_payload = t.fetch(&row_key).await;
+                            let mut row_payload = t.try_fetch(&row_key).await.unwrap().unwrap();
                             let mut cell_info = row_payload
                                 .cells
                                 .find_by_column(row_payload.secondary_index_column)
@@ -471,7 +473,7 @@ impl Table {
         {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
-            let root = self.row.root_data().await.unwrap();
+            let root = self.row.root_data().await?.unwrap();
             let new_epoch = self.row.current_epoch();
             assert!(
                 current_epoch != new_epoch,
@@ -486,7 +488,7 @@ impl Table {
             self.row.print_tree().await;
             println!("\n+++++++++++++++++++++++++++++++++\n");
         }
-        out
+        Ok(out?)
     }
 
     // apply the transformation on the index tree and returns the new nodes to prove
@@ -494,7 +496,7 @@ impl Table {
     pub async fn apply_index_update(
         &mut self,
         updates: IndexUpdate<BlockPrimaryIndex>,
-    ) -> Result<IndexUpdateResult<BlockTreeKey>> {
+    ) -> anyhow::Result<IndexUpdateResult<BlockTreeKey>> {
         let plan = self
             .index
             .in_transaction(|t| {
@@ -617,7 +619,7 @@ pub enum TreeUpdateType {
 }
 
 impl Table {
-    fn to_zktable(&self) -> Result<ZkTable> {
+    fn to_zktable(&self) -> anyhow::Result<ZkTable> {
         let zk_columns = self.columns.to_zkcolumns();
         Ok(ZkTable {
             // NOTE : we always look data in the row table
@@ -653,7 +655,7 @@ impl TableColumn {
 }
 
 impl ContextProvider for Table {
-    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+    fn fetch_table(&self, table_name: &str) -> anyhow::Result<ZkTable> {
         <&Self as ContextProvider>::fetch_table(&self, table_name)
     }
 
@@ -669,7 +671,7 @@ impl ContextProvider for Table {
 }
 
 impl ContextProvider for &Table {
-    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+    fn fetch_table(&self, table_name: &str) -> anyhow::Result<ZkTable> {
         ensure!(
             self.public_name == table_name,
             "names differ table {} vs requested {}",

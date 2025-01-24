@@ -8,7 +8,7 @@ use super::{
     leaf_mapping_of_mappings::{LeafMappingOfMappingsCircuit, LeafMappingOfMappingsWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
-    ColumnInfo,
+    ColumnId, ColumnInfo, MappingKey,
 };
 use crate::{api::InputNode, MAX_BRANCH_NODE_LEN};
 use anyhow::{bail, ensure, Result};
@@ -110,14 +110,11 @@ where
 
     /// Create a circuit input for proving a leaf MPT node of mappings where the
     /// value stored in a mapping entry is another mapping.
-    #[allow(clippy::too_many_arguments)]
     pub fn new_mapping_of_mappings_leaf(
         node: Vec<u8>,
         slot: u8,
-        outer_key: Vec<u8>,
-        inner_key: Vec<u8>,
-        outer_key_id: u64,
-        inner_key_id: u64,
+        outer_key_data: (MappingKey, ColumnId),
+        inner_key_data: (MappingKey, ColumnId),
         evm_word: u32,
         table_info: Vec<ColumnInfo>,
     ) -> Self {
@@ -125,13 +122,14 @@ where
             filter_table_column_identifiers(&table_info, slot, evm_word);
         let metadata = ColumnsMetadata::new(table_info, &extracted_column_identifiers, evm_word);
 
-        let slot = MappingSlot::new(slot, outer_key);
-        let [outer_key_id, inner_key_id] = [outer_key_id, inner_key_id].map(F::from_canonical_u64);
+        let slot = MappingSlot::new(slot, outer_key_data.0);
+        let [outer_key_id, inner_key_id] =
+            [outer_key_data.1, inner_key_data.1].map(F::from_canonical_u64);
 
         CircuitInput::LeafMappingOfMappings(LeafMappingOfMappingsCircuit {
             node,
             slot,
-            inner_key,
+            inner_key: inner_key_data.0,
             outer_key_id,
             inner_key_id,
             metadata,
@@ -814,10 +812,8 @@ mod tests {
         let encoded = test_circuit_input(CircuitInput::new_mapping_of_mappings_leaf(
             proof.last().unwrap().to_vec(),
             TEST_SLOT,
-            TEST_OUTER_KEY.to_vec(),
-            TEST_INNER_KEY.to_vec(),
-            outer_key_id,
-            inner_key_id,
+            (TEST_OUTER_KEY.to_vec(), outer_key_id),
+            (TEST_INNER_KEY.to_vec(), inner_key_id),
             TEST_EVM_WORD,
             table_info,
         ));
@@ -1034,19 +1030,15 @@ mod tests {
                                 &extracted_column_identifiers,
                                 value,
                                 evm_word,
-                                outer_mapping_key.clone(),
-                                inner_mapping_key.clone(),
-                                outer_key_id,
-                                inner_key_id,
+                                (outer_mapping_key.clone(), outer_key_id),
+                                (inner_mapping_key.clone(), inner_key_id),
                             );
 
                             let circuit_input = CircuitInput::new_mapping_of_mappings_leaf(
                                 node,
                                 slot as u8,
-                                outer_mapping_key,
-                                inner_mapping_key,
-                                outer_key_id,
-                                inner_key_id,
+                                (outer_mapping_key, outer_key_id),
+                                (inner_mapping_key, inner_key_id),
                                 evm_word,
                                 table_info.to_vec(),
                             );

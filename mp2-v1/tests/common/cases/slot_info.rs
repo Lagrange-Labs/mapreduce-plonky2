@@ -69,8 +69,7 @@ pub(crate) struct MappingOfMappingsKey {
 
 impl StorageSlotMappingKey for MappingOfMappingsKey {
     fn sample_key() -> Self {
-        let rng = &mut thread_rng();
-        let [outer_key, inner_key] = array::from_fn(|_| U256::from_limbs(rng.gen()));
+        let [outer_key, inner_key] = array::from_fn(|_| MappingKey::sample_key());
         Self::new(outer_key, inner_key)
     }
     fn slot_inputs(slot_inputs: Vec<SlotInput>) -> SlotInputs {
@@ -141,7 +140,7 @@ impl StorageSlotValue for Address {
 
 impl StorageSlotValue for U256 {
     fn sample_value() -> Self {
-        sample_u256()
+        U256::from(sample_u128()) // sample as u128 to be safe for overflow in queries
     }
     fn random_update(&mut self, _: &SlotInput) {
         loop {
@@ -168,6 +167,11 @@ fn sample_u256() -> U256 {
     U256::from_limbs(rng.gen())
 }
 
+fn sample_u128() -> u128 {
+    let rng = &mut thread_rng();
+    rng.gen()
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct LargeStruct {
     pub(crate) field1: U256,
@@ -177,9 +181,8 @@ pub struct LargeStruct {
 
 impl StorageSlotValue for LargeStruct {
     fn sample_value() -> Self {
-        let rng = &mut thread_rng();
-        let field1 = U256::from_limbs(rng.gen());
-        let [field2, field3] = array::from_fn(|_| rng.gen());
+        let field1 = U256::from(sample_u128()); // sample as u128 to be safe for overflow in queries
+        let [field2, field3] = array::from_fn(|_| sample_u128());
 
         Self {
             field1,

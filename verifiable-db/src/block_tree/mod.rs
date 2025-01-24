@@ -4,6 +4,8 @@ mod membership;
 mod parent;
 mod public_inputs;
 
+use std::iter::once;
+
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
@@ -26,12 +28,11 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, config::Hasher},
 };
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
+
 use plonky2_ecgfp5::{
     curve::{curve::Point, scalar_field::Scalar},
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
-use std::iter::once;
-
 pub use public_inputs::PublicInputs;
 
 /// Common function to compute the digest of the block tree which uses a special format using

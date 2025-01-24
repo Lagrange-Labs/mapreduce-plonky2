@@ -5,7 +5,7 @@ use std::{
 };
 
 use alloy::primitives::U256;
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use itertools::Itertools;
 
 use mp2_common::{
@@ -13,7 +13,7 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     types::{CBuilder, HashOutput},
     u256::UInt256Target,
-    utils::{Fieldable, FromFields, SelectHashBuilder, ToFields, ToTargets},
+    utils::{Fieldable, FromFields, HashBuilder, ToFields, ToTargets},
     CHasher, F,
 };
 use plonky2::{
@@ -31,14 +31,14 @@ use serde::{Deserialize, Serialize};
 use crate::revelation::placeholders_check::placeholder_ids_hash;
 
 use super::{
-    aggregation::QueryBoundSource,
     universal_circuit::{
         universal_circuit_inputs::{
             BasicOperation, InputOperand, OutputItem, PlaceholderIdsSet, ResultStructure,
         },
-        universal_query_circuit::QueryBound,
+        universal_query_gadget::QueryBound,
         ComputationalHash, ComputationalHashTarget,
     },
+    utils::QueryBoundSource,
 };
 
 pub enum Identifiers {
@@ -112,7 +112,9 @@ impl Identifiers {
         let mut cache = ComputationalHashCache::new(column_ids.len());
         let predicate_ops_hash =
             Operation::operation_hash(predicate_operations, &column_ids, &mut cache)?;
-        let predicate_hash = predicate_ops_hash.last().unwrap();
+        let predicate_hash = predicate_ops_hash
+            .last()
+            .context("missing predicate on query")?;
         let result_ops_hash =
             Operation::operation_hash(&results.result_operations, &column_ids, &mut cache)?;
         results.output_variant.output_hash(
@@ -234,7 +236,7 @@ impl<F: RichField> ToField<F> for Identifiers {
     }
 }
 /// Data structure to provide identifiers of columns of a table to compute computational hash
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ColumnIDs {
     pub(crate) primary: F,
     pub(crate) secondary: F,
@@ -250,11 +252,30 @@ impl ColumnIDs {
         }
     }
 
+    pub fn primary_column(&self) -> u64 {
+        self.primary.to_canonical_u64()
+    }
+
+    pub fn secondary_column(&self) -> u64 {
+        self.secondary.to_canonical_u64()
+    }
+
+    pub fn non_indexed_columns(&self) -> Vec<u64> {
+        self.rest
+            .iter()
+            .map(|id| id.to_canonical_u64())
+            .collect_vec()
+    }
+
     pub(crate) fn to_vec(&self) -> Vec<F> {
         [self.primary, self.secondary]
             .into_iter()
             .chain(self.rest.clone())
             .collect_vec()
+    }
+
+    pub(crate) fn num_columns(&self) -> usize {
+        self.rest.len() + 2
     }
 }
 
