@@ -14,18 +14,20 @@ use mp2_v1::{
         ColumnID,
     },
     values_extraction::{
-        gadgets::column_info::ColumnInfo, identifier_block_column, identifier_for_value_column,
+        gadgets::column_info::ColumnInfo, identifier_block_column,
+        identifier_for_inner_mapping_key_column, identifier_for_outer_mapping_key_column,
+        identifier_for_value_column,
     },
 };
+use plonky2::field::types::PrimeField64;
 use rand::{thread_rng, Rng};
 use ryhope::storage::RoEpochKvStorage;
 
 use crate::common::{
-    bindings::simple::Simple::MappingOperation,
     cases::{
         contract::Contract,
         identifier_for_mapping_key_column,
-        storage_slot_value::LargeStruct,
+        slot_info::LargeStruct,
         table_source::{
             LengthExtractionArgs, MappingExtractionArgs, MappingIndex, MergeSource,
             SingleExtractionArgs,
@@ -41,7 +43,6 @@ use crate::common::{
 };
 
 use super::{ContractExtractionArgs, TableIndexing, TableSource};
-use alloy::primitives::U256;
 use mp2_common::{eth::StorageSlot, proof::ProofWithVK, types::HashOutput};
 
 /// Test slots for single values extraction
@@ -65,15 +66,22 @@ pub(crate) const SINGLE_STRUCT_SLOT: usize = 6;
 /// Test slot for mapping Struct extraction
 const MAPPING_STRUCT_SLOT: usize = 8;
 
-/// Test slot for mapping of mappings extraction
-#[allow(dead_code)]
-const MAPPING_OF_MAPPINGS_SLOT: usize = 9;
+/// Test slot for mapping of single value mappings extraction
+pub(crate) const MAPPING_OF_SINGLE_VALUE_MAPPINGS_SLOT: u8 = 9;
+
+/// Test slot for mapping of struct mappings extraction
+pub(crate) const MAPPING_OF_STRUCT_MAPPINGS_SLOT: u8 = 10;
 
 /// human friendly name about the column containing the block number
 pub(crate) const BLOCK_COLUMN_NAME: &str = "block_number";
 pub(crate) const SINGLE_SECONDARY_COLUMN: &str = "single_secondary_column";
 pub(crate) const MAPPING_KEY_COLUMN: &str = "mapping_key_column";
 pub(crate) const MAPPING_VALUE_COLUMN: &str = "mapping_value_column";
+pub(crate) const MAPPING_OF_MAPPINGS_OUTER_KEY_COLUMN: &str =
+    "mapping_of_mappings_outer_key_column";
+pub(crate) const MAPPING_OF_MAPPINGS_INNER_KEY_COLUMN: &str =
+    "mapping_of_mappings_inner_key_column";
+pub(crate) const MAPPING_OF_MAPPINGS_VALUE_COLUMN: &str = "mapping_of_mappings_value_column";
 
 /// Construct the all slot inputs for single value testing.
 fn single_value_slot_inputs() -> Vec<SlotInput> {
@@ -449,6 +457,130 @@ impl TableIndexing {
         ))
     }
 
+    pub(crate) async fn mapping_of_single_value_mappings_test_case(
+        ctx: &mut TestContext,
+    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+        // Deploy the simple contract.
+        let contract = Contract::deploy_simple_contract(ctx).await;
+        let contract_address = contract.address;
+        let chain_id = contract.chain_id;
+
+        let slot_input = SlotInput::new(MAPPING_OF_SINGLE_VALUE_MAPPINGS_SLOT, 0, 256, 0);
+        let outer_key_id = identifier_for_outer_mapping_key_column(
+            MAPPING_OF_SINGLE_VALUE_MAPPINGS_SLOT,
+            &contract_address,
+            chain_id,
+            vec![],
+        );
+        let inner_key_id = identifier_for_inner_mapping_key_column(
+            MAPPING_OF_SINGLE_VALUE_MAPPINGS_SLOT,
+            &contract_address,
+            chain_id,
+            vec![],
+        );
+        let value_id =
+            identifier_for_value_column(&slot_input, &contract_address, chain_id, vec![]);
+        // Enable to test different indexes.
+        // let index = MappingIndex::Value(value_id);
+        // let index = MappingIndex::OuterKey(outer_key_id);
+        let index = MappingIndex::InnerKey(inner_key_id);
+        let args = MappingExtractionArgs::new(
+            MAPPING_OF_SINGLE_VALUE_MAPPINGS_SLOT,
+            index.clone(),
+            vec![slot_input.clone()],
+        );
+        let mut source = TableSource::MappingOfSingleValueMappings(args);
+        let table_row_updates = source.init_contract_data(ctx, &contract).await;
+
+        let table = build_mapping_of_mappings_table(
+            ctx,
+            &index,
+            outer_key_id,
+            inner_key_id,
+            vec![value_id],
+            vec![slot_input],
+        )
+        .await;
+        let value_column = table.columns.rest[0].name.clone();
+
+        Ok((
+            Self {
+                value_column,
+                contract_extraction: ContractExtractionArgs {
+                    slot: StorageSlot::Simple(CONTRACT_SLOT),
+                },
+                contract,
+                source,
+                table,
+            },
+            table_row_updates,
+        ))
+    }
+
+    pub(crate) async fn mapping_of_struct_mappings_test_case(
+        ctx: &mut TestContext,
+    ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
+        // Deploy the simple contract.
+        let contract = Contract::deploy_simple_contract(ctx).await;
+        let contract_address = contract.address;
+        let chain_id = contract.chain_id;
+
+        let slot_inputs = LargeStruct::slot_inputs(MAPPING_OF_STRUCT_MAPPINGS_SLOT);
+        let outer_key_id = identifier_for_outer_mapping_key_column(
+            MAPPING_OF_STRUCT_MAPPINGS_SLOT,
+            &contract_address,
+            chain_id,
+            vec![],
+        );
+        let inner_key_id = identifier_for_inner_mapping_key_column(
+            MAPPING_OF_STRUCT_MAPPINGS_SLOT,
+            &contract_address,
+            chain_id,
+            vec![],
+        );
+        let value_ids = slot_inputs
+            .iter()
+            .map(|slot_input| {
+                identifier_for_value_column(slot_input, &contract_address, chain_id, vec![])
+            })
+            .collect_vec();
+        // Enable to test different indexes.
+        // let index = MappingIndex::OuterKey(outer_key_id);
+        // let index = MappingIndex::InnerKey(inner_key_id);
+        let index = MappingIndex::Value(value_ids[1]);
+        let args = MappingExtractionArgs::new(
+            MAPPING_OF_STRUCT_MAPPINGS_SLOT,
+            index.clone(),
+            slot_inputs.clone(),
+        );
+        let mut source = TableSource::MappingOfStructMappings(args);
+        let table_row_updates = source.init_contract_data(ctx, &contract).await;
+
+        let table = build_mapping_of_mappings_table(
+            ctx,
+            &index,
+            outer_key_id,
+            inner_key_id,
+            value_ids,
+            slot_inputs,
+        )
+        .await;
+        let value_column = table.columns.rest[0].name.clone();
+
+        Ok((
+            Self {
+                value_column,
+                contract_extraction: ContractExtractionArgs {
+                    slot: StorageSlot::Simple(CONTRACT_SLOT),
+                },
+                contract,
+                source,
+                table,
+            },
+            table_row_updates,
+        ))
+    }
+
     pub async fn run(
         &mut self,
         ctx: &mut TestContext,
@@ -628,7 +760,7 @@ impl TableIndexing {
                 expected_metadata_hash,
             )
             .await;
-        info!("Generated final IVC proof for block {}", current_block,);
+        info!("Generated final IVC proof for block {}", current_block);
 
         Ok(())
     }
@@ -829,24 +961,116 @@ async fn build_mapping_table(
     .await
 }
 
-#[derive(Clone, Debug)]
-pub enum MappingUpdate<V> {
-    // key and value
-    Insertion(U256, V),
-    // key and value
-    Deletion(U256, V),
-    // key, previous value and new value
-    Update(U256, V, V),
-}
-
-impl<V> From<&MappingUpdate<V>> for MappingOperation {
-    fn from(update: &MappingUpdate<V>) -> Self {
-        Self::from(match update {
-            MappingUpdate::Deletion(_, _) => 0,
-            MappingUpdate::Update(_, _, _) => 1,
-            MappingUpdate::Insertion(_, _) => 2,
+/// Build the mapping of mappings table.
+async fn build_mapping_of_mappings_table(
+    ctx: &TestContext,
+    index: &MappingIndex,
+    outer_key_id: u64,
+    inner_key_id: u64,
+    value_ids: Vec<u64>,
+    slot_inputs: Vec<SlotInput>,
+) -> Table {
+    let mut rest_columns = value_ids
+        .into_iter()
+        .zip(slot_inputs.iter())
+        .enumerate()
+        .map(|(i, (id, slot_input))| TableColumn {
+            name: format!("{MAPPING_OF_MAPPINGS_VALUE_COLUMN}_{i}"),
+            index: IndexType::None,
+            multiplier: false,
+            info: ColumnInfo::new_from_slot_input(id, slot_input),
         })
-    }
+        .collect_vec();
+
+    let secondary_column = match index {
+        MappingIndex::OuterKey(_) => {
+            rest_columns.push(TableColumn {
+                name: MAPPING_OF_MAPPINGS_INNER_KEY_COLUMN.to_string(),
+                index: IndexType::None,
+                multiplier: false,
+                // The slot input is useless for the inner key column.
+                info: ColumnInfo::new_from_slot_input(inner_key_id, &slot_inputs[0]),
+            });
+
+            TableColumn {
+                name: MAPPING_OF_MAPPINGS_OUTER_KEY_COLUMN.to_string(),
+                index: IndexType::Secondary,
+                multiplier: false,
+                info: ColumnInfo::new_from_slot_input(
+                    outer_key_id,
+                    // The slot input is useless for the key column.
+                    &slot_inputs[0],
+                ),
+            }
+        }
+        MappingIndex::InnerKey(_) => {
+            rest_columns.push(TableColumn {
+                name: MAPPING_OF_MAPPINGS_OUTER_KEY_COLUMN.to_string(),
+                index: IndexType::None,
+                multiplier: false,
+                // The slot input is useless for the inner key column.
+                info: ColumnInfo::new_from_slot_input(outer_key_id, &slot_inputs[0]),
+            });
+
+            TableColumn {
+                name: MAPPING_OF_MAPPINGS_INNER_KEY_COLUMN.to_string(),
+                index: IndexType::Secondary,
+                multiplier: false,
+                info: ColumnInfo::new_from_slot_input(
+                    inner_key_id,
+                    // The slot input is useless for the key column.
+                    &slot_inputs[0],
+                ),
+            }
+        }
+        MappingIndex::Value(secondary_value_id) => {
+            let pos = rest_columns
+                .iter()
+                .position(|col| &col.info.identifier().to_canonical_u64() == secondary_value_id)
+                .unwrap();
+            let mut secondary_column = rest_columns.remove(pos);
+            secondary_column.index = IndexType::Secondary;
+            let key_columns = [
+                (outer_key_id, MAPPING_OF_MAPPINGS_OUTER_KEY_COLUMN),
+                (inner_key_id, MAPPING_OF_MAPPINGS_INNER_KEY_COLUMN),
+            ]
+            .map(|(id, name)| {
+                TableColumn {
+                    name: name.to_string(),
+                    index: IndexType::None,
+                    multiplier: false,
+                    // The slot input is useless for the inner key column.
+                    info: ColumnInfo::new_from_slot_input(id, &slot_inputs[0]),
+                }
+            });
+            rest_columns.extend(key_columns);
+
+            secondary_column
+        }
+        _ => unreachable!(),
+    };
+
+    let columns = TableColumns {
+        primary: TableColumn {
+            name: BLOCK_COLUMN_NAME.to_string(),
+            index: IndexType::Primary,
+            multiplier: false,
+            // Only valid for the identifier of block column, others are dummy.
+            info: ColumnInfo::new(0, identifier_block_column(), 0, 0, 0, 0),
+        },
+        secondary: secondary_column,
+        rest: rest_columns,
+    };
+    debug!("MAPPING OF MAPPINGS ZK COLUMNS -> {:?}", columns);
+    let index_genesis_block = ctx.block_number().await;
+    let row_unique_id = TableRowUniqueID::MappingOfMappings(outer_key_id, inner_key_id);
+    Table::new(
+        index_genesis_block,
+        "mapping_of_mappings_table".to_string(),
+        columns,
+        row_unique_id,
+    )
+    .await
 }
 
 #[derive(Clone, Debug)]

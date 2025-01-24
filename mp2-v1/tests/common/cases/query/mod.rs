@@ -107,7 +107,9 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Re
     match &t.source {
         TableSource::MappingValues(_, _)
         | TableSource::Merge(_)
-        | TableSource::MappingStruct(_, _) => query_mapping(ctx, &table, &t).await?,
+        | TableSource::MappingStruct(_, _)
+        | TableSource::MappingOfSingleValueMappings(_)
+        | TableSource::MappingOfStructMappings(_) => query_mapping(ctx, &table, &t).await?,
         _ => unimplemented!("yet"),
     }
     Ok(())
