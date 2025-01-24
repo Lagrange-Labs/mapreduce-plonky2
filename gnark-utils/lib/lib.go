@@ -3,7 +3,7 @@
 // - It's a pending PR, will loss the commit if it's rebased or merged.
 // - It's build with a tool of command line which only operates via files. But
 //   we want to call proving and verifying as functions with string arguments.
-// - We want to use Go as functions not a seprate process (or thread). Since it
+// - We want to use Go as functions not a separate process (or thread). Since it
 //   could handle concurrent easily for the proving and verifying processes.
 
 package main
