@@ -1,8 +1,7 @@
-use anyhow::*;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, future::Future, hash::Hash};
 
-use crate::storage::TreeStorage;
+use crate::{error::RyhopeError, storage::TreeStorage};
 
 pub mod sbbst;
 pub mod scapegoat;
@@ -38,22 +37,30 @@ pub trait TreeTopology: Default + Send + Sync {
     type State: Send + Sync + Clone + Debug + Serialize + for<'a> Deserialize<'a>;
 
     /// Return the number of nodes currently stored in the tree
-    fn size<S: TreeStorage<Self>>(&self, s: &S) -> impl Future<Output = usize>;
+    fn size<S: TreeStorage<Self>>(&self, s: &S)
+        -> impl Future<Output = Result<usize, RyhopeError>>;
 
     /// Return the root of the tree.
     ///
     /// May be empty, e.g. if the tree is empty.
-    fn root<S: TreeStorage<Self>>(&self, s: &S) -> impl Future<Output = Option<Self::Key>>;
+    fn root<S: TreeStorage<Self>>(
+        &self,
+        s: &S,
+    ) -> impl Future<Output = Result<Option<Self::Key>, RyhopeError>>;
 
     /// Return the parent of `n`, or None if `n` is the root of the tree.
     fn parent<S: TreeStorage<Self>>(
         &self,
         n: Self::Key,
         s: &S,
-    ) -> impl Future<Output = Option<Self::Key>>;
+    ) -> impl Future<Output = Result<Option<Self::Key>, RyhopeError>>;
 
     /// Return whether `k` exists in the tree.
-    fn contains<S: TreeStorage<Self>>(&self, k: &Self::Key, s: &S) -> impl Future<Output = bool>;
+    fn contains<S: TreeStorage<Self>>(
+        &self,
+        k: &Self::Key,
+        s: &S,
+    ) -> impl Future<Output = Result<bool, RyhopeError>>;
 
     /// Return, if it has some, the children of `k`.
     ///
@@ -63,7 +70,7 @@ pub trait TreeTopology: Default + Send + Sync {
         &self,
         k: &Self::Key,
         s: &S,
-    ) -> impl Future<Output = Option<(Option<Self::Key>, Option<Self::Key>)>>;
+    ) -> impl Future<Output = Result<Option<(Option<Self::Key>, Option<Self::Key>)>, RyhopeError>>;
 
     /// Return a set of `n` and its descendants, if any, up to `depth` levels
     /// down.
@@ -72,14 +79,14 @@ pub trait TreeTopology: Default + Send + Sync {
         s: &S,
         n: &Self::Key,
         depth: usize,
-    ) -> impl Future<Output = HashSet<Self::Key>> {
+    ) -> impl Future<Output = Result<HashSet<Self::Key>, RyhopeError>> {
         async move {
             let mut todos = vec![(n.to_owned(), 0)];
             let mut descendance = HashSet::new();
             while let Some(todo) = todos.pop() {
                 let current_depth = todo.1;
                 if current_depth <= depth {
-                    if let Some(children) = self.children(&todo.0, s).await {
+                    if let Some(children) = self.children(&todo.0, s).await? {
                         for child in [children.0, children.1].into_iter().flatten() {
                             todos.push((child, current_depth + 1));
                         }
@@ -88,7 +95,7 @@ pub trait TreeTopology: Default + Send + Sync {
                 }
             }
 
-            descendance
+            Ok(descendance)
         }
     }
 
@@ -97,22 +104,22 @@ pub trait TreeTopology: Default + Send + Sync {
         &self,
         k: &Self::Key,
         s: &S,
-    ) -> impl Future<Output = Option<NodePath<Self::Key>>>;
+    ) -> impl Future<Output = Result<Option<NodePath<Self::Key>>, RyhopeError>>;
 
     /// Return the union of the lineages of all the `ns`
     fn ascendance<S: TreeStorage<Self>, I: IntoIterator<Item = Self::Key>>(
         &self,
         ns: I,
         s: &S,
-    ) -> impl Future<Output = HashSet<Self::Key>> {
+    ) -> impl Future<Output = Result<HashSet<Self::Key>, RyhopeError>> {
         async {
             let mut ascendance = HashSet::new();
             for n in ns.into_iter() {
-                if let Some(np) = self.lineage(&n, s).await {
+                if let Some(np) = self.lineage(&n, s).await? {
                     ascendance.extend(np.into_full_path());
                 }
             }
-            ascendance
+            Ok(ascendance)
         }
     }
 
@@ -122,7 +129,7 @@ pub trait TreeTopology: Default + Send + Sync {
         &self,
         k: &Self::Key,
         s: &S,
-    ) -> impl Future<Output = Option<NodeContext<Self::Key>>> + Send;
+    ) -> impl Future<Output = Result<Option<NodeContext<Self::Key>>, RyhopeError>> + Send;
 }
 
 /// Define operations to mutate a tree.
@@ -134,7 +141,7 @@ pub trait MutableTree: TreeTopology {
         &mut self,
         k: Self::Key,
         s: &mut S,
-    ) -> impl Future<Output = Result<NodePath<Self::Key>>> + Send;
+    ) -> impl Future<Output = Result<NodePath<Self::Key>, RyhopeError>> + Send;
 
     /// Remove the given key from the tree; fail if it is already present.
     ///
@@ -143,7 +150,7 @@ pub trait MutableTree: TreeTopology {
         &mut self,
         k: &Self::Key,
         s: &mut S,
-    ) -> impl Future<Output = Result<Vec<Self::Key>>> + Send;
+    ) -> impl Future<Output = Result<Vec<Self::Key>, RyhopeError>> + Send;
 }
 
 /// A data structure encompassing the immediate neighborhood of a node.

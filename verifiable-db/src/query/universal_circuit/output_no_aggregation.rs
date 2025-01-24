@@ -25,7 +25,9 @@ use std::{
 
 use super::{
     cells::build_cells_tree,
-    universal_query_circuit::{OutputComponent, OutputComponentWires},
+    universal_query_gadget::{
+        OutputComponent, OutputComponentHashWires, OutputComponentValueWires,
+    },
     ComputationalHashTarget,
 };
 
@@ -56,20 +58,26 @@ pub struct InputWires<const MAX_NUM_RESULTS: usize> {
     is_output_valid: [BoolTarget; MAX_NUM_RESULTS],
 }
 
-/// Input + output wires for output component for queries without results aggregation
-pub struct Wires<const MAX_NUM_RESULTS: usize> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HashWires<const MAX_NUM_RESULTS: usize> {
     /// input wires of the component
     input_wires: InputWires<MAX_NUM_RESULTS>,
-    /// The first output value computed by this component; it is a `CurveTarget` since
-    /// it corresponds to the accumulator of all the results of the query
-    first_output_value: CurveTarget,
-    /// Remaining output values; for this component, they are basically dummy values
-    output_values: Vec<UInt256Target>,
+
     /// Computational hash representing all the computation done in the query circuit
     output_hash: ComputationalHashTarget,
     /// Identifiers of the aggregation operations to be returned as public inputs
     ops_ids: [Target; MAX_NUM_RESULTS],
 }
+
+#[derive(Clone, Debug)]
+pub struct ValueWires<const MAX_NUM_RESULTS: usize> {
+    /// The first output value computed by this component; it is a `CurveTarget` since
+    /// it corresponds to the accumulator of all the results of the query
+    first_output_value: CurveTarget,
+    /// Remaining output values; for this component, they are basically dummy values
+    output_values: Vec<UInt256Target>,
+}
+
 /// Witness input values for output component for queries without results aggregation
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Circuit<const MAX_NUM_RESULTS: usize> {
@@ -86,21 +94,23 @@ pub struct Circuit<const MAX_NUM_RESULTS: usize> {
     ids: [F; MAX_NUM_RESULTS],
 }
 
-impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULTS> {
+impl<const MAX_NUM_RESULTS: usize> OutputComponentValueWires for ValueWires<MAX_NUM_RESULTS> {
     type FirstT = CurveTarget;
-
-    type InputWires = InputWires<MAX_NUM_RESULTS>;
-
-    fn ops_ids(&self) -> &[Target] {
-        self.ops_ids.as_slice()
-    }
 
     fn first_output_value(&self) -> Self::FirstT {
         self.first_output_value
     }
 
     fn other_output_values(&self) -> &[UInt256Target] {
-        self.output_values.as_slice()
+        &self.output_values
+    }
+}
+
+impl<const MAX_NUM_RESULTS: usize> OutputComponentHashWires for HashWires<MAX_NUM_RESULTS> {
+    type InputWires = InputWires<MAX_NUM_RESULTS>;
+
+    fn ops_ids(&self) -> &[Target] {
+        self.ops_ids.as_slice()
     }
 
     fn computational_hash(&self) -> ComputationalHashTarget {
@@ -113,87 +123,8 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentWires for Wires<MAX_NUM_RESULT
 }
 
 impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<MAX_NUM_RESULTS> {
-    type Wires = Wires<MAX_NUM_RESULTS>;
-
-    fn build<const NUM_OUTPUT_VALUES: usize>(
-        b: &mut CBuilder,
-        possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
-        possible_output_hash: [ComputationalHashTarget; NUM_OUTPUT_VALUES],
-        predicate_value: &BoolTarget,
-        predicate_hash: &ComputationalHashTarget,
-    ) -> Self::Wires {
-        let u256_zero = b.zero_u256();
-        let curve_zero = b.curve_zero();
-
-        // Initialize the input wires.
-        let input_wires = InputWires {
-            selector: b.add_virtual_target_arr(),
-            ids: b.add_virtual_target_arr(),
-            is_output_valid: [0; MAX_NUM_RESULTS].map(|_| b.add_virtual_bool_target_safe()),
-        };
-
-        // Build the output items to be returned.
-        let output_items: [_; MAX_NUM_RESULTS] = array::from_fn(|i| {
-            b.random_access_u256(input_wires.selector[i], &possible_output_values)
-        });
-
-        // Compute the cells tree of the all output items to be returned for the given record.
-        let tree_hash = build_cells_tree(
-            b,
-            &output_items[2..],
-            &input_wires.ids[2..],
-            &input_wires.is_output_valid[2..],
-        );
-
-        // Compute the accumulator including the indexed items:
-        // second_item = is_output_valid[1] ? output_items[1] : 0
-        // accumulator = D(ids[0] || output_items[0] || ids[1] || second_item || tree_hash)
-        let second_item =
-            b.select_u256(input_wires.is_output_valid[1], &output_items[1], &u256_zero);
-        let inputs: Vec<_> = iter::once(input_wires.ids[0])
-            .chain(output_items[0].to_targets())
-            .chain(iter::once(input_wires.ids[1]))
-            .chain(second_item.to_targets())
-            .chain(tree_hash.to_targets())
-            .collect();
-        let accumulator = b.map_to_curve_point(&inputs);
-
-        // Expose the accumulator only if the results for this record have to be
-        // included in the query results.
-        let first_output_value = b.curve_select(*predicate_value, accumulator, curve_zero);
-
-        // Set the remaining outputs to dummy values.
-        let output_values = vec![u256_zero; MAX_NUM_RESULTS - 1];
-
-        // Compute the computational hash representing the accumulation of the items.
-        let output_hash = Self::output_variant().output_hash_circuit(
-            b,
-            predicate_hash,
-            &possible_output_hash,
-            &input_wires.selector,
-            &input_wires.ids,
-            &input_wires.is_output_valid,
-        );
-
-        // For the no aggregation operations, the first value in V contains the
-        // accumulator, while the other slots are filled by the dummy zero values.
-        // So the circuit claims that there is no aggregation operation on the
-        // first value in V, while all the other values can be simply summed up.
-        let [op_id, op_sum] = [AggregationOperation::IdOp, AggregationOperation::SumOp]
-            .map(|op| b.constant(Identifiers::AggregationOperations(op).to_field()));
-        let ops_ids: Vec<_> = iter::once(op_id)
-            .chain(iter::repeat(op_sum).take(MAX_NUM_RESULTS - 1))
-            .collect();
-        let ops_ids = ops_ids.try_into().unwrap();
-
-        Self::Wires {
-            input_wires,
-            first_output_value,
-            output_values,
-            output_hash,
-            ops_ids,
-        }
-    }
+    type HashWires = HashWires<MAX_NUM_RESULTS>;
+    type ValueWires = ValueWires<MAX_NUM_RESULTS>;
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &InputWires<MAX_NUM_RESULTS>) {
         pw.set_target_arr(wires.selector.as_slice(), self.selector.as_slice());
@@ -231,6 +162,94 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
 
     fn output_variant() -> Output {
         Output::NoAggregation
+    }
+
+    fn build_values<const NUM_OUTPUT_VALUES: usize>(
+        b: &mut CBuilder,
+        possible_output_values: [UInt256Target; NUM_OUTPUT_VALUES],
+        predicate_value: &BoolTarget,
+        input_wires: &<Self::HashWires as OutputComponentHashWires>::InputWires,
+    ) -> Self::ValueWires {
+        let u256_zero = b.zero_u256();
+        let curve_zero = b.curve_zero();
+
+        // Build the output items to be returned.
+        let output_items: [_; MAX_NUM_RESULTS] = array::from_fn(|i| {
+            b.random_access_u256(input_wires.selector[i], &possible_output_values)
+        });
+
+        // Compute the cells tree of the all output items to be returned for the given record.
+        let tree_hash = build_cells_tree(
+            b,
+            &output_items[2..],
+            &input_wires.ids[2..],
+            &input_wires.is_output_valid[2..],
+        );
+
+        // Compute the accumulator including the indexed items:
+        // second_item = is_output_valid[1] ? output_items[1] : 0
+        // accumulator = D(ids[0] || output_items[0] || ids[1] || second_item || tree_hash)
+        let second_item =
+            b.select_u256(input_wires.is_output_valid[1], &output_items[1], &u256_zero);
+        let inputs: Vec<_> = iter::once(input_wires.ids[0])
+            .chain(output_items[0].to_targets())
+            .chain(iter::once(input_wires.ids[1]))
+            .chain(second_item.to_targets())
+            .chain(tree_hash.to_targets())
+            .collect();
+        let accumulator = b.map_to_curve_point(&inputs);
+
+        // Expose the accumulator only if the results for this record have to be
+        // included in the query results.
+        let first_output_value = b.curve_select(*predicate_value, accumulator, curve_zero);
+
+        // Set the remaining outputs to dummy values.
+        let output_values = vec![u256_zero; MAX_NUM_RESULTS - 1];
+
+        ValueWires {
+            first_output_value,
+            output_values,
+        }
+    }
+
+    fn build_hash<const NUM_OUTPUT_VALUES: usize>(
+        b: &mut CBuilder,
+        possible_output_hash: [ComputationalHashTarget; NUM_OUTPUT_VALUES],
+        predicate_hash: &ComputationalHashTarget,
+    ) -> Self::HashWires {
+        // Initialize the input wires.
+        let input_wires = InputWires {
+            selector: b.add_virtual_target_arr(),
+            ids: b.add_virtual_target_arr(),
+            is_output_valid: [0; MAX_NUM_RESULTS].map(|_| b.add_virtual_bool_target_safe()),
+        };
+
+        // Compute the computational hash representing the accumulation of the items.
+        let output_hash = Self::output_variant().output_hash_circuit(
+            b,
+            predicate_hash,
+            &possible_output_hash,
+            &input_wires.selector,
+            &input_wires.ids,
+            &input_wires.is_output_valid,
+        );
+
+        // For the no aggregation operations, the first value in V contains the
+        // accumulator, while the other slots are filled by the dummy zero values.
+        // So the circuit claims that there is no aggregation operation on the
+        // first value in V, while all the other values can be simply summed up.
+        let [op_id, op_sum] = [AggregationOperation::IdOp, AggregationOperation::SumOp]
+            .map(|op| b.constant(Identifiers::AggregationOperations(op).to_field()));
+        let ops_ids: Vec<_> = iter::once(op_id)
+            .chain(iter::repeat(op_sum).take(MAX_NUM_RESULTS - 1))
+            .collect();
+        let ops_ids = ops_ids.try_into().unwrap();
+
+        HashWires {
+            input_wires,
+            output_hash,
+            ops_ids,
+        }
     }
 }
 
@@ -497,7 +516,7 @@ mod tests {
     {
         // Circuit wires + output wires + expected wires
         type Wires = (
-            Wires<MAX_NUM_RESULTS>,
+            InputWires<MAX_NUM_RESULTS>,
             TestOutputWires<NUM_COLUMNS, MAX_NUM_RESULTS>,
             TestExpectedWires,
         );
@@ -528,11 +547,15 @@ mod tests {
             );
 
             // Check the first output value and the output hash as expected.
-            b.connect_curve_points(wires.first_output_value, expected.first_output_value);
-            b.connect_hashes(wires.output_hash, expected.output_hash);
+            b.connect_curve_points(
+                wires.value_wires.first_output_value,
+                expected.first_output_value,
+            );
+            b.connect_hashes(wires.hash_wires.output_hash, expected.output_hash);
 
             // Check the remaining output values must be all zeros.
             wires
+                .value_wires
                 .output_values
                 .iter()
                 .for_each(|t| b.enforce_equal_u256(t, &u256_zero));
@@ -540,16 +563,16 @@ mod tests {
             // Check the first OP is ID, and the remainings are SUM.
             let [op_id, op_sum] = [AggregationOperation::IdOp, AggregationOperation::SumOp]
                 .map(|op| b.constant(Identifiers::AggregationOperations(op).to_field()));
-            b.connect(wires.ops_ids[0], op_id);
-            wires.ops_ids[1..]
+            b.connect(wires.hash_wires.ops_ids[0], op_id);
+            wires.hash_wires.ops_ids[1..]
                 .iter()
                 .for_each(|t| b.connect(*t, op_sum));
 
-            (wires, output, expected)
+            (wires.hash_wires.input_wires, output, expected)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.c.assign(pw, &wires.0.input_wires);
+            self.c.assign(pw, &wires.0);
             self.output.assign(pw, &wires.1);
             self.expected.assign(pw, &wires.2);
         }

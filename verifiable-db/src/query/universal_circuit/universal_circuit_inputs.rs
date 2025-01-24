@@ -5,11 +5,14 @@ use std::collections::{btree_set, BTreeSet, HashMap};
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
+    array::ToField,
     utils::{Fieldable, TryIntoBool},
     F,
 };
 
-use crate::query::computational_hash_ids::{Operation, Output, PlaceholderIdentifier};
+use crate::query::computational_hash_ids::{
+    AggregationOperation, ColumnIDs, Identifiers, Operation, Output, PlaceholderIdentifier,
+};
 
 use super::universal_query_circuit::dummy_placeholder_id;
 
@@ -17,20 +20,18 @@ use super::universal_query_circuit::dummy_placeholder_id;
 /// Data structure representing a placeholder in the query, given by its value and its identifier
 pub struct Placeholder {
     pub(crate) value: U256,
-    pub(crate) id: PlaceholderId,
+    pub(crate) id: PlaceholderIdentifier,
 }
-
-pub type PlaceholderId = PlaceholderIdentifier;
 
 /// Define a set of placeholder ids which can be iterated over
 /// following the ids expected for placeholders as outputs of
 /// the revelation circuit
 #[derive(Clone, Debug)]
-pub(crate) struct PlaceholderIdsSet(BTreeSet<PlaceholderId>);
+pub(crate) struct PlaceholderIdsSet(BTreeSet<PlaceholderIdentifier>);
 
-impl<I: Iterator<Item = PlaceholderId>> From<I> for PlaceholderIdsSet {
+impl<I: Iterator<Item = PlaceholderIdentifier>> From<I> for PlaceholderIdsSet {
     fn from(value: I) -> Self {
-        Self(value.collect::<BTreeSet<PlaceholderId>>())
+        Self(value.collect::<BTreeSet<PlaceholderIdentifier>>())
     }
 }
 
@@ -38,9 +39,9 @@ impl<I: Iterator<Item = PlaceholderId>> From<I> for PlaceholderIdsSet {
 /// the ids according to the order expected in the public inputs of the
 /// revelation circuit
 impl IntoIterator for PlaceholderIdsSet {
-    type Item = PlaceholderId;
+    type Item = PlaceholderIdentifier;
 
-    type IntoIter = btree_set::IntoIter<PlaceholderId>;
+    type IntoIter = btree_set::IntoIter<PlaceholderIdentifier>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -48,16 +49,16 @@ impl IntoIterator for PlaceholderIdsSet {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-/// Data structure employed to represent a set of placeholders, identified by their `PlaceholderId`
-pub struct Placeholders(pub HashMap<PlaceholderId, U256>);
+/// Data structure employed to represent a set of placeholders, identified by their `PlaceholderIdentifier`
+pub struct Placeholders(pub HashMap<PlaceholderIdentifier, U256>);
 
 impl Placeholders {
     /// Initialize an empty set of placeholders
     pub fn new_empty(min_query_primary: U256, max_query_primary: U256) -> Self {
         Self(
             [
-                (PlaceholderId::MinQueryOnIdx1, min_query_primary),
-                (PlaceholderId::MaxQueryOnIdx1, max_query_primary),
+                (PlaceholderIdentifier::MinQueryOnIdx1, min_query_primary),
+                (PlaceholderIdentifier::MaxQueryOnIdx1, max_query_primary),
             ]
             .into_iter()
             .collect(),
@@ -65,14 +66,14 @@ impl Placeholders {
     }
 
     /// Get the placeholder value corresponding to `id`, if found in the set of placeholders
-    pub fn get(&self, id: &PlaceholderId) -> Result<U256> {
+    pub fn get(&self, id: &PlaceholderIdentifier) -> Result<U256> {
         let value = self.0.get(id);
         ensure!(value.is_some(), "no placeholder found for id {:?}", id);
         Ok(*value.unwrap())
     }
 
     /// Add a new placeholder to `self`
-    pub fn insert(&mut self, id: PlaceholderId, value: U256) {
+    pub fn insert(&mut self, id: PlaceholderIdentifier, value: U256) {
         self.0.insert(id, value);
     }
 
@@ -106,12 +107,12 @@ impl Placeholders {
     }
 }
 
-impl From<(Vec<(PlaceholderId, U256)>, U256, U256)> for Placeholders {
-    fn from(value: (Vec<(PlaceholderId, U256)>, U256, U256)) -> Self {
+impl From<(Vec<(PlaceholderIdentifier, U256)>, U256, U256)> for Placeholders {
+    fn from(value: (Vec<(PlaceholderIdentifier, U256)>, U256, U256)) -> Self {
         Self(
             [
-                (PlaceholderId::MinQueryOnIdx1, value.1),
-                (PlaceholderId::MaxQueryOnIdx1, value.2),
+                (PlaceholderIdentifier::MinQueryOnIdx1, value.1),
+                (PlaceholderIdentifier::MaxQueryOnIdx1, value.2),
             ]
             .into_iter()
             .chain(value.0)
@@ -124,7 +125,7 @@ impl From<(Vec<(PlaceholderId, U256)>, U256, U256)> for Placeholders {
 /// Enumeration representing all the possible types of input operands for a basic operation
 pub enum InputOperand {
     // Input operand is a placeholder in the query
-    Placeholder(PlaceholderId),
+    Placeholder(PlaceholderIdentifier),
     // Input operand is a constant value in the query
     Constant(U256),
     /// Input operand is a column of the table: the integer stored in this variant is the index
@@ -199,7 +200,7 @@ impl BasicOperation {
     }
 
     /// Return the ids of the placeholders employed as operands of `self`, if any
-    pub(crate) fn extract_placeholder_ids(&self) -> Vec<PlaceholderId> {
+    pub(crate) fn extract_placeholder_ids(&self) -> Vec<PlaceholderIdentifier> {
         let first_id = match self.first_operand {
             InputOperand::Placeholder(p) => Some(p),
             _ => None,
@@ -321,6 +322,18 @@ impl BasicOperation {
 
         Ok((results, arithmetic_error))
     }
+
+    // utility function to locate operation `op` in the set of `previous_ops`
+    #[cfg(test)] // used only in test for now
+    pub(crate) fn locate_previous_operation(previous_ops: &[Self], op: &Self) -> Result<usize> {
+        previous_ops
+            .iter()
+            .find_position(|current_op| *current_op == op)
+            .map(|(pos, _)| pos)
+            .ok_or(anyhow::Error::msg(
+                "operation {} not found in set of previous ops",
+            ))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -411,6 +424,15 @@ impl ResultStructure {
         })
     }
 
+    pub fn aggregation_operations(&self) -> Vec<F> {
+        match self.query_variant() {
+            Output::Aggregation => self.output_ids.clone(),
+            Output::NoAggregation => {
+                vec![Identifiers::AggregationOperations(AggregationOperation::IdOp).to_field()]
+            }
+        }
+    }
+
     pub fn query_variant(&self) -> Output {
         self.output_variant
     }
@@ -482,5 +504,13 @@ impl RowCells {
             .chain(&self.rest)
             .cloned()
             .collect_vec()
+    }
+
+    pub fn column_ids(&self) -> ColumnIDs {
+        ColumnIDs {
+            primary: self.primary.id,
+            secondary: self.secondary.id,
+            rest: self.rest.iter().map(|cell| cell.id).collect_vec(),
+        }
     }
 }

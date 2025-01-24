@@ -5,7 +5,6 @@ use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
 };
-use itertools::Itertools;
 use log::debug;
 use mp2_common::{
     eth::{ProofQuery, StorageSlot, StorageSlotNode},
@@ -17,7 +16,6 @@ use mp2_v1::{
     api::{generate_proof, CircuitInput},
     length_extraction, values_extraction,
 };
-use plonky2::field::types::PrimeField64;
 use rlp::{Prototype, Rlp};
 use std::collections::HashMap;
 
@@ -33,8 +31,6 @@ type SerializedProof = Vec<u8>;
 /// The context during proving
 #[derive(Clone, Copy)]
 struct ProvingContext<'a> {
-    contract_address: &'a Address,
-    chain_id: u64,
     params: &'a PublicParameters,
     slots: &'a HashMap<RawNode, StorageSlotInfo>,
     b: &'a Benchmarker,
@@ -44,20 +40,16 @@ struct ProvingContext<'a> {
 impl<'a> ProvingContext<'a> {
     /// Initialize the proving context.
     fn new(
-        contract_address: &'a Address,
-        chain_id: u64,
         params: &'a PublicParameters,
         slots: &'a HashMap<RawNode, StorageSlotInfo>,
         variable_slot: Option<u8>,
         bench: &'a Benchmarker,
     ) -> Self {
         Self {
-            contract_address,
             params,
             slots,
             variable_slot,
             b: bench,
-            chain_id,
         }
     }
 }
@@ -458,20 +450,11 @@ impl TestStorageTrie {
     /// Generate the proof for the trie.
     pub(crate) fn prove_length(
         &self,
-        contract_address: &Address,
-        chain_id: u64,
         variable_slot: u8,
         params: &PublicParameters,
         b: &Benchmarker,
     ) -> ProofWithVK {
-        let ctx = ProvingContext::new(
-            contract_address,
-            chain_id,
-            params,
-            &self.slots,
-            Some(variable_slot),
-            b,
-        );
+        let ctx = ProvingContext::new(params, &self.slots, Some(variable_slot), b);
 
         // Must prove with 1 slot at least.
         let proof = self.root.as_ref().unwrap().prove_length(ctx);
@@ -480,14 +463,8 @@ impl TestStorageTrie {
     }
 
     /// Generate the proof for the trie.
-    pub(crate) fn prove_value(
-        &self,
-        contract_address: &Address,
-        chain_id: u64,
-        params: &PublicParameters,
-        b: &Benchmarker,
-    ) -> ProofWithVK {
-        let ctx = ProvingContext::new(contract_address, chain_id, params, &self.slots, None, b);
+    pub(crate) fn prove_value(&self, params: &PublicParameters, b: &Benchmarker) -> ProofWithVK {
+        let ctx = ProvingContext::new(params, &self.slots, None, b);
 
         // Must prove with 1 slot at least.
         let proof = self.root.as_ref().unwrap().prove_value(ctx);

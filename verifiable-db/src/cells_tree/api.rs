@@ -216,8 +216,8 @@ impl PublicParameters {
     }
 
     /// Get the proof of an empty node.
-    pub fn empty_node_proof(&self) -> &ProofWithVK {
-        &self.empty_node_proof
+    pub fn empty_cell_tree_proof(&self) -> Result<Vec<u8>> {
+        self.empty_node_proof.serialize()
     }
 }
 
@@ -319,7 +319,7 @@ mod tests {
 
     fn generate_empty_node_proof(params: &PublicParameters) -> Vec<u8> {
         // Get the proof.
-        let proof = params.empty_node_proof().serialize().unwrap();
+        let proof = params.empty_cell_tree_proof().unwrap();
 
         // Check the public inputs.
         let pi = ProofWithVK::deserialize(&proof)
