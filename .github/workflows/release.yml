@@ -22,10 +22,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: chainguard-dev/actions/setup-gitsign@main
-      - name: Install cargo-release
-        uses: taiki-e/install-action@v1
+      - name: Install tooling
+        uses: taiki-e/install-action@v2
         with:
-          tool: cargo-release
+          tool: cargo-release,git-cliff
       - uses: cargo-bins/release-pr@v2
         with:
           version: ${{ inputs.bump }}
