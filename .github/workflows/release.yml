@@ -1,0 +1,22 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    if: startsWith( github.event.head_commit.message, 'release:' )
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get version
+        id: set-tag
+        run:  echo "tag=$(cat VERSION)" >> $GITHUB_OUTPUT
+      - uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          omitBody: true
+          commit: "main"
+          tag: ${{ steps.set-tag.outputs.tag }}
