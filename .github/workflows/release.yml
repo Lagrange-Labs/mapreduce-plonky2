@@ -1,0 +1,33 @@
+name: Open a release PR
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Release Level
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  make-release-pr:
+    permissions:
+      id-token: write
+      pull-requests: write
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: chainguard-dev/actions/setup-gitsign@main
+      - name: Install tooling
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-release,git-cliff
+      - uses: cargo-bins/release-pr@v2
+        with:
+          version: ${{ inputs.bump }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Keep all the crates versions in sync
+          crate-release-all: true
