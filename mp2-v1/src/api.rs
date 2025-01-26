@@ -248,3 +248,28 @@ pub fn metadata_hash(
     // compute final hash
     combine_digest_and_block(contract_digest + value_digest)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deterministic_serialisation() {
+        let params_1 = build_circuits_params();
+        let serialised_1 = bincode::serialize(&params_1).unwrap();
+
+        let params_2 = build_circuits_params();
+        let serialised_2 = bincode::serialize(&params_2).unwrap();
+
+        serialised_1
+            .iter()
+            .zip(serialised_2.iter())
+            .enumerate()
+            .for_each(|(index, (&byte_1, &byte_2))| {
+                assert_eq!(
+                    byte_1, byte_2,
+                    "Parameter serialisations not the same, discrepancy occurs at index: {index}"
+                )
+            })
+    }
+}

@@ -342,6 +342,7 @@ pub(super) mod tests {
     }
 
     #[rstest]
+    #[case(3, 0)]
     #[case(6, 0)]
     #[case(16, 0)]
     #[case(17, 2)]
