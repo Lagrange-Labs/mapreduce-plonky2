@@ -4,11 +4,11 @@ use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use anyhow::Result;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
+    group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
-    serialization::{deserialize, serialize},
     types::{CBuilder, GFp},
     utils::{less_than, Endianness, PackerTarget},
     D,
@@ -16,7 +16,7 @@ use mp2_common::{
 use plonky2::{
     field::types::Field,
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::proof::ProofWithPublicInputsTarget,
@@ -37,9 +37,6 @@ where
     node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
     root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     n_proof_valid: Target,
-    /// The flag is true for `simple` aggregation type, and false for `multiple` type.
-    #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
-    is_simple_aggregation: BoolTarget,
 }
 
 #[derive(Clone, Debug)]
@@ -48,7 +45,6 @@ pub struct BranchCircuit<const NODE_LEN: usize, const N_CHILDREN: usize> {
     pub(crate) common_prefix: Vec<u8>,
     pub(crate) expected_pointer: usize,
     pub(crate) n_proof_valid: usize,
-    pub(crate) is_simple_aggregation: bool,
 }
 
 impl<const NODE_LEN: usize, const N_CHILDREN: usize> BranchCircuit<NODE_LEN, N_CHILDREN>
@@ -67,7 +63,6 @@ where
         let ffalse = b._false();
 
         let n_proof_valid = b.add_virtual_target();
-        let is_simple_aggregation = b.add_virtual_bool_target_safe();
 
         // Build the node and ensure it only includes bytes.
         let node = VectorWire::<Target, { PAD_LEN(NODE_LEN) }>::new(b);
@@ -87,9 +82,7 @@ where
         // addition of all children.
         let mut values_digest = b.curve_zero();
 
-        // Accumulate the metadata digests of each child proof for `simple`
-        // aggregation type, or the digests of each child proof are same for
-        // `multiple` type.
+        // Initialize the metadata digest.
         let mut metadata_digest = b.curve_zero();
 
         // we already decode the RLP headers here since we need it to verify the
@@ -109,16 +102,8 @@ where
 
             let child_digest = proof_inputs.metadata_digest_target();
             if i > 0 {
-                // Check if the metadata digests are same for `multiple` aggregation type.
-                let is_equal = b.curve_eq(metadata_digest, child_digest);
-                let should_check = b.not(is_simple_aggregation);
-                let should_check = b.or(is_equal, should_check);
-                b.connect(is_equal.target, should_check.target);
-
-                // Accumulate the metadata digests for `simple` aggregation type.
-                let should_acc = b.and(should_process, is_simple_aggregation);
-                let child_digest = b.curve_select(should_acc, child_digest, zero_point);
-                metadata_digest = b.curve_add(metadata_digest, child_digest);
+                // Ensure the metadata digests of all child proofs are same.
+                b.connect_curve_points(metadata_digest, child_digest);
             } else {
                 metadata_digest = child_digest;
             }
@@ -176,7 +161,6 @@ where
             common_prefix,
             root,
             n_proof_valid,
-            is_simple_aggregation,
         }
     }
 
@@ -197,7 +181,6 @@ where
             wires.n_proof_valid,
             GFp::from_canonical_usize(self.n_proof_valid),
         );
-        pw.set_bool_target(wires.is_simple_aggregation, self.is_simple_aggregation);
     }
 }
 
@@ -297,44 +280,25 @@ mod tests {
     }
 
     #[test]
-    fn test_values_extraction_branch_circuit_simple_type_without_padding() {
+    fn test_values_extraction_branch_circuit_without_padding() {
         const NODE_LEN: usize = 100;
         const N_REAL: usize = 2;
         const N_PADDING: usize = 0;
 
-        test_branch_circuit::<NODE_LEN, N_REAL, N_PADDING>(true);
+        test_branch_circuit::<NODE_LEN, N_REAL, N_PADDING>();
     }
 
     #[test]
-    fn test_values_extraction_branch_circuit_simple_type_with_padding() {
+    fn test_values_extraction_branch_circuit_with_padding() {
         const NODE_LEN: usize = 100;
         const N_REAL: usize = 2;
         const N_PADDING: usize = 1;
 
-        test_branch_circuit::<NODE_LEN, N_REAL, N_PADDING>(true);
+        test_branch_circuit::<NODE_LEN, N_REAL, N_PADDING>();
     }
 
-    #[test]
-    fn test_values_extraction_branch_circuit_multiple_type_without_padding() {
-        const NODE_LEN: usize = 100;
-        const N_REAL: usize = 2;
-        const N_PADDING: usize = 0;
-
-        test_branch_circuit::<NODE_LEN, N_REAL, N_PADDING>(false);
-    }
-
-    #[test]
-    fn test_values_extraction_branch_circuit_multiple_type_with_padding() {
-        const NODE_LEN: usize = 100;
-        const N_REAL: usize = 2;
-        const N_PADDING: usize = 1;
-
-        test_branch_circuit::<NODE_LEN, N_REAL, N_PADDING>(false);
-    }
-
-    fn test_branch_circuit<const NODE_LEN: usize, const N_REAL: usize, const N_PADDING: usize>(
-        is_simple_aggregation: bool,
-    ) where
+    fn test_branch_circuit<const NODE_LEN: usize, const N_REAL: usize, const N_PADDING: usize>()
+    where
         [(); PAD_LEN(NODE_LEN)]:,
         [(); N_REAL + N_PADDING]:,
     {
@@ -397,19 +361,13 @@ mod tests {
             let leaf = proof.last().unwrap();
             let ptr = compute_key_ptr(leaf);
 
-            let metadata = if is_simple_aggregation {
-                random_vector(20)
-            } else {
-                // Set the same metadata digests for `multiple` aggregation type.
-                metadata.clone()
-            };
             let pi = compute_pi(ptr, &child.key, &child.value, leaf, &metadata);
             assert_eq!(pi.len(), PublicInputs::<F>::TOTAL_LEN);
 
             child.proof = proof.clone();
             child.leaf = leaf.clone();
             child.ptr = ptr;
-            child.metadata = metadata;
+            child.metadata = metadata.clone();
             child.pi = pi;
         }
         let node = children[0].proof[1].clone();
@@ -420,7 +378,6 @@ mod tests {
             common_prefix: bytes_to_nibbles(&children[0].key),
             expected_pointer: children[0].ptr,
             n_proof_valid: N_REAL,
-            is_simple_aggregation,
         };
 
         // Extend the children public inputs by repeatedly copying the last real one as paddings.
@@ -465,21 +422,11 @@ mod tests {
         }
         // Check metadata digest
         {
-            let branch_acc = children
-                .iter()
-                .skip(1)
-                .map(|child| compute_digest(child.metadata.clone()))
-                .fold(
-                    compute_digest(children[0].metadata.clone()),
-                    |acc, digest| {
-                        if is_simple_aggregation {
-                            acc + digest
-                        } else {
-                            assert_eq!(acc, digest);
-                            acc
-                        }
-                    },
-                );
+            let branch_acc = compute_digest(children[0].metadata.clone());
+            children[1..].iter().for_each(|child| {
+                let child_acc = compute_digest(child.metadata.clone());
+                assert_eq!(child_acc, branch_acc);
+            });
 
             assert_eq!(pi.metadata_digest(), branch_acc.to_weierstrass());
         }
