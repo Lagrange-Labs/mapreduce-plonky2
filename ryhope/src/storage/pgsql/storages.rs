@@ -10,8 +10,6 @@ use crate::{
     },
     Epoch, EPOCH, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL,
 };
-use bb8::Pool;
-use bb8_postgres::PostgresConnectionManager;
 use itertools::Itertools;
 use postgres_types::Json;
 use serde::{Deserialize, Serialize};
@@ -20,15 +18,13 @@ use std::{
     fmt::Debug,
     future::Future,
     marker::PhantomData,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
-use tokio::sync::RwLock;
-use tokio_postgres::{self, NoTls, Row, Transaction};
+use tokio::sync::{Mutex, RwLock};
+use tokio_postgres::{self, GenericClient, Row, Transaction};
 use tracing::*;
 
 use super::{CachedValue, PayloadInDb, ToFromBytea, MAX_PGSQL_BIGINT};
-
-pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 
 const PARENT: &str = "__parent";
 const LEFT_CHILD: &str = "__left_child";
@@ -95,20 +91,20 @@ where
     }
 
     /// Return the value associated to the given key at the given epoch.
-    fn fetch_node_at(
-        db: DBPool,
+    fn fetch_node_at<B: GenericClient + Send + Sync>(
+        db: Arc<Mutex<B>>,
         table: &str,
         k: &Self::Key,
         epoch: Epoch,
     ) -> impl Future<Output = Result<Option<Self::Node>, RyhopeError>> + Send;
 
-    fn fetch_all_keys(
-        db: DBPool,
+    fn fetch_all_keys<B: GenericClient + Send + Sync>(
+        db: Arc<Mutex<B>>,
         table: &str,
         epoch: Epoch,
     ) -> impl Future<Output = Result<Vec<Self::Key>, RyhopeError>> + Send {
         async move {
-            let connection = db.get().await.unwrap();
+            let connection = db.lock().await;
             Ok(connection
                 .query(
                     &format!(
@@ -126,13 +122,13 @@ where
     }
 
     /// Return, if a any, a key alive at the give epoch
-    fn fetch_a_key(
-        db: DBPool,
+    fn fetch_a_key<B: GenericClient + Send + Sync>(
+        db: Arc<Mutex<B>>,
         table: &str,
         epoch: Epoch,
     ) -> impl Future<Output = Result<Option<Self::Key>, RyhopeError>> + Send {
         async move {
-            let connection = db.get().await.unwrap();
+            let connection = db.lock().await;
             Ok(connection
                 .query(
                     &format!(
@@ -150,13 +146,13 @@ where
     }
 
     /// Retrieve all the (key, payload) pairs valid at a given epoch
-    fn fetch_all_pairs(
-        db: DBPool,
+    fn fetch_all_pairs<B: GenericClient + Send + Sync>(
+        db: Arc<Mutex<B>>,
         table: &str,
         epoch: Epoch,
     ) -> impl Future<Output = Result<HashMap<Self::Key, V>, RyhopeError>> + std::marker::Send {
         async move {
-            let connection = db.get().await.unwrap();
+            let connection = db.lock().await;
             Ok(connection
                 .query(
                     &format!(
@@ -174,14 +170,14 @@ where
     }
 
     /// Return the value associated to the given key at the given epoch.
-    fn fetch_payload_at(
-        db: DBPool,
+    fn fetch_payload_at<B: GenericClient + Send + Sync>(
+        db: Arc<Mutex<B>>,
         table: &str,
         k: &Self::Key,
         epoch: Epoch,
     ) -> impl std::future::Future<Output = Result<Option<V>, RyhopeError>> + std::marker::Send {
         async move {
-            let connection = db.get().await.unwrap();
+            let connection = db.lock().await;
             connection
             .query(
                 &format!(
@@ -211,10 +207,10 @@ where
 
     fn node_from_row(row: &Row) -> Self::Node;
 
-    fn wide_lineage_between<S: TreeStorage<Self>>(
+    fn wide_lineage_between<S: TreeStorage<Self>, B: GenericClient + Sync + Send>(
         &self,
         s: &S,
-        db: DBPool,
+        db: Arc<Mutex<B>>,
         table: &str,
         keys_query: &str,
         bounds: (Epoch, Epoch),
@@ -222,10 +218,14 @@ where
 
     /// Return the value associated to the given key at the given epoch.
     #[allow(clippy::type_complexity)]
-    fn fetch_many_at<S: TreeStorage<Self>, I: IntoIterator<Item = (Epoch, Self::Key)> + Send>(
+    fn fetch_many_at<
+        S: TreeStorage<Self>,
+        I: IntoIterator<Item = (Epoch, Self::Key)> + Send,
+        B: GenericClient + Send + Sync,
+    >(
         &self,
         s: &S,
-        db: DBPool,
+        db: Arc<Mutex<B>>,
         table: &str,
         data: I,
     ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<Self::Key>, V)>, RyhopeError>> + Send;
@@ -241,14 +241,14 @@ where
         &[]
     }
 
-    async fn fetch_node_at(
-        db: DBPool,
+    async fn fetch_node_at<B: GenericClient + Send + Sync>(
+        db: Arc<Mutex<B>>,
         table: &str,
         k: &NodeIdx,
         epoch: Epoch,
     ) -> Result<Option<()>, RyhopeError> {
-        let connection = db.get().await.unwrap();
-        connection
+        db.lock()
+            .await
             .query(
                 &format!(
                     "SELECT * FROM {} WHERE {KEY}=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}",
@@ -289,10 +289,10 @@ where
             .map(|_| ())
     }
 
-    async fn wide_lineage_between<S: TreeStorage<Self>>(
+    async fn wide_lineage_between<S: TreeStorage<Self>, B: GenericClient + Sync + Send>(
         &self,
         s: &S,
-        db: DBPool,
+        db: Arc<Mutex<B>>,
         table: &str,
         keys_query: &str,
         bounds: (Epoch, Epoch),
@@ -302,9 +302,8 @@ where
         let keys_query = format!("{keys_query} FROM {table}");
         // Execute `keys_query` to retrieve the core keys from the DB
         let core_keys = db
-            .get()
+            .lock()
             .await
-            .map_err(|err| RyhopeError::from_bb8("getting a connection", err))?
             .query(&keys_query, &[])
             .await
             .map_err(|err| {
@@ -334,9 +333,8 @@ where
              WHERE NOT ({VALID_FROM} > $2 OR {VALID_UNTIL} < $1) AND {KEY} = ANY($3)",
         );
         let rows = db
-            .get()
+            .lock()
             .await
-            .map_err(|err| RyhopeError::from_bb8("getting a connection", err))?
             .query(
                 &payload_query,
                 &[
@@ -378,15 +376,16 @@ where
     async fn fetch_many_at<
         S: TreeStorage<Self>,
         I: IntoIterator<Item = (Epoch, Self::Key)> + Send,
+        B: GenericClient + Send + Sync,
     >(
         &self,
         s: &S,
-        db: DBPool,
+        db: Arc<Mutex<B>>,
         table: &str,
         data: I,
     ) -> Result<Vec<(Epoch, NodeContext<Self::Key>, V)>, RyhopeError> {
         let data = data.into_iter().collect::<Vec<_>>();
-        let connection = db.get().await.unwrap();
+        let connection = db.lock().await;
         let immediate_table = data
             .iter()
             .map(|(epoch, key)| {
@@ -446,13 +445,13 @@ where
         ]
     }
 
-    async fn fetch_node_at(
-        db: DBPool,
+    async fn fetch_node_at<B: GenericClient + Send + Sync>(
+        db: Arc<Mutex<B>>,
         table: &str,
         k: &K,
         epoch: Epoch,
     ) -> Result<Option<Self::Node>, RyhopeError> {
-        let connection = db.get().await.unwrap();
+        let connection = db.lock().await;
         connection
             .query(
                 &format!(
@@ -522,10 +521,10 @@ where
             .map(|_| ())
     }
 
-    async fn wide_lineage_between<S: TreeStorage<Self>>(
+    async fn wide_lineage_between<S: TreeStorage<Self>, B: GenericClient + Sync + Send>(
         &self,
         _: &S,
-        db: DBPool,
+        db: Arc<Mutex<B>>,
         table: &str,
         keys_query: &str,
         bounds: (Epoch, Epoch),
@@ -551,7 +550,7 @@ where
             zk_table = table,
             core_keys_query = keys_query,
         );
-        let connection = db.get().await.unwrap();
+        let connection = db.lock().await;
         let rows = connection
             .query(&query, &[&bounds.0, &bounds.1])
             .await
@@ -608,15 +607,16 @@ where
     async fn fetch_many_at<
         S: TreeStorage<Self>,
         I: IntoIterator<Item = (Epoch, Self::Key)> + Send,
+        B: GenericClient + Sync + Send,
     >(
         &self,
         _s: &S,
-        db: DBPool,
+        db: Arc<Mutex<B>>,
         table: &str,
         data: I,
     ) -> Result<Vec<(Epoch, NodeContext<Self::Key>, V)>, RyhopeError> {
         let data = data.into_iter().collect::<Vec<_>>();
-        let connection = db.get().await.unwrap();
+        let connection = db.lock().await;
         let immediate_table = data
             .iter()
             .map(|(epoch, key)| {
@@ -667,9 +667,12 @@ where
 }
 
 /// Stores the chronological evolution of a single value in a CoW manner.
-pub struct CachedDbStore<V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> {
+pub struct CachedDbStore<
+    V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
+    B: GenericClient,
+> {
     /// A pointer to the DB client
-    db: DBPool,
+    db: Arc<Mutex<B>>,
     /// The first valid epoch
     initial_epoch: Epoch,
     /// Whether a transaction is in process
@@ -682,8 +685,15 @@ pub struct CachedDbStore<V: Debug + Clone + Send + Sync + Serialize + for<'a> De
     table: String,
     pub(super) cache: RwLock<Option<V>>,
 }
-impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> CachedDbStore<T> {
-    pub fn new(initial_epoch: Epoch, current_epoch: Epoch, table: String, db: DBPool) -> Self {
+impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>, B: GenericClient>
+    CachedDbStore<T, B>
+{
+    pub fn new(
+        initial_epoch: Epoch,
+        current_epoch: Epoch,
+        table: String,
+        db: Arc<Mutex<B>>,
+    ) -> Self {
         Self {
             initial_epoch,
             db,
@@ -701,12 +711,12 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
     pub async fn with_value(
         initial_epoch: Epoch,
         table: String,
-        db: DBPool,
+        db: Arc<Mutex<B>>,
         t: T,
     ) -> Result<Self, RyhopeError> {
         {
-            let connection = db.get().await.unwrap();
-            connection
+            db.lock()
+                .await
                 .query(
                     &format!(
                         "INSERT INTO {}_meta ({VALID_FROM}, {VALID_UNTIL}, {PAYLOAD})
@@ -789,9 +799,10 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
     }
 }
 
-impl<T> TransactionalStorage for CachedDbStore<T>
+impl<T, B> TransactionalStorage for CachedDbStore<T, B>
 where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
+    B: GenericClient,
 {
     fn start_transaction(&mut self) -> Result<(), RyhopeError> {
         trace!("[{self}] starting transaction");
@@ -809,9 +820,9 @@ where
             return Err(RyhopeError::NotInATransaction);
         }
 
-        let pool = self.db.clone();
-        let mut connection = pool.get().await.unwrap();
-        let mut db_tx = connection
+        let db = self.db.clone();
+        let mut db = db.lock().await;
+        let mut db_tx = db
             .transaction()
             .await
             .expect("unable to create DB transaction");
@@ -826,7 +837,7 @@ where
     }
 }
 
-impl<T> std::fmt::Display for CachedDbStore<T>
+impl<T, B: GenericClient> std::fmt::Display for CachedDbStore<T, B>
 where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
 {
@@ -835,7 +846,7 @@ where
     }
 }
 
-impl<T> SqlTransactionStorage for CachedDbStore<T>
+impl<T, B: GenericClient> SqlTransactionStorage for CachedDbStore<T, B>
 where
     T: Debug + Clone + Serialize + for<'a> Deserialize<'a> + Send + Sync,
 {
@@ -858,9 +869,10 @@ where
     }
 }
 
-impl<T> EpochStorage<T> for CachedDbStore<T>
+impl<T, B> EpochStorage<T> for CachedDbStore<T, B>
 where
     T: Debug + Clone + Sync + Serialize + for<'a> Deserialize<'a> + Send,
+    B: GenericClient + Send + Sync,
 {
     async fn fetch(&self) -> Result<T, RyhopeError> {
         trace!("[{self}] fetching payload");
@@ -875,8 +887,7 @@ where
 
     async fn fetch_at(&self, epoch: Epoch) -> Result<T, RyhopeError> {
         trace!("[{self}] fetching payload at {}", epoch);
-        let connection = self.db.get().await.unwrap();
-        connection
+        self.db.lock().await
             .query_one(
                 &format!(
                     "SELECT {PAYLOAD} FROM {}_meta WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
@@ -927,8 +938,13 @@ where
         )?;
 
         let _ = self.cache.get_mut().take();
-        let mut connection = self.db.get().await.unwrap();
-        let db_tx = connection
+        let db = self.db.clone();
+        let mut db = db.lock().await;
+        let mut db_tx = db
+            .transaction()
+            .await
+            .expect("unable to create DB transaction");
+        db_tx
             .transaction()
             .await
             .expect("unable to create DB transaction");
@@ -969,18 +985,19 @@ where
 /// A `CachedDbStore` keeps a cache of all the storage operations that occured
 /// during the current transaction, while falling back to the given database
 /// when referring to older epochs.
-pub struct CachedDbTreeStore<T, V>
+pub struct CachedDbTreeStore<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
+    B: GenericClient + Send + Sync,
 {
     /// The initial epoch
     initial_epoch: Epoch,
     /// The latest *commited* epoch
     epoch: Epoch,
     /// A pointer to the DB client
-    db: DBPool,
+    db: Arc<Mutex<B>>,
     /// DB backing this cache
     table: String,
     /// Operations pertaining to the in-process transaction.
@@ -988,29 +1005,36 @@ where
     pub(super) payload_cache: HashMap<T::Key, Option<CachedValue<V>>>,
     _p: PhantomData<T>,
 }
-impl<T, V> std::fmt::Display for CachedDbTreeStore<T, V>
+impl<T, V, B> std::fmt::Display for CachedDbTreeStore<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
+    B: GenericClient + Send + Sync,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TreeStore {}@{}", self.table, self.epoch)
     }
 }
-impl<T, V> CachedDbTreeStore<T, V>
+impl<T, V, B> CachedDbTreeStore<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
+    B: GenericClient + Send + Sync,
 {
-    pub fn new(initial_epoch: Epoch, current_epoch: Epoch, table: String, db: DBPool) -> Self {
+    pub fn new(
+        initial_epoch: Epoch,
+        current_epoch: Epoch,
+        table: String,
+        db: Arc<Mutex<B>>,
+    ) -> Self {
         trace!("[{}] initializing CachedDbTreeStore", table);
         CachedDbTreeStore {
             initial_epoch,
             epoch: current_epoch,
             table,
-            db: db.clone(),
+            db,
             nodes_cache: Default::default(),
             payload_cache: Default::default(),
             _p: PhantomData,
@@ -1040,8 +1064,9 @@ where
     }
 
     pub async fn size_at(&self, epoch: Epoch) -> usize {
-        let connection = self.db.get().await.unwrap();
-        connection
+        self.db
+            .lock()
+            .await
             .query_one(
                 &format!(
                     "SELECT COUNT(*) FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
@@ -1077,7 +1102,7 @@ where
 
         self.nodes_cache.clear();
         self.payload_cache.clear();
-        let mut connection = self.db.get().await.unwrap();
+        let mut connection = self.db.lock().await;
         let db_tx = connection
             .transaction()
             .await
@@ -1118,29 +1143,32 @@ where
 /// two different specializations of the same trait for the same type; otherwise
 /// [`RoEpochKvStorage`] and [`EpochKvStorage`] could be directly implemented
 /// for [`CachedDbTreeStore`] for both `<T::Key, T::Node>` and `<T::Key, V>`.
-pub struct NodeProjection<T, V>
+pub struct NodeProjection<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
+    B: GenericClient + Send + Sync,
 {
-    pub(super) wrapped: Arc<Mutex<CachedDbTreeStore<T, V>>>,
+    pub(super) wrapped: Arc<std::sync::Mutex<CachedDbTreeStore<T, V, B>>>,
 }
-impl<T, V> std::fmt::Display for NodeProjection<T, V>
+impl<T, V, B> std::fmt::Display for NodeProjection<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: PayloadInDb,
+    B: GenericClient + Send + Sync,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/Nodes", self.wrapped.lock().unwrap())
     }
 }
-impl<T, V> RoEpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
+impl<T, V, B> RoEpochKvStorage<T::Key, T::Node> for NodeProjection<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: PayloadInDb,
+    B: GenericClient + Send + Sync,
 {
     delegate::delegate! {
         to self.wrapped.lock().unwrap() {
@@ -1211,12 +1239,13 @@ where
         self.try_fetch_at(k, epoch).await.map(|x| x.is_some())
     }
 }
-impl<T, V> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V>
+impl<T, V, B> EpochKvStorage<T::Key, T::Node> for NodeProjection<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     V: PayloadInDb,
+    B: GenericClient + Send + Sync,
 {
     delegate::delegate! {
         to self.wrapped.lock().unwrap() {
@@ -1285,30 +1314,33 @@ where
 /// otherwise [`RoEpochKvStorage`] and [`EpochKvStorage`] could be directly
 /// implemented for [`CachedDbTreeStore`] for both `<T::Key, T::Node>` and
 /// `<T::Key, V>`.
-pub struct PayloadProjection<T, V>
+pub struct PayloadProjection<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>,
+    B: GenericClient + Send + Sync,
 {
-    pub(super) wrapped: Arc<Mutex<CachedDbTreeStore<T, V>>>,
+    pub(super) wrapped: Arc<std::sync::Mutex<CachedDbTreeStore<T, V, B>>>,
 }
-impl<T, V> std::fmt::Display for PayloadProjection<T, V>
+impl<T, V, B> std::fmt::Display for PayloadProjection<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: PayloadInDb,
+    B: GenericClient + Send + Sync,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/Payload", self.wrapped.lock().unwrap())
     }
 }
 
-impl<T, V> RoEpochKvStorage<T::Key, V> for PayloadProjection<T, V>
+impl<T, V, B> RoEpochKvStorage<T::Key, V> for PayloadProjection<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     V: PayloadInDb,
+    B: GenericClient + Send + Sync,
 {
     delegate::delegate! {
         to self.wrapped.lock().unwrap() {
@@ -1371,12 +1403,13 @@ where
         T::fetch_all_pairs(db, &table, epoch).await
     }
 }
-impl<T, V> EpochKvStorage<T::Key, V> for PayloadProjection<T, V>
+impl<T, V, B> EpochKvStorage<T::Key, V> for PayloadProjection<T, V, B>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
     T::Node: Sync + Clone,
     V: PayloadInDb,
+    B: GenericClient + Send + Sync,
 {
     delegate::delegate! {
         to self.wrapped.lock().unwrap() {

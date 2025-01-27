@@ -28,8 +28,9 @@ use super::{
     TestContext,
 };
 
-pub type IndexStorage = PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>>;
-pub type MerkleIndexTree = MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>;
+pub type IndexStorage<B> = PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>, B>;
+pub type MerkleIndexTree<B> =
+    MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage<B>>;
 
 impl TestContext {
     /// NOTE: we require the added_index information because we need to distinguish if a new node

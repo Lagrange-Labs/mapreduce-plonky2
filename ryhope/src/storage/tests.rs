@@ -5,14 +5,14 @@ use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use tokio_postgres::NoTls;
+use tokio_postgres::{Client, NoTls};
 
 pub type DBPool = bb8::Pool<PostgresConnectionManager<NoTls>>;
 
 use crate::{
     storage::{
         memory::InMemory,
-        pgsql::{PgsqlStorage, SqlServerConnection, SqlStorageSettings},
+        pgsql::{PgsqlStorage, SqlStorageSettings},
         EpochKvStorage, PayloadStorage, RoEpochKvStorage, SqlTreeTransactionalStorage, TreeStorage,
     },
     tree::{
@@ -101,15 +101,12 @@ async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
     type V = usize;
 
     type TestTree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<TestTree, V>;
+    type Storage = PgsqlStorage<TestTree, V, Client>;
     let table = format!("simple_{}", initial_epoch);
 
     let mut s = MerkleTreeKvDb::<TestTree, V, Storage>::new(
         InitSettings::ResetAt(scapegoat::Tree::empty(Alpha::new(0.8)), initial_epoch),
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table: table.clone(),
-        },
+        SqlStorageSettings::from_url(&db_url(), table.clone()).await?,
     )
     .await?;
     with_storage(&mut s).await?;
@@ -118,10 +115,7 @@ async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
 
     let s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
         InitSettings::MustExist,
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table,
-        },
+        SqlStorageSettings::from_url(&db_url(), table).await?,
     )
     .await?;
     println!("New one");
@@ -256,15 +250,12 @@ impl From<&str> for ShaizedString {
 async fn sbbst_storage_in_pgsql() -> Result<()> {
     type V = ShaizedString;
     type TestTree = sbbst::Tree;
-    type SqlStorage = PgsqlStorage<TestTree, V>;
+    type SqlStorage = PgsqlStorage<TestTree, V, Client>;
     type RamStorage = InMemory<TestTree, V>;
 
     let mut s_psql = MerkleTreeKvDb::<TestTree, V, SqlStorage>::new(
         InitSettings::Reset(sbbst::Tree::empty()),
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table: "simple_sbbst".to_string(),
-        },
+        SqlStorageSettings::from_url(&db_url(), "simple_sbbst".to_string()).await?,
     )
     .await?;
 
@@ -296,10 +287,7 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
 
     let s2 = MerkleTreeKvDb::<TestTree, V, SqlStorage>::new(
         InitSettings::MustExist,
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table: "simple_sbbst".to_string(),
-        },
+        SqlStorageSettings::from_url(&db_url(), "simple_sbbst".to_string()).await?,
     )
     .await?;
     println!("New one");
@@ -458,15 +446,12 @@ async fn hashes_pgsql() -> Result<()> {
     type V = ShaizedString;
 
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, Client>;
 
     {
         let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
             InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
-            SqlStorageSettings {
-                source: SqlServerConnection::NewConnection(db_url()),
-                table: "test_hashes".into(),
-            },
+            SqlStorageSettings::from_url(&db_url(), "test_hashes".to_string()).await?,
         )
         .await?;
 
@@ -498,10 +483,7 @@ async fn hashes_pgsql() -> Result<()> {
     {
         let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
             InitSettings::MustExist,
-            SqlStorageSettings {
-                source: SqlServerConnection::NewConnection(db_url()),
-                table: "test_hashes".into(),
-            },
+            SqlStorageSettings::from_url(&db_url(), "test_hashes".to_string()).await?,
         )
         .await?;
 
@@ -555,14 +537,11 @@ async fn thousand_rows() -> Result<()> {
     type K = i64;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, Client>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table: "thousand".to_string(),
-        },
+        SqlStorageSettings::from_url(&db_url(), "thousand".to_string()).await?,
     )
     .await?;
 
@@ -648,13 +627,10 @@ async fn aggregation_pgsql() -> Result<()> {
     type Tree = sbbst::Tree;
     type V = MinMaxi64;
 
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, Client>;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::ResetAt(Tree::empty(), 32),
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table: "agg".to_string(),
-        },
+        SqlStorageSettings::from_url(&db_url(), "agg".to_string()).await?,
     )
     .await?;
 
@@ -773,13 +749,12 @@ async fn rollback_psql() {
     type V = MinMaxi64;
     type Tree = scapegoat::Tree<K>;
 
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, Client>;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::new(0.7))),
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table: "rollback".to_string(),
-        },
+        SqlStorageSettings::from_url(&db_url(), "rollback".to_string())
+            .await
+            .unwrap(),
     )
     .await
     .expect("unable to initialize tree");
@@ -794,13 +769,12 @@ async fn rollback_psql_at() {
     type Tree = scapegoat::Tree<K>;
 
     const INITIAL_EPOCH: Epoch = 4875;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, Client>;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::ResetAt(Tree::empty(Alpha::new(0.7)), INITIAL_EPOCH),
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table: "rollback_at".to_string(),
-        },
+        SqlStorageSettings::from_url(&db_url(), "rollback_at".to_string())
+            .await
+            .unwrap(),
     )
     .await
     .expect("unable to initialize tree");
@@ -862,16 +836,15 @@ async fn initial_state() {
     type K = i64;
     type V = MinMaxi64;
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, Client>;
 
     // Create an empty tree
     {
         let _ = MerkleTreeKvDb::<Tree, V, Storage>::new(
             InitSettings::Reset(Tree::empty(Alpha::new(0.8))),
-            SqlStorageSettings {
-                source: SqlServerConnection::NewConnection(db_url()),
-                table: "empty_tree".to_string(),
-            },
+            SqlStorageSettings::from_url(&db_url(), "empty_tree".to_string())
+                .await
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -880,10 +853,9 @@ async fn initial_state() {
     {
         let s_init = MerkleTreeKvDb::<Tree, V, Storage>::new(
             InitSettings::MustExist,
-            SqlStorageSettings {
-                source: SqlServerConnection::NewConnection(db_url()),
-                table: "empty_tree".to_string(),
-            },
+            SqlStorageSettings::from_url(&db_url(), "empty_tree".to_string())
+                .await
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -948,26 +920,20 @@ async fn grouped_txs() -> Result<()> {
     type V = MinMaxi64;
 
     type SbbstTree = sbbst::Tree;
-    type SbbstStorage = PgsqlStorage<SbbstTree, V>;
+    type SbbstStorage = PgsqlStorage<SbbstTree, V, Client>;
     type ScapeTree = scapegoat::Tree<K>;
-    type ScapeStorage = PgsqlStorage<ScapeTree, V>;
+    type ScapeStorage = PgsqlStorage<ScapeTree, V, Client>;
 
     let mut t1 = MerkleTreeKvDb::<SbbstTree, V, SbbstStorage>::new(
         InitSettings::Reset(Tree::empty()),
-        SqlStorageSettings {
-            table: "nested_sbbst".into(),
-            source: SqlServerConnection::Pool(db_pool.clone()),
-        },
+        SqlStorageSettings::from_url(&db_url(), "nested_sbbst".to_string()).await?,
     )
     .await
     .context("while initializing SBBST")?;
 
     let mut t2 = MerkleTreeKvDb::<ScapeTree, V, ScapeStorage>::new(
         InitSettings::Reset(scapegoat::Tree::empty(Alpha::fully_balanced())),
-        SqlStorageSettings {
-            table: "nested_scape".into(),
-            source: SqlServerConnection::Pool(db_pool.clone()),
-        },
+        SqlStorageSettings::from_url(&db_url(), "nested_scape".to_string()).await?,
     )
     .await
     .context("while initializing scapegoat")?;
@@ -1048,14 +1014,13 @@ async fn fetch_many() {
     type K = String;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, Client>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table: "many".to_string(),
-        },
+        SqlStorageSettings::from_url(&db_url(), "many".to_string())
+            .await
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -1128,14 +1093,13 @@ async fn wide_update_trees() {
     type K = String;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, Client>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table: "wide".to_string(),
-        },
+        SqlStorageSettings::from_url(&db_url(), "wide".to_string())
+            .await
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -1189,14 +1153,13 @@ async fn all_pgsql() {
     type K = String;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, Client>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url()),
-            table: "fetch_all".to_string(),
-        },
+        SqlStorageSettings::from_url(&db_url(), "fetch_all".to_string())
+            .await
+            .unwrap(),
     )
     .await
     .unwrap();

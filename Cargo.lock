@@ -3588,6 +3588,7 @@ dependencies = [
  "serde",
  "tabled",
  "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]

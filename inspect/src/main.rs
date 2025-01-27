@@ -4,7 +4,7 @@ use index::{IndexDb, IndexPayloadFormatter};
 use repl::Repl;
 use rows::{RowDb, RowPayloadFormatter};
 use ryhope::{
-    storage::pgsql::{SqlServerConnection, SqlStorageSettings, ToFromBytea},
+    storage::pgsql::{SqlStorageSettings, ToFromBytea},
     Epoch, InitSettings,
 };
 use serde::Serialize;
@@ -74,10 +74,7 @@ async fn main() -> Result<()> {
         } => {
             let tree_db = RowDb::new(
                 InitSettings::MustExist,
-                SqlStorageSettings {
-                    source: SqlServerConnection::NewConnection(args.db_uri.clone()),
-                    table: args.db_table,
-                },
+                SqlStorageSettings::from_url(&args.db_uri, args.db_table.clone()).await?,
             )
             .await?;
 
@@ -98,10 +95,7 @@ async fn main() -> Result<()> {
         TreeReader::IndexTree => {
             let tree_db = IndexDb::new(
                 InitSettings::MustExist,
-                SqlStorageSettings {
-                    source: SqlServerConnection::NewConnection(args.db_uri.clone()),
-                    table: args.db_table,
-                },
+                SqlStorageSettings::from_url(&args.db_uri, args.db_table.clone()).await?,
             )
             .await?;
 

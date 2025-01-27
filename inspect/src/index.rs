@@ -8,13 +8,14 @@ use mp2_v1::indexing::{
 };
 use ryhope::{storage::pgsql::PgsqlStorage, MerkleTreeKvDb};
 use tabled::{builder::Builder, settings::Style};
+use tokio_postgres::Client;
 
 use crate::repl::PayloadFormatter;
 
 pub(crate) type IndexDb = MerkleTreeKvDb<
     BlockTree,
     IndexNode<BlockPrimaryIndex>,
-    PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>>,
+    PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>, Client>,
 >;
 
 struct IndexPayloadFormatterDisplay {
