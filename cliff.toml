@@ -4,6 +4,9 @@
 # Lines starting with "#" are comments.
 # Configuration options are organized into tables and keys.
 # See documentation for more information on available options.
+[remote.github]
+owner = "Lagrange-Labs"
+repo = "mapreduce-plonky2"
 
 [changelog]
 # template for the changelog header
@@ -20,8 +23,8 @@ body = """
 {% endif %}\
 {% if previous %}\
     {% if previous.commit_id and commit_id %}
-        [{{ previous.commit_id | truncate(length=7, end="") }}]({{ previous.commit_id }})...\
-            [{{ commit_id | truncate(length=7, end="") }}]({{ commit_id }})
+        [{{ previous.commit_id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ previous.commit_id }})...\
+            [{{ commit_id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ commit_id }})
     {% endif %}\
 {% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
@@ -29,7 +32,10 @@ body = """
     {% for commit in commits | filter(attribute="scope") | sort(attribute="scope") %}
         - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
             {% if commit.breaking %}[**breaking**] {% endif %}\
-            {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}]({{ commit.id }}))\\
+            {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ commit.id }}))\\
+                {% if commit.remote.pr_number %} in \
+      [#{{ commit.remote.pr_number }}]({{ self::remote_url() }}/pull/{{ commit.remote.pr_number }}) \
+    {%- endif %}
     {% endfor %}
      {% raw %}\n{% endraw %}\
     {%- for commit in commits %}
@@ -37,6 +43,10 @@ body = """
     {% endfor -%}
     {% raw %}\n{% endraw %}\
 {% endfor %}\n
+
+{%- macro remote_url() -%}
+  https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}
+{%- endmacro -%}
 """
 # template for the changelog footer
 footer = """
