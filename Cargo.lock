@@ -2968,7 +2968,7 @@ dependencies = [
 
 [[package]]
 name = "gnark-utils"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2987,7 +2987,7 @@ dependencies = [
 
 [[package]]
 name = "groth16_framework"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "alloy",
  "anyhow",
@@ -3575,7 +3575,7 @@ dependencies = [
 
 [[package]]
 name = "inspect"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3922,7 +3922,7 @@ dependencies = [
 
 [[package]]
 name = "mp2_common"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "alloy",
  "anyhow",
@@ -3953,7 +3953,7 @@ dependencies = [
 
 [[package]]
 name = "mp2_test"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "alloy",
  "anyhow",
@@ -3971,7 +3971,7 @@ dependencies = [
 
 [[package]]
 name = "mp2_v1"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "alloy",
  "anyhow",
@@ -4352,7 +4352,7 @@ dependencies = [
 
 [[package]]
 name = "parsil"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "alloy",
  "anyhow",
@@ -5012,7 +5012,7 @@ dependencies = [
 
 [[package]]
 name = "recursion_framework"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -5504,7 +5504,7 @@ dependencies = [
 
 [[package]]
 name = "ryhope"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "bb8",
@@ -6951,7 +6951,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "verifiable-db"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "alloy",
  "anyhow",
