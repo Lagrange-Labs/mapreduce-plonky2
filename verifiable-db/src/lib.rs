@@ -18,3 +18,8 @@ pub mod results_tree;
 pub mod revelation;
 pub mod row_tree;
 pub mod test_utils;
+
+/// Return the current version of the library.
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
