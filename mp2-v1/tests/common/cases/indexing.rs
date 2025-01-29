@@ -26,13 +26,7 @@ use plonky2::{
     plonk::config::Hasher,
 };
 use rand::{thread_rng, Rng};
-use ryhope::{
-    storage::{
-        pgsql::{SqlServerConnection, SqlStorageSettings},
-        RoEpochKvStorage,
-    },
-    InitSettings,
-};
+use ryhope::storage::RoEpochKvStorage;
 
 use crate::common::{
     bindings::eventemitter::EventEmitter::{self, EventEmitterInstance},
@@ -49,10 +43,10 @@ use crate::common::{
         TableIndexing,
     },
     proof_storage::{ProofKey, ProofStorage},
-    rowtree::{MerkleRowTree, SecondaryIndexCell},
+    rowtree::SecondaryIndexCell,
     table::{
-        row_table_name, CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns,
-        TableRowUniqueID, TreeRowUpdate, TreeUpdateType,
+        CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TableRowUniqueID,
+        TreeRowUpdate, TreeUpdateType,
     },
     TableInfo, TestContext,
 };
@@ -125,7 +119,7 @@ fn single_value_slot_inputs() -> Vec<SlotInput> {
     slot_inputs
 }
 
-pub(crate) const TX_INDEX_COLUMN: &str = "tx index";
+pub(crate) const TX_INDEX_COLUMN: &str = "tx_index";
 
 impl<T: TableSource> TableIndexing<T> {
     pub(crate) async fn merge_table_test_case(
@@ -703,7 +697,7 @@ impl<T: TableSource> TableIndexing<T> {
         .await;
         Ok((
             TableIndexing::<T> {
-                value_column: "".to_string(),
+                value_column: table.columns.rest[0].name.clone(),
                 source,
                 table,
                 contract,
@@ -739,22 +733,24 @@ impl<T: TableSource> TableIndexing<T> {
             if table_row_updates.is_empty() {
                 continue;
             }
+
             // If we are dealing with receipts we need to remove everything already in the row tree
             let bn = ctx.block_number().await as BlockPrimaryIndex;
 
-            if let ChangeType::Receipt(..) = ut {
-                let db_url =
-                    std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
-                self.table.row = MerkleRowTree::new(
-                    InitSettings::MustExist,
-                    SqlStorageSettings {
-                        table: row_table_name(&self.table.public_name),
-                        source: SqlServerConnection::NewConnection(db_url.clone()),
-                    },
-                )
-                .await
-                .unwrap();
-            }
+            let table_row_updates = if let ChangeType::Receipt(..) = ut {
+                let current_row_epoch = self.table.row.current_epoch();
+                let current_row_keys = self
+                    .table
+                    .row
+                    .keys_at(current_row_epoch)
+                    .await
+                    .into_iter()
+                    .map(TableRowUpdate::<BlockPrimaryIndex>::Deletion)
+                    .collect::<Vec<_>>();
+                [current_row_keys, table_row_updates].concat()
+            } else {
+                table_row_updates
+            };
 
             log::info!("Applying follow up updates to contract done - now at block {bn}",);
             // we first run the initial preprocessing and db creation.
