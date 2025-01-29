@@ -10,92 +10,81 @@ use super::column_info::{
 use itertools::Itertools;
 use mp2_common::{
     array::{Array, Targetable},
-    eth::EventLogInfo,
+    eth::{left_pad32, EventLogInfo},
     group_hashing::CircuitBuilderGroupHashing,
-    poseidon::H,
-    serialization::{deserialize_long_array, serialize_long_array},
+    poseidon::{empty_poseidon_hash, hash_to_int_value, H},
+    serialization::{
+        deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
+    },
     types::{CBuilder, HashOutput},
-    u256::{CircuitBuilderU256, UInt256Target},
-    utils::{Endianness, Packer},
+    utils::{Endianness, Packer, ToFields},
     F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
+    hash::hash_types::HashOut,
     iop::{
-        target::Target,
+        target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::config::Hasher,
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecgfp5::{
-    curve::curve::Point,
+    curve::{curve::Point, scalar_field::Scalar},
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
-use std::{array, iter::once};
+use std::{array, borrow::Borrow, iter::once};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableMetadata<const MAX_COLUMNS: usize, const INPUT_COLUMNS: usize>
-where
-    [(); MAX_COLUMNS - INPUT_COLUMNS]:,
-{
+/// This struct stores the [`InputColumnInfo`] and [`ExtractedColumnInfo`] for an object that we wish to index.
+/// `input_columns` are columns whose values must be provided to an extraction circuit as witness directly, for instance mapping keys for storage variables
+/// or the transaction index for receipts. There will be fixed amount of them per object type that we are indexing so we can safely store them as a vec.
+/// `extracted_columns` are columns whose values are stored in the value part of an MPT node.
+/// `num_actual_columns` is the number of columns that aren't dummy columns. We need this since a circuit has to always have the same number of columns but not every table will need all of them.
+///
+/// We use this struct so we can store all information about the columns of a table easily and use it to calculate value and metadata digests.
+pub struct TableMetadata {
     /// Columns that aren't extracted from the node, like the mapping keys
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) input_columns: [InputColumnInfo; INPUT_COLUMNS],
+    pub(crate) input_columns: Vec<InputColumnInfo>,
     /// The extracted column info
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) extracted_columns: [ExtractedColumnInfo; MAX_COLUMNS - INPUT_COLUMNS],
+    pub(crate) extracted_columns: Vec<ExtractedColumnInfo>,
     /// Actual column number
     pub(crate) num_actual_columns: usize,
 }
 
-impl<const MAX_COLUMNS: usize, const INPUT_COLUMNS: usize> TableMetadata<MAX_COLUMNS, INPUT_COLUMNS>
-where
-    [(); MAX_COLUMNS - INPUT_COLUMNS]:,
-{
-    /// Create a new instance of [`TableColumns`] from a slice of [`ColumnInfo`] we assume that the columns are sorted into a predetermined order.
+impl TableMetadata {
+    /// Create a new instance of [`TableMetadata`] from a slice of [`InputColumnInfo`] and a slice of [`ExtractedColumnInfo`] we assume that the columns are sorted into a predetermined order.
     pub fn new(
-        input_columns: &[InputColumnInfo; INPUT_COLUMNS],
+        input_columns: &[InputColumnInfo],
         extracted_columns: &[ExtractedColumnInfo],
-    ) -> TableMetadata<MAX_COLUMNS, INPUT_COLUMNS> {
-        let num_actual_columns = extracted_columns.len() + INPUT_COLUMNS;
-        // Check that we don't have too many columns
-        assert!(num_actual_columns <= MAX_COLUMNS);
+    ) -> TableMetadata {
+        let num_actual_columns = extracted_columns.len() + input_columns.len();
 
-        let mut table_info = [ExtractedColumnInfo::default(); { MAX_COLUMNS - INPUT_COLUMNS }];
-        table_info
-            .iter_mut()
-            .zip(extracted_columns)
-            .for_each(|(ti, &column)| *ti = column);
-
-        TableMetadata::<MAX_COLUMNS, INPUT_COLUMNS> {
-            input_columns: input_columns.clone(),
-            extracted_columns: table_info,
+        TableMetadata {
+            input_columns: input_columns.to_vec(),
+            extracted_columns: extracted_columns.to_vec(),
             num_actual_columns,
         }
     }
 
     /// Create a sample MPT metadata. It could be used in testing.
-    pub fn sample(
+    pub fn sample<const NUM_EXTRACTED_COLUMNS: usize>(
         flag: bool,
-        input_prefixes: &[&[u8]; INPUT_COLUMNS],
+        input_prefixes: &[&[u8]],
         extraction_identifier: &[u8],
         location_offset: F,
     ) -> Self {
         let rng = &mut thread_rng();
 
         let input_columns = input_prefixes
-            .map(|prefix| InputColumnInfo::new(extraction_identifier, rng.gen(), prefix, 32));
+            .iter()
+            .map(|prefix| InputColumnInfo::new(extraction_identifier, rng.gen(), prefix, 32))
+            .collect::<Vec<InputColumnInfo>>();
 
-        let num_actual_columns = rng.gen_range(1..=MAX_COLUMNS - INPUT_COLUMNS);
+        let num_actual_columns = rng.gen_range(1..=NUM_EXTRACTED_COLUMNS);
 
         let mut extraction_vec = extraction_identifier.pack(Endianness::Little);
         extraction_vec.resize(8, 0u32);
@@ -111,7 +100,7 @@ where
             .map(|_| ExtractedColumnInfo::sample(flag, &extraction_id, location_offset))
             .collect::<Vec<ExtractedColumnInfo>>();
 
-        TableMetadata::<MAX_COLUMNS, INPUT_COLUMNS>::new(&input_columns, &extracted_columns)
+        TableMetadata::new(&input_columns, &extracted_columns)
     }
 
     /// Get the input columns
@@ -121,7 +110,7 @@ where
 
     /// Get the columns we actually extract from
     pub fn extracted_columns(&self) -> &[ExtractedColumnInfo] {
-        &self.extracted_columns[..self.num_actual_columns - INPUT_COLUMNS]
+        &self.extracted_columns[..self.num_actual_columns - self.input_columns.len()]
     }
 
     /// Compute the metadata digest.
@@ -145,54 +134,36 @@ where
     }
 
     /// Computes the value digest for a provided value array and the unique row_id
-    pub fn input_value_digest(
-        &self,
-        input_vals: &[&[u8; 32]; INPUT_COLUMNS],
-    ) -> (Point, HashOutput) {
+    pub fn input_value_digest<T: Borrow<[u8; 32]>>(&self, input_vals: &[T]) -> (Point, HashOutput) {
+        // Make sure we have the same number of input values and columns
+        assert_eq!(input_vals.len(), self.input_columns.len());
+
         let point = self
             .input_columns()
             .iter()
             .zip(input_vals.iter())
             .fold(Point::NEUTRAL, |acc, (column, value)| {
-                acc + column.value_digest(value.as_slice())
+                acc + column.value_digest(value.borrow())
             });
 
         let row_id_input = input_vals
-            .map(|key| {
-                key.pack(Endianness::Big)
+            .iter()
+            .flat_map(|key| {
+                key.borrow()
+                    .pack(Endianness::Big)
                     .into_iter()
                     .map(F::from_canonical_u32)
             })
-            .into_iter()
-            .flatten()
             .collect::<Vec<F>>();
 
         (point, H::hash_no_pad(&row_id_input).into())
     }
 
-    pub fn extracted_value_digest(
-        &self,
-        value: &[u8],
-        extraction_id: &[u8],
-        location_offset: F,
-    ) -> Point {
-        let mut extraction_vec = extraction_id.pack(Endianness::Little);
-        extraction_vec.resize(8, 0u32);
-        extraction_vec.reverse();
-        let extraction_id: [F; 8] = extraction_vec
-            .into_iter()
-            .map(F::from_canonical_u32)
-            .collect::<Vec<F>>()
-            .try_into()
-            .expect("This should never fail");
-
+    pub fn extracted_value_digest(&self, value: &[u8], location_offset: F) -> Point {
         self.extracted_columns()
             .iter()
             .fold(Point::NEUTRAL, |acc, column| {
-                let correct_id = extraction_id == column.extraction_id();
-                let correct_offset = location_offset == column.location_offset();
-                let correct_location = correct_id && correct_offset;
-
+                let correct_location = location_offset == column.location_offset();
                 if correct_location {
                     acc + column.value_digest(value)
                 } else {
@@ -221,59 +192,166 @@ where
     pub fn num_actual_columns(&self) -> usize {
         self.num_actual_columns
     }
+
+    /// Create a new instance of [`TableMetadata`] from an [`EventLogInfo`]. Events
+    /// always have two input columns relating to the transaction index and gas used for the transaction.
+    pub fn from_event_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+    ) -> TableMetadata {
+        TableMetadata::from(*event)
+    }
+
+    /// Function to calculate the full receipt value digest from a receipt leaf node and [`EventLogInfo`]
+    pub fn receipt_value_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+        &self,
+        tx_index: u64,
+        value: &[u8],
+        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+    ) -> Point {
+        let mut tx_index_input = [0u8; 32];
+        tx_index_input[31] = tx_index as u8;
+
+        // The actual receipt data is item 1 in the list
+        let node_rlp = rlp::Rlp::new(value);
+        let receipt_rlp = node_rlp.at(1).unwrap();
+
+        // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
+        let receipt_list = rlp::Rlp::new(&receipt_rlp.data().unwrap()[1..]);
+
+        // The logs themselves start are the item at index 3 in this list
+        let gas_used_rlp = receipt_list.at(1).unwrap();
+
+        let gas_used_bytes = left_pad32(gas_used_rlp.data().unwrap());
+
+        let (input_d, row_unique_data) =
+            self.input_value_digest(&[&tx_index_input, &gas_used_bytes]);
+        let extracted_vd = self.extracted_receipt_value_digest(value, event);
+
+        let total = input_d + extracted_vd;
+
+        // row_id = H2int(row_unique_data || num_actual_columns)
+        let inputs = HashOut::from(row_unique_data)
+            .to_fields()
+            .into_iter()
+            .chain(std::iter::once(F::from_canonical_usize(
+                self.num_actual_columns,
+            )))
+            .collect::<Vec<F>>();
+        let hash = H::hash_no_pad(&inputs);
+        let row_id = hash_to_int_value(hash);
+
+        // values_digest = values_digest * row_id
+        let row_id = Scalar::from_noncanonical_biguint(row_id);
+
+        total * row_id
+    }
+
+    /// Computes storage values digest
+    pub(crate) fn storage_values_digest(
+        &self,
+        input_vals: &[[u8; 32]],
+        value: &[u8],
+        location_offset: u32,
+    ) -> Point {
+        let location_offset = F::from_canonical_u32(location_offset);
+        let (input_vd, row_unique) = self.input_value_digest(input_vals);
+
+        let extract_vd = self.extracted_value_digest(value, location_offset);
+
+        let inputs = if self.input_columns().is_empty() {
+            empty_poseidon_hash()
+                .to_fields()
+                .into_iter()
+                .chain(once(F::from_canonical_usize(
+                    self.input_columns().len() + self.extracted_columns().len(),
+                )))
+                .collect_vec()
+        } else {
+            HashOut::from(row_unique)
+                .to_fields()
+                .into_iter()
+                .chain(once(F::from_canonical_usize(
+                    self.input_columns().len() + self.extracted_columns().len(),
+                )))
+                .collect_vec()
+        };
+        let hash = H::hash_no_pad(&inputs);
+        let row_id = hash_to_int_value(hash);
+
+        // values_digest = values_digest * row_id
+        let row_id = Scalar::from_noncanonical_biguint(row_id);
+        if location_offset.0 == 0 {
+            (extract_vd + input_vd) * row_id
+        } else {
+            extract_vd * row_id
+        }
+    }
 }
 
-pub struct TableMetadataGadget<const MAX_COLUMNS: usize, const INPUT_COLUMNS: usize>;
+pub struct TableMetadataGadget<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>;
 
-impl<const MAX_COLUMNS: usize, const INPUT_COLUMNS: usize>
-    TableMetadataGadget<MAX_COLUMNS, INPUT_COLUMNS>
-where
-    [(); MAX_COLUMNS - INPUT_COLUMNS]:,
+impl<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>
+    TableMetadataGadget<MAX_EXTRACTED_COLUMNS, INPUT_COLUMNS>
 {
-    pub(crate) fn build(b: &mut CBuilder) -> TableMetadataTarget<MAX_COLUMNS, INPUT_COLUMNS> {
+    pub(crate) fn build(
+        b: &mut CBuilder,
+    ) -> TableMetadataTarget<MAX_EXTRACTED_COLUMNS, INPUT_COLUMNS> {
         TableMetadataTarget {
             input_columns: array::from_fn(|_| b.add_virtual_input_column_info()),
             extracted_columns: array::from_fn(|_| b.add_virtual_extracted_column_info()),
+            real_columns: array::from_fn(|_| b.add_virtual_bool_target_safe()),
             num_actual_columns: b.add_virtual_target(),
         }
     }
 
     pub(crate) fn assign(
         pw: &mut PartialWitness<F>,
-        columns_metadata: &TableMetadata<MAX_COLUMNS, INPUT_COLUMNS>,
-        metadata_target: &TableMetadataTarget<MAX_COLUMNS, INPUT_COLUMNS>,
+        columns_metadata: &TableMetadata,
+        metadata_target: &TableMetadataTarget<MAX_EXTRACTED_COLUMNS, INPUT_COLUMNS>,
     ) {
+        // First we check that we are trying to assign from a `TableMetadata` with the correct
+        // number of columns
+        assert_eq!(
+            columns_metadata.input_columns.len(),
+            metadata_target.input_columns.len()
+        );
+
+        assert!(columns_metadata.extracted_columns.len() <= MAX_EXTRACTED_COLUMNS);
+
         pw.set_input_column_info_target_arr(
             metadata_target.input_columns.as_slice(),
             columns_metadata.input_columns.as_slice(),
         );
 
+        let padded_extracted_columns = columns_metadata
+            .extracted_columns
+            .iter()
+            .copied()
+            .chain(std::iter::repeat(ExtractedColumnInfo::default()))
+            .take(MAX_EXTRACTED_COLUMNS)
+            .collect::<Vec<ExtractedColumnInfo>>();
         pw.set_extracted_column_info_target_arr(
             metadata_target.extracted_columns.as_slice(),
-            columns_metadata.extracted_columns.as_slice(),
+            padded_extracted_columns.as_slice(),
         );
+
+        metadata_target
+            .real_columns
+            .iter()
+            .enumerate()
+            .for_each(|(i, &b_target)| {
+                pw.set_bool_target(b_target, i < columns_metadata.extracted_columns.len())
+            });
+
         pw.set_target(
             metadata_target.num_actual_columns,
             F::from_canonical_usize(columns_metadata.num_actual_columns),
         );
     }
-
-    /// Create a new instance of [`TableMetadata`] from an [`EventLogInfo`]. Events
-    /// always have two input columns relating to the transaction index and gas used for the transaction.
-    pub fn from_event_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-    ) -> TableMetadata<MAX_COLUMNS, 2>
-    where
-        [(); MAX_COLUMNS - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
-    {
-        TableMetadata::<MAX_COLUMNS, 2>::from(*event)
-    }
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize, const MAX_COLUMNS: usize>
-    From<EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>> for TableMetadata<MAX_COLUMNS, 2>
-where
-    [(); MAX_COLUMNS - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
+impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
+    From<EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>> for TableMetadata
 {
     fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>) -> Self {
         let extraction_id = event.event_signature;
@@ -357,7 +435,7 @@ where
 
         let extracted_columns = [topic_columns, data_columns].concat();
 
-        TableMetadata::<MAX_COLUMNS, 2>::new(
+        TableMetadata::new(
             &[tx_index_input_column, gas_used_index_column],
             &extracted_columns,
         )
@@ -365,10 +443,10 @@ where
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct TableMetadataTarget<const MAX_COLUMNS: usize, const INPUT_COLUMNS: usize>
-where
-    [(); MAX_COLUMNS - INPUT_COLUMNS]:,
-{
+pub(crate) struct TableMetadataTarget<
+    const MAX_EXTRACTED_COLUMNS: usize,
+    const INPUT_COLUMNS: usize,
+> {
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
@@ -380,7 +458,13 @@ where
         deserialize_with = "deserialize_long_array"
     )]
     /// Information about all extracted columns of the table
-    pub(crate) extracted_columns: [ExtractedColumnInfoTarget; MAX_COLUMNS - INPUT_COLUMNS],
+    pub(crate) extracted_columns: [ExtractedColumnInfoTarget; MAX_EXTRACTED_COLUMNS],
+    /// An Array signaling whether an extracted column is real or not
+    #[serde(
+        serialize_with = "serialize_array",
+        deserialize_with = "deserialize_array"
+    )]
+    pub(crate) real_columns: [BoolTarget; MAX_EXTRACTED_COLUMNS],
     /// The number of actual columns
     pub(crate) num_actual_columns: Target,
 }
@@ -392,10 +476,8 @@ type ReceiptExtractedOutput = (
     CurveTarget,
 );
 
-impl<const MAX_COLUMNS: usize, const INPUT_COLUMNS: usize>
-    TableMetadataTarget<MAX_COLUMNS, INPUT_COLUMNS>
-where
-    [(); MAX_COLUMNS - INPUT_COLUMNS]:,
+impl<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>
+    TableMetadataTarget<MAX_EXTRACTED_COLUMNS, INPUT_COLUMNS>
 {
     #[cfg(test)]
     pub fn metadata_digest(&self, b: &mut CBuilder) -> CurveTarget {
@@ -404,15 +486,15 @@ where
             .iter()
             .map(|column| column.digest(b))
             .collect::<Vec<CurveTarget>>();
-        let zero = b.zero();
+
         let curve_zero = b.curve_zero();
         let extracted_points = self
             .extracted_columns
             .iter()
-            .map(|column| {
-                let selector = b.is_equal(zero, column.identifier());
+            .zip(self.real_columns.iter())
+            .map(|(column, &selector)| {
                 let poss_digest = column.digest(b);
-                b.select_curve_point(selector, curve_zero, poss_digest)
+                b.select_curve_point(selector, poss_digest, curve_zero)
             })
             .collect::<Vec<CurveTarget>>();
 
@@ -455,11 +537,9 @@ where
         &self,
         b: &mut CBuilder,
         value: &Array<Target, VALUE_LEN>,
-        location_no_offset: &UInt256Target,
-        location: &UInt256Target,
+        offset: Target,
         extraction_id: &[Target; 8],
     ) -> (CurveTarget, CurveTarget) {
-        let zero = b.zero();
         let one = b.one();
 
         let curve_zero = b.curve_zero();
@@ -469,18 +549,14 @@ where
         let (metadata_points, value_points): (Vec<CurveTarget>, Vec<CurveTarget>) = self
             .extracted_columns
             .into_iter()
-            .map(|column| {
+            .zip(self.real_columns)
+            .map(|(column, selector)| {
                 // Calculate the column digest
                 let column_digest = column.digest(b);
-                // The column is real if the identifier is non-zero so we use it as a selector
-                let selector = b.is_equal(zero, column.identifier());
 
                 // Now we work out if the column is to be extracted, if it is we will take the value we recover from `value[column.byte_offset..column.byte_offset + column.length]`
                 // left padded.
-                let loc_offset_u256 =
-                    UInt256Target::new_from_target_unsafe(b, column.location_offset());
-                let (sum, _) = b.add_u256(&loc_offset_u256, location_no_offset);
-                let correct_offset = b.is_equal_u256(&sum, location);
+                let correct_offset = b.is_equal(offset, column.location_offset());
 
                 // We check that we have the correct base extraction id
                 let column_ex_id_arr = Array::<Target, 8>::from(column.extraction_id());
@@ -488,10 +564,10 @@ where
 
                 // We only extract if we are in the correct location AND `column.is_extracted` is true
                 let correct_location = b.and(correct_offset, correct_extraction_id);
-                let not_selector = b.not(selector);
+
                 // We also make sure we should actually extract for this column, otherwise we have issues
                 // when indexing into the array.
-                let correct = b.and(not_selector, correct_location);
+                let correct = b.and(selector, correct_location);
 
                 // last_byte_found lets us know whether we continue extracting or not.
                 // Hence if we want to extract values `extract` will be true so `last_byte_found` should be false
@@ -514,7 +590,7 @@ where
                 let value_selector = b.not(correct);
 
                 (
-                    b.curve_select(selector, curve_zero, column_digest),
+                    b.curve_select(selector, column_digest, curve_zero),
                     b.curve_select(value_selector, curve_zero, value_digest),
                 )
             })
@@ -536,7 +612,6 @@ where
         address_offset: Target,
         signature_offset: Target,
     ) -> ReceiptExtractedOutput {
-        let zero = b.zero();
         let one = b.one();
         let curve_zero = b.curve_zero();
 
@@ -549,11 +624,12 @@ where
         let (metadata_points, value_points): (Vec<CurveTarget>, Vec<CurveTarget>) = self
             .extracted_columns
             .into_iter()
-            .map(|column| {
+            .zip(self.real_columns)
+            .map(|(column, selector)| {
                 // Calculate the column digest
                 let column_digest = column.digest(b);
-                // The column is real if the identifier is non-zero so we use it as a selector
-                let selector = b.is_equal(zero, column.identifier());
+                // If selector is true (from self.real_columns) we need it to be false when we feed it into `column.extract_value()` later.
+                let selector = b.not(selector);
 
                 let location = b.add(log_offset, column.byte_offset());
 
@@ -598,7 +674,7 @@ pub(crate) mod tests {
 
     #[derive(Clone, Debug)]
     struct TestMedataCircuit {
-        columns_metadata: TableMetadata<TEST_MAX_COLUMNS, 0>,
+        columns_metadata: TableMetadata,
         slot: u8,
         expected_num_actual_columns: usize,
         expected_metadata_digest: Point,
@@ -655,7 +731,7 @@ pub(crate) mod tests {
         let slot = rng.gen();
         let evm_word = rng.gen();
 
-        let metadata = TableMetadata::<TEST_MAX_COLUMNS, 0>::sample(
+        let metadata = TableMetadata::sample::<TEST_MAX_COLUMNS>(
             true,
             &[],
             &[slot],

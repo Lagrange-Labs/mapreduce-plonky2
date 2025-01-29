@@ -7,22 +7,28 @@ use alloy::{
     primitives::{Address, Log, B256, U256},
     providers::{Provider, RootProvider},
     rlp::{Decodable, Encodable as AlloyEncodable},
-    rpc::types::{
-        Block, BlockTransactions, EIP1186AccountProofResponse, Filter, ReceiptEnvelope, Transaction,
+    rpc::{
+        json_rpc::RpcError,
+        types::{
+            Block, BlockTransactions, EIP1186AccountProofResponse, Filter, ReceiptEnvelope,
+            Transaction, TransactionReceipt,
+        },
     },
     transports::Transport,
 };
-use anyhow::{anyhow, bail, Context, Result};
-use eth_trie::{EthTrie, MemoryDB, Trie};
+
+use eth_trie::{EthTrie, MemoryDB, Trie, TrieError};
 use ethereum_types::H256;
 use itertools::Itertools;
 use log::{debug, warn};
 
-use rlp::{Encodable, Rlp};
+use rlp::{DecoderError, Encodable, Rlp};
 use serde::{Deserialize, Serialize};
+
 use std::{
     array::from_fn as create_array,
     collections::{BTreeSet, HashMap},
+    fmt::{Debug, Display, Formatter},
     sync::Arc,
 };
 
@@ -44,6 +50,65 @@ const MAX_RECEIPT_DATA_SIZE: usize = 32;
 
 /// The size of an event topic rlp encoded.
 const ENCODED_TOPIC_SIZE: usize = 33;
+
+/// The number of bytes the transaction type takes up in a Receipts RLP encoding.
+const TX_TYPE_BYTES: usize = 1;
+
+/// Error enum encompassing different errors that can arise in this module.
+#[derive(Debug)]
+pub enum MP2EthError {
+    /// Error occuring from a [`RpcError`], but not necessarily one we should retry.
+    RpcError(String),
+    /// An error that occurs when trying to fetch data from an RPC node, used so that we can know we should retry the call in this case.
+    FetchError,
+    /// An error that arises from a method within the [`rlp`] crate.
+    RlpError(DecoderError),
+    /// An error arising from rlp decoding methods in the [`alloy::rlp`] crate.
+    AlloyRlpError(alloy::rlp::Error),
+    /// An error arising from methods in the [`eth_trie`] crate.
+    TrieError(TrieError),
+    /// Any other error arising from the functions in this module.
+    InternalError(String),
+}
+
+impl std::error::Error for MP2EthError {}
+
+impl Display for MP2EthError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MP2EthError::RpcError(s) => write!(f,"Error returned when making an RPC call {{ inner: {:?} }}", s),
+            MP2EthError::FetchError => write!(f, "Error occured when trying to fetch data from an RPC node"),
+            MP2EthError::RlpError(e) => write!(f,"Error returned when performing Rlp encoding or decoding function {{ inner: {:?} }}", e),
+            MP2EthError::AlloyRlpError(e) => write!(f, "Error when decding to alloy type: {:?}", e),
+            MP2EthError::TrieError(e) => write!(f, "Error returned when construct or querying an MPT {{ inner: {:?} }}", e),
+            MP2EthError::InternalError(s) => write!(f, "Error occured in eth related code: {}", s)
+        }
+    }
+}
+
+impl<E: Debug> From<RpcError<E>> for MP2EthError {
+    fn from(value: RpcError<E>) -> Self {
+        MP2EthError::RpcError(format!("{:?}", value))
+    }
+}
+
+impl From<DecoderError> for MP2EthError {
+    fn from(value: DecoderError) -> Self {
+        MP2EthError::RlpError(value)
+    }
+}
+
+impl From<TrieError> for MP2EthError {
+    fn from(value: TrieError) -> Self {
+        MP2EthError::TrieError(value)
+    }
+}
+
+impl From<alloy::rlp::Error> for MP2EthError {
+    fn from(value: alloy::rlp::Error) -> Self {
+        MP2EthError::AlloyRlpError(value)
+    }
+}
 
 pub trait Rlpable {
     fn block_hash(&self) -> Vec<u8> {
@@ -84,7 +149,7 @@ pub enum NodeType {
 }
 
 /// Function that returns the [`NodeType`] of an RLP encoded MPT node
-pub fn node_type(rlp_data: &[u8]) -> Result<NodeType> {
+pub fn node_type(rlp_data: &[u8]) -> Result<NodeType, MP2EthError> {
     let rlp = Rlp::new(rlp_data);
 
     let item_count = rlp.item_count()?;
@@ -102,14 +167,14 @@ pub fn node_type(rlp_data: &[u8]) -> Result<NodeType> {
         match first_byte / 16 {
             0 | 1 => Ok(NodeType::Extension),
             2 | 3 => Ok(NodeType::Leaf),
-            _ => Err(anyhow!(
-                "Expected compact encoding beginning with 0,1,2 or 3"
+            _ => Err(MP2EthError::InternalError(
+                "Expected compact encoding beginning with 0,1,2 or 3".to_string(),
             )),
         }
     } else {
-        Err(anyhow!(
+        Err(MP2EthError::InternalError(format!(
             "RLP encoded Node item count was {item_count}, expected either 17 or 2"
-        ))
+        )))
     }
 }
 
@@ -150,22 +215,76 @@ pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     }
 }
 
-/// Query the latest block.
-pub async fn query_latest_block<T: Transport + Clone>(provider: &RootProvider<T>) -> Result<Block> {
+/// Query a specific block.
+pub async fn query_block<T: Transport + Clone>(
+    provider: &RootProvider<T>,
+    id: BlockNumberOrTag,
+) -> Result<Block, MP2EthError> {
     // Query the MPT proof with retries.
-    for i in 0..RETRY_NUM {
-        if let Ok(response) = provider
-            .get_block_by_number(BlockNumberOrTag::Latest, true.into())
-            .await
-        {
+    for i in 0..RETRY_NUM - 1 {
+        if let Ok(response) = provider.get_block_by_number(id, true.into()).await {
             // Has one block at least.
-            return Ok(response.unwrap());
+            return response.ok_or(MP2EthError::RpcError(
+                "Call to get block successful but returned None".to_string(),
+            ));
         } else {
             warn!("Failed to query the block - {i} time")
         }
     }
 
-    bail!("Failed to query the block ");
+    // For the final attempt we return the error
+    let resp = provider.get_block_by_number(id, true.into()).await;
+
+    match resp {
+        Ok(option) => match option {
+            Some(block) => Ok(block),
+            None => Err(MP2EthError::RpcError(
+                "Get block by number call did not error but returned a None value".to_string(),
+            )),
+        },
+        Err(_) => {
+            warn!("Failed to query the block - {} time", RETRY_NUM - 1);
+            Err(MP2EthError::FetchError)
+        }
+    }
+}
+
+/// Query a specific block for its receipts.
+pub async fn query_block_receipts<T: Transport + Clone>(
+    provider: &RootProvider<T>,
+    id: BlockNumberOrTag,
+) -> Result<Vec<TransactionReceipt>, MP2EthError> {
+    // Query the MPT proof with retries.
+    for i in 0..RETRY_NUM - 1 {
+        if let Ok(response) = provider.get_block_receipts(id.into()).await {
+            // Has one block at least.
+            return response.ok_or(MP2EthError::InternalError(
+                "Call to get block receipts successful but returned None".to_string(),
+            ));
+        } else {
+            warn!("Failed to query the block receipts - {i} time")
+        }
+    }
+
+    // For the final attempt we return the error
+    let resp = provider.get_block_receipts(id.into()).await;
+
+    match resp {
+        Ok(option) => match option {
+            Some(block) => Ok(block),
+            None => Err(MP2EthError::RpcError(
+                "Get Receipts by block number call did not error but returned a None value"
+                    .to_string(),
+            )),
+        },
+        Err(_) => {
+            warn!(
+                "Failed to query the block receipts - {} time",
+                RETRY_NUM - 1
+            );
+            Err(MP2EthError::FetchError)
+        }
+    }
 }
 
 pub struct ProofQuery {
@@ -271,7 +390,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
     }
 
     /// Function used to return the offset from the start of an Receipt Trie Leaf Node to the log relevant to [`EventLogInfo`]
-    pub fn get_log_offset(&self, node: &[u8]) -> Result<usize> {
+    pub fn get_log_offset(&self, node: &[u8]) -> Result<usize, MP2EthError> {
         let node_rlp = rlp::Rlp::new(node);
 
         // The actual receipt data is item 1 in the list
@@ -281,7 +400,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
         let receipt_str_payload = receipt_rlp.payload_info()?;
 
         // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
-        let receipt_list = rlp::Rlp::new(&receipt_rlp.data()?[1..]);
+        let receipt_list = rlp::Rlp::new(&receipt_rlp.data()?[TX_TYPE_BYTES..]);
 
         // The logs themselves start are the item at index 3 in this list
         let (logs_rlp, logs_off) = receipt_list.at_with_offset(3)?;
@@ -307,8 +426,8 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
                     None
                 }
             })
-            .ok_or(anyhow::anyhow!(
-                "There were no relevant logs in this transaction"
+            .ok_or(MP2EthError::InternalError(
+                "There were no relevant logs in this transaction".to_string(),
             ))?;
 
         Ok(relevant_log_offset)
@@ -332,13 +451,15 @@ pub enum StorageSlotNode {
 }
 
 impl StorageSlotNode {
-    pub fn new_mapping(parent: StorageSlot, mapping_key: Vec<u8>) -> Result<Self> {
+    pub fn new_mapping(parent: StorageSlot, mapping_key: Vec<u8>) -> Result<Self, MP2EthError> {
         let parent = Box::new(parent);
         if !matches!(
             *parent,
             StorageSlot::Mapping(_, _) | StorageSlot::Node(Self::Mapping(_, _))
         ) {
-            bail!("The parent of a Slot mapping entry must be type of mapping");
+            return Err(MP2EthError::InternalError(
+                "The parent of a Slot mapping entry must be type of mapping".to_string(),
+            ));
         }
 
         Ok(Self::Mapping(parent, mapping_key))
@@ -480,10 +601,10 @@ impl ProofQuery {
         &self,
         provider: &RootProvider<T>,
         block: BlockNumberOrTag,
-    ) -> Result<EIP1186AccountProofResponse> {
+    ) -> Result<EIP1186AccountProofResponse, MP2EthError> {
         // Query the MPT proof with retries.
-        for i in 0..RETRY_NUM {
-            let location = self.slot.location();
+        let location = self.slot.location();
+        for i in 0..RETRY_NUM - 1 {
             debug!(
                 "Querying MPT proof:\n\tslot = {:?}, location = {:?}",
                 self.slot,
@@ -499,11 +620,20 @@ impl ProofQuery {
             }
         }
 
-        bail!("Failed to query the MPT proof {RETRY_NUM} in total");
+        match provider
+            .get_proof(self.contract, vec![location])
+            .block_id(block.into())
+            .await
+        {
+            Ok(response) => Ok(response),
+            Err(_) => Err(MP2EthError::FetchError),
+        }
     }
     /// Returns the raw value from the storage proof, not the one "interpreted" by the
     /// JSON RPC so we can see how the encoding is done.
-    pub fn verify_storage_proof(proof: &EIP1186AccountProofResponse) -> Result<Vec<u8>> {
+    pub fn verify_storage_proof(
+        proof: &EIP1186AccountProofResponse,
+    ) -> Result<Vec<u8>, MP2EthError> {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
         let proof_key_bytes = proof.storage_proof[0].key.as_b256();
@@ -517,18 +647,17 @@ impl ProofQuery {
                 .iter()
                 .map(|b| b.to_vec())
                 .collect(),
-        );
-        // key must be valid, proof must be valid and value must exist
-        if is_valid.is_err() {
-            bail!("proof is not valid");
-        }
-        if let Some(ext_value) = is_valid.unwrap() {
+        )?;
+
+        if let Some(ext_value) = is_valid {
             Ok(ext_value)
         } else {
-            bail!("proof says the value associated with that key does not exist");
+            Err(MP2EthError::InternalError(
+                "proof says the value associated with that key does not exist".to_string(),
+            ))
         }
     }
-    pub fn verify_state_proof(&self, res: &EIP1186AccountProofResponse) -> Result<()> {
+    pub fn verify_state_proof(&self, res: &EIP1186AccountProofResponse) -> Result<(), MP2EthError> {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
 
@@ -542,26 +671,29 @@ impl ProofQuery {
             state_root_hash,
             &mpt_key,
             res.account_proof.iter().map(|b| b.to_vec()).collect(),
-        );
+        )?;
 
-        if is_valid.is_err() {
-            bail!("Account proof is invalid");
-        }
-        if is_valid.unwrap().is_none() {
-            bail!("Account proof says the value associated with that key does not exist");
+        if is_valid.is_none() {
+            return Err(MP2EthError::InternalError(
+                "Account proof says the value associated with that key does not exist".to_string(),
+            ));
         }
 
         // The length of acount node must be 104 bytes (8 + 32 + 32 + 32) as:
         // [nonce (U64), balance (U256), storage_hash (H256), code_hash (H256)]
-        let account_node = res.account_proof.last().unwrap();
-        assert_eq!(account_node.len(), 104);
-
-        Ok(())
+        let account_node = res.account_proof.last().ok_or(MP2EthError::InternalError(
+            "Account proof response was empty".to_string(),
+        ))?;
+        if account_node.len() != 104 {
+            Err(MP2EthError::InternalError(format!("The length of acount node must be 104 bytes (8 + 32 + 32 + 32), retrieved node length: {}", account_node.len())))
+        } else {
+            Ok(())
+        }
     }
 }
 
 impl ReceiptProofInfo {
-    pub fn to_receipt(&self) -> Result<ReceiptWithBloom> {
+    pub fn to_receipt(&self) -> Result<ReceiptWithBloom, MP2EthError> {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
 
@@ -569,11 +701,12 @@ impl ReceiptProofInfo {
 
         let valid = tx_trie
             .verify_proof(self.mpt_root, &mpt_key, self.mpt_proof.clone())?
-            .ok_or(anyhow!("No proof found when verifying"))?;
+            .ok_or(MP2EthError::InternalError(
+                "No proof found when verifying".to_string(),
+            ))?;
 
         let rlp_receipt = rlp::Rlp::new(&valid[1..]);
-        ReceiptWithBloom::decode(&mut rlp_receipt.as_raw())
-            .map_err(|e| anyhow!("Could not decode receipt got: {}", e))
+        ReceiptWithBloom::decode(&mut rlp_receipt.as_raw()).map_err(|e| e.into())
     }
 }
 
@@ -592,7 +725,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS
         &self,
         provider: &RootProvider<T>,
         block: BlockNumberOrTag,
-    ) -> Result<Vec<ReceiptProofInfo>> {
+    ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
         // Retrieve the transaction indices for the relevant logs
         let tx_indices = self.retrieve_tx_indices(provider, block).await?;
 
@@ -606,24 +739,40 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS
         &self,
         provider: &RootProvider<T>,
         block: BlockNumberOrTag,
-    ) -> Result<BTreeSet<u64>> {
+    ) -> Result<BTreeSet<u64>, MP2EthError> {
         let filter = Filter::new()
             .select(block)
             .address(self.contract)
             .event_signature(B256::from(self.event.event_signature));
-        let logs = provider.get_logs(&filter).await?;
-
-        // For each of the logs return the transacion its included in, then sort and remove duplicates.
-        Ok(BTreeSet::from_iter(
-            logs.iter().map_while(|log| log.transaction_index),
-        ))
+        for i in 0..RETRY_NUM - 1 {
+            debug!(
+                "Querying Receipt logs:\n\tevent signature = {:?}",
+                self.event.event_signature,
+            );
+            match provider.get_logs(&filter).await {
+                // For each of the logs return the transacion its included in, then sort and remove duplicates.
+                Ok(response) => {
+                    return Ok(BTreeSet::from_iter(
+                        response.iter().map_while(|log| log.transaction_index),
+                    ))
+                }
+                Err(e) => println!("Failed to query the Receipt logs at {i} time: {e:?}"),
+            }
+        }
+        match provider.get_logs(&filter).await {
+            // For each of the logs return the transacion its included in, then sort and remove duplicates.
+            Ok(response) => Ok(BTreeSet::from_iter(
+                response.iter().map_while(|log| log.transaction_index),
+            )),
+            Err(_) => Err(MP2EthError::FetchError),
+        }
     }
 
     /// Function that takes a list of transaction indices in the form of a [`BTreeSet`] and a [`BlockUtil`] and returns a list of [`ReceiptProofInfo`]
     pub fn extract_info(
         tx_indices: &BTreeSet<u64>,
         block_util: &mut BlockUtil,
-    ) -> Result<Vec<ReceiptProofInfo>> {
+    ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
         let mpt_root = block_util.receipts_trie.root_hash()?;
         let proofs = tx_indices
             .iter()
@@ -638,7 +787,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS
                     tx_index,
                 })
             })
-            .collect::<Result<Vec<ReceiptProofInfo>, eth_trie::TrieError>>()?;
+            .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()?;
 
         Ok(proofs)
     }
@@ -692,17 +841,14 @@ impl BlockUtil {
     pub async fn fetch<T: Transport + Clone>(
         t: &RootProvider<T>,
         id: BlockNumberOrTag,
-    ) -> Result<BlockUtil> {
-        let block = t
-            .get_block(id.into(), alloy::rpc::types::BlockTransactionsKind::Full)
-            .await?
-            .context("can't get block")?;
-        let receipts = t
-            .get_block_receipts(id.into())
-            .await?
-            .context("can't get receipts")?;
+    ) -> Result<BlockUtil, MP2EthError> {
+        let block = query_block(t, id).await?;
+
+        let receipts = query_block_receipts(t, id).await?;
         let BlockTransactions::Full(all_tx) = block.transactions() else {
-            bail!("can't see full transactions");
+            return Err(MP2EthError::InternalError(
+                "Could not recover full transactions from Block".to_string(),
+            ));
         };
         // check receipt root
         let all_tx_map = HashMap::<u64, &Transaction>::from_iter(
@@ -753,11 +899,11 @@ impl BlockUtil {
         })
     }
 
-    // recompute the receipts trie by first converting all receipts form RPC type to consensus type
-    // since in Alloy these are two different types and RLP functions are only implemented for
-    // consensus ones.
+    /// recompute the receipts trie by first converting all receipts form RPC type to consensus type
+    /// since in Alloy these are two different types and RLP functions are only implemented for
+    /// consensus ones.
     #[cfg(test)]
-    fn check(&mut self) -> Result<()> {
+    fn check(&mut self) -> Result<(), MP2EthError> {
         let computed = self.receipts_trie.root_hash()?;
         let tx_computed = self.transactions_trie.root_hash()?;
         let expected = self.block.header.receipts_root;
@@ -801,7 +947,7 @@ mod test {
         providers::{Provider, ProviderBuilder},
         rlp::Decodable,
     };
-
+    use anyhow::{anyhow, Context, Result};
     use eth_trie::Nibbles;
     use ethereum_types::U64;
     use ethers::{

@@ -1,6 +1,5 @@
 use crate::api::SlotInput;
 
-use anyhow::anyhow;
 use gadgets::{
     column_info::{ExtractedColumnInfo, InputColumnInfo},
     metadata_gadget::TableMetadata,
@@ -9,19 +8,17 @@ use itertools::Itertools;
 
 use alloy::primitives::Address;
 use mp2_common::{
+    digest::Digest,
     eth::{left_pad32, StorageSlot},
-    poseidon::{empty_poseidon_hash, hash_to_int_value, H},
-    types::HashOutput,
+    poseidon::{empty_poseidon_hash, H},
+    types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
     F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
-    hash::hash_types::HashOut,
     plonk::config::Hasher,
 };
-
-use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
 
 use serde::{Deserialize, Serialize};
 use std::iter::once;
@@ -132,7 +129,7 @@ impl StorageSlotInfo {
         contract_address: &Address,
         chain_id: u64,
         extra: Vec<u8>,
-    ) -> ColumnMetadata {
+    ) -> TableMetadata {
         let slot = self.slot().slot();
         let num_mapping_keys = self.slot().mapping_keys().len();
 
@@ -172,178 +169,7 @@ impl StorageSlotInfo {
             _ => vec![],
         };
 
-        ColumnMetadata::new(input_columns, self.table_info().to_vec())
-    }
-}
-
-/// Struct that mirrors [`TableMetadata`] but without having to specify generic constants.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ColumnMetadata {
-    pub input_columns: Vec<InputColumnInfo>,
-    pub extracted_columns: Vec<ExtractedColumnInfo>,
-}
-
-impl ColumnMetadata {
-    /// Create a new instance of [`ColumnMetadata`]
-    pub fn new(
-        input_columns: Vec<InputColumnInfo>,
-        extracted_columns: Vec<ExtractedColumnInfo>,
-    ) -> ColumnMetadata {
-        ColumnMetadata {
-            input_columns,
-            extracted_columns,
-        }
-    }
-
-    /// Getter for the [`InputColumnInfo`]
-    pub fn input_columns(&self) -> &[InputColumnInfo] {
-        &self.input_columns
-    }
-
-    /// Getter for the [`ExtractedColumnInfo`]
-    pub fn extracted_columns(&self) -> &[ExtractedColumnInfo] {
-        &self.extracted_columns
-    }
-
-    /// Computes storage values digest
-    pub fn storage_values_digest(
-        &self,
-        input_vals: &[&[u8; 32]],
-        value: &[u8],
-        extraction_id: &[u8],
-        location_offset: F,
-    ) -> Point {
-        let (input_vd, row_unique) = self.input_value_digest(input_vals);
-
-        let extract_vd = self.extracted_value_digest(value, extraction_id, location_offset);
-
-        let inputs = if self.input_columns().is_empty() {
-            empty_poseidon_hash()
-                .to_fields()
-                .into_iter()
-                .chain(once(F::from_canonical_usize(
-                    self.input_columns().len() + self.extracted_columns().len(),
-                )))
-                .collect_vec()
-        } else {
-            HashOut::from(row_unique)
-                .to_fields()
-                .into_iter()
-                .chain(once(F::from_canonical_usize(
-                    self.input_columns().len() + self.extracted_columns().len(),
-                )))
-                .collect_vec()
-        };
-        let hash = H::hash_no_pad(&inputs);
-        let row_id = hash_to_int_value(hash);
-
-        // values_digest = values_digest * row_id
-        let row_id = Scalar::from_noncanonical_biguint(row_id);
-        if location_offset.0 == 0 {
-            (extract_vd + input_vd) * row_id
-        } else {
-            extract_vd * row_id
-        }
-    }
-
-    /// Computes the value digest for a provided value array and the unique row_id
-    pub fn input_value_digest(&self, input_vals: &[&[u8; 32]]) -> (Point, HashOutput) {
-        let point = self
-            .input_columns()
-            .iter()
-            .zip(input_vals.iter())
-            .fold(Point::NEUTRAL, |acc, (column, value)| {
-                acc + column.value_digest(value.as_slice())
-            });
-
-        let row_id_input = input_vals
-            .iter()
-            .flat_map(|key| {
-                key.pack(Endianness::Big)
-                    .into_iter()
-                    .map(F::from_canonical_u32)
-            })
-            .collect::<Vec<F>>();
-
-        (point, H::hash_no_pad(&row_id_input).into())
-    }
-
-    /// Compute the metadata digest.
-    pub fn digest(&self) -> Point {
-        let input_iter = self
-            .input_columns()
-            .iter()
-            .map(|column| column.digest())
-            .collect::<Vec<Point>>();
-
-        let extracted_iter = self
-            .extracted_columns()
-            .iter()
-            .map(|column| column.digest())
-            .collect::<Vec<Point>>();
-
-        input_iter
-            .into_iter()
-            .chain(extracted_iter)
-            .fold(Point::NEUTRAL, |acc, b| acc + b)
-    }
-
-    pub fn extracted_value_digest(
-        &self,
-        value: &[u8],
-        extraction_id: &[u8],
-        location_offset: F,
-    ) -> Point {
-        let mut extraction_vec = extraction_id.pack(Endianness::Little);
-        extraction_vec.resize(8, 0u32);
-        extraction_vec.reverse();
-        let extraction_id: [F; 8] = extraction_vec
-            .into_iter()
-            .map(F::from_canonical_u32)
-            .collect::<Vec<F>>()
-            .try_into()
-            .expect("This should never fail");
-
-        self.extracted_columns()
-            .iter()
-            .fold(Point::NEUTRAL, |acc, column| {
-                let correct_id = extraction_id == column.extraction_id();
-                let correct_offset = location_offset == column.location_offset();
-                let correct_location = correct_id && correct_offset;
-
-                if correct_location {
-                    acc + column.value_digest(value)
-                } else {
-                    acc
-                }
-            })
-    }
-}
-
-impl<const MAX_COLUMNS: usize, const INPUT_COLUMNS: usize> TryFrom<ColumnMetadata>
-    for TableMetadata<MAX_COLUMNS, INPUT_COLUMNS>
-where
-    [(); MAX_COLUMNS - INPUT_COLUMNS]:,
-{
-    type Error = anyhow::Error;
-
-    fn try_from(value: ColumnMetadata) -> Result<Self, Self::Error> {
-        let ColumnMetadata {
-            input_columns,
-            extracted_columns,
-        } = value;
-        let input_array: [InputColumnInfo; INPUT_COLUMNS] =
-            input_columns.try_into().map_err(|e| {
-                anyhow!(
-                    "Could not convert input columns to fixed length array: {:?}",
-                    e
-                )
-            })?;
-
-        Ok(TableMetadata::<MAX_COLUMNS, INPUT_COLUMNS>::new(
-            &input_array,
-            &extracted_columns,
-        ))
+        TableMetadata::new(&input_columns, self.table_info())
     }
 }
 
@@ -539,4 +365,26 @@ pub fn row_unique_data_for_mapping_of_mappings_leaf(
     // row_unique_data = H(outer_key || inner_key)
     let inputs = packed_outer_key.chain(packed_inner_key).collect_vec();
     H::hash_no_pad(&inputs).into()
+}
+
+/// Function to compute a storage value digest
+pub fn storage_value_digest(
+    table_metadata: &TableMetadata,
+    keys: &[&[u8]],
+    value: &[u8; MAPPING_LEAF_VALUE_LEN],
+    evm_word: u32,
+) -> Digest {
+    let padded_keys = keys
+        .iter()
+        .map(|slice| left_pad32(slice))
+        .collect::<Vec<[u8; 32]>>();
+    // Panic if the number of keys provided is not equal to the number of input columns
+    assert_eq!(
+        keys.len(),
+        table_metadata.input_columns.len(),
+        "Number of keys: {}, does not equal the number of input columns: {}",
+        keys.len(),
+        table_metadata.input_columns.len()
+    );
+    table_metadata.storage_values_digest(padded_keys.as_slice(), value.as_slice(), evm_word)
 }

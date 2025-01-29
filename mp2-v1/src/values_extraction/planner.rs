@@ -1,5 +1,4 @@
 //! This code returns an [`UpdateTree`] used to plan how we prove a series of values was extracted from a Merkle Patricia Trie.
-#![allow(clippy::identity_op)]
 use alloy::{
     network::Ethereum,
     primitives::{keccak256, Address, B256},
@@ -7,13 +6,67 @@ use alloy::{
     transports::Transport,
 };
 use anyhow::Result;
-use mp2_common::eth::{node_type, EventLogInfo, NodeType, ReceiptQuery};
+use mp2_common::eth::{node_type, EventLogInfo, MP2EthError, NodeType, ReceiptQuery};
 use ryhope::storage::updatetree::{Next, UpdateTree};
 use std::future::Future;
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    error::Error,
+    fmt::{Display, Formatter},
+    write,
+};
 
 use super::{generate_proof, CircuitInput, PublicParameters};
+
+#[derive(Debug)]
+/// Error enum used for Extractable data
+pub enum MP2PlannerError {
+    /// An error that occurs when trying to fetch data from an RPC node, used so that we can know we should retry the call in this case.
+    FetchError,
+    /// An error that occurs when the [`UpdateTree`] returns an unexpected output from one of its methods.
+    UpdateTreeError(String),
+    /// A conversion from the error type defined in [`mp2_common::eth`] that is not a [`MP2EthError::FetchError`].
+    EthError(MP2EthError),
+    /// An error that occurs from a method in the proving API.
+    ProvingError(String),
+}
+
+impl Error for MP2PlannerError {}
+
+impl Display for MP2PlannerError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MP2PlannerError::FetchError => write!(
+                f,
+                "Error occured when trying to fetch data from an RPC node"
+            ),
+            MP2PlannerError::UpdateTreeError(s) => write!(
+                f,
+                "Error occured when working with the update Tree: {{ inner: {} }}",
+                s
+            ),
+            MP2PlannerError::EthError(e) => write!(
+                f,
+                "Error occured in call from mp2_common::eth function {{ inner: {:?} }}",
+                e
+            ),
+            MP2PlannerError::ProvingError(s) => {
+                write!(f, "Error while proving, extra message: {}", s)
+            }
+        }
+    }
+}
+
+impl From<MP2EthError> for MP2PlannerError {
+    fn from(value: MP2EthError) -> Self {
+        match value {
+            MP2EthError::FetchError => MP2PlannerError::FetchError,
+            _ => MP2PlannerError::EthError(value),
+        }
+    }
+}
+
 /// Trait that is implemented for all data that we can provably extract.
 pub trait Extractable {
     fn create_update_tree<T: Transport + Clone>(
@@ -21,7 +74,7 @@ pub trait Extractable {
         contract: Address,
         epoch: u64,
         provider: &RootProvider<T, Ethereum>,
-    ) -> impl Future<Output = Result<UpdateTree<B256>>>;
+    ) -> impl Future<Output = Result<UpdateTree<B256>, MP2PlannerError>>;
 
     fn prove_value_extraction<const MAX_COLUMNS: usize, T: Transport + Clone>(
         &self,
@@ -29,11 +82,7 @@ pub trait Extractable {
         epoch: u64,
         pp: &PublicParameters<512, MAX_COLUMNS>,
         provider: &RootProvider<T, Ethereum>,
-    ) -> impl Future<Output = Result<Vec<u8>>>
-    where
-        [(); MAX_COLUMNS - 2]:,
-        [(); MAX_COLUMNS - 1]:,
-        [(); MAX_COLUMNS - 0]:;
+    ) -> impl Future<Output = Result<Vec<u8>, MP2PlannerError>>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -57,15 +106,13 @@ impl ProofData {
 
 impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
     for EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>
-where
-    [(); 7 - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
 {
     async fn create_update_tree<T: Transport + Clone>(
         &self,
         contract: Address,
         epoch: u64,
         provider: &RootProvider<T, Ethereum>,
-    ) -> Result<UpdateTree<B256>> {
+    ) -> Result<UpdateTree<B256>, MP2PlannerError> {
         let query = ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS> {
             contract,
             event: *self,
@@ -83,18 +130,13 @@ where
         Ok(UpdateTree::<B256>::from_paths(key_paths, epoch as i64))
     }
 
-    async fn prove_value_extraction<const MAX_COLUMNS: usize, T: Transport + Clone>(
+    async fn prove_value_extraction<const MAX_EXTRACTED_COLUMNS: usize, T: Transport + Clone>(
         &self,
         contract: Address,
         epoch: u64,
-        pp: &PublicParameters<512, MAX_COLUMNS>,
+        pp: &PublicParameters<512, MAX_EXTRACTED_COLUMNS>,
         provider: &RootProvider<T, Ethereum>,
-    ) -> Result<Vec<u8>>
-    where
-        [(); MAX_COLUMNS - 2]:,
-        [(); MAX_COLUMNS - 1]:,
-        [(); MAX_COLUMNS - 0]:,
-    {
+    ) -> Result<Vec<u8>, MP2PlannerError> {
         let query = ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS> {
             contract,
             event: *self,
@@ -124,9 +166,9 @@ where
 
                         Ok(node_key)
                     })
-                    .collect::<Result<Vec<B256>>>()
+                    .collect::<Result<Vec<B256>, MP2PlannerError>>()
             })
-            .collect::<Result<Vec<Vec<B256>>>>()?;
+            .collect::<Result<Vec<Vec<B256>>, MP2PlannerError>>()?;
 
         let update_tree = UpdateTree::<B256>::from_paths(key_paths, epoch as i64);
 
@@ -135,66 +177,82 @@ where
         while let Some(Next::Ready(work_plan_item)) = update_plan.next() {
             let node_type = data_store
                 .get(work_plan_item.k())
-                .ok_or(anyhow::anyhow!(
+                .ok_or(MP2PlannerError::UpdateTreeError(format!(
                     "No ProofData found for key: {:?}",
                     work_plan_item.k()
-                ))?
+                )))?
                 .node_type;
 
-            let update_tree_node =
-                update_tree
-                    .get_node(work_plan_item.k())
-                    .ok_or(anyhow::anyhow!(
-                        "No UpdateTreeNode found for key: {:?}",
-                        work_plan_item.k()
-                    ))?;
+            let update_tree_node = update_tree.get_node(work_plan_item.k()).ok_or(
+                MP2PlannerError::UpdateTreeError(format!(
+                    "No UpdateTreeNode found for key: {:?}",
+                    work_plan_item.k(),
+                )),
+            )?;
 
             match node_type {
                 NodeType::Leaf => {
-                    let proof_data =
-                        data_store
-                            .get_mut(work_plan_item.k())
-                            .ok_or(anyhow::anyhow!(
-                                "No ProofData found for key: {:?}",
-                                work_plan_item.k()
-                            ))?;
+                    let proof_data = data_store.get_mut(work_plan_item.k()).ok_or(
+                        MP2PlannerError::UpdateTreeError(format!(
+                            "No ProofData found for key: {:?}",
+                            work_plan_item.k()
+                        )),
+                    )?;
                     let input = CircuitInput::new_receipt_leaf(
                         &proof_data.node,
                         proof_data.tx_index.unwrap(),
                         self,
                     );
-                    let proof = generate_proof(pp, input)?;
+                    let proof = generate_proof(pp, input).map_err(|_| {
+                        MP2PlannerError::ProvingError(
+                            "Error calling generate proof API".to_string(),
+                        )
+                    })?;
                     proof_data.proof = Some(proof);
-                    update_plan.done(&work_plan_item)?;
+                    update_plan.done(&work_plan_item).map_err(|_| {
+                        MP2PlannerError::UpdateTreeError(
+                            "Could not mark work plan item as done".to_string(),
+                        )
+                    })?;
                 }
                 NodeType::Extension => {
                     let child_key = update_tree.get_child_keys(update_tree_node);
                     if child_key.len() != 1 {
-                        return Err(anyhow::anyhow!("When proving extension node had {} many child keys when we should only have 1", child_key.len()));
+                        return Err(MP2PlannerError::ProvingError(format!(
+                            "Expected nodes child keys to have length 1, actual length: {}",
+                            child_key.len()
+                        )));
                     }
                     let child_proof = data_store
                         .get(&child_key[0])
-                        .ok_or(anyhow::anyhow!(
+                        .ok_or(MP2PlannerError::UpdateTreeError(format!(
                             "Extension node child had no proof data for key: {:?}",
                             child_key[0]
-                        ))?
+                        )))?
                         .clone();
-                    let proof_data =
-                        data_store
-                            .get_mut(work_plan_item.k())
-                            .ok_or(anyhow::anyhow!(
-                                "No ProofData found for key: {:?}",
-                                work_plan_item.k()
-                            ))?;
+                    let proof_data = data_store.get_mut(work_plan_item.k()).ok_or(
+                        MP2PlannerError::UpdateTreeError(format!(
+                            "No ProofData found for key: {:?}",
+                            work_plan_item.k()
+                        )),
+                    )?;
                     let input = CircuitInput::new_extension(
                         proof_data.node.clone(),
-                        child_proof.proof.ok_or(anyhow::anyhow!(
-                            "Extension node child proof was a None value"
+                        child_proof.proof.ok_or(MP2PlannerError::UpdateTreeError(
+                            "Extension node child proof was a None value".to_string(),
                         ))?,
                     );
-                    let proof = generate_proof(pp, input)?;
+                    let proof = generate_proof(pp, input).map_err(|_| {
+                        MP2PlannerError::ProvingError(
+                            "Error calling generate proof API".to_string(),
+                        )
+                    })?;
                     proof_data.proof = Some(proof);
-                    update_plan.done(&work_plan_item)?;
+                    update_plan.done(&work_plan_item).map_err(|_| {
+                        MP2PlannerError::UpdateTreeError(
+                            "Could not mark work plan item as done".to_string(),
+                        )
+                    })?;
                 }
                 NodeType::Branch => {
                     let child_keys = update_tree.get_child_keys(update_tree_node);
@@ -203,38 +261,49 @@ where
                         .map(|key| {
                             data_store
                                 .get(key)
-                                .ok_or(anyhow::anyhow!(
+                                .ok_or(MP2PlannerError::UpdateTreeError(format!(
                                     "Branch child data could not be found for key: {:?}",
                                     key
-                                ))?
+                                )))?
                                 .clone()
                                 .proof
-                                .ok_or(anyhow::anyhow!("No proof found in brnach node child"))
+                                .ok_or(MP2PlannerError::UpdateTreeError(
+                                    "No proof found in brnach node child".to_string(),
+                                ))
                         })
-                        .collect::<Result<Vec<Vec<u8>>>>()?;
-                    let proof_data =
-                        data_store
-                            .get_mut(work_plan_item.k())
-                            .ok_or(anyhow::anyhow!(
-                                "No ProofData found for key: {:?}",
-                                work_plan_item.k()
-                            ))?;
+                        .collect::<Result<Vec<Vec<u8>>, MP2PlannerError>>()?;
+                    let proof_data = data_store.get_mut(work_plan_item.k()).ok_or(
+                        MP2PlannerError::UpdateTreeError(format!(
+                            "No ProofData found for key: {:?}",
+                            work_plan_item.k()
+                        )),
+                    )?;
                     let input = CircuitInput::new_branch(proof_data.node.clone(), child_proofs);
-                    let proof = generate_proof(pp, input)?;
+                    let proof = generate_proof(pp, input).map_err(|_| {
+                        MP2PlannerError::ProvingError(
+                            "Error calling generate proof API".to_string(),
+                        )
+                    })?;
                     proof_data.proof = Some(proof);
-                    update_plan.done(&work_plan_item)?;
+                    update_plan.done(&work_plan_item).map_err(|_| {
+                        MP2PlannerError::UpdateTreeError(
+                            "Could not mark work plan item as done".to_string(),
+                        )
+                    })?;
                 }
             }
         }
 
         let final_data = data_store
             .get(update_tree.root())
-            .ok_or(anyhow::anyhow!("No data for root of update tree found"))?
+            .ok_or(MP2PlannerError::UpdateTreeError(
+                "No data for root of update tree found".to_string(),
+            ))?
             .clone();
 
-        final_data
-            .proof
-            .ok_or(anyhow::anyhow!("No proof stored for final data"))
+        final_data.proof.ok_or(MP2PlannerError::UpdateTreeError(
+            "No proof stored for final data".to_string(),
+        ))
     }
 }
 
@@ -308,7 +377,7 @@ pub mod tests {
             event: event_info,
         };
 
-        let metadata = TableMetadata::<7, 2>::from(event_info);
+        let metadata = TableMetadata::from(event_info);
 
         let metadata_digest = metadata.digest();
 

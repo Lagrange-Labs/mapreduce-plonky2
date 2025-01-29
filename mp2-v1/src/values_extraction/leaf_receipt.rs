@@ -12,12 +12,12 @@ use mp2_common::{
     eth::EventLogInfo,
     group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
-    mpt_sequential::{MPTKeyWire, MPTReceiptLeafNode, PAD_LEN},
+    mpt_sequential::{utils::bytes_to_nibbles, MPTKeyWire, MPTReceiptLeafNode, PAD_LEN},
     poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp},
-    utils::{less_than, less_than_or_equal_to_unsafe, ToTargets},
+    utils::{less_than_or_equal_to_unsafe, less_than_unsafe, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{
@@ -36,32 +36,28 @@ use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use rlp::Encodable;
 use serde::{Deserialize, Serialize};
-use std::iter;
 
 /// The number of bytes that `gas_used` could take up in the receipt.
 /// We set a max of 3 here because this would be over half the gas in the block for Ethereum.
 const MAX_GAS_SIZE: u64 = 3;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ReceiptLeafWires<const NODE_LEN: usize, const MAX_COLUMNS: usize>
+pub(crate) struct ReceiptLeafWires<const NODE_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>
 where
     [(); PAD_LEN(NODE_LEN)]:,
-    [(); MAX_COLUMNS - 2]:,
 {
     /// The event we are monitoring for
-    pub event: EventWires,
+    pub(crate) event: EventWires,
     /// The node bytes
-    pub node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
+    pub(crate) node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
     /// the hash of the node bytes
-    pub root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
-    /// The index of this receipt in the block
-    pub index: Target,
+    pub(crate) root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
     /// The offsets of the relevant logs inside the node
-    pub relevant_log_offset: Target,
+    pub(crate) relevant_log_offset: Target,
     /// The key in the MPT Trie
-    pub mpt_key: MPTKeyWire,
+    pub(crate) mpt_key: MPTKeyWire,
     /// The table metadata
-    pub(crate) metadata: TableMetadataTarget<MAX_COLUMNS, 2>,
+    pub(crate) metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS, 2>,
 }
 
 /// Contains all the information for an [`Event`] in rlp form
@@ -81,10 +77,7 @@ pub struct EventWires {
 
 /// Circuit to prove a transaction receipt contains logs relating to a specific event.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ReceiptLeafCircuit<const NODE_LEN: usize, const MAX_COLUMNS: usize>
-where
-    [(); MAX_COLUMNS - 2]:,
-{
+pub struct ReceiptLeafCircuit<const NODE_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize> {
     /// This is the RLP encoded leaf node in the Receipt Trie.
     pub node: Vec<u8>,
     /// The transaction index, telling us where the receipt is in the block. The RLP encoding of the index
@@ -103,34 +96,20 @@ where
     /// This is the offset in the node to the start of the log that relates to `event_info`
     pub relevant_log_offset: usize,
     /// The table metadata
-    pub metadata: TableMetadata<MAX_COLUMNS, 2>,
+    pub metadata: TableMetadata,
 }
 
-/// Contains all the information for data contained in an [`Event`]
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct LogDataInfo {
-    /// The column id of this piece of info
-    pub column_id: GFp,
-    /// The byte offset from the beggining of the log to this target
-    pub rel_byte_offset: usize,
-    /// The length of this piece of data
-    pub len: usize,
-}
-
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize> ReceiptLeafCircuit<NODE_LEN, MAX_COLUMNS>
+impl<const NODE_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>
+    ReceiptLeafCircuit<NODE_LEN, MAX_EXTRACTED_COLUMNS>
 where
     [(); PAD_LEN(NODE_LEN)]:,
-    [(); MAX_COLUMNS - 2]:,
 {
     /// Create a new [`ReceiptLeafCircuit`] from a [`ReceiptProofInfo`] and a [`EventLogInfo`]
     pub fn new<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
         last_node: &[u8],
         tx_index: u64,
         event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-    ) -> Result<Self>
-    where
-        [(); MAX_COLUMNS - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
-    {
+    ) -> Result<Self> {
         // Get the relevant log offset
         let relevant_log_offset = event.get_log_offset(last_node)?;
 
@@ -144,7 +123,7 @@ where
         } = *event;
 
         // Construct the table metadata from the event
-        let metadata = TableMetadata::<MAX_COLUMNS, 2>::from(*event);
+        let metadata = TableMetadata::from(*event);
 
         Ok(Self {
             node: last_node.to_vec(),
@@ -159,7 +138,7 @@ where
         })
     }
 
-    pub fn build(b: &mut CBuilder) -> ReceiptLeafWires<NODE_LEN, MAX_COLUMNS> {
+    pub(crate) fn build(b: &mut CBuilder) -> ReceiptLeafWires<NODE_LEN, MAX_EXTRACTED_COLUMNS> {
         // Build the event wires
         let event_wires = Self::build_event_wires(b);
         // Build the metadata
@@ -168,13 +147,12 @@ where
 
         let one = b.one();
         let two = b.two();
-        let t = b._true();
-        // Add targets for the data specific to this receipt
-        let index = b.add_virtual_target();
 
+        // Add targets for the data specific to this receipt
         let relevant_log_offset = b.add_virtual_target();
 
         let mpt_key = MPTKeyWire::new(b);
+        let index = mpt_key.fold_key(b);
 
         // Build the node wires.
         let wires = MPTReceiptLeafNode::build_and_advance_key::<_, D, NODE_LEN>(b, &mpt_key);
@@ -190,7 +168,7 @@ where
         );
         let key_header = node.arr.random_access_large_array(b, header_len_len);
         let less_than_val = b.constant(F::from_canonical_u8(128));
-        let single_value = less_than(b, key_header, less_than_val, 8);
+        let single_value = less_than_unsafe(b, key_header, less_than_val, 8);
         let key_len_maybe = b.add_const(key_header, F::ONE - F::from_canonical_u64(128));
         let key_len = b.select(single_value, one, key_len_maybe);
 
@@ -225,13 +203,10 @@ where
             // If we have extracted a value from an index in the desired range (so lte final_gas_index) we want to add it.
             // If access_index was strictly less than final_gas_index we need to multiply by 1 << 8 after (since the encoding is big endian)
             let valid = less_than_or_equal_to_unsafe(b, access_index, final_gas_index, 12);
-            let need_scalar = less_than(b, access_index, final_gas_index, 12);
 
-            let to_add = b.select(valid, array_value, zero);
-
-            let scalar = b.select(need_scalar, combiner, one);
-            let tmp = b.add(acc, to_add);
-            b.mul(tmp, scalar)
+            let tmp = b.mul(acc, combiner);
+            let tmp = b.add(tmp, array_value);
+            b.select(valid, tmp, acc)
         });
 
         let zero_u32 = b.zero_u32();
@@ -269,11 +244,8 @@ where
                 event_wires.sig_rel_offset,
             );
 
-        let address_check = address_extract.equals(b, &event_wires.address);
-        let sig_check = signature_extract.equals(b, &event_wires.event_signature);
-
-        b.connect(t.target, address_check.target);
-        b.connect(t.target, sig_check.target);
+        address_extract.enforce_equal(b, &event_wires.address);
+        signature_extract.enforce_equal(b, &event_wires.event_signature);
 
         let dm = b.add_curve_point(&[input_metadata_digest, extracted_metadata_digest]);
 
@@ -316,7 +288,6 @@ where
             event: event_wires,
             node,
             root,
-            index,
             relevant_log_offset,
             mpt_key,
             metadata,
@@ -347,10 +318,10 @@ where
         }
     }
 
-    pub fn assign(
+    pub(crate) fn assign(
         &self,
         pw: &mut PartialWitness<GFp>,
-        wires: &ReceiptLeafWires<NODE_LEN, MAX_COLUMNS>,
+        wires: &ReceiptLeafWires<NODE_LEN, MAX_EXTRACTED_COLUMNS>,
     ) {
         self.assign_event_wires(pw, &wires.event);
 
@@ -362,25 +333,27 @@ where
             &wires.root,
             &InputData::Assigned(&pad_node),
         );
-        pw.set_target(wires.index, GFp::from_canonical_u64(self.tx_index));
 
         pw.set_target(
             wires.relevant_log_offset,
             GFp::from_canonical_usize(self.relevant_log_offset),
         );
         let key_encoded = self.tx_index.rlp_bytes();
-        let key_nibbles: [u8; MAX_KEY_NIBBLE_LEN] = key_encoded
-            .iter()
-            .flat_map(|byte| [byte / 16, byte % 16])
-            .chain(iter::repeat(0u8))
-            .take(MAX_KEY_NIBBLE_LEN)
-            .collect::<Vec<u8>>()
+        let mut nibbles = bytes_to_nibbles(&key_encoded);
+        let ptr = nibbles.len() - 1;
+        nibbles.resize(MAX_KEY_NIBBLE_LEN, 0u8);
+
+        let key_nibbles: [u8; MAX_KEY_NIBBLE_LEN] = nibbles
             .try_into()
             .expect("Couldn't create mpt key with correct length");
 
-        wires.mpt_key.assign(pw, &key_nibbles, key_encoded.len());
+        wires.mpt_key.assign(pw, &key_nibbles, ptr);
 
-        TableMetadataGadget::<MAX_COLUMNS, 2>::assign(pw, &self.metadata, &wires.metadata);
+        TableMetadataGadget::<MAX_EXTRACTED_COLUMNS, 2>::assign(
+            pw,
+            &self.metadata,
+            &wires.metadata,
+        );
     }
 
     pub fn assign_event_wires(&self, pw: &mut PartialWitness<GFp>, wires: &EventWires) {
@@ -407,15 +380,14 @@ where
 }
 
 /// Num of children = 0
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize> CircuitLogicWires<GFp, D, 0>
-    for ReceiptLeafWires<NODE_LEN, MAX_COLUMNS>
+impl<const NODE_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize> CircuitLogicWires<GFp, D, 0>
+    for ReceiptLeafWires<NODE_LEN, MAX_EXTRACTED_COLUMNS>
 where
     [(); PAD_LEN(NODE_LEN)]:,
-    [(); MAX_COLUMNS - 2]:,
 {
     type CircuitBuilderParams = ();
 
-    type Inputs = ReceiptLeafCircuit<NODE_LEN, MAX_COLUMNS>;
+    type Inputs = ReceiptLeafCircuit<NODE_LEN, MAX_EXTRACTED_COLUMNS>;
 
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
 
@@ -443,20 +415,17 @@ mod tests {
     use super::*;
 
     use mp2_common::{
-        eth::left_pad32,
-        poseidon::{hash_to_int_value, H},
-        utils::{keccak256, Endianness, Packer, ToFields},
+        utils::{keccak256, Endianness, Packer},
         C,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         mpt_sequential::generate_receipt_test_info,
     };
-    use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
-    use plonky2_ecgfp5::curve::scalar_field::Scalar;
+
     #[derive(Clone, Debug)]
     struct TestReceiptLeafCircuit<const NODE_LEN: usize> {
-        c: ReceiptLeafCircuit<NODE_LEN, 7>,
+        c: ReceiptLeafCircuit<NODE_LEN, 5>,
     }
 
     impl<const NODE_LEN: usize> UserCircuit<F, D> for TestReceiptLeafCircuit<NODE_LEN>
@@ -464,10 +433,10 @@ mod tests {
         [(); PAD_LEN(NODE_LEN)]:,
     {
         // Leaf wires + expected extracted value
-        type Wires = ReceiptLeafWires<NODE_LEN, 7>;
+        type Wires = ReceiptLeafWires<NODE_LEN, 5>;
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            ReceiptLeafCircuit::<NODE_LEN, 7>::build(b)
+            ReceiptLeafCircuit::<NODE_LEN, 5>::build(b)
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -491,14 +460,13 @@ mod tests {
     >()
     where
         [(); PAD_LEN(NODE_LEN)]:,
-        [(); 7 - 2 - NO_TOPICS - MAX_DATA_WORDS]:,
     {
         let receipt_proof_infos = generate_receipt_test_info::<NO_TOPICS, MAX_DATA_WORDS>();
         let proofs = receipt_proof_infos.proofs();
         let info = proofs.first().unwrap();
         let query = receipt_proof_infos.query();
 
-        let c = ReceiptLeafCircuit::<NODE_LEN, 7>::new::<NO_TOPICS, MAX_DATA_WORDS>(
+        let c = ReceiptLeafCircuit::<NODE_LEN, 5>::new::<NO_TOPICS, MAX_DATA_WORDS>(
             info.mpt_proof.last().unwrap(),
             info.tx_index,
             &query.event,
@@ -509,21 +477,6 @@ mod tests {
         let test_circuit = TestReceiptLeafCircuit { c };
 
         let node = info.mpt_proof.last().unwrap().clone();
-
-        let mut tx_index_input = [0u8; 32];
-        tx_index_input[31] = info.tx_index as u8;
-
-        let node_rlp = rlp::Rlp::new(&node);
-        // The actual receipt data is item 1 in the list
-        let receipt_rlp = node_rlp.at(1).unwrap();
-
-        // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
-        let receipt_list = rlp::Rlp::new(&receipt_rlp.data().unwrap()[1..]);
-
-        // The logs themselves start are the item at index 3 in this list
-        let gas_used_rlp = receipt_list.at(1).unwrap();
-
-        let gas_used_bytes = left_pad32(gas_used_rlp.data().unwrap());
 
         assert!(node.len() <= NODE_LEN);
         let proof = run_circuit::<F, D, C, _>(test_circuit);
@@ -537,27 +490,7 @@ mod tests {
 
         // Check value digest
         {
-            let (input_d, row_unique_data) =
-                metadata.input_value_digest(&[&tx_index_input, &gas_used_bytes]);
-            let extracted_vd = metadata.extracted_receipt_value_digest(&node, &query.event);
-
-            let total = input_d + extracted_vd;
-
-            // row_id = H2int(row_unique_data || num_actual_columns)
-            let inputs = HashOut::from(row_unique_data)
-                .to_fields()
-                .into_iter()
-                .chain(std::iter::once(GFp::from_canonical_usize(
-                    metadata.num_actual_columns,
-                )))
-                .collect::<Vec<GFp>>();
-            let hash = H::hash_no_pad(&inputs);
-            let row_id = hash_to_int_value(hash);
-
-            // values_digest = values_digest * row_id
-            let row_id = Scalar::from_noncanonical_biguint(row_id);
-
-            let exp_digest = total * row_id;
+            let exp_digest = metadata.receipt_value_digest(info.tx_index, &node, &query.event);
             assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
         }
 

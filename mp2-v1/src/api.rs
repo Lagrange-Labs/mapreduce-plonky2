@@ -11,9 +11,12 @@ use crate::{
     },
     values_extraction::{
         self, compute_id_with_prefix,
-        gadgets::column_info::{ExtractedColumnInfo, InputColumnInfo},
-        identifier_block_column, identifier_for_value_column, ColumnMetadata, INNER_KEY_ID_PREFIX,
-        KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
+        gadgets::{
+            column_info::{ExtractedColumnInfo, InputColumnInfo},
+            metadata_gadget::TableMetadata,
+        },
+        identifier_block_column, identifier_for_value_column, INNER_KEY_ID_PREFIX, KEY_ID_PREFIX,
+        OUTER_KEY_ID_PREFIX,
     },
     MAX_RECEIPT_LEAF_NODE_LEN,
 };
@@ -46,31 +49,26 @@ pub struct InputNode {
 /// We use `512` in as the `NODE_LEN` in [`values_extraction::CircuitInput`] to represent
 /// the maximum length of a Receipt Trie leaf node. The Storage trie leaf node size is now hard coded into
 /// the circuits.
-type ValuesExtractionInput<const MAX_COLUMNS: usize> =
-    values_extraction::CircuitInput<512, MAX_COLUMNS>;
+type ValuesExtractionInput<const MAX_EXTRACTED_COLUMNS: usize> =
+    values_extraction::CircuitInput<512, MAX_EXTRACTED_COLUMNS>;
 /// We use `512` in as the `NODE_LEN` in [`values_extraction::PublicParameters`] to represent
 /// the maximum length of a Receipt Trie leaf node. The Storage trie leaf node size is now hard coded into
 /// the circuits.
-type ValuesExtractionParameters<const MAX_COLUMNS: usize> =
-    values_extraction::PublicParameters<512, MAX_COLUMNS>;
+type ValuesExtractionParameters<const MAX_EXTRACTED_COLUMNS: usize> =
+    values_extraction::PublicParameters<512, MAX_EXTRACTED_COLUMNS>;
 fn sanity_check() {
     assert_eq!(MAX_RECEIPT_LEAF_NODE_LEN, 512);
 }
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the
 /// pre-processing stage of LPN
-pub enum CircuitInput<const MAX_COLUMNS: usize>
-where
-    [(); MAX_COLUMNS - 2]:,
-    [(); MAX_COLUMNS - 1]:,
-    [(); MAX_COLUMNS - 0]:,
-{
+pub enum CircuitInput<const MAX_EXTRACTED_COLUMNS: usize> {
     /// Contract extraction input
     ContractExtraction(contract_extraction::CircuitInput),
     /// Length extraction input
     LengthExtraction(LengthCircuitInput),
     /// Values extraction input
-    ValuesExtraction(ValuesExtractionInput<MAX_COLUMNS>),
+    ValuesExtraction(ValuesExtractionInput<MAX_EXTRACTED_COLUMNS>),
     /// Block extraction necessary input
     BlockExtraction(block_extraction::CircuitInput),
     /// Final extraction input
@@ -87,26 +85,16 @@ where
 
 #[derive(Serialize, Deserialize)]
 /// Parameters defining all the circuits employed for the pre-processing stage of LPN
-pub struct PublicParameters<const MAX_COLUMNS: usize>
-where
-    [(); MAX_COLUMNS - 2]:,
-    [(); MAX_COLUMNS - 1]:,
-    [(); MAX_COLUMNS - 0]:,
-{
+pub struct PublicParameters<const MAX_EXTRACTED_COLUMNS: usize> {
     contract_extraction: contract_extraction::PublicParameters,
     length_extraction: length_extraction::PublicParameters,
-    values_extraction: ValuesExtractionParameters<MAX_COLUMNS>,
+    values_extraction: ValuesExtractionParameters<MAX_EXTRACTED_COLUMNS>,
     block_extraction: block_extraction::PublicParameters,
     final_extraction: final_extraction::PublicParameters,
     tree_creation:
         verifiable_db::api::PublicParameters<final_extraction::PublicInputs<'static, Target>>,
 }
-impl<const MAX_COLUMNS: usize> PublicParameters<MAX_COLUMNS>
-where
-    [(); MAX_COLUMNS - 2]:,
-    [(); MAX_COLUMNS - 1]:,
-    [(); MAX_COLUMNS - 0]:,
-{
+impl<const MAX_EXTRACTED_COLUMNS: usize> PublicParameters<MAX_EXTRACTED_COLUMNS> {
     pub fn get_params_info(&self) -> Result<Vec<u8>> {
         self.tree_creation.get_params_info()
     }
@@ -115,19 +103,18 @@ where
     pub fn empty_cell_tree_proof(&self) -> Result<Vec<u8>> {
         self.tree_creation.empty_cell_tree_proof()
     }
-    pub fn get_value_extraction_params(&self) -> &ValuesExtractionParameters<MAX_COLUMNS> {
+
+    pub fn get_value_extraction_params(
+        &self,
+    ) -> &ValuesExtractionParameters<MAX_EXTRACTED_COLUMNS> {
         &self.values_extraction
     }
 }
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
-pub fn build_circuits_params<const MAX_COLUMNS: usize>() -> PublicParameters<MAX_COLUMNS>
-where
-    [(); MAX_COLUMNS - 2]:,
-    [(); MAX_COLUMNS - 1]:,
-    [(); MAX_COLUMNS - 0]:,
-{
+pub fn build_circuits_params<const MAX_EXTRACTED_COLUMNS: usize>(
+) -> PublicParameters<MAX_EXTRACTED_COLUMNS> {
     sanity_check();
     log::info!("Building contract_extraction parameters...");
     let contract_extraction = contract_extraction::build_circuits_params();
@@ -161,15 +148,10 @@ where
 /// Generate a proof for a circuit in the set of circuits employed in the
 /// pre-processing stage of LPN, employing `CircuitInput` to specify for which
 /// circuit the proof should be generated
-pub fn generate_proof<const MAX_COLUMNS: usize>(
-    params: &PublicParameters<MAX_COLUMNS>,
-    input: CircuitInput<MAX_COLUMNS>,
-) -> Result<Vec<u8>>
-where
-    [(); MAX_COLUMNS - 2]:,
-    [(); MAX_COLUMNS - 1]:,
-    [(); MAX_COLUMNS - 0]:,
-{
+pub fn generate_proof<const MAX_EXTRACTED_COLUMNS: usize>(
+    params: &PublicParameters<MAX_EXTRACTED_COLUMNS>,
+    input: CircuitInput<MAX_EXTRACTED_COLUMNS>,
+) -> Result<Vec<u8>> {
     match input {
         CircuitInput::ContractExtraction(input) => {
             contract_extraction::generate_proof(&params.contract_extraction, input)
@@ -253,7 +235,7 @@ impl SlotInputs {
         contract_address: &Address,
         chain_id: u64,
         extra: Vec<u8>,
-    ) -> ColumnMetadata {
+    ) -> TableMetadata {
         let (slot, extracted_columns) = match self {
             SlotInputs::Simple(ref inner)
             | SlotInputs::Mapping(ref inner)
@@ -306,7 +288,7 @@ impl SlotInputs {
             _ => vec![],
         };
 
-        ColumnMetadata::new(input_columns, extracted_columns)
+        TableMetadata::new(&input_columns, &extracted_columns)
     }
 }
 
@@ -463,18 +445,17 @@ pub fn metadata_hash(
     extra: Vec<u8>,
 ) -> MetadataHash {
     // closure to compute the metadata digest associated to a mapping variable
-    let (value_digest, length_digest) =
-        value_metadata(slot_input, contract_address, chain_id, extra);
+    let (md_digest, length_digest) = value_metadata(slot_input, contract_address, chain_id, extra);
     // Correspond to the computation of final extraction base circuit.
-    let value_digest = map_to_curve_point(&value_digest.to_fields());
+    let md_digest = map_to_curve_point(&md_digest.to_fields());
     // add contract digest
     let contract_digest = contract_metadata_digest(contract_address);
     debug!(
         "METADATA_HASH ->\n\tvalues_ext_md = {:?}\n\tcontract_md = {:?}\n\tfinal_ex_md(contract + values_ex) = {:?}",
-        value_digest.to_weierstrass(),
+        md_digest.to_weierstrass(),
         contract_digest.to_weierstrass(),
-        (contract_digest + value_digest).to_weierstrass(),
+        (contract_digest + md_digest).to_weierstrass(),
     );
     // compute final hash
-    combine_digest_and_block(contract_digest + value_digest + length_digest)
+    combine_digest_and_block(contract_digest + md_digest + length_digest)
 }

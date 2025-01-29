@@ -685,11 +685,8 @@ pub trait ReceiptExtractionArgs:
         proof_infos: &[ReceiptProofInfo],
         event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>,
         block: PrimaryIndex,
-    ) -> Vec<TableRowUpdate<PrimaryIndex>>
-    where
-        [(); 7 - 2 - Self::NO_TOPICS - Self::MAX_DATA_WORDS]:,
-    {
-        let metadata = TableMetadata::<7, 2>::from(*event);
+    ) -> Vec<TableRowUpdate<PrimaryIndex>> {
+        let metadata = TableMetadata::from(*event);
 
         let (_, row_id) = metadata.input_value_digest(&[&[0u8; 32]; 2]);
         let input_columns_ids = metadata
@@ -963,7 +960,7 @@ where
     }
 
     fn metadata_hash(&self, _contract_address: Address, _chain_id: u64) -> MetadataHash {
-        let table_metadata = TableMetadata::<7, 2>::from(self.get_event());
+        let table_metadata = TableMetadata::from(self.get_event());
         let digest = table_metadata.digest();
         combine_digest_and_block(digest)
     }
