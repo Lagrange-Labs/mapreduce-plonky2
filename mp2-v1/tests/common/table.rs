@@ -193,7 +193,7 @@ pub struct Table {
     pub(crate) db_pool: DBPool,
 }
 
-fn row_table_name(name: &str) -> String {
+pub(crate) fn row_table_name(name: &str) -> String {
     format!("row_{}", name)
 }
 fn index_table_name(name: &str) -> String {

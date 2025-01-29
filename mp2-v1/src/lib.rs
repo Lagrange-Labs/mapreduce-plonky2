@@ -30,6 +30,8 @@ pub const L32_LEAF_VALUE_LEN: usize = L32(MAX_LEAF_VALUE_LEN);
 /// The maximum size of receipt leaf that we accept in the code, any larger causes additiona keccak hashing to occur resulting in
 /// different circuits.
 pub const MAX_RECEIPT_LEAF_NODE_LEN: usize = 512;
+/// This is the maxoimum number fo columns that are extracted from a log in a receipt, it corresponds to three topics and two EVM words of additional data
+pub const MAX_RECEIPT_COLUMNS: usize = 5;
 
 pub mod api;
 pub mod block_extraction;

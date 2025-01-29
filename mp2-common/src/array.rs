@@ -693,16 +693,6 @@ where
         b: &mut CircuitBuilder<F, D>,
         at: Target,
     ) -> Array<T, SUB_SIZE> {
-        let m = b.constant(F::from_canonical_usize(SUB_SIZE));
-        let array_len = b.constant(F::from_canonical_usize(SIZE));
-        let upper_bound = b.add(at, m);
-        let num_bits_size = SIZE.ilog2() + 1;
-
-        let lt = less_than_or_equal_to_unsafe(b, upper_bound, array_len, num_bits_size as usize);
-
-        let t = b._true();
-        b.connect(t.target, lt.target);
-
         Array::<T, SUB_SIZE> {
             arr: core::array::from_fn(|i| {
                 let i_target = b.constant(F::from_canonical_usize(i));

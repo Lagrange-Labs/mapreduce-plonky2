@@ -26,7 +26,13 @@ use plonky2::{
     plonk::config::Hasher,
 };
 use rand::{thread_rng, Rng};
-use ryhope::storage::RoEpochKvStorage;
+use ryhope::{
+    storage::{
+        pgsql::{SqlServerConnection, SqlStorageSettings},
+        RoEpochKvStorage,
+    },
+    InitSettings,
+};
 
 use crate::common::{
     bindings::eventemitter::EventEmitter::{self, EventEmitterInstance},
@@ -43,10 +49,10 @@ use crate::common::{
         TableIndexing,
     },
     proof_storage::{ProofKey, ProofStorage},
-    rowtree::SecondaryIndexCell,
+    rowtree::{MerkleRowTree, SecondaryIndexCell},
     table::{
-        CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns, TableRowUniqueID,
-        TreeRowUpdate, TreeUpdateType,
+        row_table_name, CellsUpdate, IndexType, IndexUpdate, Table, TableColumn, TableColumns,
+        TableRowUniqueID, TreeRowUpdate, TreeUpdateType,
     },
     TableInfo, TestContext,
 };
@@ -736,20 +742,19 @@ impl<T: TableSource> TableIndexing<T> {
             // If we are dealing with receipts we need to remove everything already in the row tree
             let bn = ctx.block_number().await as BlockPrimaryIndex;
 
-            let table_row_updates = if let ChangeType::Receipt(..) = ut {
-                let current_row_epoch = self.table.row.current_epoch();
-                let current_row_keys = self
-                    .table
-                    .row
-                    .keys_at(current_row_epoch)
-                    .await
-                    .into_iter()
-                    .map(TableRowUpdate::<BlockPrimaryIndex>::Deletion)
-                    .collect::<Vec<_>>();
-                [current_row_keys, table_row_updates].concat()
-            } else {
-                table_row_updates
-            };
+            if let ChangeType::Receipt(..) = ut {
+                let db_url =
+                    std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
+                self.table.row = MerkleRowTree::new(
+                    InitSettings::MustExist,
+                    SqlStorageSettings {
+                        table: row_table_name(&self.table.public_name),
+                        source: SqlServerConnection::NewConnection(db_url.clone()),
+                    },
+                )
+                .await
+                .unwrap();
+            }
 
             log::info!("Applying follow up updates to contract done - now at block {bn}",);
             // we first run the initial preprocessing and db creation.

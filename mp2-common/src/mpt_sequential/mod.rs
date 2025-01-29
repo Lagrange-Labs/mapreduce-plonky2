@@ -362,7 +362,7 @@ where
 ///     And it returns:
 /// * New key with the pointer moved.
 /// * The child hash / value of the node.
-/// * A boolean that must be true if the given node is a leaf or an extension.
+/// * A boolean that must be true if the given node is a branch.
 /// * The nibble position before this advance.
 pub fn advance_key_branch<
     F: RichField + Extendable<D>,
