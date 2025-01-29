@@ -31,3 +31,5 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # Keep all the crates versions in sync
           crate-release-all: true
+          pr-meta-comment: false
+          pr-merge-strategy: "squash"
