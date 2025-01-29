@@ -75,6 +75,7 @@ const PROOF_STORE_FILE: &str = "test_proofs.store";
 const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
 const MAPPING_OF_MAPPING_TABLE_INFO_FILE: &str = "mapping_of_mapping_column_info.json";
 const MERGE_TABLE_INFO_FILE: &str = "merge_column_info.json";
+const RECEIPT_TABLE_INFO_FILE: &str = "receipt_column_info.json";
 
 #[test(tokio::test)]
 #[ignore]
@@ -97,7 +98,7 @@ async fn integrated_indexing() -> Result<()> {
     let changes = vec![
         ChangeType::Receipt(1, 10),
         ChangeType::Receipt(10, 1),
-        ChangeType::Receipt(0, 10),
+        ChangeType::Receipt(5, 5),
     ];
     receipt.run(&mut ctx, genesis, changes.clone()).await?;
 
@@ -176,6 +177,7 @@ async fn integrated_indexing() -> Result<()> {
         MAPPING_OF_MAPPING_TABLE_INFO_FILE,
         mapping_of_struct_mappings.table_info(),
     )?;
+    write_table_info(RECEIPT_TABLE_INFO_FILE, receipt.table_info())?;
 
     Ok(())
 }
@@ -223,6 +225,14 @@ async fn integrated_querying_mapping_of_mappings_table() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test for merged table");
     let table_info = read_table_info(MAPPING_OF_MAPPING_TABLE_INFO_FILE)?;
+    integrated_querying(table_info).await
+}
+#[test(tokio::test)]
+#[ignore]
+async fn integrated_querying_receipt_table() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test for merged table");
+    let table_info: TableInfo<EventLogInfo<0, 0>> = read_table_info(RECEIPT_TABLE_INFO_FILE)?;
     integrated_querying(table_info).await
 }
 

@@ -497,7 +497,8 @@ impl StorageSlotValue for U256 {
 
 fn sample_u256() -> U256 {
     let rng = &mut thread_rng();
-    U256::from_limbs(rng.gen())
+    let sampled: u64 = rng.gen();
+    U256::from(sampled)
 }
 
 fn sample_u128() -> u128 {

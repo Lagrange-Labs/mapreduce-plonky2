@@ -828,15 +828,11 @@ impl<R: ReceiptExtractionArgs> TableSource for R
 where
     [(); <R as ReceiptExtractionArgs>::NO_TOPICS]:,
     [(); <R as ReceiptExtractionArgs>::MAX_DATA_WORDS]:,
-    [(); 7
-        - 2
-        - <R as ReceiptExtractionArgs>::NO_TOPICS
-        - <R as ReceiptExtractionArgs>::MAX_DATA_WORDS]:,
 {
     type Metadata = EventLogInfo<{ R::NO_TOPICS }, { R::MAX_DATA_WORDS }>;
 
     fn can_query(&self) -> bool {
-        false
+        true
     }
 
     fn get_data(&self) -> Self::Metadata {
