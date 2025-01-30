@@ -768,7 +768,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS
         }
     }
 
-    /// Function that takes a list of transaction indices in the form of a [`BTreeSet`] and a [`BlockUtil`] and returns a list of [`ReceiptProofInfo`]
+    /// Function that takes a list of transaction indices in the form of a [`BTreeSet`] and a [`BlockUtil`] and returns a list of [`ReceiptProofInfo`].
     pub fn extract_info(
         tx_indices: &BTreeSet<u64>,
         block_util: &mut BlockUtil,
@@ -789,6 +789,15 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS
             })
             .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()?;
 
+        // // In the case when proofs is empty we just need to provide a proof for the root node
+        // if proofs.is_empty() {
+        //     // Transaction index 0 should always be present
+        //     let key = 0u64.rlp_bytes();
+
+        //     // Get the proof but just use the first node of the proof
+        //     let proof = block_util.receipts_trie.get_proof(&key[..])?;
+
+        // }
         Ok(proofs)
     }
 }
