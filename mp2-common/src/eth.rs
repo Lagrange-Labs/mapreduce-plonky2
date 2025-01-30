@@ -768,7 +768,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS
         }
     }
 
-    /// Function that takes a list of transaction indices in the form of a [`BTreeSet`] and a [`BlockUtil`] and returns a list of [`ReceiptProofInfo`]
+    /// Function that takes a list of transaction indices in the form of a [`BTreeSet`] and a [`BlockUtil`] and returns a list of [`ReceiptProofInfo`].
     pub fn extract_info(
         tx_indices: &BTreeSet<u64>,
         block_util: &mut BlockUtil,

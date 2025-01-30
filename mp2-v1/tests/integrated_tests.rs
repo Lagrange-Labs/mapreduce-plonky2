@@ -231,7 +231,7 @@ async fn integrated_querying_mapping_of_mappings_table() -> Result<()> {
 #[ignore]
 async fn integrated_querying_receipt_table() -> Result<()> {
     let _ = env_logger::try_init();
-    info!("Running QUERY test for merged table");
+    info!("Running QUERY test for receipt table");
     let table_info: TableInfo<EventLogInfo<0, 0>> = read_table_info(RECEIPT_TABLE_INFO_FILE)?;
     integrated_querying(table_info).await
 }
