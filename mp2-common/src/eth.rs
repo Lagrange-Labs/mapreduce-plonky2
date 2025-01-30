@@ -789,6 +789,15 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS
             })
             .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()?;
 
+        // // In the case when proofs is empty we just need to provide a proof for the root node
+        // if proofs.is_empty() {
+        //     // Transaction index 0 should always be present
+        //     let key = 0u64.rlp_bytes();
+
+        //     // Get the proof but just use the first node of the proof
+        //     let proof = block_util.receipts_trie.get_proof(&key[..])?;
+
+        // }
         Ok(proofs)
     }
 }
