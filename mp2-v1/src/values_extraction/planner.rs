@@ -8,6 +8,7 @@ use alloy::{
 use anyhow::Result;
 use mp2_common::eth::{node_type, EventLogInfo, MP2EthError, NodeType, ReceiptQuery};
 use ryhope::storage::updatetree::{Next, UpdateTree};
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 
 use std::{
@@ -85,7 +86,7 @@ pub trait Extractable {
     ) -> impl Future<Output = Result<Vec<u8>, MP2PlannerError>>;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 struct ProofData {
     node: Vec<u8>,
     node_type: NodeType,
