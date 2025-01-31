@@ -209,6 +209,9 @@ impl<PrimaryIndex: std::fmt::Debug + Clone + Default + PartialEq + Eq> RowPayloa
         }
     }
 
+    pub fn column_value(&self, column_id: ColumnID) -> Option<U256> {
+        self.cells.get(&column_id).map(|c| c.value)
+    }
     pub fn secondary_index_value(&self) -> U256 {
         self.cells
             .get(&self.secondary_index_column)

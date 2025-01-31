@@ -194,8 +194,8 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
 ///
 ///     B           C           D
 ///
-/// E   F   G       H   I  
-/// ```  
+/// E   F   G       H   I
+/// ```
 /// The nodes in this tree will be identified by the following keys:
 /// ```text
 ///                             (0,0)
@@ -203,7 +203,7 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
 ///        (1,0)                (1,1)               (1,2)
 ///
 /// (2,0)  (2,1)  (2,2)         (2,3)  (2,4)
-/// ```      
+/// ```
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize,
 )]
@@ -248,7 +248,11 @@ impl<const NUM_CHUNKS: usize> UTForChunkProofs<NUM_CHUNKS> for UTForChunks<NUM_C
                 // first, compute the child key for the i-th potential child
                 let child_key = node_key.children_key(i);
                 // then, return the computed key only if the i-th child exists in the tree
-                self.node_from_key(&child_key).map(|_| child_key)
+                if self.contains_key(&child_key) {
+                    Some(child_key)
+                } else {
+                    None
+                }
             })
             .collect_vec()
     }

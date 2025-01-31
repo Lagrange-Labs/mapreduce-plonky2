@@ -1,5 +1,6 @@
 use anyhow::*;
 use futures::{stream, StreamExt};
+use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::proof::ProofWithVK;
 use mp2_v1::{
@@ -168,7 +169,7 @@ impl TestContext {
                 "[+] [+] Merkle SLOT identifier {:?} -> value {} value.digest() = {:?}",
                 cell.identifier(),
                 cell.value(),
-                pi.individual_digest_point()
+                pi.individual_values_digest_point()
             );
 
             self.storage
@@ -241,10 +242,10 @@ impl TestContext {
         let must_move_all_proofs = !(cells_update.previous_row_key == cells_update.new_row_key
             || cells_update.previous_row_key == Default::default());
         // impacted keys by the update
-        let impacted_keys = cells_update.to_update.impacted_keys();
-        println!(
+        let impacted_keys = cells_update.to_update.nodes().collect_vec();
+        debug!(
             "  -- -CELL TREE impacted keys in new update: {:?}",
-            cells_update.to_update.impacted_keys()
+            impacted_keys
         );
         let updated_cells = CellCollection(
             all_cells
@@ -255,21 +256,21 @@ impl TestContext {
                     // only move the cells tree proof of the actual cells, not the secondary index !
                     // CellsCollection is a bit weird because it has to contain as well the secondary
                     // index to be able to search in it in JSON
-                    if *id == table.columns.secondary_column().identifier {
+                    if *id == table.columns.secondary_column().identifier() {
                         return (*id, new_cell);
                     }
 
                     let tree_key = table.columns.cells_tree_index_of(*id);
-                    println!(
+                    debug!(
                         " --- CELL TREE key {} index of {id} vs secondary id {} vs table.secondary_id {}",
                         tree_key,
                         previous_row.payload.secondary_index_column,
-                        table.columns.secondary.identifier
+                        table.columns.secondary.identifier()
                     );
                     // we need to update the primary on the impacted cells at least, OR on all the cells if
                     // we are moving all the proofs to a new row key which happens when doing an DELETE +
                     // INSERT
-                    if must_move_all_proofs || impacted_keys.contains(&tree_key) {
+                    if must_move_all_proofs || impacted_keys.contains(&&tree_key) {
                         new_cell.primary = primary;
                         debug!("CELL INFO: Updated key {tree_key} to new block {primary}")
                     }
@@ -308,7 +309,7 @@ impl TestContext {
         );
 
         Ok(RowPayload {
-            secondary_index_column: table.columns.secondary_column().identifier,
+            secondary_index_column: table.columns.secondary_column().identifier(),
             cell_root_key: Some(root_key),
             cell_root_hash: Some(tree_hash),
             cell_root_column: Some(

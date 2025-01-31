@@ -12,7 +12,7 @@ use sqlparser::ast::{
 use std::collections::HashMap;
 use verifiable_db::query::{
     computational_hash_ids::PlaceholderIdentifier,
-    universal_circuit::universal_circuit_inputs::{PlaceholderId, Placeholders},
+    universal_circuit::universal_circuit_inputs::Placeholders,
 };
 
 use crate::{
@@ -93,7 +93,7 @@ pub struct TranslatedQuery {
     pub query: SafeQuery,
     /// Where each placeholder from the zkSQL query should be put in the array
     /// of PgSQL placeholder.
-    pub placeholder_mapping: HashMap<PlaceholderId, usize>,
+    pub placeholder_mapping: HashMap<PlaceholderIdentifier, usize>,
     /// A mapping from the named placeholders as defined in the settings to the
     /// string representation of numeric placeholders (e.g. from `$MIN_BLOCK` to
     /// `$4`).
@@ -105,9 +105,13 @@ impl TranslatedQuery {
         settings: &ParsilSettings<C>,
     ) -> Result<Self> {
         let used_placeholders = placeholders::gather_placeholders(settings, query.as_mut())?;
-        let placeholder_mapping = std::iter::once(PlaceholderId::MinQueryOnIdx1)
+        let placeholder_mapping = std::iter::once(PlaceholderIdentifier::MinQueryOnIdx1)
             .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
-            .chain(used_placeholders.iter().map(|i| PlaceholderId::Generic(*i)))
+            .chain(
+                used_placeholders
+                    .iter()
+                    .map(|i| PlaceholderIdentifier::Generic(*i)),
+            )
             .enumerate()
             .map(|(i, p)| (p, i))
             .collect();
@@ -259,8 +263,8 @@ pub fn convert_number_string(expr: &mut Expr) -> Result<()> {
     Ok(())
 }
 
-/// When a function that may return a float is encountered (i.e., AVG), it is replaced with a
-/// call to integer division DIV.
+/// When a function that may return a float is encountered, (i.e., AVG), it is replaced
+/// with a call to integer division DIV.
 fn convert_funcalls(expr: &mut Expr) -> Result<()> {
     if let Some(replacement) = match expr {
         Expr::Function(Function { name, .. }) => match name.to_string().to_uppercase().as_str() {

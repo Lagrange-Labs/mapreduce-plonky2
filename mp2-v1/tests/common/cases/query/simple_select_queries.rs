@@ -26,10 +26,8 @@ use std::{fmt::Debug, hash::Hash};
 use tokio_postgres::Row as PgSqlRow;
 use verifiable_db::{
     query::{
-        computational_hash_ids::ColumnIDs,
-        universal_circuit::universal_circuit_inputs::{
-            ColumnCell, PlaceholderId, Placeholders, RowCells,
-        },
+        computational_hash_ids::{ColumnIDs, PlaceholderIdentifier},
+        universal_circuit::universal_circuit_inputs::{ColumnCell, Placeholders, RowCells},
         utils::{ChildPosition, NodeInfo},
     },
     revelation::{api::MatchingRow, RowPath},
@@ -264,7 +262,7 @@ pub(crate) async fn prove_single_row<T: TreeFetcher<RowTreeKey, RowPayload<Block
     let rest_cells = columns
         .non_indexed_columns()
         .iter()
-        .map(|tc| tc.identifier)
+        .map(|tc| tc.identifier())
         .filter_map(|id| {
             row_payload
                 .cells
@@ -328,7 +326,7 @@ pub(crate) async fn cook_query_with_max_num_matching_rows(
     let added_placeholder = U256::from(42);
 
     let placeholders = Placeholders::from((
-        vec![(PlaceholderId::Generic(1), added_placeholder)],
+        vec![(PlaceholderIdentifier::Generic(1), added_placeholder)],
         U256::from(min_block),
         U256::from(max_block),
     ));
@@ -371,7 +369,7 @@ pub(crate) async fn cook_query_with_matching_rows(
     let added_placeholder = U256::from(42);
 
     let placeholders = Placeholders::from((
-        vec![(PlaceholderId::Generic(1), added_placeholder)],
+        vec![(PlaceholderIdentifier::Generic(1), added_placeholder)],
         U256::from(min_block),
         U256::from(max_block),
     ));
@@ -417,7 +415,7 @@ pub(crate) async fn cook_query_too_big_offset(
     let added_placeholder = U256::from(42);
 
     let placeholders = Placeholders::from((
-        vec![(PlaceholderId::Generic(1), added_placeholder)],
+        vec![(PlaceholderIdentifier::Generic(1), added_placeholder)],
         U256::from(min_block),
         U256::from(max_block),
     ));
@@ -461,8 +459,8 @@ pub(crate) async fn cook_query_no_matching_rows(
 
     let placeholders = Placeholders::from((
         vec![
-            (PlaceholderId::Generic(1), key_value),
-            (PlaceholderId::Generic(2), added_placeholder),
+            (PlaceholderIdentifier::Generic(1), key_value),
+            (PlaceholderIdentifier::Generic(2), added_placeholder),
         ],
         U256::from(min_block),
         U256::from(max_block),
@@ -506,7 +504,7 @@ pub(crate) async fn cook_query_with_distinct(
     let added_placeholder = U256::from(42);
 
     let placeholders = Placeholders::from((
-        vec![(PlaceholderId::Generic(1), added_placeholder)],
+        vec![(PlaceholderIdentifier::Generic(1), added_placeholder)],
         U256::from(min_block),
         U256::from(max_block),
     ));
@@ -550,7 +548,7 @@ pub(crate) async fn cook_query_with_wildcard(
     let added_placeholder = U256::from(42);
 
     let placeholders = Placeholders::from((
-        vec![(PlaceholderId::Generic(1), added_placeholder)],
+        vec![(PlaceholderIdentifier::Generic(1), added_placeholder)],
         U256::from(min_block),
         U256::from(max_block),
     ));

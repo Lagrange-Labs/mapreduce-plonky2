@@ -1,3 +1,8 @@
+use super::{
+    public_inputs::PublicInputs,
+    secondary_index_cell::{SecondaryIndexCell, SecondaryIndexCellWire},
+};
+use crate::cells_tree;
 use derive_more::{From, Into};
 use mp2_common::{
     default_config,
@@ -18,61 +23,54 @@ use recursion_framework::{
     },
 };
 use serde::{Deserialize, Serialize};
-
-use crate::cells_tree::{self, Cell, CellWire};
-
-use super::public_inputs::PublicInputs;
+use std::iter::once;
 
 // new type to implement the circuit logic on each differently
 // deref to access directly the same members - read only so it's ok
 #[derive(Clone, Debug, From, Into)]
-pub struct LeafCircuit(Cell);
+pub struct LeafCircuit(SecondaryIndexCell);
 
 #[derive(Clone, Serialize, Deserialize, From, Into)]
-pub(crate) struct LeafWires(CellWire);
+pub(crate) struct LeafWires(SecondaryIndexCellWire);
 
 impl LeafCircuit {
     pub(crate) fn build(b: &mut CircuitBuilder<F, D>, cells_pis: &[Target]) -> LeafWires {
         let cells_pis = cells_tree::PublicInputs::from_slice(cells_pis);
-        // D(index_id||pack_u32(index_value)
-        let tuple = CellWire::new(b);
-        // set the right digest depending on the multiplier and accumulate the ones from the public
-        // inputs of the cell root proof
-        let split_digest = tuple.split_and_accumulate_digest(b, cells_pis.split_digest_target());
-        // final_digest = HashToInt(D(mul_digest)) * D(ind_digest)
-        // NOTE This additional digest is necessary since the individual digest is supposed to be a
-        // full row, that is how it is extracted from MPT
-        let (final_digest, is_merge) = split_digest.cond_combine_to_row_digest(b);
+        let secondary_index_cell = SecondaryIndexCellWire::new(b);
+        let id = secondary_index_cell.identifier();
+        let value = secondary_index_cell.value().to_targets();
+        let digest = secondary_index_cell.digest(b, &cells_pis);
 
         // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
         // in our case, min == max == index_value
         // left_child_hash == right_child_hash == empty_hash since there is not children
-        let empty_hash = b.constant_hash(*empty_poseidon_hash());
+        let empty_hash = b.constant_hash(*empty_poseidon_hash()).to_targets();
         let inputs = empty_hash
-            .to_targets()
-            .iter()
-            .chain(empty_hash.to_targets().iter())
-            .chain(tuple.value.to_targets().iter())
-            .chain(tuple.value.to_targets().iter())
-            .chain(tuple.to_targets().iter())
-            .chain(cells_pis.node_hash().to_targets().iter())
-            .cloned()
+            .clone()
+            .into_iter()
+            .chain(empty_hash)
+            .chain(value.clone())
+            .chain(value.clone())
+            .chain(once(id))
+            .chain(value.clone())
+            .chain(cells_pis.node_hash_target())
             .collect::<Vec<_>>();
         let row_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
-        let value_fields = tuple.value.to_targets();
         PublicInputs::new(
             &row_hash.elements,
-            &final_digest.to_targets(),
-            &value_fields,
-            &value_fields,
-            &[is_merge.target],
+            &digest.individual_vd.to_targets(),
+            &digest.multiplier_vd.to_targets(),
+            &value,
+            &value,
+            &digest.multiplier_cnt,
         )
         .register(b);
-        LeafWires(tuple)
+
+        LeafWires(secondary_index_cell)
     }
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
-        self.0.assign_wires(pw, &wires.0);
+        self.0.assign(pw, &wires.0);
     }
 }
 
@@ -98,14 +96,14 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 
     type Inputs = RecursiveLeafInput;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<Target>::total_len();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::TOTAL_LEN;
+        const CELLS_IO: usize = cells_tree::PublicInputs::<Target>::total_len();
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::<F, C, D, CELLS_IO>::new(
             default_config(),
             &builder_parameters,
@@ -129,25 +127,18 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 
 #[cfg(test)]
 mod test {
-
-    use alloy::primitives::U256;
-    use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, CHasher, C, D, F};
+    use super::*;
+    use crate::{
+        cells_tree::PublicInputs as CellsPublicInputs, row_tree::public_inputs::PublicInputs,
+    };
+    use itertools::Itertools;
+    use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
-        field::types::Sample,
-        hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
         iop::{target::Target, witness::WitnessWrite},
         plonk::{circuit_builder::CircuitBuilder, config::Hasher},
     };
-    use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{thread_rng, Rng};
-
-    use crate::{
-        cells_tree::{self, Cell},
-        row_tree::public_inputs::PublicInputs,
-    };
-
-    use super::{LeafCircuit, LeafWires};
+    use std::iter::once;
 
     #[derive(Debug, Clone)]
     struct TestLeafCircuit {
@@ -159,7 +150,7 @@ mod test {
         type Wires = (LeafWires, Vec<Target>);
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
-            let cells_pi = c.add_virtual_targets(cells_tree::PublicInputs::<Target>::TOTAL_LEN);
+            let cells_pi = c.add_virtual_targets(cells_tree::PublicInputs::<Target>::total_len());
             (LeafCircuit::build(c, &cells_pi), cells_pi)
         }
 
@@ -170,48 +161,56 @@ mod test {
     }
 
     fn test_row_tree_leaf_circuit(is_multiplier: bool, cells_multiplier: bool) {
-        let mut rng = thread_rng();
-        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
-        let identifier = F::rand();
-        let row_cell = Cell::new(identifier, value, is_multiplier);
-        let circuit = LeafCircuit::from(row_cell.clone());
-        let tuple = row_cell.clone();
+        let cells_pi = CellsPublicInputs::sample(cells_multiplier);
 
-        let ind_cells_digest = Point::rand().to_fields();
-        // TODO: test with other than neutral
-        let mul_cells_digest = if cells_multiplier {
-            Point::rand().to_fields()
-        } else {
-            Point::NEUTRAL.to_fields()
+        let secondary_index_cell = SecondaryIndexCell::sample(is_multiplier);
+        let id = secondary_index_cell.cell.identifier;
+        let value = secondary_index_cell.cell.value;
+        let row_digest = secondary_index_cell.digest(&CellsPublicInputs::from_slice(&cells_pi));
+
+        let circuit = LeafCircuit::from(secondary_index_cell);
+        let test_circuit = TestLeafCircuit {
+            circuit,
+            cells_pi: cells_pi.clone(),
         };
-        let cells_hash = HashOut::rand().to_fields();
-        let cells_pi_struct =
-            cells_tree::PublicInputs::new(&cells_hash, &ind_cells_digest, &mul_cells_digest);
-        let cells_pi = cells_pi_struct.to_vec();
-        let test_circuit = TestLeafCircuit { circuit, cells_pi };
+        let cells_pi = CellsPublicInputs::from_slice(&cells_pi);
+
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        assert_eq!(value, pi.max_value_u256());
-        assert_eq!(value, pi.min_value_u256());
-        let empty_hash = empty_poseidon_hash();
-        let inputs = empty_hash
-            .to_fields()
-            .iter()
-            .chain(empty_hash.to_fields().iter())
-            .chain(tuple.value.to_fields().iter())
-            .chain(tuple.value.to_fields().iter())
-            .chain(tuple.to_fields().iter())
-            .chain(cells_hash.iter())
-            .cloned()
-            .collect::<Vec<_>>();
-        let row_hash = hash_n_to_hash_no_pad::<F, <CHasher as Hasher<F>>::Permutation>(&inputs);
-        assert_eq!(row_hash, pi.root_hash_hashout());
-        // final_digest = HashToInt(mul_digest) * D(ind_digest)
-        let split_digest =
-            row_cell.split_and_accumulate_digest(cells_pi_struct.split_digest_point());
-        let result = split_digest.cond_combine_to_row_digest();
-        assert_eq!(result.to_weierstrass(), pi.rows_digest_field());
-        assert_eq!(split_digest.is_merge_case(), pi.is_merge_flag());
+
+        // Check root hash
+        {
+            let value = value.to_fields();
+            let empty_hash = empty_poseidon_hash().to_fields();
+            let inputs = empty_hash
+                .iter()
+                .chain(empty_hash.iter())
+                .chain(value.iter())
+                .chain(value.iter())
+                .chain(once(&id))
+                .chain(value.iter())
+                .chain(cells_pi.to_node_hash_raw())
+                .cloned()
+                .collect_vec();
+            let exp_root_hash = H::hash_no_pad(&inputs);
+            assert_eq!(pi.root_hash(), exp_root_hash);
+        }
+        // Check individual digest
+        assert_eq!(
+            pi.individual_digest_point(),
+            row_digest.individual_vd.to_weierstrass()
+        );
+        // Check multiplier digest
+        assert_eq!(
+            pi.multiplier_digest_point(),
+            row_digest.multiplier_vd.to_weierstrass()
+        );
+        // Check row ID multiplier
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
+        // Check minimum value
+        assert_eq!(pi.min_value(), value);
+        // Check maximum value
+        assert_eq!(pi.max_value(), value);
     }
 
     #[test]

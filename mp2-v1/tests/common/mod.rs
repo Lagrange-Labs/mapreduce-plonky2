@@ -6,7 +6,7 @@ use mp2_v1::api::{
     merge_metadata_hash, metadata_hash, no_provable_metadata_hash, MetadataHash, SlotInputs,
 };
 use serde::{Deserialize, Serialize};
-use table::TableColumns;
+use table::{TableColumns, TableRowUniqueID};
 pub mod benchmarker;
 pub mod bindings;
 mod block_extraction;
@@ -32,7 +32,13 @@ pub(crate) use context::TestContext;
 use mp2_common::{proof::ProofWithVK, types::HashOutput};
 use plonky2::plonk::config::GenericHashOut;
 
+/// Testing maximum columns
+pub(crate) const TEST_MAX_COLUMNS: usize = 32;
+/// Testing maximum fields for each EVM word
+pub(crate) const TEST_MAX_FIELD_PER_EVM: usize = 32;
+
 type ColumnIdentifier = u64;
+type PublicParameters = mp2_v1::api::PublicParameters<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
 
 fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
     let root_pi = ProofWithVK::deserialize(proof)
@@ -40,7 +46,7 @@ fn cell_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
         .proof
         .public_inputs;
     verifiable_db::cells_tree::PublicInputs::from_slice(&root_pi)
-        .root_hash_hashout()
+        .node_hash()
         .to_bytes()
         .try_into()
         .unwrap()
@@ -52,7 +58,7 @@ fn row_tree_proof_to_hash(proof: &[u8]) -> HashOutput {
         .proof
         .public_inputs;
     verifiable_db::row_tree::PublicInputs::from_slice(&root_pi)
-        .root_hash_hashout()
+        .root_hash()
         .to_bytes()
         .try_into()
         .unwrap()
@@ -69,6 +75,7 @@ pub fn mkdir_all(params_path_str: &str) -> Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableInfo {
     pub columns: TableColumns,
+    pub row_unique_id: TableRowUniqueID,
     // column to do queries over for numerical values, NOT secondary index
     pub value_column: String,
     pub public_name: String,
@@ -80,19 +87,55 @@ pub struct TableInfo {
 impl TableInfo {
     pub fn metadata_hash(&self) -> MetadataHash {
         match &self.source {
-            TableSource::Mapping((mapping, _)) => {
-                let slot = SlotInputs::Mapping(mapping.slot);
-                metadata_hash(slot, &self.contract_address, self.chain_id, vec![])
+            TableSource::Single(args) => {
+                let slot = SlotInputs::Simple(args.slot_inputs.clone());
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
             }
-            // mapping with length not tested right now
-            TableSource::SingleValues(args) => {
-                let slot = SlotInputs::Simple(args.slots.clone());
-                metadata_hash(slot, &self.contract_address, self.chain_id, vec![])
+            TableSource::MappingValues(args, _) => {
+                let slot_inputs = SlotInputs::Mapping(args.slot_inputs().to_vec());
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot_inputs,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
             }
-            TableSource::Merge(merge) => {
-                let single = SlotInputs::Simple(merge.single.slots.clone());
-                let mapping = SlotInputs::Mapping(merge.mapping.slot);
-                merge_metadata_hash(
+            TableSource::MappingStruct(args, _) => {
+                let slot_inputs = SlotInputs::Mapping(args.slot_inputs().to_vec());
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot_inputs,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
+            }
+            TableSource::MappingOfSingleValueMappings(args) => {
+                let slot_inputs = SlotInputs::MappingOfMappings(args.slot_inputs().to_vec());
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot_inputs,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
+            }
+            TableSource::MappingOfStructMappings(args) => {
+                let slot_inputs = SlotInputs::MappingOfMappings(args.slot_inputs().to_vec());
+                metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+                    slot_inputs,
+                    &self.contract_address,
+                    self.chain_id,
+                    vec![],
+                )
+            }
+            TableSource::Merge(source) => {
+                let single = SlotInputs::Simple(source.single.slot_inputs.clone());
+                let mapping = SlotInputs::Mapping(source.mapping.slot_inputs().to_vec());
+                merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
                     self.contract_address,
                     self.chain_id,
                     vec![],

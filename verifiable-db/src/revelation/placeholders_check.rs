@@ -4,8 +4,7 @@
 use crate::query::{
     computational_hash_ids::PlaceholderIdentifier,
     universal_circuit::{
-        universal_circuit_inputs::{PlaceholderId, Placeholders},
-        universal_query_gadget::QueryBound,
+        universal_circuit_inputs::Placeholders, universal_query_gadget::QueryBound,
     },
     utils::QueryBounds,
 };
@@ -155,7 +154,7 @@ impl<const PH: usize, const PP: usize> CheckPlaceholderGadget<PH, PP> {
     pub(crate) fn new(
         query_bounds: &QueryBounds,
         placeholders: &Placeholders,
-        placeholder_hash_ids: [PlaceholderId; PP],
+        placeholder_hash_ids: [PlaceholderIdentifier; PP],
     ) -> Result<Self> {
         let num_placeholders = placeholders.len();
         ensure!(
@@ -219,12 +218,12 @@ impl<const PH: usize, const PP: usize> CheckPlaceholderGadget<PH, PP> {
             .into_iter()
             .flat_map(|query_bound| {
                 [
-                    compute_checked_placeholder_for_id(PlaceholderId::from_fields(&[query_bound
-                        .operation
-                        .placeholder_ids[0]])),
-                    compute_checked_placeholder_for_id(PlaceholderId::from_fields(&[query_bound
-                        .operation
-                        .placeholder_ids[1]])),
+                    compute_checked_placeholder_for_id(PlaceholderIdentifier::from_fields(&[
+                        query_bound.operation.placeholder_ids[0],
+                    ])),
+                    compute_checked_placeholder_for_id(PlaceholderIdentifier::from_fields(&[
+                        query_bound.operation.placeholder_ids[1],
+                    ])),
                 ]
             })
             .collect::<Result<Vec<_>>>()?;
