@@ -25,6 +25,7 @@ use std::iter::once;
 
 pub mod api;
 mod branch;
+mod dummy;
 mod extension;
 pub mod gadgets;
 mod leaf_mapping;
