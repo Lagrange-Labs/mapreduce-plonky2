@@ -763,8 +763,8 @@ where
             &output_component_wires.computational_hash(),
         );
 
-        let min_secondary = min_query_secondary.get_bound_value().clone();
-        let max_secondary = max_query_secondary.get_bound_value().clone();
+        let min_secondary = *min_query_secondary.get_bound_value();
+        let max_secondary = *max_query_secondary.get_bound_value();
         let num_bound_overflows = QueryBoundTarget::num_overflows_for_query_bound_operations(
             b,
             &min_query_secondary,
@@ -1043,7 +1043,7 @@ where
         if i == 0 {
             self.first_output.as_u256_target()
         } else {
-            self.other_outputs[i - 1].clone()
+            self.other_outputs[i - 1]
         }
     }
 

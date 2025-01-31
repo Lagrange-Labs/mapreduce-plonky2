@@ -47,6 +47,11 @@ pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"\0OUT_KEY";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
+/// Type for mapping keys
+pub type MappingKey = Vec<u8>;
+/// Type for column ID
+pub type ColumnId = u64;
+
 /// Storage slot information for generating the extraction proof
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct StorageSlotInfo {
