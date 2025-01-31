@@ -139,7 +139,7 @@ where
                                                                                       // since they are exposed as public inputs
         let index_path = MerklePathWithNeighborsGadget::build(
             b,
-            index_node_value.clone(),
+            index_node_value,
             index_node_subtree_hash,
             primary_index,
         );

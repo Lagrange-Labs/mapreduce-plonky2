@@ -312,7 +312,7 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
                 }
             }
         } else {
-            return Err(RyhopeError::fatal("the tree is empty"));
+            Err(RyhopeError::fatal("the tree is empty"))
         }
     }
 

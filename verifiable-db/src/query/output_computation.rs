@@ -96,8 +96,8 @@ where
             // which each field may be out of range of an Uint32 (to combine an Uint256).
             sum_value = b.select_u256(is_op_id, &u256_zero, &sum_value);
         }
-        let mut min_value = sum_value.clone();
-        let mut max_value = sum_value.clone();
+        let mut min_value = sum_value;
+        let mut max_value = sum_value;
         for p in outputs[1..].iter() {
             // Get the current proof value.
             let mut value = p.value_target_at_index(i);
