@@ -224,7 +224,8 @@ async fn integrated_querying_merged_table() -> Result<()> {
 async fn integrated_querying_mapping_of_mappings_table() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test for merged table");
-    let table_info = read_table_info(MAPPING_OF_MAPPING_TABLE_INFO_FILE)?;
+    let table_info: TableInfo<MappingExtractionArgs<StructNestedMapping>> =
+        read_table_info(MAPPING_OF_MAPPING_TABLE_INFO_FILE)?;
     integrated_querying(table_info).await
 }
 #[test(tokio::test)]

@@ -12,7 +12,7 @@ use super::{
     leaf_receipt::{ReceiptLeafCircuit, ReceiptLeafWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
-    INNER_KEY_ID_PREFIX, KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
+    ColumnId, MappingKey, INNER_KEY_ID_PREFIX, KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
 };
 use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_RECEIPT_COLUMNS};
 use anyhow::{bail, ensure, Result};
@@ -86,7 +86,7 @@ where
     pub fn new_mapping_variable_leaf(
         node: Vec<u8>,
         slot: u8,
-        mapping_key: Vec<u8>,
+        mapping_key: MappingKey,
         key_id: u64,
         evm_word: u32,
         table_info: Vec<ExtractedColumnInfo>,
@@ -119,18 +119,18 @@ where
         // but are used in proving we are looking at the correct node. For instance mapping keys are used to calculate the position of a leaf node
         // that we need to extract from, but only the output of a keccak hash of some combination of them is included in the node, hence we feed them in as witness.
         let outer_input_column =
-            InputColumnInfo::new(&[slot], outer_key_id, OUTER_KEY_ID_PREFIX, 32);
+            InputColumnInfo::new(&[slot], outer_key_data.1, OUTER_KEY_ID_PREFIX, 32);
         let inner_input_column =
-            InputColumnInfo::new(&[slot], inner_key_id, INNER_KEY_ID_PREFIX, 32);
+            InputColumnInfo::new(&[slot], inner_key_data.1, INNER_KEY_ID_PREFIX, 32);
 
         let metadata = TableMetadata::new(&[outer_input_column, inner_input_column], &table_info);
 
-        let slot = MappingSlot::new(slot, outer_key);
+        let slot = MappingSlot::new(slot, outer_key_data.0);
 
         CircuitInput::LeafMappingOfMappings(LeafMappingOfMappingsCircuit {
             node,
             slot,
-            inner_key,
+            inner_key: inner_key_data.0,
             metadata,
             evm_word: evm_word as u8,
         })
@@ -863,10 +863,8 @@ mod tests {
         let encoded = test_circuit_input(CircuitInput::new_mapping_of_mappings_leaf(
             proof.last().unwrap().to_vec(),
             TEST_SLOT,
-            TEST_OUTER_KEY.to_vec(),
-            TEST_INNER_KEY.to_vec(),
-            outer_key_id,
-            inner_key_id,
+            (TEST_OUTER_KEY.to_vec(), outer_key_id),
+            (TEST_INNER_KEY.to_vec(), inner_key_id),
             TEST_EVM_WORD,
             table_info,
         ));
@@ -1130,10 +1128,8 @@ mod tests {
                                 let circuit_input = CircuitInput::new_mapping_of_mappings_leaf(
                                     node,
                                     slot as u8,
-                                    outer_mapping_key,
-                                    inner_mapping_key,
-                                    key_ids[0],
-                                    key_ids[1],
+                                    (outer_mapping_key, key_ids[0]),
+                                    (inner_mapping_key, key_ids[1]),
                                     evm_word,
                                     table_info.to_vec(),
                                 );
