@@ -2,6 +2,7 @@
 
 use super::{
     branch::{BranchCircuit, BranchWires},
+    dummy::{DummyNodeCircuit, DummyNodeWires},
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
     gadgets::{
         column_info::{ExtractedColumnInfo, InputColumnInfo},
@@ -15,6 +16,7 @@ use super::{
     ColumnId, MappingKey, INNER_KEY_ID_PREFIX, KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
 };
 use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_RECEIPT_COLUMNS};
+use alloy::primitives::B256;
 use anyhow::{bail, ensure, Result};
 use log::debug;
 use mp2_common::{
@@ -28,6 +30,7 @@ use mp2_common::{
 };
 use paste::paste;
 use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::Hasher};
+use plonky2_ecgfp5::curve::curve::Point;
 #[cfg(test)]
 use recursion_framework::framework_testing::{
     new_universal_circuit_builder_for_testing, TestingRecursiveCircuits,
@@ -56,6 +59,7 @@ where
     LeafReceipt(ReceiptLeafCircuit<LEAF_LEN, MAX_RECEIPT_COLUMNS>),
     Extension(ExtensionInput),
     Branch(BranchInput),
+    Dummy(DummyNodeCircuit),
 }
 
 impl<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>
@@ -165,6 +169,14 @@ where
             serialized_child_proofs: child_proofs,
         })
     }
+
+    /// Create a circuit input for proving a dummy node.
+    pub fn new_dummy(trie_root: B256, metadata_digest: Point) -> Self {
+        CircuitInput::Dummy(DummyNodeCircuit {
+            root_hash: trie_root,
+            metadata_digest,
+        })
+    }
 }
 
 /// Main struct holding the different circuit parameters for each of the MPT
@@ -183,6 +195,7 @@ where
     leaf_receipt:
         CircuitWithUniversalVerifier<F, C, D, 0, ReceiptLeafWires<LEAF_LEN, MAX_RECEIPT_COLUMNS>>,
     extension: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionNodeWires>,
+    dummy: CircuitWithUniversalVerifier<F, C, D, 0, DummyNodeWires>,
     #[cfg(not(test))]
     branches: BranchCircuits,
     #[cfg(test)]
@@ -364,8 +377,8 @@ impl_branch_circuits!(BranchCircuits, 2, 9, 16);
 impl_branch_circuits!(TestBranchCircuits, 1, 4, 9);
 
 /// Number of circuits in the set
-/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 leaf mapping of mappings + 1 leaf receipt
-const MAPPING_CIRCUIT_SET_SIZE: usize = 8;
+/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 leaf mapping of mappings + 1 leaf receipt + 1 dummy circuit
+const MAPPING_CIRCUIT_SET_SIZE: usize = 9;
 
 impl<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>
     PublicParameters<LEAF_LEN, MAX_EXTRACTED_COLUMNS>
@@ -406,6 +419,9 @@ where
         debug!("Building extension circuit");
         let extension = circuit_builder.build_circuit::<C, 1, ExtensionNodeWires>(());
 
+        debug!("Building dummy circuit");
+        let dummy = circuit_builder.build_circuit::<C, 0, DummyNodeWires>(());
+
         debug!("Building branch circuits");
         #[cfg(not(test))]
         let branches = BranchCircuits::new(&circuit_builder);
@@ -418,6 +434,7 @@ where
             leaf_mapping_of_mappings.get_verifier_data().circuit_digest,
             leaf_receipt.get_verifier_data().circuit_digest,
             extension.get_verifier_data().circuit_digest,
+            dummy.get_verifier_data().circuit_digest,
         ];
         circuits_set.extend(branches.circuit_set());
         assert_eq!(circuits_set.len(), MAPPING_CIRCUIT_SET_SIZE);
@@ -428,6 +445,7 @@ where
             leaf_mapping_of_mappings,
             leaf_receipt,
             extension,
+            dummy,
             branches,
             #[cfg(not(test))]
             set: RecursiveCircuits::new_from_circuit_digests(circuits_set),
@@ -454,7 +472,9 @@ where
             CircuitInput::LeafReceipt(leaf) => set
                 .generate_proof(&self.leaf_receipt, [], [], leaf)
                 .map(|p| (p, self.leaf_receipt.get_verifier_data().clone()).into()),
-
+            CircuitInput::Dummy(dummy) => set
+                .generate_proof(&self.dummy, [], [], dummy)
+                .map(|p| (p, self.leaf_receipt.get_verifier_data().clone()).into()),
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
                 let (child_proof, child_vk) = child_proofs
@@ -513,7 +533,7 @@ mod tests {
         mpt_sequential::{generate_random_storage_mpt, generate_receipt_test_info},
         utils::random_vector,
     };
-    use plonky2::field::types::Field;
+    use plonky2::field::types::{Field, Sample};
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
     use std::{str::FromStr, sync::Arc};
@@ -877,6 +897,11 @@ mod tests {
             },
             serialized_child_proofs: vec![encoded],
         }));
+
+        // Test for dummy
+        let dummy_hash = B256::random();
+        let dummy_md = Point::rand();
+        test_circuit_input(CircuitInput::new_dummy(dummy_hash, dummy_md));
     }
 
     fn test_api(test_slots: [StorageSlotInfo; 2]) {
@@ -1011,6 +1036,25 @@ mod tests {
         generate_proof(&params, branch_input).unwrap();
         println!(
             "Proof for branch node generated in {} ms",
+            now.elapsed().as_millis()
+        );
+    }
+
+    #[test]
+    fn test_dummy_api() {
+        println!("Generating params...");
+        let params = build_circuits_params();
+
+        let dummy_hash = B256::random();
+        let dummy_md = Point::rand();
+
+        println!("Proving dummy circuit");
+        let dummy_input = CircuitInput::new_dummy(dummy_hash, dummy_md);
+
+        let now = std::time::Instant::now();
+        generate_proof(&params, dummy_input).unwrap();
+        println!(
+            "Proof for dummy node generated in {} ms",
             now.elapsed().as_millis()
         );
     }
