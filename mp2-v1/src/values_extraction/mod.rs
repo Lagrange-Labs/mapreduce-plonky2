@@ -378,7 +378,7 @@ pub fn storage_value_digest(
     table_metadata: &TableMetadata,
     keys: &[&[u8]],
     value: &[u8; MAPPING_LEAF_VALUE_LEN],
-    evm_word: u32,
+    slot: &StorageSlotInfo,
 ) -> Digest {
     let padded_keys = keys
         .iter()
@@ -392,5 +392,5 @@ pub fn storage_value_digest(
         keys.len(),
         table_metadata.input_columns.len()
     );
-    table_metadata.storage_values_digest(padded_keys.as_slice(), value.as_slice(), evm_word)
+    table_metadata.storage_values_digest(padded_keys.as_slice(), value.as_slice(), slot.slot())
 }

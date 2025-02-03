@@ -488,12 +488,13 @@ where
         slice_len: Target,
     ) {
         let tru = b._true();
+        let mut take = b._false();
         for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
             let it = b.constant(F::from_canonical_usize(i));
-            // TODO: fixed to 6 becaues max nibble len = 64 - TO CHANGE
-            let before_end = less_than(b, it, slice_len, 6);
+            let reached_end = b.is_equal(slice_len, it);
+            take = b.or(take, reached_end);
             let eq = b.is_equal(our.to_target(), other.to_target());
-            let res = b.select(before_end, eq.target, tru.target);
+            let res = b.select(take, tru.target, eq.target);
             b.connect(res, tru.target);
         }
     }
@@ -526,25 +527,19 @@ where
         b: &mut CircuitBuilder<F, D>,
         at: Target,
     ) -> Array<T, SUB_SIZE> {
+        let tru = b._true();
         let m = b.constant(F::from_canonical_usize(SUB_SIZE));
+        let orig_size = b.constant(F::from_canonical_usize(SIZE));
         let upper_bound = b.add(at, m);
         let num_bits_size = SIZE.ilog2() + 1;
+        // By enforcing that upper_bound is less than or equal to total size we don't need to check at each step
+        let lt = less_than_or_equal_to_unsafe(b, upper_bound, orig_size, num_bits_size as usize);
+        b.connect(lt.target, tru.target);
         Array::<T, SUB_SIZE> {
             arr: core::array::from_fn(|i| {
                 let i_target = b.constant(F::from_canonical_usize(i));
                 let i_plus_n_target = b.add(at, i_target);
-                // ((i + offset) <= n + M)
-                // unsafe should be ok since the function assumes that `at + SUB_SIZE <= SIZE`
-                let lt = less_than_or_equal_to_unsafe(
-                    b,
-                    i_plus_n_target,
-                    upper_bound,
-                    num_bits_size as usize,
-                );
-                // ((i+n) <= n+M) * (i+n)
-                let j = b.mul(lt.target, i_plus_n_target);
-                // out_val = arr[((i+n)<=n+M) * (i+n)]
-                self.value_at(b, j)
+                self.value_at(b, i_plus_n_target)
             }),
         }
     }

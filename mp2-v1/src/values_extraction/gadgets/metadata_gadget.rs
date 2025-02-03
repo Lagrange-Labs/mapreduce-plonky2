@@ -10,7 +10,7 @@ use super::column_info::{
 use itertools::Itertools;
 use mp2_common::{
     array::{Array, Targetable},
-    eth::{left_pad32, EventLogInfo},
+    eth::{left_pad32, EventLogInfo, StorageSlot},
     group_hashing::CircuitBuilderGroupHashing,
     poseidon::{empty_poseidon_hash, hash_to_int_value, H},
     serialization::{
@@ -159,12 +159,16 @@ impl TableMetadata {
         (point, H::hash_no_pad(&row_id_input).into())
     }
 
-    pub fn extracted_value_digest(&self, value: &[u8], location_offset: F) -> Point {
+    pub fn extracted_value_digest(&self, value: &[u8], slot: &StorageSlot) -> Point {
+        let mut slot_extraction_id = [F::ZERO; 8];
+        slot_extraction_id[7] = F::from_canonical_u8(slot.slot());
+        let location_offset = F::from_canonical_u32(slot.evm_offset());
         self.extracted_columns()
             .iter()
             .fold(Point::NEUTRAL, |acc, column| {
+                let correct_extraction_id = slot_extraction_id == column.extraction_id();
                 let correct_location = location_offset == column.location_offset();
-                if correct_location {
+                if correct_location && correct_extraction_id {
                     acc + column.value_digest(value)
                 } else {
                     acc
@@ -251,12 +255,11 @@ impl TableMetadata {
         &self,
         input_vals: &[[u8; 32]],
         value: &[u8],
-        location_offset: u32,
+        slot: &StorageSlot,
     ) -> Point {
-        let location_offset = F::from_canonical_u32(location_offset);
         let (input_vd, row_unique) = self.input_value_digest(input_vals);
 
-        let extract_vd = self.extracted_value_digest(value, location_offset);
+        let extract_vd = self.extracted_value_digest(value, slot);
 
         let inputs = if self.input_columns().is_empty() {
             empty_poseidon_hash()
@@ -280,7 +283,7 @@ impl TableMetadata {
 
         // values_digest = values_digest * row_id
         let row_id = Scalar::from_noncanonical_biguint(row_id);
-        if location_offset.0 == 0 {
+        if slot.evm_offset() == 0 {
             (extract_vd + input_vd) * row_id
         } else {
             extract_vd * row_id
@@ -327,7 +330,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>
             .extracted_columns
             .iter()
             .copied()
-            .chain(std::iter::repeat(ExtractedColumnInfo::default()))
+            .chain(std::iter::repeat(columns_metadata.extracted_columns[0]))
             .take(MAX_EXTRACTED_COLUMNS)
             .collect::<Vec<ExtractedColumnInfo>>();
         pw.set_extracted_column_info_target_arr(
