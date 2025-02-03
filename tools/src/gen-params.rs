@@ -96,16 +96,27 @@ fn write_hashes(params_root_dir: &str) {
     for entry in walkdir::WalkDir::new(params_root_dir)
         .into_iter()
         .filter_map(|e| e.ok())
+        .map(|e| e.path().to_path_buf())
+        .filter(|p| p.is_file())
     {
-        println!("hashing {}", entry.path().display());
+        println!("hashing {}", entry.display());
         let mut hasher = blake3::Hasher::new();
         hasher
-            .update_mmap_rayon(entry.path())
+            .update_mmap_rayon(entry.as_path())
             .expect("hashing failed");
         let hash_str = hasher.finalize().to_hex();
-        let relative_path = entry.path().strip_prefix(params_root_dir).unwrap();
         out_file
-            .write_all(format!("{} {}", relative_path.display(), hash_str).as_bytes())
+            .write_all(
+                format!(
+                    "{} {}\n",
+                    entry
+                        .strip_prefix(params_dir(params_root_dir))
+                        .unwrap()
+                        .display(),
+                    hash_str
+                )
+                .as_bytes(),
+            )
             .expect("failed to write to hash file");
     }
 }
