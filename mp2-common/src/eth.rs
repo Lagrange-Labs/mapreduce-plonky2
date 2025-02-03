@@ -141,7 +141,7 @@ pub fn extract_child_hashes(rlp_data: &[u8]) -> Vec<Vec<u8>> {
 }
 
 /// Enum used to distinguish between different types of node in an MPT.
-#[derive(Clone, Debug, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub enum NodeType {
     Branch,
     Extension,
@@ -774,7 +774,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS
         block_util: &mut BlockUtil,
     ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
         let mpt_root = block_util.receipts_trie.root_hash()?;
-        let proofs = tx_indices
+        tx_indices
             .iter()
             .map(|&tx_index| {
                 let key = tx_index.rlp_bytes();
@@ -787,18 +787,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS
                     tx_index,
                 })
             })
-            .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()?;
-
-        // // In the case when proofs is empty we just need to provide a proof for the root node
-        // if proofs.is_empty() {
-        //     // Transaction index 0 should always be present
-        //     let key = 0u64.rlp_bytes();
-
-        //     // Get the proof but just use the first node of the proof
-        //     let proof = block_util.receipts_trie.get_proof(&key[..])?;
-
-        // }
-        Ok(proofs)
+            .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()
     }
 }
 
