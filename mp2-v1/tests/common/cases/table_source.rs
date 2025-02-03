@@ -896,7 +896,7 @@ where
             .on_http(ctx.rpc_url.parse().unwrap());
 
         let value_proof = event
-            .prove_value_extraction::<32, _>(
+            .prove_value_extraction::<32, 512, _>(
                 contract.address(),
                 bn as u64,
                 ctx.params().get_value_extraction_params(),

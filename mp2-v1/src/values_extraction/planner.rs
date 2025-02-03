@@ -1,15 +1,23 @@
 //! This code returns an [`UpdateTree`] used to plan how we prove a series of values was extracted from a Merkle Patricia Trie.
 use alloy::{
+    eips::BlockNumberOrTag,
     network::Ethereum,
     primitives::{keccak256, Address, B256},
-    providers::RootProvider,
+    providers::{Provider, RootProvider},
     transports::Transport,
 };
 use anyhow::Result;
-use mp2_common::eth::{node_type, EventLogInfo, MP2EthError, NodeType, ReceiptQuery};
-use ryhope::storage::updatetree::{Next, UpdateTree};
-use serde::{Deserialize, Serialize};
-use std::future::Future;
+use mp2_common::{
+    eth::{node_type, EventLogInfo, MP2EthError, NodeType, ReceiptQuery},
+    mpt_sequential::PAD_LEN,
+};
+
+use ryhope::{
+    error::RyhopeError,
+    storage::updatetree::{Next, UpdateTree},
+};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{fmt::Debug, future::Future, hash::Hash};
 
 use std::{
     collections::HashMap,
@@ -18,7 +26,9 @@ use std::{
     write,
 };
 
-use super::{generate_proof, CircuitInput, PublicParameters};
+use super::{
+    gadgets::metadata_gadget::TableMetadata, generate_proof, CircuitInput, PublicParameters,
+};
 
 #[derive(Debug)]
 /// Error enum used for Extractable data
@@ -31,6 +41,8 @@ pub enum MP2PlannerError {
     EthError(MP2EthError),
     /// An error that occurs from a method in the proving API.
     ProvingError(String),
+    /// Error from within Ryhope
+    RyhopeError(RyhopeError),
 }
 
 impl Error for MP2PlannerError {}
@@ -55,6 +67,9 @@ impl Display for MP2PlannerError {
             MP2PlannerError::ProvingError(s) => {
                 write!(f, "Error while proving, extra message: {}", s)
             }
+            MP2PlannerError::RyhopeError(e) => {
+                write!(f, "Error in Ryhope method {{ inner: {:?} }}", e)
+            }
         }
     }
 }
@@ -68,52 +83,204 @@ impl From<MP2EthError> for MP2PlannerError {
     }
 }
 
+impl From<RyhopeError> for MP2PlannerError {
+    fn from(value: RyhopeError) -> Self {
+        MP2PlannerError::RyhopeError(value)
+    }
+}
+
+/// Trait used to mark types that are needed as extra circuit inputs
+pub trait ExtraInput {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum InputEnum<E: Extractable> {
+    Leaf(E::ExtraLeafInput),
+    Extension(Vec<u8>),
+    Branch(Vec<Vec<u8>>),
+    Dummy(B256),
+}
+
+impl<E: Extractable> InputEnum<E> {
+    /// Create a new Branch or extension node with empty input
+    pub fn empty_non_leaf(node: &[u8]) -> Result<Self, MP2PlannerError> {
+        let node_type = node_type(node)?;
+        match node_type {
+            NodeType::Branch => Ok(InputEnum::Branch(vec![])),
+            NodeType::Extension => Ok(InputEnum::Extension(vec![])),
+            _ => Err(MP2PlannerError::UpdateTreeError("Tried to make an empty non leaf node from a node that wasn't a Branch or Extension".to_string()))
+        }
+    }
+}
+
 /// Trait that is implemented for all data that we can provably extract.
-pub trait Extractable {
+pub trait Extractable: Debug {
+    /// The extra info needed to make a leaf proof for this extraction type.
+    type ExtraLeafInput: Clone
+        + Debug
+        + Serialize
+        + DeserializeOwned
+        + PartialEq
+        + Eq
+        + Ord
+        + PartialOrd
+        + Hash;
+
     fn create_update_tree<T: Transport + Clone>(
         &self,
         contract: Address,
         epoch: u64,
         provider: &RootProvider<T, Ethereum>,
-    ) -> impl Future<Output = Result<UpdateTree<B256>, MP2PlannerError>>;
+    ) -> impl Future<Output = Result<ExtractionUpdatePlan<Self>, MP2PlannerError>>
+    where
+        Self: Sized;
 
-    fn prove_value_extraction<const MAX_COLUMNS: usize, T: Transport + Clone>(
+    fn to_circuit_input<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>(
+        &self,
+        proof_data: &ProofData<Self>,
+    ) -> CircuitInput<LEAF_LEN, MAX_EXTRACTED_COLUMNS>
+    where
+        [(); PAD_LEN(LEAF_LEN)]:,
+        Self: Sized;
+
+    fn prove_value_extraction<
+        const MAX_EXTRACTED_COLUMNS: usize,
+        const LEAF_LEN: usize,
+        T: Transport + Clone,
+    >(
         &self,
         contract: Address,
         epoch: u64,
-        pp: &PublicParameters<512, MAX_COLUMNS>,
+        pp: &PublicParameters<LEAF_LEN, MAX_EXTRACTED_COLUMNS>,
         provider: &RootProvider<T, Ethereum>,
-    ) -> impl Future<Output = Result<Vec<u8>, MP2PlannerError>>;
+    ) -> impl Future<Output = Result<Vec<u8>, MP2PlannerError>>
+    where
+        [(); PAD_LEN(LEAF_LEN)]:;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-struct ProofData {
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
+pub struct ProofData<E: Extractable> {
     node: Vec<u8>,
-    node_type: NodeType,
-    tx_index: Option<u64>,
-    proof: Option<Vec<u8>>,
+    extra_inputs: InputEnum<E>,
 }
 
-impl ProofData {
-    pub fn new(node: Vec<u8>, node_type: NodeType, tx_index: Option<u64>) -> ProofData {
-        ProofData {
-            node,
-            node_type,
-            tx_index,
-            proof: None,
+impl<E: Extractable> ProofData<E> {
+    pub fn new(node: Vec<u8>, extra_inputs: InputEnum<E>) -> ProofData<E> {
+        ProofData::<E> { node, extra_inputs }
+    }
+
+    /// Create a new instance of [`ProofData`] from a slice of [`u8`]
+    pub fn from_slice(
+        node: &[u8],
+        extra_inputs: InputEnum<E>,
+    ) -> Result<ProofData<E>, MP2PlannerError> {
+        let node_type = node_type(node)?;
+
+        // Check that the node type matches the extra input type we expect.
+        if !matches!(
+            (node_type, &extra_inputs),
+            (NodeType::Branch, InputEnum::Branch(..))
+                | (NodeType::Extension, InputEnum::Extension(..))
+                | (NodeType::Leaf, InputEnum::Leaf(..))
+        ) {
+            return Err(MP2PlannerError::ProvingError(format!(
+                "The node provided: {:?} did not match the extra input type provided: {:?} ",
+                node_type, extra_inputs
+            )));
         }
+
+        Ok(ProofData::<E>::new(node.to_vec(), extra_inputs))
+    }
+
+    /// Update a [`ProofData`] with a proof represented as a [`Vec<u8>`]
+    pub fn update(&mut self, proof: Vec<u8>) -> Result<(), MP2PlannerError> {
+        match self.extra_inputs {
+            InputEnum::Branch(ref mut proofs) => proofs.push(proof),
+
+            InputEnum::Extension(ref mut inner_proof) => {
+                if !proof.is_empty() {
+                    return Err(MP2PlannerError::UpdateTreeError(
+                        "Can't update Extension ProofData if its child proof isn't empty"
+                            .to_string(),
+                    ));
+                }
+                *inner_proof = proof;
+            }
+            _ => {
+                return Err(MP2PlannerError::UpdateTreeError(
+                    "Can't update a Proof Data that isn't an Extension or Branch".to_string(),
+                ))
+            }
+        };
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractionUpdatePlan<E: Extractable> {
+    pub(crate) update_tree: UpdateTree<B256>,
+    pub(crate) proof_cache: HashMap<B256, ProofData<E>>,
+}
+
+impl<E: Extractable> ExtractionUpdatePlan<E> {
+    pub fn new(update_tree: UpdateTree<B256>, proof_cache: HashMap<B256, ProofData<E>>) -> Self {
+        Self {
+            update_tree,
+            proof_cache,
+        }
+    }
+
+    pub fn process_locally<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>(
+        &mut self,
+        params: &PublicParameters<LEAF_LEN, MAX_EXTRACTED_COLUMNS>,
+        extractable: &E,
+    ) -> Result<Vec<u8>, MP2PlannerError>
+    where
+        [(); PAD_LEN(LEAF_LEN)]:,
+    {
+        let mut update_plan = self.update_tree.clone().into_workplan();
+        let mut final_proof = Vec::<u8>::new();
+        while let Some(Next::Ready(work_plan_item)) = update_plan.next() {
+            let proof_data = self.proof_cache.get(work_plan_item.k()).ok_or(
+                MP2PlannerError::UpdateTreeError("Key not present in the proof cache".to_string()),
+            )?;
+            let circuit_type = extractable.to_circuit_input(proof_data);
+
+            let proof = generate_proof(params, circuit_type).map_err(|e| {
+                MP2PlannerError::ProvingError(format!(
+                    "Error while generating proof for node {{ inner: {:?} }}",
+                    e
+                ))
+            })?;
+
+            let parent = self.update_tree.get_parent_key(work_plan_item.k());
+
+            match parent {
+                Some(parent_key) => {
+                    let proof_data_ref = self.proof_cache.get_mut(&parent_key).unwrap();
+                    proof_data_ref.update(proof)?
+                }
+                None => {
+                    final_proof = proof;
+                }
+            }
+
+            update_plan.done(&work_plan_item)?;
+        }
+        Ok(final_proof)
     }
 }
 
 impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
     for EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>
 {
+    type ExtraLeafInput = u64;
     async fn create_update_tree<T: Transport + Clone>(
         &self,
         contract: Address,
         epoch: u64,
         provider: &RootProvider<T, Ethereum>,
-    ) -> Result<UpdateTree<B256>, MP2PlannerError> {
+    ) -> Result<ExtractionUpdatePlan<Self>, MP2PlannerError> {
         let query = ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS> {
             contract,
             event: *self,
@@ -121,190 +288,115 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
 
         let proofs = query.query_receipt_proofs(provider, epoch.into()).await?;
 
-        // Convert the paths into their keys using keccak
-        let key_paths = proofs
-            .iter()
-            .map(|input| input.mpt_proof.iter().map(keccak256).collect::<Vec<B256>>())
-            .collect::<Vec<Vec<B256>>>();
+        let mut proof_cache = HashMap::<B256, ProofData<Self>>::new();
 
-        // Now we make the UpdateTree
-        Ok(UpdateTree::<B256>::from_paths(key_paths, epoch as i64))
+        // Convert the paths into their keys using keccak
+        if proofs.is_empty() {
+            let block = provider
+                .get_block_by_number(BlockNumberOrTag::Number(epoch), false.into())
+                .await
+                .map_err(|_| MP2PlannerError::FetchError)?
+                .ok_or(MP2PlannerError::UpdateTreeError(
+                    "Fetched Block with no relevant events but the result was None".to_string(),
+                ))?;
+            let receipt_root = block.header.receipts_root;
+
+            let dummy_input = InputEnum::Dummy(receipt_root);
+            let proof_data = ProofData::<Self> {
+                node: vec![],
+                extra_inputs: dummy_input,
+            };
+
+            proof_cache.insert(receipt_root, proof_data);
+
+            let update_tree = UpdateTree::<B256>::from_path(vec![receipt_root], epoch as i64);
+
+            Ok(ExtractionUpdatePlan::new(update_tree, proof_cache))
+        } else {
+            let key_paths = proofs
+                .iter()
+                .map(|input| {
+                    let proof_len = input.mpt_proof.len();
+
+                    // First we add the leaf and its proving data to the cache
+                    let leaf = input
+                        .mpt_proof
+                        .last()
+                        .ok_or(MP2PlannerError::UpdateTreeError(
+                            "MPT proof had no nodes".to_string(),
+                        ))?;
+                    let leaf_key = keccak256(leaf);
+                    let leaf_proof_data =
+                        ProofData::<Self>::from_slice(leaf, InputEnum::Leaf(input.tx_index))?;
+
+                    proof_cache.insert(leaf_key, leaf_proof_data);
+
+                    input
+                        .mpt_proof
+                        .iter()
+                        .take(proof_len - 1)
+                        .map(|proof_vec| {
+                            let proof_key = keccak256(proof_vec);
+                            let proof_input = InputEnum::<Self>::empty_non_leaf(proof_vec)?;
+                            let proof_data = ProofData::<Self>::from_slice(proof_vec, proof_input)?;
+                            proof_cache.insert(proof_key, proof_data);
+                            Ok(proof_key)
+                        })
+                        .chain(std::iter::once(Ok(leaf_key)))
+                        .collect::<Result<Vec<B256>, MP2PlannerError>>()
+                })
+                .collect::<Result<Vec<Vec<B256>>, MP2PlannerError>>()?;
+
+            // Now we make the UpdateTree
+            let update_tree = UpdateTree::<B256>::from_paths(key_paths, epoch as i64);
+
+            // Finally make the plan
+            Ok(ExtractionUpdatePlan::<Self>::new(update_tree, proof_cache))
+        }
     }
 
-    async fn prove_value_extraction<const MAX_EXTRACTED_COLUMNS: usize, T: Transport + Clone>(
+    fn to_circuit_input<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>(
+        &self,
+        proof_data: &ProofData<Self>,
+    ) -> CircuitInput<LEAF_LEN, MAX_EXTRACTED_COLUMNS>
+    where
+        [(); PAD_LEN(LEAF_LEN)]:,
+        Self: Sized,
+    {
+        let ProofData { node, extra_inputs } = proof_data;
+        match extra_inputs {
+            InputEnum::Branch(child_proofs) => {
+                CircuitInput::new_branch(node.clone(), child_proofs.clone())
+            }
+            InputEnum::Extension(child_proof) => {
+                CircuitInput::new_extension(node.clone(), child_proof.clone())
+            }
+            InputEnum::Leaf(tx_index) => CircuitInput::new_receipt_leaf(node, *tx_index, self),
+            InputEnum::Dummy(block_hash) => {
+                let metadata = TableMetadata::from_event_info(self);
+                let metadata_digest = metadata.digest();
+                CircuitInput::new_dummy(*block_hash, metadata_digest)
+            }
+        }
+    }
+
+    async fn prove_value_extraction<
+        const MAX_EXTRACTED_COLUMNS: usize,
+        const LEAF_LEN: usize,
+        T: Transport + Clone,
+    >(
         &self,
         contract: Address,
         epoch: u64,
-        pp: &PublicParameters<512, MAX_EXTRACTED_COLUMNS>,
+        pp: &PublicParameters<LEAF_LEN, MAX_EXTRACTED_COLUMNS>,
         provider: &RootProvider<T, Ethereum>,
-    ) -> Result<Vec<u8>, MP2PlannerError> {
-        let query = ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS> {
-            contract,
-            event: *self,
-        };
+    ) -> Result<Vec<u8>, MP2PlannerError>
+    where
+        [(); PAD_LEN(LEAF_LEN)]:,
+    {
+        let mut extraction_plan = self.create_update_tree(contract, epoch, provider).await?;
 
-        let proofs = query.query_receipt_proofs(provider, epoch.into()).await?;
-
-        let mut data_store = HashMap::<B256, ProofData>::new();
-
-        // Convert the paths into their keys using keccak
-        let key_paths = proofs
-            .iter()
-            .map(|input| {
-                let tx_index = input.tx_index;
-                input
-                    .mpt_proof
-                    .iter()
-                    .map(|node| {
-                        let node_key = keccak256(node);
-                        let node_type = node_type(node)?;
-                        let tx = if let NodeType::Leaf = node_type {
-                            Some(tx_index)
-                        } else {
-                            None
-                        };
-                        data_store.insert(node_key, ProofData::new(node.clone(), node_type, tx));
-
-                        Ok(node_key)
-                    })
-                    .collect::<Result<Vec<B256>, MP2PlannerError>>()
-            })
-            .collect::<Result<Vec<Vec<B256>>, MP2PlannerError>>()?;
-
-        let update_tree = UpdateTree::<B256>::from_paths(key_paths, epoch as i64);
-
-        let mut update_plan = update_tree.clone().into_workplan();
-
-        while let Some(Next::Ready(work_plan_item)) = update_plan.next() {
-            let node_type = data_store
-                .get(work_plan_item.k())
-                .ok_or(MP2PlannerError::UpdateTreeError(format!(
-                    "No ProofData found for key: {:?}",
-                    work_plan_item.k()
-                )))?
-                .node_type;
-
-            let update_tree_node = update_tree.get_node(work_plan_item.k()).ok_or(
-                MP2PlannerError::UpdateTreeError(format!(
-                    "No UpdateTreeNode found for key: {:?}",
-                    work_plan_item.k(),
-                )),
-            )?;
-
-            match node_type {
-                NodeType::Leaf => {
-                    let proof_data = data_store.get_mut(work_plan_item.k()).ok_or(
-                        MP2PlannerError::UpdateTreeError(format!(
-                            "No ProofData found for key: {:?}",
-                            work_plan_item.k()
-                        )),
-                    )?;
-                    let input = CircuitInput::new_receipt_leaf(
-                        &proof_data.node,
-                        proof_data.tx_index.unwrap(),
-                        self,
-                    );
-                    let proof = generate_proof(pp, input).map_err(|_| {
-                        MP2PlannerError::ProvingError(
-                            "Error calling generate proof API".to_string(),
-                        )
-                    })?;
-                    proof_data.proof = Some(proof);
-                    update_plan.done(&work_plan_item).map_err(|_| {
-                        MP2PlannerError::UpdateTreeError(
-                            "Could not mark work plan item as done".to_string(),
-                        )
-                    })?;
-                }
-                NodeType::Extension => {
-                    let child_key = update_tree.get_child_keys(update_tree_node);
-                    if child_key.len() != 1 {
-                        return Err(MP2PlannerError::ProvingError(format!(
-                            "Expected nodes child keys to have length 1, actual length: {}",
-                            child_key.len()
-                        )));
-                    }
-                    let child_proof = data_store
-                        .get(&child_key[0])
-                        .ok_or(MP2PlannerError::UpdateTreeError(format!(
-                            "Extension node child had no proof data for key: {:?}",
-                            child_key[0]
-                        )))?
-                        .clone();
-                    let proof_data = data_store.get_mut(work_plan_item.k()).ok_or(
-                        MP2PlannerError::UpdateTreeError(format!(
-                            "No ProofData found for key: {:?}",
-                            work_plan_item.k()
-                        )),
-                    )?;
-                    let input = CircuitInput::new_extension(
-                        proof_data.node.clone(),
-                        child_proof.proof.ok_or(MP2PlannerError::UpdateTreeError(
-                            "Extension node child proof was a None value".to_string(),
-                        ))?,
-                    );
-                    let proof = generate_proof(pp, input).map_err(|_| {
-                        MP2PlannerError::ProvingError(
-                            "Error calling generate proof API".to_string(),
-                        )
-                    })?;
-                    proof_data.proof = Some(proof);
-                    update_plan.done(&work_plan_item).map_err(|_| {
-                        MP2PlannerError::UpdateTreeError(
-                            "Could not mark work plan item as done".to_string(),
-                        )
-                    })?;
-                }
-                NodeType::Branch => {
-                    let child_keys = update_tree.get_child_keys(update_tree_node);
-                    let child_proofs = child_keys
-                        .iter()
-                        .map(|key| {
-                            data_store
-                                .get(key)
-                                .ok_or(MP2PlannerError::UpdateTreeError(format!(
-                                    "Branch child data could not be found for key: {:?}",
-                                    key
-                                )))?
-                                .clone()
-                                .proof
-                                .ok_or(MP2PlannerError::UpdateTreeError(
-                                    "No proof found in brnach node child".to_string(),
-                                ))
-                        })
-                        .collect::<Result<Vec<Vec<u8>>, MP2PlannerError>>()?;
-                    let proof_data = data_store.get_mut(work_plan_item.k()).ok_or(
-                        MP2PlannerError::UpdateTreeError(format!(
-                            "No ProofData found for key: {:?}",
-                            work_plan_item.k()
-                        )),
-                    )?;
-                    let input = CircuitInput::new_branch(proof_data.node.clone(), child_proofs);
-                    let proof = generate_proof(pp, input).map_err(|_| {
-                        MP2PlannerError::ProvingError(
-                            "Error calling generate proof API".to_string(),
-                        )
-                    })?;
-                    proof_data.proof = Some(proof);
-                    update_plan.done(&work_plan_item).map_err(|_| {
-                        MP2PlannerError::UpdateTreeError(
-                            "Could not mark work plan item as done".to_string(),
-                        )
-                    })?;
-                }
-            }
-        }
-
-        let final_data = data_store
-            .get(update_tree.root())
-            .ok_or(MP2PlannerError::UpdateTreeError(
-                "No data for root of update tree found".to_string(),
-            ))?
-            .clone();
-
-        final_data.proof.ok_or(MP2PlannerError::UpdateTreeError(
-            "No proof stored for final data".to_string(),
-        ))
+        extraction_plan.process_locally(pp, self)
     }
 }
 
@@ -324,7 +416,7 @@ pub mod tests {
     };
     use mp2_test::eth::get_mainnet_url;
     use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::Hasher};
-    use plonky2_ecgfp5::curve::scalar_field::Scalar;
+    use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
     use std::str::FromStr;
 
     use crate::values_extraction::{
@@ -345,13 +437,16 @@ pub mod tests {
         // get some tx and receipt
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
-        let update_tree = event_info
+        let extraction_plan = event_info
             .create_update_tree(contract, epoch, &provider)
             .await?;
 
-        let block_util = build_test_data().await;
+        let block_util = build_test_data(epoch).await;
 
-        assert_eq!(*update_tree.root(), block_util.block.header.receipts_root);
+        assert_eq!(
+            *extraction_plan.update_tree.root(),
+            block_util.block.header.receipts_root
+        );
         Ok(())
     }
 
@@ -431,7 +526,7 @@ pub mod tests {
 
         let pi = PublicInputs::new(&final_proof.proof.public_inputs);
 
-        let mut block_util = build_test_data().await;
+        let mut block_util = build_test_data(epoch).await;
         // Check the output hash
         {
             assert_eq!(
@@ -457,14 +552,72 @@ pub mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_empty_block_receipt_proving() -> Result<()> {
+        // First get the info we will feed in to our function
+        let event_info = test_receipt_trie_helper().await?;
+
+        let contract = Address::from_str("0xbd3531da5cf5857e7cfaa92426877b022e612cf8")?;
+        let epoch: u64 = 21767312;
+
+        let url = get_mainnet_url();
+        // get some tx and receipt
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+
+        let pp = build_circuits_params::<512, 7>();
+        let final_proof_bytes = event_info
+            .prove_value_extraction(contract, epoch, &pp, &provider)
+            .await?;
+
+        let final_proof = ProofWithVK::deserialize(&final_proof_bytes)?;
+
+        let metadata = TableMetadata::from(event_info);
+
+        let metadata_digest = metadata.digest();
+
+        let value_digest = Point::NEUTRAL;
+
+        let pi = PublicInputs::new(&final_proof.proof.public_inputs);
+
+        let mut block_util = build_test_data(epoch).await;
+        // Check the output hash
+        {
+            assert_eq!(
+                pi.root_hash(),
+                block_util
+                    .receipts_trie
+                    .root_hash()?
+                    .0
+                    .to_vec()
+                    .pack(Endianness::Little)
+            );
+        }
+
+        // Check value digest
+        {
+            assert_eq!(pi.values_digest(), value_digest.to_weierstrass());
+        }
+
+        // Check metadata digest
+        {
+            assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
+        }
+
+        // Check that the number of rows is zero
+        {
+            assert_eq!(pi.n(), GFp::ZERO);
+        }
+        Ok(())
+    }
+
     /// Function that fetches a block together with its transaction trie and receipt trie for testing purposes.
-    async fn build_test_data() -> BlockUtil {
+    async fn build_test_data(block_number: u64) -> BlockUtil {
         let url = get_mainnet_url();
         // get some tx and receipt
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
         // We fetch a specific block which we know includes transactions relating to the PudgyPenguins contract.
-        BlockUtil::fetch(&provider, BlockNumberOrTag::Number(21362445))
+        BlockUtil::fetch(&provider, BlockNumberOrTag::Number(block_number))
             .await
             .unwrap()
     }

@@ -48,7 +48,7 @@ const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 
 /// CircuitInput is a wrapper around the different specialized circuits that can
 /// be used to prove a MPT node recursively.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CircuitInput<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>
 where
     [(); PAD_LEN(LEAF_LEN)]:,
