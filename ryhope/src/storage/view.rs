@@ -45,7 +45,7 @@ impl<
 where
     T: Send,
 {
-    async fn current_epoch(&self) -> Result<UserEpoch> {
+    async fn current_epoch(&self) -> Result<UserEpoch, RyhopeError> {
         Ok(self.1)
     }
 
@@ -72,7 +72,7 @@ where
         unimplemented!("storage views are read only")
     }
 
-    async fn rollback(&mut self) -> Result<()> {
+    async fn rollback(&mut self) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
 }
@@ -94,11 +94,15 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStor
         self.wrapped.initial_epoch()
     }
 
-    async fn current_epoch(&self) -> Result<UserEpoch> {
+    async fn current_epoch(&self) -> Result<UserEpoch, RyhopeError> {
         Ok(self.current_epoch)
     }
 
-    async fn try_fetch_at(&self, k: &T::Key, epoch: UserEpoch) -> Result<Option<T::Node>, RyhopeError> {
+    async fn try_fetch_at(
+        &self,
+        k: &T::Key,
+        epoch: UserEpoch,
+    ) -> Result<Option<T::Node>, RyhopeError> {
         if epoch > self.current_epoch {
             unimplemented!(
                 "this storage view is locked at {}; {epoch} unreachable",
@@ -109,12 +113,8 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStor
         }
     }
 
-    async fn try_fetch(&self, k: &T::Key) -> Option<T::Node> {
+    async fn try_fetch(&self, k: &T::Key) -> Result<Option<T::Node>, RyhopeError> {
         self.wrapped.try_fetch_at(k, self.current_epoch).await
-    }
-
-    async fn fetch(&self, k: &T::Key) -> T::Node {
-        self.wrapped.fetch_at(k, self.current_epoch).await
     }
 
     async fn size(&self) -> usize {
@@ -163,7 +163,7 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> EpochKvStorag
     async fn rollback_to(&mut self, _epoch: UserEpoch) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }
-    
+
     async fn rollback(&mut self) -> Result<(), RyhopeError> {
         unimplemented!("storage views are read only")
     }

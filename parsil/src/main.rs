@@ -86,6 +86,8 @@ enum Command {
         to_keys: bool,
     },
     Core {
+        /// The query to execute if tree_type is "row", or the table name if
+        /// tree_type is "index"
         #[arg(long, short = 'Q')]
         request: String,
 
@@ -217,9 +219,11 @@ fn main() -> Result<()> {
                     //     todo!(),
                     // )?
                 }
-                "index" => {
-                    core_keys_for_index_tree(epoch, (min_block as NodeIdx, max_block as NodeIdx))?
-                }
+                "index" => core_keys_for_index_tree(
+                    epoch,
+                    (min_block as NodeIdx, max_block as NodeIdx),
+                    &request,
+                )?,
                 _ => unreachable!(),
             };
 

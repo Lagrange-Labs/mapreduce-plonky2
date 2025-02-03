@@ -163,7 +163,10 @@ impl TestContext {
                 // here we are simply proving the new updated nodes from the new node to
                 // the root. We fetch the same node but at the previous version of the
                 // tree to prove the update.
-                let previous_node = t.try_fetch_at(k, t.current_epoch().await.unwrap() - 1).await?.unwrap();
+                let previous_node = t
+                    .try_fetch_at(k, t.current_epoch().await.unwrap() - 1)
+                    .await?
+                    .unwrap();
                 let left_key = context.left.expect("should always be a left child");
                 let left_node = t.try_fetch(&left_key).await?.unwrap();
                 // this should be one of the nodes we just proved in this loop before

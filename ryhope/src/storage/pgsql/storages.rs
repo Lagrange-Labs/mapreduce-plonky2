@@ -2,8 +2,8 @@ use crate::{
     error::{ensure, RyhopeError},
     mapper_table_name,
     storage::{
-        CurrenEpochUndefined, EpochKvStorage, EpochMapper, EpochStorage, RoEpochKvStorage,
-        RoSharedEpochMapper, SqlTransactionStorage, TransactionalStorage, TreeStorage, WideLineage,
+        EpochKvStorage, EpochMapper, EpochStorage, RoEpochKvStorage, RoSharedEpochMapper,
+        SqlTransactionStorage, TransactionalStorage, TreeStorage, WideLineage,
     },
     tree::{
         sbbst::{self, NodeIdx},
@@ -134,7 +134,7 @@ where
     fn fetch_a_key(
         db: DBPool,
         table: &str,
-        epoch: IncrementalEpoch,    
+        epoch: IncrementalEpoch,
     ) -> impl Future<Output = Result<Option<Self::Key>, RyhopeError>> + Send {
         async move {
             let connection = db.get().await.unwrap();
@@ -223,7 +223,7 @@ where
         table: &str,
         keys_query: &str,
         bounds: (UserEpoch, UserEpoch), // we keep `UserEpoch` here because we need to do ranges
-         // over epochs in this operation
+                                        // over epochs in this operation
     ) -> impl Future<Output = Result<WideLineage<Self::Key, V>, RyhopeError>>;
 
     /// Return the value associated to the given key at the given epoch.
@@ -378,7 +378,9 @@ where
                 .epoch_mapper()
                 .try_to_user_epoch(epoch as IncrementalEpoch)
                 .await
-                .ok_or(anyhow!("Epoch correspong to inner epoch {epoch} not found"))?;
+                .ok_or(RyhopeError::epoch_error(format!(
+                    "UserEpoch corresponding to epoch {epoch} not found"
+                )))?;
             let key = NodeIdx::from_bytea(row.get::<_, Vec<u8>>(KEY));
 
             let payload = Self::payload_from_row(row)?;
@@ -404,8 +406,7 @@ where
         db: DBPool,
         table: &str,
         data: I,
-    ) -> Result<Vec<(UserEpoch, NodeContext<Self::Key>, V)>, RyhopeError> 
-    {
+    ) -> Result<Vec<(UserEpoch, NodeContext<Self::Key>, V)>, RyhopeError> {
         let connection = db.get().await.unwrap();
         let immediate_table = data
             .into_iter()
@@ -430,8 +431,8 @@ where
                 )),
                 &[],
             )
-             .await
-             .map_err(|err| RyhopeError::from_db("fetching payload from DB", err))?
+            .await
+            .map_err(|err| RyhopeError::from_db("fetching payload from DB", err))?
             .iter()
         {
             let k = Self::Key::from_bytea(row.get::<_, Vec<u8>>(0));
@@ -610,7 +611,9 @@ where
                 .epoch_mapper()
                 .try_to_user_epoch(epoch as IncrementalEpoch)
                 .await
-                .ok_or(anyhow!("Epoch correspong to inner epoch {epoch} not found"))?;
+                .ok_or(RyhopeError::epoch_error(format!(
+                    "UserEpoch corresponding to epoch {epoch} not found"
+                )))?;
             let node = <Self as DbConnector<V>>::node_from_row(row);
             let payload = Self::payload_from_row(row)?;
             if is_core {
@@ -645,8 +648,7 @@ where
         db: DBPool,
         table: &str,
         data: I,
-    ) -> Result<Vec<(UserEpoch, NodeContext<Self::Key>, V)>, RyhopeError> 
-    {
+    ) -> Result<Vec<(UserEpoch, NodeContext<Self::Key>, V)>, RyhopeError> {
         let connection = db.get().await.unwrap();
         let immediate_table = data
             .into_iter()
@@ -735,7 +737,12 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
     /// Initialize a new store, with the given state. The initial state is
     /// immediately persisted, as the DB representation of the payload must be
     /// valid even if it is never modified further by the user.
-    pub async fn with_value(table: String, db: DBPool, t: T, mapper: RoSharedEpochMapper<EpochMapperStorage>) -> Result<Self, RyhopeError> {
+    pub async fn with_value(
+        table: String,
+        db: DBPool,
+        t: T,
+        mapper: RoSharedEpochMapper<EpochMapperStorage>,
+    ) -> Result<Self, RyhopeError> {
         let initial_epoch = INITIAL_INCREMENTAL_EPOCH;
         {
             let connection = db.get().await.unwrap();
@@ -821,7 +828,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
         self.in_tx = false;
     }
 
-    async fn fetch_at_inner(&self, epoch: IncrementalEpoch) -> T {
+    async fn fetch_at_inner(&self, epoch: IncrementalEpoch) -> Result<T, RyhopeError> {
         trace!("[{self}] fetching payload at {}", epoch);
         let meta_table = metadata_table_name(&self.table);
         let connection = self
@@ -839,26 +846,31 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
             .await
             .and_then(|row| row.try_get::<_, Json<T>>(0))
             .map(|x| x.0)
-            .with_context(|| {
-                anyhow!(
-                    "failed to fetch state from `{meta_table}` at epoch `{epoch}`"
-                )
-            }).unwrap()
+            .map_err(|err| RyhopeError::from_db(
+                format!(
+                    "Fetching state from `{meta_table}` at epoch `{epoch}`"
+                ), err
+            ))
     }
 
-    async fn rollback_to_incremental_epoch(&mut self, new_epoch: IncrementalEpoch) -> Result<()> {
-        ensure!(
+    async fn rollback_to_incremental_epoch(
+        &mut self,
+        new_epoch: IncrementalEpoch,
+    ) -> Result<(), RyhopeError> {
+        ensure(
             new_epoch < self.epoch,
-            "unable to rollback into the future: requested epoch ({}) > current epoch ({})",
-            new_epoch,
-            self.epoch
-        );
-        ensure!(
+            format!(
+                "unable to rollback into the future: requested epoch ({}) > current epoch ({})",
+                new_epoch, self.epoch
+            ),
+        )?;
+        ensure(
             new_epoch >= INITIAL_INCREMENTAL_EPOCH,
-            "unable to rollback to {} before initial epoch {}",
-            new_epoch,
-            INITIAL_INCREMENTAL_EPOCH
-        );
+            format!(
+                "unable to rollback to {} before initial epoch {}",
+                new_epoch, INITIAL_INCREMENTAL_EPOCH
+            ),
+        )?;
 
         let _ = self.cache.get_mut().take();
         let meta_table = metadata_table_name(&self.table);
@@ -873,15 +885,30 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
                 &format!("UPDATE {meta_table} SET {VALID_UNTIL} = $1 WHERE {VALID_UNTIL} > $1"),
                 &[&new_epoch],
             )
-            .await?;
+            .await
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!("Rolling back alive nodes to epoch {new_epoch} in table {meta_table}"),
+                    err,
+                )
+            })?;
         // Delete nodes that would not have been born yet
         db_tx
             .query(
                 &format!("DELETE FROM {meta_table} WHERE {VALID_FROM} > $1"),
                 &[&new_epoch],
             )
-            .await?;
-        db_tx.commit().await?;
+            .await
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!("Deleting nodes born after epoch {new_epoch} from table {meta_table}"),
+                    err,
+                )
+            })?;
+        db_tx
+            .commit()
+            .await
+            .map_err(|err| RyhopeError::from_db("committing", err))?;
         self.epoch = new_epoch;
 
         Ok(())
@@ -964,7 +991,7 @@ where
     async fn fetch(&self) -> Result<T, RyhopeError> {
         trace!("[{self}] fetching payload");
         if self.cache.read().await.is_none() {
-            let state = self.fetch_at_inner(self.epoch).await;
+            let state = self.fetch_at_inner(self.epoch).await?;
             let _ = self.cache.write().await.replace(state.clone());
             Ok(state)
         } else {
@@ -972,8 +999,14 @@ where
         }
     }
 
-    async fn fetch_at(&self, epoch: UserEpoch) -> T {
-        let epoch = self.epoch_mapper.to_incremental_epoch(epoch).await;
+    async fn fetch_at(&self, epoch: UserEpoch) -> Result<T, RyhopeError> {
+        let epoch = self
+            .epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await
+            .ok_or(RyhopeError::epoch_error(format!(
+                "IncrementalEpoch not found for epoch {epoch}"
+            )))?;
         self.fetch_at_inner(epoch).await
     }
 
@@ -984,21 +1017,29 @@ where
         Ok(())
     }
 
-    async fn current_epoch(&self) -> Result<UserEpoch> {
+    async fn current_epoch(&self) -> Result<UserEpoch, RyhopeError> {
         self.epoch_mapper
             .try_to_user_epoch(self.epoch)
             .await
-            .ok_or(CurrenEpochUndefined(self.epoch).into())
+            .ok_or(RyhopeError::CurrenEpochUndefined(self.epoch))
     }
 
     async fn rollback_to(&mut self, new_epoch: UserEpoch) -> Result<(), RyhopeError> {
-        let inner_epoch = self.epoch_mapper.try_to_incremental_epoch(new_epoch).await
-            .ok_or(anyhow!("IncrementalEpoch not found for epoch {new_epoch}"))?;
+        let inner_epoch = self
+            .epoch_mapper
+            .try_to_incremental_epoch(new_epoch)
+            .await
+            .ok_or(RyhopeError::epoch_error(format!(
+                "IncrementalEpoch not found for epoch {new_epoch}"
+            )))?;
         self.rollback_to_incremental_epoch(inner_epoch).await
     }
 
     async fn rollback(&mut self) -> Result<(), RyhopeError> {
-        ensure!(self.epoch > INITIAL_INCREMENTAL_EPOCH, "cannot rollback before initial epoch");
+        ensure(
+            self.epoch > INITIAL_INCREMENTAL_EPOCH,
+            "cannot rollback before initial epoch",
+        )?;
         self.rollback_to_incremental_epoch(self.epoch - 1).await
     }
 }
@@ -1095,7 +1136,10 @@ where
             .unwrap()
     }
 
-    pub(super) async fn rollback_to(&mut self, new_epoch: IncrementalEpoch) -> Result<(), RyhopeError> {
+    pub(super) async fn rollback_to(
+        &mut self,
+        new_epoch: IncrementalEpoch,
+    ) -> Result<(), RyhopeError> {
         trace!("[{self}] rolling back to {new_epoch}");
         ensure(
             new_epoch >= INITIAL_INCREMENTAL_EPOCH,
@@ -1188,13 +1232,13 @@ where
     ) -> Result<Option<T::Node>, RyhopeError> {
         let db = self.wrapped.read().await.db.clone();
         let table = self.wrapped.read().await.table.to_owned();
-        if epoch == self.wrapped.read().await.current_epoch() {
+        Ok(if epoch == self.wrapped.read().await.current_epoch() {
             // Directly returns the value if it is already in cache, fetch it from
             // the DB otherwise.
             let value = self.wrapped.read().await.nodes_cache.get(k).cloned();
             if let Some(Some(cached_value)) = value {
                 Some(cached_value.into_value())
-            } else if let Some(value) = T::fetch_node_at(db, &table, k, epoch).await.unwrap() {
+            } else if let Some(value) = T::fetch_node_at(db, &table, k, epoch).await? {
                 self.wrapped
                     .write()
                     .await
@@ -1205,8 +1249,8 @@ where
                 None
             }
         } else {
-            T::fetch_node_at(db, &table, k, epoch).await.unwrap()
-        }
+            T::fetch_node_at(db, &table, k, epoch).await?
+        })
     }
 }
 
@@ -1225,7 +1269,7 @@ where
             .await as UserEpoch
     }
 
-    async fn current_epoch(&self) -> Result<UserEpoch> {
+    async fn current_epoch(&self) -> Result<UserEpoch, RyhopeError> {
         let inner_epoch = self.wrapped.read().await.current_epoch();
         self.wrapped
             .read()
@@ -1233,7 +1277,7 @@ where
             .epoch_mapper
             .try_to_user_epoch(inner_epoch)
             .await
-            .ok_or(CurrenEpochUndefined(inner_epoch).into())
+            .ok_or(RyhopeError::CurrenEpochUndefined(inner_epoch))
     }
 
     async fn size(&self) -> usize {
@@ -1251,7 +1295,11 @@ where
         self.wrapped.read().await.size_at(inner_epoch).await
     }
 
-    async fn try_fetch_at(&self, k: &T::Key, epoch: UserEpoch) -> Option<T::Node> {
+    async fn try_fetch_at(
+        &self,
+        k: &T::Key,
+        epoch: UserEpoch,
+    ) -> Result<Option<T::Node>, RyhopeError> {
         trace!("[{self}] fetching {k:?}@{epoch}",);
         let inner_epoch = self
             .wrapped
@@ -1263,7 +1311,7 @@ where
         if let Some(epoch) = inner_epoch {
             self.try_fetch_at_incremental_epoch(k, epoch).await
         } else {
-            None
+            Ok(None)
         }
     }
 
@@ -1327,7 +1375,7 @@ where
         Ok(())
     }
 
-    fn update(&mut self, k: T::Key, new_value: T::Node) -> impl Future<Output = Result<(), RyhopeError>> + Send {
+    async fn update(&mut self, k: T::Key, new_value: T::Node) -> Result<(), RyhopeError> {
         trace!("[{self}] updating cache {k:?} -> {new_value:?}");
         // If the operation is already present from a read, replace it with the
         // new value.
@@ -1339,11 +1387,7 @@ where
         Ok(())
     }
 
-    async fn store(
-        &mut self,
-        k: T::Key,
-        value: T::Node,
-    ) -> Result<(), RyhopeError> {
+    async fn store(&mut self, k: T::Key, value: T::Node) -> Result<(), RyhopeError> {
         trace!("[{self}] storing {k:?} -> {value:?} in cache");
         // If the operation is already present from a read, replace it with the
         // new value.
@@ -1371,7 +1415,7 @@ where
         }
     }
 
-    async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<()> {
+    async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<(), RyhopeError> {
         let inner_epoch = self
             .wrapped
             .read()
@@ -1382,9 +1426,9 @@ where
         self.wrapped.write().await.rollback_to(inner_epoch).await
     }
 
-    async fn rollback(&mut self) -> Result<()> {
+    async fn rollback(&mut self) -> Result<(), RyhopeError> {
         let inner_epoch = self.wrapped.read().await.current_epoch();
-        ensure!(inner_epoch > 0, "cannot rollback past the initial epoch");
+        ensure(inner_epoch > 0, "cannot rollback past the initial epoch")?;
         self.wrapped.write().await.rollback_to(inner_epoch).await
     }
 }
@@ -1424,16 +1468,16 @@ where
         &self,
         k: &T::Key,
         epoch: IncrementalEpoch,
-    ) -> Option<V> {
+    ) -> Result<Option<V>, RyhopeError> {
         let db = self.wrapped.read().await.db.clone();
         let table = self.wrapped.read().await.table.to_owned();
-        if epoch == self.wrapped.read().await.current_epoch() {
+        Ok(if epoch == self.wrapped.read().await.current_epoch() {
             // Directly returns the value if it is already in cache, fetch it from
             // the DB otherwise.
             let value = self.wrapped.read().await.payload_cache.get(k).cloned();
             if let Some(Some(cached_value)) = value {
                 Some(cached_value.into_value())
-            } else if let Some(value) = T::fetch_payload_at(db, &table, k, epoch).await.unwrap() {
+            } else if let Some(value) = T::fetch_payload_at(db, &table, k, epoch).await? {
                 self.wrapped
                     .write()
                     .await
@@ -1444,8 +1488,8 @@ where
                 None
             }
         } else {
-            T::fetch_payload_at(db, &table, k, epoch).await.unwrap()
-        }
+            T::fetch_payload_at(db, &table, k, epoch).await?
+        })
     }
 }
 
@@ -1464,7 +1508,7 @@ where
             .await as UserEpoch
     }
 
-    async fn current_epoch(&self) -> Result<UserEpoch> {
+    async fn current_epoch(&self) -> Result<UserEpoch, RyhopeError> {
         let inner_epoch = self.wrapped.read().await.current_epoch();
         self.wrapped
             .read()
@@ -1472,7 +1516,7 @@ where
             .epoch_mapper
             .try_to_user_epoch(inner_epoch as IncrementalEpoch)
             .await
-            .ok_or(CurrenEpochUndefined(inner_epoch).into())
+            .ok_or(RyhopeError::CurrenEpochUndefined(inner_epoch))
     }
 
     async fn size(&self) -> usize {
@@ -1490,7 +1534,7 @@ where
         self.wrapped.read().await.size_at(inner_epoch).await
     }
 
-    async fn try_fetch_at(&self, k: &T::Key, epoch: UserEpoch) -> Option<V> {
+    async fn try_fetch_at(&self, k: &T::Key, epoch: UserEpoch) -> Result<Option<V>, RyhopeError> {
         trace!("[{self}] attempting to fetch payload for {k:?}@{epoch}");
         let inner_epoch = self
             .wrapped
@@ -1502,11 +1546,11 @@ where
         if let Some(epoch) = inner_epoch {
             self.try_fetch_at_incremental_epoch(k, epoch).await
         } else {
-            None
+            Ok(None)
         }
     }
 
-    async fn try_fetch(&self, k: &T::Key) -> Option<V> {
+    async fn try_fetch(&self, k: &T::Key) -> Result<Option<V>, RyhopeError> {
         let current_epoch = self.wrapped.read().await.current_epoch();
         self.try_fetch_at_incremental_epoch(k, current_epoch).await
     }
@@ -1567,7 +1611,7 @@ where
         Ok(())
     }
 
-    fn update(&mut self, k: T::Key, new_value: V) -> impl Future<Output = Result<(), RyhopeError>> + Send {
+    async fn update(&mut self, k: T::Key, new_value: V) -> Result<(), RyhopeError> {
         trace!("[{self}] updating cache {k:?} -> {new_value:?}");
         // If the operation is already present from a read, replace it with the
         // new value.
@@ -1579,11 +1623,7 @@ where
         Ok(())
     }
 
-    async fn store(
-        &mut self,
-        k: T::Key,
-        value: V,
-    ) -> Result<(), RyhopeError> {
+    async fn store(&mut self, k: T::Key, value: V) -> Result<(), RyhopeError> {
         trace!("[{self}] storing {k:?} -> {value:?} in cache",);
         // If the operation is already present from a read, replace it with the
         // new value.
@@ -1595,7 +1635,7 @@ where
         Ok(())
     }
 
-    async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<()> {
+    async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<(), RyhopeError> {
         let inner_epoch = self
             .wrapped
             .read()
@@ -1606,9 +1646,9 @@ where
         self.wrapped.write().await.rollback_to(inner_epoch).await
     }
 
-    async fn rollback(&mut self) -> Result<()> {
+    async fn rollback(&mut self) -> Result<(), RyhopeError> {
         let inner_epoch = self.wrapped.read().await.current_epoch();
-        ensure!(inner_epoch > 0, "cannot rollback past the initial epoch");
+        ensure(inner_epoch > 0, "cannot rollback past the initial epoch")?;
         self.wrapped.write().await.rollback_to(inner_epoch).await
     }
 }

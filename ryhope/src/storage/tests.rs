@@ -578,12 +578,12 @@ async fn epoch_sbbst_can_use_non_sequential_keys() -> Result<()> {
     s.commit_transaction().await?;
 
     // check that values have been inserted
-    assert_eq!(s.try_fetch(&12).await.unwrap(), 2);
-    assert_eq!(s.try_fetch(&14).await.unwrap(), 2);
-    assert_eq!(s.try_fetch(&15).await.unwrap(), 2);
+    assert_eq!(s.try_fetch(&12).await?.unwrap(), 2);
+    assert_eq!(s.try_fetch(&14).await?.unwrap(), 2);
+    assert_eq!(s.try_fetch(&15).await?.unwrap(), 2);
 
     // chekc that 11 has not been inserted
-    assert!(s.try_fetch(&11).await.is_none());
+    assert!(s.try_fetch(&11).await?.is_none());
     Ok(())
 }
 
@@ -616,11 +616,11 @@ async fn epoch_sbbst_over_pgsql_with_non_sequential_keys() -> Result<()> {
     s.commit_transaction().await?;
 
     // check that values have been inserted
-    assert_eq!(s.try_fetch(&12).await.unwrap(), 2);
-    assert_eq!(s.try_fetch(&14).await.unwrap(), 2);
+    assert_eq!(s.try_fetch(&12).await?.unwrap(), 2);
+    assert_eq!(s.try_fetch(&14).await?.unwrap(), 2);
 
     // check that 11 has not been inserted
-    assert!(s.try_fetch(&11).await.is_none());
+    assert!(s.try_fetch(&11).await?.is_none());
 
     assert_eq!(s.storage.epoch_mapper().to_incremental_epoch(12).await, 1);
     assert_eq!(s.storage.epoch_mapper().to_incremental_epoch(14).await, 2);

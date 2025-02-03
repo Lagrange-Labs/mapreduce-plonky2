@@ -247,7 +247,7 @@ impl TableIndexing {
             columns,
             row_unique_id,
         )
-        .await;
+        .await?;
         Ok((
             Self {
                 value_column,
@@ -959,6 +959,7 @@ async fn build_mapping_table(
         row_unique_id,
     )
     .await
+    .unwrap()
 }
 
 /// Build the mapping of mappings table.
@@ -1071,6 +1072,7 @@ async fn build_mapping_of_mappings_table(
         row_unique_id,
     )
     .await
+    .unwrap()
 }
 
 #[derive(Clone, Debug)]

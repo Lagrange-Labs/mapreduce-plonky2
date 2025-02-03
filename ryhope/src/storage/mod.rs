@@ -28,16 +28,6 @@ mod tests;
 pub mod updatetree;
 pub mod view;
 
-/// Error type to represent when the current epoch is undefined, which
-/// might happen when the epochs are handled by another storage.
-pub(crate) struct CurrenEpochUndefined(IncrementalEpoch);
-
-impl From<CurrenEpochUndefined> for anyhow::Error {
-    fn from(value: CurrenEpochUndefined) -> Self {
-        anyhow!("Current epoch is undefined: internal epoch is {}, but no corresponding user epoch was found", value.0)
-    }
-}
-
 /// An atomic operation to apply on a KV storage.
 pub enum Operation<K, V> {
     /// Insert a new row in the database at the new block state
@@ -184,7 +174,7 @@ pub trait EpochMapper: Sized + Send + Sync + Clone + Debug {
         &mut self,
         user_epoch: UserEpoch,
         incremental_epoch: IncrementalEpoch,
-    ) -> impl Future<Output = Result<()>> + Send;
+    ) -> impl Future<Output = Result<(), RyhopeError>> + Send;
 }
 
 /// Wrapper data structure to safely use an instance of an `EpochMapper` shared among multiple
@@ -223,10 +213,10 @@ impl<T: EpochMapper, const READ_ONLY: bool> SharedEpochMapper<T, READ_ONLY> {
         self.0.read().await
     }
 
-    pub(crate) async fn apply_fn<Fn: FnMut(&'_ mut T) -> Result<()>>(
+    pub(crate) async fn apply_fn<Fn: FnMut(&'_ mut T) -> Result<(), RyhopeError>>(
         &mut self,
         mut f: Fn,
-    ) -> Result<()>
+    ) -> Result<(), RyhopeError>
     where
         T: 'static,
     {
@@ -257,7 +247,7 @@ impl<T: EpochMapper, const READ_ONLY: bool> EpochMapper for SharedEpochMapper<T,
         &mut self,
         user_epoch: UserEpoch,
         incremental_epoch: IncrementalEpoch,
-    ) -> Result<()> {
+    ) -> Result<(), RyhopeError> {
         // add new epoch mapping only if `self` is not READ_ONLY
         if !READ_ONLY {
             self.0
@@ -342,9 +332,9 @@ where
     /// Return the current epoch of the storage. It returns an error
     /// if the current epoch is undefined, which might happen when the epochs
     /// are handled by another storage.
-    fn current_epoch(&self) -> impl Future<Output = Result<UserEpoch>> + Send;
+    fn current_epoch(&self) -> impl Future<Output = Result<UserEpoch, RyhopeError>> + Send;
 
-    /// Return the value stored at the current epoch. 
+    /// Return the value stored at the current epoch.
     fn fetch(&self) -> impl Future<Output = Result<T, RyhopeError>> + Send;
 
     /// Return the value stored at the given epoch.
@@ -387,7 +377,7 @@ where
     /// Return the current time stamp of the storage. It returns an error
     /// if the current epoch is undefined, which might happen when the epochs
     /// are handled by another storage.
-    fn current_epoch(&self) -> impl Future<Output = Result<UserEpoch>> + Send;
+    fn current_epoch(&self) -> impl Future<Output = Result<UserEpoch, RyhopeError>> + Send;
 
     /// Return the value associated to `k` at the current epoch if it exists,
     /// `None` otherwise.
@@ -407,7 +397,11 @@ where
     }
 
     /// Return whether the given key is present at the given epoch.
-    fn contains_at(&self, k: &K, epoch: UserEpoch) -> impl Future<Output = Result<bool, RyhopeError>> {
+    fn contains_at(
+        &self,
+        k: &K,
+        epoch: UserEpoch,
+    ) -> impl Future<Output = Result<bool, RyhopeError>> {
         async move { self.try_fetch_at(k, epoch).await.map(|x| x.is_some()) }
     }
 
@@ -426,7 +420,10 @@ where
     /// Return all the valid key/value pairs at the given `epoch`.
     ///
     /// NOTE: be careful when using this function, it is not lazy.
-    fn pairs_at(&self, epoch: UserEpoch) -> impl Future<Output = Result<HashMap<K, V>, RyhopeError>>;
+    fn pairs_at(
+        &self,
+        epoch: UserEpoch,
+    ) -> impl Future<Output = Result<HashMap<K, V>, RyhopeError>>;
 }
 
 /// A versioned KV storage only allowed to mutate entries only in the current

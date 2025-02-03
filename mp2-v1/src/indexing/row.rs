@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use super::{block::BlockPrimaryIndex, cell::CellTreeKey, ColumnID};
 use alloy::primitives::U256;
 use anyhow::Result;

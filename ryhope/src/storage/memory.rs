@@ -1,4 +1,3 @@
-use anyhow::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashSet};
 use std::hash::Hash;
@@ -9,8 +8,8 @@ use crate::tree::TreeTopology;
 use crate::{IncrementalEpoch, InitSettings, UserEpoch};
 
 use super::{
-    CurrenEpochUndefined, EpochKvStorage, EpochMapper, EpochStorage, FromSettings, PayloadStorage,
-    RoEpochKvStorage, RoSharedEpochMapper, SharedEpochMapper, TransactionalStorage, TreeStorage,
+    EpochKvStorage, EpochMapper, EpochStorage, FromSettings, PayloadStorage, RoEpochKvStorage,
+    RoSharedEpochMapper, SharedEpochMapper, TransactionalStorage, TreeStorage,
 };
 
 /// A RAM-backed implementation of a transactional epoch storage for a single value.
@@ -50,18 +49,25 @@ where
         (self.ts.len() - 1).try_into().unwrap()
     }
 
-    fn fetch_at_incremental_epoch(&self, epoch: IncrementalEpoch) -> T {
+    fn fetch_at_incremental_epoch(&self, epoch: IncrementalEpoch) -> Result<T, RyhopeError> {
         assert!(epoch >= 0);
-        self.ts[epoch as usize].clone().unwrap()
+        self.ts[epoch as usize].clone().ok_or(RyhopeError::internal(
+            "No entry found in storage for epoch {epoch}",
+        ))
     }
 
-    fn rollback_to_incremental_epoch(&mut self, epoch: IncrementalEpoch) -> Result<()> {
-        ensure!(
+    fn rollback_to_incremental_epoch(
+        &mut self,
+        epoch: IncrementalEpoch,
+    ) -> Result<(), RyhopeError> {
+        ensure(
             epoch <= self.inner_epoch(),
-            "unable to rollback to epoch `{}` more recent than current epoch `{}`",
-            epoch,
-            self.inner_epoch()
-        );
+            format!(
+                "unable to rollback to epoch `{}` more recent than current epoch `{}`",
+                epoch,
+                self.inner_epoch()
+            ),
+        )?;
 
         self.ts.resize((epoch + 1).try_into().unwrap(), None);
         Ok(())
@@ -98,19 +104,25 @@ impl<T> EpochStorage<T> for VersionedStorage<T>
 where
     T: Debug + Send + Sync + Clone + Serialize + for<'b> Deserialize<'b>,
 {
-    async fn current_epoch(&self) -> Result<UserEpoch> {
+    async fn current_epoch(&self) -> Result<UserEpoch, RyhopeError> {
         self.epoch_mapper
             .try_to_user_epoch(self.inner_epoch())
             .await
-            .ok_or(CurrenEpochUndefined(self.inner_epoch()).into())
+            .ok_or(RyhopeError::CurrenEpochUndefined(self.inner_epoch()))
     }
 
-    async fn fetch_at(&self, epoch: UserEpoch) -> T {
-        let epoch = self.epoch_mapper.to_incremental_epoch(epoch).await;
+    async fn fetch_at(&self, epoch: UserEpoch) -> Result<T, RyhopeError> {
+        let epoch = self
+            .epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await
+            .ok_or(RyhopeError::epoch_error(format!(
+                "IncrementalEpoch not found for epoch {epoch}"
+            )))?;
         self.fetch_at_incremental_epoch(epoch)
     }
 
-    async fn fetch(&self) -> T {
+    async fn fetch(&self) -> Result<T, RyhopeError> {
         self.fetch_at_incremental_epoch(self.inner_epoch())
     }
 
@@ -121,20 +133,20 @@ where
         Ok(())
     }
 
-    async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<()> {
+    async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<(), RyhopeError> {
         let inner_epoch = self
             .epoch_mapper
             .try_to_incremental_epoch(epoch)
             .await
-            .ok_or(anyhow!(format!(
+            .ok_or(RyhopeError::epoch_error(format!(
                 "trying to rollback to an invalid epoch {}",
                 epoch
             )))?;
         self.rollback_to_incremental_epoch(inner_epoch)
     }
 
-    async fn rollback(&mut self) -> Result<()> {
-        ensure!(self.inner_epoch() > 0, "unable to rollback before epoch 0");
+    async fn rollback(&mut self) -> Result<(), RyhopeError> {
+        ensure(self.inner_epoch() > 0, "unable to rollback before epoch 0")?;
         self.rollback_to_incremental_epoch(self.inner_epoch() - 1)
     }
 }
@@ -195,30 +207,35 @@ impl<K: Hash + Eq + Clone + Debug + Send + Sync, V: Clone + Debug + Send + Sync>
     }
 
     fn try_fetch_at_incremental_epoch(&self, k: &K, epoch: IncrementalEpoch) -> Option<V> {
-        assert!(epoch >= 0); // To fetch a key at a given epoch, the list of diffs up to the
-                             // requested epoch is iterated in reverse. The first occurence of k,
-                             // i.e. the most recent one, will be the current value.
-                             //
-                             // If this occurence is a None, it means that k has been deleted.
-
+        assert!(epoch >= 0);
+        // To fetch a key at a given epoch, the list of diffs up to the
+        // requested epoch is iterated in reverse. The first occurence of k,
+        // i.e. the most recent one, will be the current value.
+        //
+        // If this occurence is a None, it means that k has been deleted.
         for i in (0..=epoch as usize).rev() {
             let maybe = self.mem[i].get(k);
             if let Some(found) = maybe {
-                return Ok(found.to_owned());
+                return found.to_owned();
             };
         }
 
         None
     }
 
-    fn rollback_to_incremental_epoch(&mut self, epoch: IncrementalEpoch) -> Result<()> {
-        ensure!(epoch >= 0, "unable to rollback before epoch 0",);
-        ensure!(
+    fn rollback_to_incremental_epoch(
+        &mut self,
+        epoch: IncrementalEpoch,
+    ) -> Result<(), RyhopeError> {
+        ensure(epoch >= 0, "unable to rollback before epoch 0")?;
+        ensure(
             epoch <= self.inner_epoch(),
-            "unable to rollback to epoch `{}` more recent than current epoch `{}`",
-            epoch,
-            self.inner_epoch()
-        );
+            format!(
+                "unable to rollback to epoch `{}` more recent than current epoch `{}`",
+                epoch,
+                self.inner_epoch()
+            ),
+        )?;
 
         self.mem.truncate((epoch + 1).try_into().unwrap());
 
@@ -235,65 +252,23 @@ where
         self.epoch_mapper.to_user_epoch(0).await as UserEpoch
     }
 
-    async fn current_epoch(&self) -> Result<UserEpoch> {
+    async fn current_epoch(&self) -> Result<UserEpoch, RyhopeError> {
         self.epoch_mapper
             .try_to_user_epoch(self.inner_epoch())
             .await
-            .ok_or(CurrenEpochUndefined(self.inner_epoch()).into())
+            .ok_or(RyhopeError::CurrenEpochUndefined(self.inner_epoch()))
     }
 
-    async fn try_fetch(&self, k: &K) -> Option<V> {
-        self.try_fetch_at_incremental_epoch(k, self.inner_epoch())
+    async fn try_fetch(&self, k: &K) -> Result<Option<V>, RyhopeError> {
+        Ok(self.try_fetch_at_incremental_epoch(k, self.inner_epoch()))
     }
 
-    async fn try_fetch_at(&self, k: &K, epoch: UserEpoch) -> Option<V> {
-        self.epoch_mapper
+    async fn try_fetch_at(&self, k: &K, epoch: UserEpoch) -> Result<Option<V>, RyhopeError> {
+        Ok(self
+            .epoch_mapper
             .try_to_incremental_epoch(epoch)
             .await
-            .and_then(|inner_epoch| self.try_fetch_at_incremental_epoch(k, inner_epoch))
-    }
-
-    fn rollback_to_incremental_epoch(&mut self, epoch: IncrementalEpoch) -> Result<()> {
-        ensure!(
-            epoch >= 0,
-            "unable to rollback before epoch 0",
-        );
-        ensure!(
-            epoch <= self.inner_epoch(),
-            "unable to rollback to epoch `{}` more recent than current epoch `{}`",
-            epoch,
-            self.inner_epoch()
-        );
-
-        self.mem.truncate((epoch + 1).try_into().unwrap());
-
-        Ok(())
-    }
-}
-
-impl<K, V> RoEpochKvStorage<K, V> for VersionedKvStorage<K, V>
-where
-    K: Hash + Eq + Clone + Debug + Send + Sync,
-    V: Clone + Debug + Send + Sync,
-{
-    async fn initial_epoch(&self) -> UserEpoch {
-        self.epoch_mapper.to_user_epoch(0).await as UserEpoch
-    }
-
-    async fn current_epoch(&self) -> Result<UserEpoch> {
-        self.epoch_mapper.try_to_user_epoch(self.inner_epoch()).await
-            .ok_or(CurrenEpochUndefined(self.inner_epoch()).into())
-    }
-
-    async fn try_fetch(&self, k: &K) -> Option<V> {
-        self.try_fetch_at_incremental_epoch(k, self.inner_epoch())
-    }
-
-    async fn try_fetch_at(&self, k: &K, epoch: UserEpoch) -> Option<V> {
-        self.epoch_mapper.try_to_incremental_epoch(epoch).await
-            .and_then(|inner_epoch| {
-            self.try_fetch_at_incremental_epoch(k, inner_epoch)
-        })
+            .and_then(|inner_epoch| self.try_fetch_at_incremental_epoch(k, inner_epoch)))
     }
 
     // Expensive, but only used in test context.
@@ -362,12 +337,14 @@ where
             })
     }
 
-    async fn pairs_at(&self, epoch: UserEpoch) -> Result<HashMap<K, V>> {
+    async fn pairs_at(&self, epoch: UserEpoch) -> Result<HashMap<K, V>, RyhopeError> {
         let inner_epoch = self
             .epoch_mapper
             .try_to_incremental_epoch(epoch)
             .await
-            .ok_or(anyhow!("Try fetching an invalid epoch {epoch}"))?;
+            .ok_or(RyhopeError::epoch_error(format!(
+                "IncrementalEpoch not found for epoch {epoch}"
+            )))?;
         assert!(inner_epoch >= 0);
         let mut pairs = HashMap::new();
         for i in 0..=inner_epoch as usize {
@@ -405,17 +382,19 @@ where
         Ok(())
     }
 
-    async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<()> {
+    async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<(), RyhopeError> {
         let inner_epoch = self
             .epoch_mapper
             .try_to_incremental_epoch(epoch)
             .await
-            .ok_or(anyhow!("Try to rollback to an invalid epoch {epoch}"))?;
+            .ok_or(RyhopeError::epoch_error(format!(
+                "Try to rollback to an invalid epoch {epoch}"
+            )))?;
         self.rollback_to_incremental_epoch(inner_epoch)
     }
 
-    async fn rollback(&mut self) -> Result<()> {
-        ensure!(self.inner_epoch() > 0, "unable to rollback before epoch 0");
+    async fn rollback(&mut self) -> Result<(), RyhopeError> {
+        ensure(self.inner_epoch() > 0, "unable to rollback before epoch 0")?;
         self.rollback_to_incremental_epoch(self.inner_epoch() - 1)
     }
 }
@@ -656,28 +635,28 @@ impl<const IS_CACHE: bool, const MAX_ENTRIES: usize>
         }
     }
 
-    pub(crate) fn rollback_to(&mut self, epoch: UserEpoch) -> Result<()> {
+    pub(crate) fn rollback_to(&mut self, epoch: UserEpoch) -> Result<(), RyhopeError> {
         // first, check that we are rolling back to a valid epoch
         let last_epoch = self.last_epoch();
-        ensure!(
+        ensure(
             epoch <= last_epoch,
-            "cannot rollback to epoch greater than last epoch"
-        );
+            "cannot rollback to epoch greater than last epoch",
+        )?;
         let initial_epoch = self.initial_epoch();
-        ensure!(
+        ensure(
             epoch >= initial_epoch,
-            "cannot rollback to epoch smaller than initial epoch"
-        );
+            "cannot rollback to epoch smaller than initial epoch",
+        )?;
         match self.incremental_epochs_map.as_mut() {
             Some(IncrementalEpochMap { last_epoch, .. }) => {
                 *last_epoch = epoch;
             }
             None => {
                 // first, check that the epoch we are rolling back to exists
-                ensure!(
+                ensure(
                     self.generic_map.contains(&EpochMapItem::PartialUser(epoch)),
-                    "Trying to rollback to non-existing epoch {epoch}"
-                );
+                    format!("Trying to rollback to non-existing epoch {epoch}"),
+                )?;
                 // now, erase all epochs greater than `epoch`
                 while self.generic_map.last().unwrap().to_epochs().0 > epoch {
                     self.generic_map.pop_last();
@@ -712,7 +691,7 @@ impl<const IS_CACHE: bool, const MAX_ENTRIES: usize>
         &mut self,
         user_epoch: UserEpoch,
         incremental_epoch: IncrementalEpoch,
-    ) -> Result<()> {
+    ) -> Result<(), RyhopeError> {
         // if we are replacing an existing `IncrementalEpoch`, ensure that
         // we remove the old mapping entry
         if let Some(epoch) = self.try_to_user_epoch_inner(incremental_epoch) {
@@ -740,15 +719,15 @@ impl<const IS_CACHE: bool, const MAX_ENTRIES: usize>
         &mut self,
         user_epoch: UserEpoch,
         incremental_epoch: IncrementalEpoch,
-    ) -> Result<()> {
+    ) -> Result<(), RyhopeError> {
         match self.incremental_epochs_map {
             Some(IncrementalEpochMap {
                 offset: initial_epoch,
                 last_epoch,
             }) => {
-                ensure!(user_epoch >= initial_epoch,
-                    "Trying to insert an epoch {user_epoch} smaller than initial epoch {initial_epoch}"
-                );
+                ensure(user_epoch >= initial_epoch,
+                    format!("Trying to insert an epoch {user_epoch} smaller than initial epoch {initial_epoch}")
+                )?;
                 // we need to fallback to the generic map implementation if:
                 // - either we are insering a new `user_epoch` which is no longer incremental
                 // - or we are updating the last inserted `incremental_epoch` with a bigger `user_epoch`
@@ -763,10 +742,11 @@ impl<const IS_CACHE: bool, const MAX_ENTRIES: usize>
                     // In all other cases, we need to check that
                     // `incremental_epoch == user_epoch - initial_epoch`, to keep the epochs
                     // incremental
-                    ensure!(user_epoch - initial_epoch == incremental_epoch,
-                        "Trying to insert an invalid incremental epoch: expected {}, found {incremental_epoch}",
-                        user_epoch - initial_epoch,
-                    );
+                    ensure(user_epoch - initial_epoch == incremental_epoch,
+                        format!(
+                            "Trying to insert an invalid incremental epoch: expected {}, found {incremental_epoch}",
+                            user_epoch - initial_epoch,
+                    ))?;
                     // If we are adding a new `user_epoch`, we update `last_epoch`;
                     // otherwise, it's a no-operation
                     if user_epoch == last_epoch + 1 {
@@ -815,7 +795,7 @@ impl<const IS_CACHE: bool, const MAX_ENTRIES: usize> EpochMapper
         &mut self,
         user_epoch: UserEpoch,
         incremental_epoch: IncrementalEpoch,
-    ) -> Result<()> {
+    ) -> Result<(), RyhopeError> {
         self.add_epoch(user_epoch, incremental_epoch)
     }
 }
@@ -871,7 +851,7 @@ impl<T: TreeTopology, V: Clone + Debug + Send + Sync> FromSettings<T::State>
     async fn from_settings(
         init_settings: InitSettings<T::State>,
         storage_settings: Self::Settings,
-    ) -> Result<Self> {
+    ) -> Result<Self, RyhopeError> {
         match init_settings {
             InitSettings::MustExist => unimplemented!(),
             InitSettings::MustNotExist(tree_state) | InitSettings::Reset(tree_state) => {
@@ -880,10 +860,10 @@ impl<T: TreeTopology, V: Clone + Debug + Send + Sync> FromSettings<T::State>
             InitSettings::MustNotExistAt(tree_state, initial_epoch)
             | InitSettings::ResetAt(tree_state, initial_epoch) => {
                 // check that initial_epoch is in epoch_mapper
-                ensure!(
+                ensure(
                     storage_settings.read_access_ref().await.initial_epoch() == initial_epoch,
-                    "Initial epoch {initial_epoch} not found in the epoch mapper provided as input"
-                );
+                    format!("Initial epoch {initial_epoch} not found in the epoch mapper provided as input")
+                )?;
                 Ok(Self::new_with_mapper(tree_state, storage_settings))
             }
         }

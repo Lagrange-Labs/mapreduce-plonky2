@@ -1,9 +1,10 @@
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::Context;
 use std::{collections::BTreeSet, sync::Arc};
 use tokio::sync::RwLock;
 use tokio_postgres::{Row, Transaction};
 
 use crate::{
+    error::{ensure, RyhopeError},
     mapper_table_name,
     storage::{memory::EpochMapperCache, EpochMapper},
     IncrementalEpoch, UserEpoch, INCREMENTAL_EPOCH, USER_EPOCH,
@@ -52,9 +53,12 @@ impl EpochMapperStorage {
         mapper_table_name(&self.table)
     }
 
-    pub(crate) async fn new_from_table(table: String, db: DBPool) -> Result<Self> {
+    pub(crate) async fn new_from_table(table: String, db: DBPool) -> Result<Self, RyhopeError> {
         let cache = {
-            let connection = db.get().await?;
+            let connection = db
+                .get()
+                .await
+                .map_err(|err| RyhopeError::from_bb8("getting a connection", err))?;
             let mapper_table_name = mapper_table_name(table.as_str());
             let rows = connection
                 .query(
@@ -67,27 +71,24 @@ impl EpochMapperStorage {
                 .await
                 .context("while fetching incremental epoch")
                 .unwrap();
-            ensure!(
+            ensure(
                 !rows.is_empty(),
-                "Loading from empty table {mapper_table_name}"
-            );
+                format!("Loading from empty table {mapper_table_name}"),
+            )?;
             let read_row = |row: &Row| {
                 let user_epoch = row.get::<_, i64>(0) as UserEpoch;
                 let incremental_epoch = row.get::<_, i64>(1) as IncrementalEpoch;
                 (user_epoch, incremental_epoch)
             };
             let (user_epoch, incremental_epoch) = read_row(&rows[0]);
-            ensure!(
+            ensure(
                 incremental_epoch == INITIAL_INCREMENTAL_EPOCH,
-                "Wrong initial epoch found in table {mapper_table_name}"
-            );
+                format!("Wrong initial epoch found in table {mapper_table_name}"),
+            )?;
             let mut cache = EpochMapperCache::new_at(user_epoch);
             for row in &rows[1..] {
                 let (user_epoch, incremental_epoch) = read_row(row);
-                cache
-                    .add_epoch_map(user_epoch, incremental_epoch)
-                    .await
-                    .context("while adding mapping to cache")?;
+                cache.add_epoch_map(user_epoch, incremental_epoch).await?;
             }
             cache
         };
@@ -104,23 +105,24 @@ impl EpochMapperStorage {
         table: String,
         db: DBPool,
         initial_epoch: UserEpoch,
-    ) -> Result<Self> {
+    ) -> Result<Self, RyhopeError> {
         // Add initial epoch to cache
         let mapper_table_name = mapper_table_name(table.as_str());
         Ok(if EXTERNAL_EPOCH_MAPPER {
             // Initialize from mapper table
             let mapper = Self::new_from_table(table, db).await?;
             // check that there is a mapping initial_epoch -> INITIAL_INCREMENTAL_EPOCH
-            ensure!(
+            ensure(
                 mapper.try_to_incremental_epoch(initial_epoch).await
                     == Some(INITIAL_INCREMENTAL_EPOCH),
-                "No initial epoch {initial_epoch} found in mapping table {mapper_table_name}"
-            );
+                "No initial epoch {initial_epoch} found in mapping table {mapper_table_name}",
+            )?;
             mapper
         } else {
             // add epoch map for `initial_epoch` to the DB
             db.get()
-                .await?
+                .await
+                .map_err(|err| RyhopeError::from_bb8("getting a connection", err))?
                 .query(
                     &format!(
                         "INSERT INTO {} ({USER_EPOCH}, {INCREMENTAL_EPOCH})
@@ -129,7 +131,10 @@ impl EpochMapperStorage {
                     ),
                     &[&(initial_epoch as UserEpoch), &INITIAL_INCREMENTAL_EPOCH],
                 )
-                .await?;
+                .await
+                .map_err(|err| {
+                    RyhopeError::from_db(format!("Inserting epochs in {mapper_table_name}"), err)
+                })?;
             let cache = EpochMapperCache::new_at(initial_epoch);
             Self {
                 db,
@@ -145,7 +150,10 @@ impl EpochMapperStorage {
     /// are also computed incrementally from an initial shift. If there is already a mapping for
     /// `IncrementalEpoch` `epoch`, then this function has no side effects, because it is assumed
     /// that the mapping has already been provided according to another logic.
-    pub(crate) async fn new_incremental_epoch(&mut self, epoch: IncrementalEpoch) -> Result<()> {
+    pub(crate) async fn new_incremental_epoch(
+        &mut self,
+        epoch: IncrementalEpoch,
+    ) -> Result<(), RyhopeError> {
         if let Some(mapped_epoch) = self.cache.write().await.new_incremental_epoch(epoch) {
             // if a new mapping is actually added to the cache, then we add the `UserEpoch`
             // of this mapping to the `dirty` set, so that it is later committed to the DB
@@ -154,8 +162,10 @@ impl EpochMapperStorage {
         Ok(())
     }
 
-    pub(crate) fn start_transaction(&mut self) -> Result<()> {
-        ensure!(!self.in_tx, "already in a transaction");
+    pub(crate) fn start_transaction(&mut self) -> Result<(), RyhopeError> {
+        if self.in_tx {
+            return Err(RyhopeError::AlreadyInTransaction);
+        }
         self.in_tx = true;
         Ok(())
     }
@@ -163,7 +173,7 @@ impl EpochMapperStorage {
     pub(crate) async fn commit_in_transaction(
         &mut self,
         db_tx: &mut Transaction<'_>,
-    ) -> Result<()> {
+    ) -> Result<(), RyhopeError> {
         // build the set of epoch mappings (user_epoch, incremental_epoch) to be written to the DB
         let mut rows_to_insert = vec![];
         for &user_epoch in self.dirty.iter() {
@@ -173,7 +183,9 @@ impl EpochMapperStorage {
                 .await
                 .try_to_incremental_epoch(user_epoch)
                 .await
-                .ok_or(anyhow!("Epoch {user_epoch} not found in cache"))?;
+                .ok_or(RyhopeError::epoch_error(format!(
+                    "Epoch {user_epoch} not found in cache"
+                )))?;
             rows_to_insert.push(format!("({user_epoch}, {incremental_epoch})"));
         }
 
@@ -188,7 +200,13 @@ impl EpochMapperStorage {
                 ),
                 &[],
             )
-            .await?;
+            .await
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!("Inserting new epochs in {}", self.mapper_table_name()),
+                    err,
+                )
+            })?;
 
         Ok(())
     }
@@ -258,12 +276,16 @@ impl EpochMapperStorage {
     pub(crate) async fn rollback_to<const EXTERNAL_EPOCH_MAPPER: bool>(
         &mut self,
         epoch: UserEpoch,
-    ) -> Result<()> {
+    ) -> Result<(), RyhopeError> {
         // rollback the cache
         self.cache.write().await.rollback_to(epoch)?;
         if !EXTERNAL_EPOCH_MAPPER {
             // rollback also DB
-            let connection = self.db.get().await?;
+            let connection = self
+                .db
+                .get()
+                .await
+                .map_err(|err| RyhopeError::from_bb8("getting connection", err))?;
             connection
                 .query(
                     &format!(
@@ -272,7 +294,16 @@ impl EpochMapperStorage {
                     ),
                     &[&(epoch)],
                 )
-                .await?;
+                .await
+                .map_err(|err| {
+                    RyhopeError::from_db(
+                        format!(
+                            "Rolling back epoch mapper table {}",
+                            self.mapper_table_name()
+                        ),
+                        err,
+                    )
+                })?;
         }
 
         Ok(())
@@ -355,7 +386,7 @@ impl EpochMapper for EpochMapperStorage {
         &mut self,
         user_epoch: UserEpoch,
         incremental_epoch: IncrementalEpoch,
-    ) -> Result<()> {
+    ) -> Result<(), RyhopeError> {
         // add to cache
         self.cache
             .write()

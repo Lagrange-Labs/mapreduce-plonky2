@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail};
+use anyhow::{Result, anyhow, bail};
 use colored::Colorize;
 use dialoguer::{console, theme::ColorfulTheme, FuzzySelect, Input};
 use itertools::Itertools;
@@ -6,9 +6,7 @@ use ryhope::{
     storage::{
         FromSettings, MetaOperations, PayloadStorage, RoEpochKvStorage, TransactionalStorage,
         TreeStorage,
-    },
-    tree::{MutableTree, PrintableTree, TreeTopology},
-    MerkleTreeKvDb, NodePayload, UserEpoch,
+    }, tree::{MutableTree, PrintableTree, TreeTopology}, MerkleTreeKvDb, NodePayload, UserEpoch
 };
 use std::io::Write;
 use tabled::{builder::Builder, settings::Style};

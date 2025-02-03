@@ -139,7 +139,7 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
             let proven_node = non_existence_inputs
                 .find_row_node_for_non_existence(index_value)
                 .await
-                .unwrap_or_else(|_| {
+                .unwrap_or_else(|e| {
                     panic!("node for non-existence not found for index value {index_value}: {e:?}")
                 });
             let row_input = compute_input_for_row(

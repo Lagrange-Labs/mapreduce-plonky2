@@ -51,7 +51,7 @@
 //!   parent = parent(s_tree, parent)
 use super::{MutableTree, NodeContext, NodePath, TreeTopology};
 use crate::{
-    error::RyhopeError,
+    error::{ensure, RyhopeError},
     storage::{EpochKvStorage, EpochMapper, EpochStorage, TreeStorage},
     tree::PrintableTree,
     IncrementalEpoch, UserEpoch,
@@ -463,7 +463,9 @@ impl<const IS_EPOCH_TREE: bool> Tree<IS_EPOCH_TREE> {
     }
 }
 
-async fn shift<const IS_EPOCH_TREE: bool, S: TreeStorage<Tree<IS_EPOCH_TREE>>>(s: &S) -> Result<usize, RyhopeError> {
+async fn shift<const IS_EPOCH_TREE: bool, S: TreeStorage<Tree<IS_EPOCH_TREE>>>(
+    s: &S,
+) -> Result<usize, RyhopeError> {
     s.state().fetch().await.map(|s| s.shift)
 }
 
@@ -515,38 +517,47 @@ impl<const IS_EPOCH_TREE: bool> TreeTopology for Tree<IS_EPOCH_TREE> {
         ns: I,
         s: &S,
     ) -> Result<HashSet<NodeIdx>, RyhopeError> {
-        let state = s.state().fetch().await;
-        if IS_EPOCH_TREE {
+        let state = s.state().fetch().await?;
+        Ok(if IS_EPOCH_TREE {
             state.ascendance_with_mapper(ns, s.epoch_mapper()).await
         } else {
             state.ascendance(ns).await
-        }
+        })
     }
 
     async fn root<S: TreeStorage<Self>>(&self, s: &S) -> Result<Option<NodeIdx>, RyhopeError> {
-        s.state().fetch().await.map(|s| Some(if IS_EPOCH_TREE {
+        let state = s.state().fetch().await?;
+        Ok(Some(if IS_EPOCH_TREE {
             state.root_with_mapper(s.epoch_mapper()).await
         } else {
-            s.root()
+            state.root()
         }))
     }
 
-    async fn parent<S: TreeStorage<Self>>(&self, n: NodeIdx, s: &S) -> Result<Option<NodeIdx>, RyhopeError> {
-        let state = s.state().fetch().await;
-        if IS_EPOCH_TREE {
+    async fn parent<S: TreeStorage<Self>>(
+        &self,
+        n: NodeIdx,
+        s: &S,
+    ) -> Result<Option<NodeIdx>, RyhopeError> {
+        let state = s.state().fetch().await?;
+        Ok(if IS_EPOCH_TREE {
             state.parent_with_mapper(n, s.epoch_mapper()).await
         } else {
             state.parent(n).await
-        }
+        })
     }
 
-    async fn lineage<S: TreeStorage<Self>>(&self, n: &NodeIdx, s: &S) -> Result<Option<NodePath<NodeIdx>>, RyhopeError> {
+    async fn lineage<S: TreeStorage<Self>>(
+        &self,
+        n: &NodeIdx,
+        s: &S,
+    ) -> Result<Option<NodePath<NodeIdx>>, RyhopeError> {
         let state = s.state().fetch().await?;
-        if IS_EPOCH_TREE {
+        Ok(if IS_EPOCH_TREE {
             state.lineage_with_mapper(n, s.epoch_mapper()).await
         } else {
             state.lineage(n).await
-        }
+        })
     }
 
     async fn children<S: TreeStorage<Self>>(
@@ -555,11 +566,11 @@ impl<const IS_EPOCH_TREE: bool> TreeTopology for Tree<IS_EPOCH_TREE> {
         s: &S,
     ) -> Result<Option<(Option<NodeIdx>, Option<NodeIdx>)>, RyhopeError> {
         let state = s.state().fetch().await?;
-        if IS_EPOCH_TREE {
+        Ok(if IS_EPOCH_TREE {
             state.children_with_mapper(n, s.epoch_mapper()).await
         } else {
             state.children(n).await
-        }
+        })
     }
 
     async fn node_context<S: TreeStorage<Self>>(
@@ -567,17 +578,21 @@ impl<const IS_EPOCH_TREE: bool> TreeTopology for Tree<IS_EPOCH_TREE> {
         k: &NodeIdx,
         s: &S,
     ) -> Result<Option<NodeContext<NodeIdx>>, RyhopeError> {
-        let state = s.state().fetch().await;
-        if IS_EPOCH_TREE {
+        let state = s.state().fetch().await?;
+        Ok(if IS_EPOCH_TREE {
             state.node_context_with_mapper(k, s.epoch_mapper()).await
         } else {
             state.node_context(k)
-        }
+        })
     }
 
-    async fn contains<S: TreeStorage<Self>>(&self, k: &NodeIdx, s: &S) -> Result<bool, RyhopeError> {
-        let state = s.state().fetch().await;
-        self.to_inner_idx(s, &state, OuterIdx(*k)).await <= state.inner_max()
+    async fn contains<S: TreeStorage<Self>>(
+        &self,
+        k: &NodeIdx,
+        s: &S,
+    ) -> Result<bool, RyhopeError> {
+        let state = s.state().fetch().await?;
+        Ok(self.to_inner_idx(s, &state, OuterIdx(*k)).await <= state.inner_max())
     }
 }
 
@@ -597,19 +612,19 @@ impl<const IS_EPOCH_TREE: bool> MutableTree for Tree<IS_EPOCH_TREE> {
             ),
         )?;
 
-        let state = s.state().fetch().await;
+        let state = s.state().fetch().await?;
         // compute the inner key of the next item to be inserted
         let expected_inner_k = state.inner_max() + 1;
         if IS_EPOCH_TREE {
             // we need to check that k >= last epoch inserted
             let max_outer = s.epoch_mapper().to_outer_idx(state.inner_max()).await;
-            ensure!(
+            ensure(
                 max_outer <= OuterIdx(k),
                 format!(
                     "Trying to insert an epoch {k} smaller than a previous inserted epoch {}",
                     max_outer.0
-                )
-            );
+                ),
+            )?;
             // in this case, k must be mapped to `expected_inner_k` in the epoch mapper
             s.epoch_mapper_mut()
                 .add_epoch_map(k as UserEpoch, expected_inner_k.0 as IncrementalEpoch)
@@ -618,16 +633,16 @@ impl<const IS_EPOCH_TREE: bool> MutableTree for Tree<IS_EPOCH_TREE> {
             // in this case, we need to check that the inner key corresponding to k
             // is equal to `expected_inner_k`
             let inner_k = state.to_inner_idx(OuterIdx(k)).await;
-            ensure!(inner_k == expected_inner_k,
+            ensure(inner_k == expected_inner_k,
                 format!(
                     "invalid insert in SBBST: trying to insert {}, but next insert should be {} (shift = {})",
                     k,
                     state.to_outer_idx(expected_inner_k).await.0,
                     state.shift,
                 ),
-            );
+            )?;
         }
-        s.state_mut().update(|state| state.max += 1).await;
+        s.state_mut().update(|state| state.max += 1).await?;
         s.nodes_mut().store(k, ()).await?;
 
         Ok(self.lineage(&k, s).await?.unwrap())

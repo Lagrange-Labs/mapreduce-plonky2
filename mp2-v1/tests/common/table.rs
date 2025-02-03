@@ -7,14 +7,17 @@ use futures::{
 };
 use itertools::Itertools;
 use log::debug;
-use mp2_v1::indexing::{
-    block::{BlockPrimaryIndex, BlockTreeKey, MerkleIndexTree},
-    build_trees,
-    cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},
-    index::IndexNode,
-    load_trees,
-    row::{CellCollection, MerkleRowTree, Row, RowTreeKey},
-    ColumnID,
+use mp2_v1::{
+    indexing::{
+        block::{BlockPrimaryIndex, BlockTreeKey, MerkleIndexTree},
+        build_trees,
+        cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},
+        index::IndexNode,
+        load_trees,
+        row::{CellCollection, MerkleRowTree, Row, RowTreeKey},
+        ColumnID,
+    },
+    values_extraction::gadgets::column_info::ColumnInfo,
 };
 use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
 use plonky2::field::types::PrimeField64;
@@ -209,7 +212,7 @@ impl Table {
             row_table_name(&public_name),
         )
         .await?;
-        let genesis = index_tree.storage_state().await.shift;
+        let genesis = index_tree.storage_state().await?.shift;
         columns.self_assert();
 
         Ok(Self {
@@ -232,15 +235,11 @@ impl Table {
     }
 
     pub async fn new(
-        
         genesis_block: u64,
-       
         root_table_name: String,
-       
         columns: TableColumns,
         row_unique_id: TableRowUniqueID,
-    ,
-    ) -> Self {
+    ) -> Result<Self> {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         let (index_tree, row_tree) = build_trees(
             db_url.as_str(),
@@ -449,7 +448,7 @@ impl Table {
         {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
-            let root = self.row.root_data().await.unwrap();
+            let root = self.row.root_data().await?.unwrap();
             println!(
                 " ++ After row update, row cell tree root tree proof hash = {:?}",
                 hex::encode(root.cell_root_hash.unwrap().0)

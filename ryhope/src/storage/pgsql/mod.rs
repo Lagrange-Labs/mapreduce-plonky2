@@ -102,7 +102,10 @@ pub trait PayloadInDb: Clone + Send + Sync + Debug + Serialize + for<'a> Deseria
 impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb for T {}
 
 /// If it exists, remove the given table from the current database.
-async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(db: DBPool, table: &str) -> Result<(), RyhopeError> {
+async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(
+    db: DBPool,
+    table: &str,
+) -> Result<(), RyhopeError> {
     let connection = db.get().await.unwrap();
     connection
         .execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
@@ -123,7 +126,9 @@ async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(db: DBPool, tab
         connection
             .execute(&format!("DROP VIEW IF EXISTS {mapper_table_alias}"), &[])
             .await
-            .with_context(|| format!("unable to delete view `{mapper_table_alias}`"))
+            .map_err(|err| {
+                RyhopeError::from_db(format!("unable to delete view `{mapper_table_alias}`"), err)
+            })
             .map(|_| ())
     } else {
         // The epoch mapper is internal, so we directly erase the table
@@ -134,7 +139,9 @@ async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(db: DBPool, tab
                 &[],
             )
             .await
-            .with_context(|| format!("unable to delete table `{mapper_table_name}`"))
+            .map_err(|err| {
+                RyhopeError::from_db(format!("unable to delete table `{mapper_table_name}`"), err)
+            })
             .map(|_| ())
     }
 }
@@ -237,12 +244,12 @@ where
                 EXTERNAL_EPOCH_MAPPER,
                 storage_settings.external_mapper.is_some(),
             ) {
-                (true, false) => {
-                    bail!("No external mapper table provided for a storage with external epoch mapper")
-                }
-                (false, true) => {
-                    bail!("External mapper table provided for a storage with no external epoch mapper")
-                }
+                (true, false) => Err(RyhopeError::internal(
+                    "No external mapper table provided for a storage with external epoch mapper",
+                ))?,
+                (false, true) => Err(RyhopeError::internal(
+                    "External mapper table provided for a storage with no external epoch mapper",
+                ))?,
                 _ => {}
             }
         };
@@ -352,8 +359,8 @@ where
 
         ensure(
             fetch_epoch_data(db_pool.clone(), &table).await.is_err(),
-            "table `{table}` already exists"
-        );
+            format!("table `{table}` already exists"),
+        )?;
         Self::create_tables(db_pool.clone(), &table, mapper_table).await?;
 
         let epoch_mapper = SharedEpochMapper::new(
@@ -388,8 +395,7 @@ where
                 tree_state,
                 (&epoch_mapper).into(),
             )
-            .await
-            .context("failed to store initial state")?,
+            .await?,
             epoch_mapper,
         };
         Ok(r)
@@ -406,21 +412,25 @@ where
 
         let (initial_epoch, latest_epoch) = fetch_epoch_data(db_pool.clone(), &table).await?;
         debug!("loading `{table}`; latest epoch is {latest_epoch}");
-        ensure!(
+        ensure(
             initial_epoch == INITIAL_INCREMENTAL_EPOCH,
-            "Wrong internal initial epoch found for existing table {table}: 
+            format!(
+                "Wrong internal initial epoch found for existing table {table}: 
                 expected {INITIAL_INCREMENTAL_EPOCH}, found {initial_epoch}"
-        );
+            ),
+        )?;
         let epoch_mapper =
             EpochMapperStorage::new_from_table(table.clone(), db_pool.clone()).await?;
         let latest_epoch_in_mapper = epoch_mapper
             .to_incremental_epoch(epoch_mapper.latest_epoch().await)
             .await;
-        ensure!(
+        ensure(
             latest_epoch_in_mapper == latest_epoch,
-            "Mismatch between the latest internal epoch in mapper table and the latest epoch 
+            format!(
+                "Mismatch between the latest internal epoch in mapper table and the latest epoch 
             found in the storage: {latest_epoch_in_mapper} != {latest_epoch}"
-        );
+            ),
+        )?;
         let epoch_mapper = SharedEpochMapper::new(epoch_mapper);
         let tree_store = Arc::new(RwLock::new(CachedDbTreeStore::new(
             latest_epoch,
@@ -560,7 +570,11 @@ where
     ///     the tree at the given epoch range.
     ///
     /// Will fail if the CREATE is not valid (e.g. the table already exists)
-    async fn create_tables(db: DBPool, table: &str, mapper_table: Option<String>) -> Result<(), RyhopeError> {
+    async fn create_tables(
+        db: DBPool,
+        table: &str,
+        mapper_table: Option<String>,
+    ) -> Result<(), RyhopeError> {
         let node_columns = <T as DbConnector<V>>::columns()
             .iter()
             .map(|(name, t)| format!("{name} {t},"))
@@ -592,8 +606,11 @@ where
             )
             .await
             .map(|_| ())
-            .with_context(|| {
-                format!("unable to create index on table `{table}` for {VALID_FROM}")
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!("unable to create index on table `{table}` for {VALID_FROM}"),
+                    err,
+                )
             })?;
 
         // create index on `VALID_UNTIL`
@@ -604,8 +621,11 @@ where
             )
             .await
             .map(|_| ())
-            .with_context(|| {
-                format!("unable to create index on table `{table}` for {VALID_UNTIL}")
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!("unable to create index on table `{table}` for {VALID_UNTIL}"),
+                    err,
+                )
             })?;
 
         // The meta table will store everything related to the tree itself.
@@ -634,17 +654,20 @@ where
             )
             .await
             .map(|_| ())
-            .with_context(|| {
-                format!("unable to create index on table `{meta_table}` for {VALID_UNTIL}")
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!("unable to create index on table `{meta_table}` for {VALID_UNTIL}"),
+                    err,
+                )
             })?;
 
         // Create the mapper table if the mapper table is not external, otherwise
         // create a view for the mapper table name expected for `table` to `mapper_table`.
         if EXTERNAL_EPOCH_MAPPER {
-            ensure!(
+            ensure(
                 mapper_table.is_some(),
-                "No mapper table name provided for storage with external epoch mapper"
-            );
+                "No mapper table name provided for storage with external epoch mapper",
+            )?;
             let mapper_table_alias = mapper_table_name(table);
             let mapper_table_name = mapper_table_name(mapper_table.unwrap().as_str());
             connection
@@ -658,7 +681,12 @@ where
                 )
                 .await
                 .map(|_| ())
-                .with_context(|| format!("unable to create view for `{mapper_table_alias}`"))
+                .map_err(|err| {
+                    RyhopeError::from_db(
+                        format!("unable to create view for `{mapper_table_alias}`"),
+                        err,
+                    )
+                })
         } else {
             let mapper_table_name = mapper_table_name(table);
             connection
@@ -673,7 +701,12 @@ where
                 )
                 .await
                 .map(|_| ())
-                .with_context(|| format!("unable to create table `{mapper_table_name}`"))
+                .map_err(|err| {
+                    RyhopeError::from_db(
+                        format!("unable to create table `{mapper_table_name}`"),
+                        err,
+                    )
+                })
         }
     }
 
@@ -985,7 +1018,9 @@ where
             .epoch_mapper
             .try_to_incremental_epoch(epoch)
             .await
-            .ok_or(anyhow!("IncrementalEpoch for epoch {} not found", epoch))?;
+            .ok_or(RyhopeError::epoch_error(format!(
+                "IncrementalEpoch for epoch {epoch} not found"
+            )))?;
         self.tree_store
             .write()
             .await
