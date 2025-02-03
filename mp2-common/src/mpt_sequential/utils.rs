@@ -57,13 +57,65 @@ pub fn left_pad_leaf_value<
     let value_len_80 = b.sub(value[0], byte_80);
     let value_len = b.select(is_single_byte, one, value_len_80);
     let offset = b.select(is_single_byte, zero, one);
-    value
-        // WARNING: this is a hack to avoid another const generic but
-        // what we should really do here is extract RLP_VALUE_LEN-1 because we
-        // consider 1 extra byte for the RLP header always (which may or may not exist)
-        .extract_array::<F, _, RLP_VALUE_LEN>(b, offset)
-        .into_vec(value_len)
-        .normalize_left::<_, _, PADDED_LEN>(b)
+
+    // So the value is just in the first byte if is_single_byte is true
+    // Hence the first index we take is offset + value_len - 1 and then we continue until we hit
+    // offset
+    let tmp = b.add(offset, value_len);
+    let start = b.sub(tmp, one);
+
+    let mut last_byte_found = b._false();
+
+    let mut result_bytes = [zero; PADDED_LEN];
+
+    // Need the length to be a power of two
+    let ram_value = if !value.arr.len().is_power_of_two() {
+        let new_size = value.arr.len().next_power_of_two();
+        let mut value_vec = value.arr.to_vec();
+        value_vec.resize(new_size, zero);
+        value_vec
+    } else {
+        value.arr.to_vec()
+    };
+
+    result_bytes
+        .iter_mut()
+        .rev()
+        .enumerate()
+        .for_each(|(i, out_byte)| {
+            // offset = info.byte_offset + i
+            let index = b.constant(F::from_canonical_usize(i));
+            let inner_offset = b.sub(start, index);
+            // Set to 0 if found the last byte.
+            let inner_offset = b.select(last_byte_found, zero, inner_offset);
+
+            // Since VALUE_LEN is a constant that is determined at compile time this conditional won't
+            // cause any issues with the circuit.
+            let byte = if RLP_VALUE_LEN <= 64 {
+                b.random_access(inner_offset, ram_value.clone())
+            } else {
+                value.random_access_large_array(b, inner_offset)
+            };
+
+            // Now if `last_byte_found` is true we add zero, otherwise add `byte`
+            let to_add = b.select(last_byte_found, zero, byte);
+
+            *out_byte = b.add(*out_byte, to_add);
+            // is_last_byte = offset == last_byte_offset
+            let is_last_byte = b.is_equal(inner_offset, offset);
+            // last_byte_found |= is_last_byte
+            last_byte_found = b.or(last_byte_found, is_last_byte);
+        });
+
+    Array::<Target, PADDED_LEN>::from_array(result_bytes)
+
+    // value
+    //     // WARNING: this is a hack to avoid another const generic but
+    //     // what we should really do here is extract RLP_VALUE_LEN-1 because we
+    //     // consider 1 extra byte for the RLP header always (which may or may not exist)
+    //     .extract_array::<F, _, RLP_VALUE_LEN>(b, offset)
+    //     .into_vec(value_len)
+    //     .normalize_left::<_, _, PADDED_LEN>(b)
 }
 
 pub fn visit_proof(proof: &[Vec<u8>]) {
