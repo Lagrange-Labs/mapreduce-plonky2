@@ -191,7 +191,7 @@ mod tests {
     use super::*;
     use crate::{
         tests::TEST_MAX_COLUMNS,
-        values_extraction::{storage_value_digest, KEY_ID_PREFIX},
+        values_extraction::{storage_value_digest, StorageSlotInfo, KEY_ID_PREFIX},
     };
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
@@ -267,12 +267,15 @@ mod tests {
         );
 
         let metadata_digest = table_metadata.digest();
-
+        let slot_info = StorageSlotInfo::new(
+            storage_slot.clone(),
+            table_metadata.extracted_columns.clone(),
+        );
         let values_digest = storage_value_digest(
             &table_metadata,
             &[mapping_key],
             &value.clone().try_into().unwrap(),
-            evm_word,
+            &slot_info,
         );
 
         let slot = MappingSlot::new(slot, mapping_key.to_vec());

@@ -1,6 +1,6 @@
 use crate::array::{Array, VectorWire};
 
-use crate::utils::{greater_than_or_equal_to_unsafe, less_than, less_than_unsafe, num_to_bits};
+use crate::utils::{less_than, num_to_bits};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
@@ -146,6 +146,7 @@ pub fn decode_compact_encoding<
         cond,
     )
 }
+
 // Returns the length from the RLP prefix in case of long string or long list
 // data is the full data starting from the "type" byte of RLP encoding
 // data length needs to be a power of 2
@@ -157,33 +158,31 @@ pub fn data_len<F: RichField + Extendable<D>, const D: usize>(
     offset: Target,
 ) -> Target {
     let mut res = b.zero();
-    let one = b.one();
-    let const_256 = b.constant(F::from_canonical_u64(256));
 
+    let const_256 = b.constant(F::from_canonical_u64(256));
+    let mut last_byte_found = b._false();
+    let lol_add_one = b.add_const(len_of_len, F::ONE);
     for i in 0..MAX_LEN_BYTES {
-        let i_tgt = b.constant(F::from_canonical_u8(i as u8));
+        // We shift by one because the first byte is the rlp target.
+        let i_tgt = b.constant(F::from_canonical_u8(i as u8 + 1));
         // make sure we don't read out more than the actual len
-        let len_of_len_pred = less_than_unsafe(b, i_tgt, len_of_len, 8);
+        let equal = b.is_equal(i_tgt, lol_add_one);
+        last_byte_found = b.or(equal, last_byte_found);
+
         // this part offset i to read from the array
-        let i_offset = b.add(i_tgt, offset);
-        // i+1 because first byte is the RLP type
-        let i_plus_1 = b.add(i_offset, one);
+        let i_plus_1 = b.add(i_tgt, offset);
+
         let item = quin_selector(b, data, i_plus_1);
 
         // shift result by one byte
-        let multiplicand = b.mul(const_256, res);
         // res += 2^i * arr[i+1] only if we're in right range
-        let sum = b.add(multiplicand, item);
-        let multiplicand_2 = b.mul(sum, len_of_len_pred.target);
-
-        let not_len_of_len_pred_target = b.not(len_of_len_pred);
-        let multiplicand_3 = b.mul(not_len_of_len_pred_target.target, res);
-        // res = (2^i * arr[i+1]) * (i < len_len) + res * (i >= len_len)
-        res = b.add(multiplicand_2, multiplicand_3);
+        let sum = b.mul_add(const_256, res, item);
+        res = b.select(last_byte_found, res, sum);
     }
 
     res
 }
+
 // We read the RLP header but knowing it is a value that is always <55bytes long
 // we can hardcode the type of RLP header it is and directly get the real number len
 // in this case, the header marker is 0x80 that we can directly take out from first byte
@@ -249,7 +248,7 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     let select_3 = b._if(prefix_less_0xb8, short_str_len, select_2);
     let len = b._if(prefix_less_0x80, one, select_3);
 
-    let data_type = greater_than_or_equal_to_unsafe(b, prefix, byte_c0, 8).target;
+    let data_type = b.not(prefix_less_0xc0).target;
 
     let final_offset = b.add(offset, offset_data);
     RlpHeader {
@@ -323,25 +322,15 @@ pub fn quin_selector<F: RichField + Extendable<D>, const D: usize>(
     arr: &[Target],
     n: Target,
 ) -> Target {
-    let mut nums: Vec<Target> = vec![];
-
+    let mut sum = b.zero();
     for (i, el) in arr.iter().enumerate() {
         let i_target = b.constant(F::from_canonical_usize(i));
         let is_eq = b.is_equal(i_target, n);
         // (i == n (idx) ) * element
-        let product = b.mul(is_eq.target, *el);
-        nums.push(product);
+        sum = b.mul_add(is_eq.target, *el, sum);
     }
-    // SUM_i (i == n (idx) ) * element
-    // -> sum = element
-    calculate_total(b, &nums)
-}
 
-fn calculate_total<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    arr: &[Target],
-) -> Target {
-    b.add_many(arr)
+    sum
 }
 
 #[cfg(test)]

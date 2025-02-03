@@ -474,7 +474,7 @@ where
                 .map(|p| (p, self.leaf_receipt.get_verifier_data().clone()).into()),
             CircuitInput::Dummy(dummy) => set
                 .generate_proof(&self.dummy, [], [], dummy)
-                .map(|p| (p, self.leaf_receipt.get_verifier_data().clone()).into()),
+                .map(|p| (p, self.dummy.get_verifier_data().clone()).into()),
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
                 let (child_proof, child_vk) = child_proofs
@@ -1078,35 +1078,71 @@ mod tests {
 
         let metadata = test_slot.table_columns(&contract_address, TEST_CHAIN_ID, vec![]);
 
-        let (expected_metadata_digest, expected_values_digest, circuit_input) =
-            match &test_slot.slot {
-                // Simple variable slot
+        let (expected_metadata_digest, expected_values_digest, circuit_input) = match &test_slot
+            .slot
+        {
+            // Simple variable slot
+            StorageSlot::Simple(slot) => {
+                let metadata_digest = metadata.digest();
+                let values_digest = storage_value_digest(&metadata, &[], &value, &test_slot);
+
+                let circuit_input = CircuitInput::new_single_variable_leaf(
+                    node,
+                    *slot as u8,
+                    evm_word,
+                    table_info.to_vec(),
+                );
+
+                (metadata_digest, values_digest, circuit_input)
+            }
+            // Mapping variable
+            StorageSlot::Mapping(mapping_key, slot) => {
+                let padded_key = left_pad32(mapping_key);
+                let metadata_digest = metadata.digest();
+                let values_digest =
+                    storage_value_digest(&metadata, &[&padded_key], &value, &test_slot);
+
+                let outer_key_id = metadata.input_columns()[0].identifier().0;
+
+                let circuit_input = CircuitInput::new_mapping_variable_leaf(
+                    node,
+                    *slot as u8,
+                    mapping_key.clone(),
+                    outer_key_id,
+                    evm_word,
+                    table_info.to_vec(),
+                );
+
+                (metadata_digest, values_digest, circuit_input)
+            }
+            StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => match *parent.clone() {
+                // Simple Struct
                 StorageSlot::Simple(slot) => {
                     let metadata_digest = metadata.digest();
-                    let values_digest = storage_value_digest(&metadata, &[], &value, evm_word);
+                    let values_digest = storage_value_digest(&metadata, &[], &value, &test_slot);
 
                     let circuit_input = CircuitInput::new_single_variable_leaf(
                         node,
-                        *slot as u8,
+                        slot as u8,
                         evm_word,
                         table_info.to_vec(),
                     );
 
                     (metadata_digest, values_digest, circuit_input)
                 }
-                // Mapping variable
+                // Mapping Struct
                 StorageSlot::Mapping(mapping_key, slot) => {
-                    let padded_key = left_pad32(mapping_key);
+                    let padded_key = left_pad32(&mapping_key);
                     let metadata_digest = metadata.digest();
                     let values_digest =
-                        storage_value_digest(&metadata, &[&padded_key], &value, evm_word);
+                        storage_value_digest(&metadata, &[&padded_key], &value, &test_slot);
 
                     let outer_key_id = metadata.input_columns()[0].identifier().0;
 
                     let circuit_input = CircuitInput::new_mapping_variable_leaf(
                         node,
-                        *slot as u8,
-                        mapping_key.clone(),
+                        slot as u8,
+                        mapping_key,
                         outer_key_id,
                         evm_word,
                         table_info.to_vec(),
@@ -1114,79 +1150,44 @@ mod tests {
 
                     (metadata_digest, values_digest, circuit_input)
                 }
-                StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => match *parent.clone() {
-                    // Simple Struct
-                    StorageSlot::Simple(slot) => {
-                        let metadata_digest = metadata.digest();
-                        let values_digest = storage_value_digest(&metadata, &[], &value, evm_word);
+                // Mapping of mappings Struct
+                StorageSlot::Node(StorageSlotNode::Mapping(grand, inner_mapping_key)) => {
+                    match *grand {
+                        StorageSlot::Mapping(outer_mapping_key, slot) => {
+                            let padded_outer_key = left_pad32(&outer_mapping_key);
+                            let padded_inner_key = left_pad32(&inner_mapping_key);
+                            let metadata_digest = metadata.digest();
+                            let values_digest = storage_value_digest(
+                                &metadata,
+                                &[&padded_outer_key, &padded_inner_key],
+                                &value,
+                                &test_slot,
+                            );
 
-                        let circuit_input = CircuitInput::new_single_variable_leaf(
-                            node,
-                            slot as u8,
-                            evm_word,
-                            table_info.to_vec(),
-                        );
+                            let key_ids = metadata
+                                .input_columns()
+                                .iter()
+                                .map(|col| col.identifier().0)
+                                .collect::<Vec<u64>>();
 
-                        (metadata_digest, values_digest, circuit_input)
-                    }
-                    // Mapping Struct
-                    StorageSlot::Mapping(mapping_key, slot) => {
-                        let padded_key = left_pad32(&mapping_key);
-                        let metadata_digest = metadata.digest();
-                        let values_digest =
-                            storage_value_digest(&metadata, &[&padded_key], &value, evm_word);
+                            let circuit_input = CircuitInput::new_mapping_of_mappings_leaf(
+                                node,
+                                slot as u8,
+                                (outer_mapping_key, key_ids[0]),
+                                (inner_mapping_key, key_ids[1]),
+                                evm_word,
+                                table_info.to_vec(),
+                            );
 
-                        let outer_key_id = metadata.input_columns()[0].identifier().0;
-
-                        let circuit_input = CircuitInput::new_mapping_variable_leaf(
-                            node,
-                            slot as u8,
-                            mapping_key,
-                            outer_key_id,
-                            evm_word,
-                            table_info.to_vec(),
-                        );
-
-                        (metadata_digest, values_digest, circuit_input)
-                    }
-                    // Mapping of mappings Struct
-                    StorageSlot::Node(StorageSlotNode::Mapping(grand, inner_mapping_key)) => {
-                        match *grand {
-                            StorageSlot::Mapping(outer_mapping_key, slot) => {
-                                let padded_outer_key = left_pad32(&outer_mapping_key);
-                                let padded_inner_key = left_pad32(&inner_mapping_key);
-                                let metadata_digest = metadata.digest();
-                                let values_digest = storage_value_digest(
-                                    &metadata,
-                                    &[&padded_outer_key, &padded_inner_key],
-                                    &value,
-                                    evm_word,
-                                );
-
-                                let key_ids = metadata
-                                    .input_columns()
-                                    .iter()
-                                    .map(|col| col.identifier().0)
-                                    .collect::<Vec<u64>>();
-
-                                let circuit_input = CircuitInput::new_mapping_of_mappings_leaf(
-                                    node,
-                                    slot as u8,
-                                    (outer_mapping_key, key_ids[0]),
-                                    (inner_mapping_key, key_ids[1]),
-                                    evm_word,
-                                    table_info.to_vec(),
-                                );
-
-                                (metadata_digest, values_digest, circuit_input)
-                            }
-                            _ => unreachable!(),
+                            (metadata_digest, values_digest, circuit_input)
                         }
+                        _ => unreachable!(),
                     }
-                    _ => unreachable!(),
-                },
+                }
                 _ => unreachable!(),
-            };
+            },
+            _ => unreachable!(),
+        };
 
         let proof = generate_proof(params, circuit_input).unwrap();
 
