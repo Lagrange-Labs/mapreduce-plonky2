@@ -176,7 +176,7 @@ impl TableMetadata {
             })
     }
 
-    pub fn extracted_receipt_value_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+    fn extracted_receipt_value_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
         &self,
         value: &[u8],
         event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
