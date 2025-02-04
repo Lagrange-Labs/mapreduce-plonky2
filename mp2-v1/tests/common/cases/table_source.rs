@@ -20,7 +20,7 @@ use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
-    eth::{EventLogInfo, ProofQuery, ReceiptProofInfo, ReceiptQuery, StorageSlot, StorageSlotNode},
+    eth::{EventLogInfo, ProofQuery, ReceiptProofInfo, StorageSlot, StorageSlotNode},
     poseidon::H,
     proof::ProofWithVK,
     types::{GFp, HashOutput},
@@ -863,12 +863,7 @@ where
             let block_number = ctx.block_number().await;
             let new_block_number = block_number as BlockPrimaryIndex;
 
-            let query = ReceiptQuery::<{ R::NO_TOPICS }, { R::MAX_DATA_WORDS }> {
-                contract: contract.address(),
-                event,
-            };
-
-            let proof_infos = query
+            let proof_infos = event
                 .query_receipt_proofs(provider.root(), block_number.into())
                 .await
                 .unwrap();
@@ -897,7 +892,6 @@ where
 
         let value_proof = event
             .prove_value_extraction::<32, 512, _>(
-                contract.address(),
                 bn as u64,
                 ctx.params().get_value_extraction_params(),
                 provider.root(),
@@ -940,12 +934,7 @@ where
             let block_number = ctx.block_number().await;
             let new_block_number = block_number as BlockPrimaryIndex;
 
-            let query = ReceiptQuery::<{ R::NO_TOPICS }, { R::MAX_DATA_WORDS }> {
-                contract: contract.address(),
-                event,
-            };
-
-            let proof_infos = query
+            let proof_infos = event
                 .query_receipt_proofs(provider.root(), block_number.into())
                 .await
                 .unwrap();

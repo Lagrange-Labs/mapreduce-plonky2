@@ -959,7 +959,7 @@ mod tests {
     fn test_receipt_api() {
         let receipt_proof_infos = generate_receipt_test_info::<1, 0>();
         let receipt_proofs = receipt_proof_infos.proofs();
-        let query = receipt_proof_infos.query();
+        let event = receipt_proof_infos.info();
         // We need two nodes that are children of the same branch so we compare the last but two nodes for each of them until we find a case that works
         let (info_one, info_two) = if let Some((one, two)) = receipt_proofs
             .iter()
@@ -997,7 +997,7 @@ mod tests {
         let leaf_input_1 = CircuitInput::new_receipt_leaf(
             info_one.mpt_proof.last().unwrap(),
             info_one.tx_index,
-            &query.event,
+            event,
         );
         let now = std::time::Instant::now();
         let leaf_proof1 = generate_proof(&params, leaf_input_1).unwrap();
@@ -1016,7 +1016,7 @@ mod tests {
         let leaf_input_2 = CircuitInput::new_receipt_leaf(
             info_two.mpt_proof.last().unwrap(),
             info_two.tx_index,
-            &query.event,
+            event,
         );
         let now = std::time::Instant::now();
         let leaf_proof2 = generate_proof(&params, leaf_input_2).unwrap();

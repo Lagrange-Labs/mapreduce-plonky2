@@ -464,12 +464,12 @@ mod tests {
         let receipt_proof_infos = generate_receipt_test_info::<NO_TOPICS, MAX_DATA_WORDS>();
         let proofs = receipt_proof_infos.proofs();
         let info = proofs.first().unwrap();
-        let query = receipt_proof_infos.query();
+        let event = receipt_proof_infos.info();
 
         let c = ReceiptLeafCircuit::<NODE_LEN, 5>::new::<NO_TOPICS, MAX_DATA_WORDS>(
             info.mpt_proof.last().unwrap(),
             info.tx_index,
-            &query.event,
+            event,
         )
         .unwrap();
         let metadata = c.metadata.clone();
@@ -490,7 +490,7 @@ mod tests {
 
         // Check value digest
         {
-            let exp_digest = metadata.receipt_value_digest(info.tx_index, &node, &query.event);
+            let exp_digest = metadata.receipt_value_digest(info.tx_index, &node, event);
             assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
         }
 

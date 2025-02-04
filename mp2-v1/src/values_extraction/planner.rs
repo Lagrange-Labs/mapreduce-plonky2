@@ -2,13 +2,13 @@
 use alloy::{
     eips::BlockNumberOrTag,
     network::Ethereum,
-    primitives::{keccak256, Address, B256},
+    primitives::{keccak256, B256},
     providers::{Provider, RootProvider},
     transports::Transport,
 };
 use anyhow::Result;
 use mp2_common::{
-    eth::{node_type, EventLogInfo, MP2EthError, NodeType, ReceiptQuery},
+    eth::{node_type, EventLogInfo, MP2EthError, NodeType},
     mpt_sequential::PAD_LEN,
 };
 
@@ -89,14 +89,16 @@ impl From<RyhopeError> for MP2PlannerError {
     }
 }
 
-/// Trait used to mark types that are needed as extra circuit inputs
-pub trait ExtraInput {}
-
+/// Enum used for supplying extra inputs needed to convert [`ProofData`] to [`CircuitInput`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum InputEnum<E: Extractable> {
+    /// Leaf Variant that contains the extra inputs that depend on the implementation of [`Extractable`]
     Leaf(E::ExtraLeafInput),
+    /// Extension extra input should be a single child proof
     Extension(Vec<u8>),
+    /// Branch extra inputs should be a list of child proofs
     Branch(Vec<Vec<u8>>),
+    /// A dummy input just requires the root hash of the tree and the metadata digest for the extracted item
     Dummy(B256),
 }
 
@@ -104,10 +106,14 @@ impl<E: Extractable> InputEnum<E> {
     /// Create a new Branch or extension node with empty input
     pub fn empty_non_leaf(node: &[u8]) -> Result<Self, MP2PlannerError> {
         let node_type = node_type(node)?;
+        // Match on the node type to make sure we can create an empty version.
         match node_type {
             NodeType::Branch => Ok(InputEnum::Branch(vec![])),
             NodeType::Extension => Ok(InputEnum::Extension(vec![])),
-            _ => Err(MP2PlannerError::UpdateTreeError("Tried to make an empty non leaf node from a node that wasn't a Branch or Extension".to_string()))
+            _ => Err(MP2PlannerError::UpdateTreeError(
+                "Tried to make an empty node from a MPT node that wasn't a Branch or Extension"
+                    .to_string(),
+            )),
         }
     }
 }
@@ -124,16 +130,15 @@ pub trait Extractable: Debug {
         + Ord
         + PartialOrd
         + Hash;
-
-    fn create_update_tree<T: Transport + Clone>(
+    /// Method that creates an [`ExtractionUpdatePlan`] that can then be processed either locally or in a distributed fashion.
+    fn create_update_plan<T: Transport + Clone>(
         &self,
-        contract: Address,
         epoch: u64,
         provider: &RootProvider<T, Ethereum>,
     ) -> impl Future<Output = Result<ExtractionUpdatePlan<Self>, MP2PlannerError>>
     where
         Self: Sized;
-
+    /// Method that defines how to convert [`ProofData`] into [`CircuitInput`] for this implementation.
     fn to_circuit_input<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>(
         &self,
         proof_data: &ProofData<Self>,
@@ -141,14 +146,13 @@ pub trait Extractable: Debug {
     where
         [(); PAD_LEN(LEAF_LEN)]:,
         Self: Sized;
-
+    /// Method provided for building and processing an [`ExtractionUpdatePlan`] locally.
     fn prove_value_extraction<
         const MAX_EXTRACTED_COLUMNS: usize,
         const LEAF_LEN: usize,
         T: Transport + Clone,
     >(
         &self,
-        contract: Address,
         epoch: u64,
         pp: &PublicParameters<LEAF_LEN, MAX_EXTRACTED_COLUMNS>,
         provider: &RootProvider<T, Ethereum>,
@@ -157,18 +161,22 @@ pub trait Extractable: Debug {
         [(); PAD_LEN(LEAF_LEN)]:;
 }
 
+/// Struct that stores the MPT node along with any extra data needed for the [`CircuitInput`] API.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub struct ProofData<E: Extractable> {
+    /// The MPT node
     node: Vec<u8>,
+    /// Extra inputs as defined by the implementor of [`Extractable`]
     extra_inputs: InputEnum<E>,
 }
 
 impl<E: Extractable> ProofData<E> {
+    /// Create a new instance of [`ProofData`]
     pub fn new(node: Vec<u8>, extra_inputs: InputEnum<E>) -> ProofData<E> {
         ProofData::<E> { node, extra_inputs }
     }
 
-    /// Create a new instance of [`ProofData`] from a slice of [`u8`]
+    /// Create a new instance of [`ProofData`] from a slice of [`u8`] and any extra data required.
     pub fn from_slice(
         node: &[u8],
         extra_inputs: InputEnum<E>,
@@ -191,11 +199,15 @@ impl<E: Extractable> ProofData<E> {
         Ok(ProofData::<E>::new(node.to_vec(), extra_inputs))
     }
 
-    /// Update a [`ProofData`] with a proof represented as a [`Vec<u8>`]
+    /// Update a [`ProofData`] with a proof represented as a [`Vec<u8>`]. This method
+    /// will error if called on a node whose `extra_inputs` are not either the
+    /// [`InputEnum::Extension`] or [`InputEnum::Branch`] variant.
     pub fn update(&mut self, proof: Vec<u8>) -> Result<(), MP2PlannerError> {
         match self.extra_inputs {
+            // If its a branch simply push the proof into the stored vec
             InputEnum::Branch(ref mut proofs) => proofs.push(proof),
-
+            // For an extension we check that the vec is currently empty, if it is we replace it with
+            // the provided one.
             InputEnum::Extension(ref mut inner_proof) => {
                 if !proof.is_empty() {
                     return Err(MP2PlannerError::UpdateTreeError(
@@ -216,20 +228,30 @@ impl<E: Extractable> ProofData<E> {
     }
 }
 
+/// A struct that stores an [`UpdateTree`] of keys and a local cache of [`ProofData`].
+/// This way when a [`WorkplanItem`](ryhope::storage::updatetree::WorkplanItem) is processed we can update the cache so any parent proofs can
+/// be processed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractionUpdatePlan<E: Extractable> {
+    /// The [`UpdateTree`] that specifies the order proofs should be generated.
     pub(crate) update_tree: UpdateTree<B256>,
+    /// The cache of input data, at the beginning only the keys relating to leaf proofs will have all data
+    /// provided, it should then be updated as these tasks are processed.
     pub(crate) proof_cache: HashMap<B256, ProofData<E>>,
 }
 
 impl<E: Extractable> ExtractionUpdatePlan<E> {
+    /// Create a new [`ExtractionUpdatePlan`] from its constituent parts.
     pub fn new(update_tree: UpdateTree<B256>, proof_cache: HashMap<B256, ProofData<E>>) -> Self {
         Self {
             update_tree,
             proof_cache,
         }
     }
-
+    /// Method to run the plan to completion locally. For each item in the [`UpdatePlan`](ryhope::storage::updatetree::UpdatePlan) we fetch the data from [`self.proof_cache`](ExtractionUpdatePlan::proof_cache)
+    /// convert the [`ProofData`] to a [`CircuitInput`] which we then pass to the [`generate_proof`] function defined in [`crate::values_extraction::api`]. We then take the output proof
+    /// and if the current key has a parent node in [`self.update_tree`](ExtractionUpdatePlan::update_tree) we update the [`ProofData`] stored for this key. If no parent is present we must be at the root of the tree
+    /// and so we just return the final proof.
     pub fn process_locally<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>(
         &mut self,
         params: &PublicParameters<LEAF_LEN, MAX_EXTRACTED_COLUMNS>,
@@ -238,14 +260,20 @@ impl<E: Extractable> ExtractionUpdatePlan<E> {
     where
         [(); PAD_LEN(LEAF_LEN)]:,
     {
+        // Convert the UpdateTree into an UpdatePlan
         let mut update_plan = self.update_tree.clone().into_workplan();
+        // Instantiate a vector that will eventually be the output.
         let mut final_proof = Vec::<u8>::new();
+        // Run the loop while the UpdatePlan continues to yield tasks.
         while let Some(Next::Ready(work_plan_item)) = update_plan.next() {
+            // Retrieve proof data related to this key
             let proof_data = self.proof_cache.get(work_plan_item.k()).ok_or(
                 MP2PlannerError::UpdateTreeError("Key not present in the proof cache".to_string()),
             )?;
+            // Convert to CircuitInput
             let circuit_type = extractable.to_circuit_input(proof_data);
 
+            // Generate the proof
             let proof = generate_proof(params, circuit_type).map_err(|e| {
                 MP2PlannerError::ProvingError(format!(
                     "Error while generating proof for node {{ inner: {:?} }}",
@@ -253,8 +281,9 @@ impl<E: Extractable> ExtractionUpdatePlan<E> {
                 ))
             })?;
 
+            // Fetch the parent of this key
             let parent = self.update_tree.get_parent_key(work_plan_item.k());
-
+            // Determine next steps based on whether the parent exists
             match parent {
                 Some(parent_key) => {
                     let proof_data_ref = self.proof_cache.get_mut(&parent_key).unwrap();
@@ -264,7 +293,7 @@ impl<E: Extractable> ExtractionUpdatePlan<E> {
                     final_proof = proof;
                 }
             }
-
+            // Mark the item as done
             update_plan.done(&work_plan_item)?;
         }
         Ok(final_proof)
@@ -275,18 +304,13 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
     for EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>
 {
     type ExtraLeafInput = u64;
-    async fn create_update_tree<T: Transport + Clone>(
+    async fn create_update_plan<T: Transport + Clone>(
         &self,
-        contract: Address,
         epoch: u64,
         provider: &RootProvider<T, Ethereum>,
     ) -> Result<ExtractionUpdatePlan<Self>, MP2PlannerError> {
-        let query = ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS> {
-            contract,
-            event: *self,
-        };
-
-        let proofs = query.query_receipt_proofs(provider, epoch.into()).await?;
+        // Query for the receipt proofs relating to this event at block number `epoch`
+        let proofs = self.query_receipt_proofs(provider, epoch.into()).await?;
 
         let mut proof_cache = HashMap::<B256, ProofData<Self>>::new();
 
@@ -386,7 +410,6 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
         T: Transport + Clone,
     >(
         &self,
-        contract: Address,
         epoch: u64,
         pp: &PublicParameters<LEAF_LEN, MAX_EXTRACTED_COLUMNS>,
         provider: &RootProvider<T, Ethereum>,
@@ -394,7 +417,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
     where
         [(); PAD_LEN(LEAF_LEN)]:,
     {
-        let mut extraction_plan = self.create_update_tree(contract, epoch, provider).await?;
+        let mut extraction_plan = self.create_update_plan(epoch, provider).await?;
 
         extraction_plan.process_locally(pp, self)
     }
@@ -408,15 +431,14 @@ pub mod tests {
     use eth_trie::Trie;
     use mp2_common::{
         digest::Digest,
-        eth::{left_pad32, BlockUtil},
-        poseidon::{hash_to_int_value, H},
+        eth::{BlockUtil, ReceiptProofInfo},
         proof::ProofWithVK,
         types::GFp,
-        utils::{Endianness, Packer, ToFields},
+        utils::{Endianness, Packer},
     };
     use mp2_test::eth::get_mainnet_url;
-    use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::Hasher};
-    use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
+    use plonky2::field::types::Field;
+    use plonky2_ecgfp5::curve::curve::Point;
     use std::str::FromStr;
 
     use crate::values_extraction::{
@@ -428,20 +450,14 @@ pub mod tests {
     #[tokio::test]
     async fn test_receipt_update_tree() -> Result<()> {
         // First get the info we will feed in to our function
-        let event_info = test_receipt_trie_helper().await?;
-
-        let contract = Address::from_str("0xbd3531da5cf5857e7cfaa92426877b022e612cf8")?;
         let epoch: u64 = 21362445;
+        let (block_util, event_info, _) = build_test_data(epoch).await?;
 
         let url = get_mainnet_url();
         // get some tx and receipt
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
-        let extraction_plan = event_info
-            .create_update_tree(contract, epoch, &provider)
-            .await?;
-
-        let block_util = build_test_data(epoch).await;
+        let extraction_plan = event_info.create_update_plan(epoch, &provider).await?;
 
         assert_eq!(
             *extraction_plan.update_tree.root(),
@@ -451,122 +467,24 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn test_receipt_proving() -> Result<()> {
-        // First get the info we will feed in to our function
-        let event_info = test_receipt_trie_helper().await?;
-
-        let contract = Address::from_str("0xbd3531da5cf5857e7cfaa92426877b022e612cf8")?;
-        let epoch: u64 = 21362445;
-
-        let url = get_mainnet_url();
-        // get some tx and receipt
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
-
-        let pp = build_circuits_params::<512, 7>();
-        let final_proof_bytes = event_info
-            .prove_value_extraction(contract, epoch, &pp, &provider)
-            .await?;
-
-        let final_proof = ProofWithVK::deserialize(&final_proof_bytes)?;
-        let query = ReceiptQuery::<2, 1> {
-            contract,
-            event: event_info,
-        };
-
-        let metadata = TableMetadata::from(event_info);
-
-        let metadata_digest = metadata.digest();
-
-        let value_digest = query
-            .query_receipt_proofs(&provider, epoch.into())
-            .await?
-            .iter()
-            .fold(Digest::NEUTRAL, |acc, info| {
-                let node = info.mpt_proof.last().unwrap().clone();
-
-                let mut tx_index_input = [0u8; 32];
-                tx_index_input[31] = info.tx_index as u8;
-
-                let node_rlp = rlp::Rlp::new(&node);
-                // The actual receipt data is item 1 in the list
-                let receipt_rlp = node_rlp.at(1).unwrap();
-
-                // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
-                let receipt_list = rlp::Rlp::new(&receipt_rlp.data().unwrap()[1..]);
-
-                // The logs themselves start are the item at index 3 in this list
-                let gas_used_rlp = receipt_list.at(1).unwrap();
-
-                let gas_used_bytes = left_pad32(gas_used_rlp.data().unwrap());
-
-                let (input_vd, row_unique_data) =
-                    metadata.input_value_digest(&[&tx_index_input, &gas_used_bytes]);
-                let extracted_vd = metadata.extracted_receipt_value_digest(&node, &event_info);
-
-                let total = input_vd + extracted_vd;
-
-                // row_id = H2int(row_unique_data || num_actual_columns)
-                let inputs = HashOut::from(row_unique_data)
-                    .to_fields()
-                    .into_iter()
-                    .chain(std::iter::once(GFp::from_canonical_usize(
-                        metadata.num_actual_columns,
-                    )))
-                    .collect::<Vec<GFp>>();
-                let hash = H::hash_no_pad(&inputs);
-                let row_id = hash_to_int_value(hash);
-
-                // values_digest = values_digest * row_id
-                let row_id = Scalar::from_noncanonical_biguint(row_id);
-
-                let exp_digest = total * row_id;
-
-                acc + exp_digest
-            });
-
-        let pi = PublicInputs::new(&final_proof.proof.public_inputs);
-
-        let mut block_util = build_test_data(epoch).await;
-        // Check the output hash
-        {
-            assert_eq!(
-                pi.root_hash(),
-                block_util
-                    .receipts_trie
-                    .root_hash()?
-                    .0
-                    .to_vec()
-                    .pack(Endianness::Little)
-            );
-        }
-
-        // Check value digest
-        {
-            assert_eq!(pi.values_digest(), value_digest.to_weierstrass());
-        }
-
-        // Check metadata digest
-        {
-            assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
-        }
-        Ok(())
+    async fn test_receipt_local_proving() -> Result<()> {
+        let pp = build_circuits_params::<512, 5>();
+        // Test proving on a block with some relevant events
+        test_receipt_proving(21362445, &pp).await?;
+        // Test proving on a block with no relevant events
+        test_receipt_proving(21767312, &pp).await
     }
 
-    #[tokio::test]
-    async fn test_empty_block_receipt_proving() -> Result<()> {
+    async fn test_receipt_proving(epoch: u64, pp: &PublicParameters<512, 5>) -> Result<()> {
         // First get the info we will feed in to our function
-        let event_info = test_receipt_trie_helper().await?;
-
-        let contract = Address::from_str("0xbd3531da5cf5857e7cfaa92426877b022e612cf8")?;
-        let epoch: u64 = 21767312;
+        let (mut block_util, event_info, proof_info) = build_test_data(epoch).await?;
 
         let url = get_mainnet_url();
         // get some tx and receipt
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
-        let pp = build_circuits_params::<512, 7>();
         let final_proof_bytes = event_info
-            .prove_value_extraction(contract, epoch, &pp, &provider)
+            .prove_value_extraction(epoch, pp, &provider)
             .await?;
 
         let final_proof = ProofWithVK::deserialize(&final_proof_bytes)?;
@@ -575,11 +493,20 @@ pub mod tests {
 
         let metadata_digest = metadata.digest();
 
-        let value_digest = Point::NEUTRAL;
+        let value_digest = proof_info.iter().try_fold(Digest::NEUTRAL, |acc, info| {
+            let node = info
+                .mpt_proof
+                .last()
+                .ok_or(MP2PlannerError::UpdateTreeError(
+                    "MPT proof had no nodes".to_string(),
+                ))?;
+            Result::<Point, MP2PlannerError>::Ok(
+                acc + metadata.receipt_value_digest(info.tx_index, node, &event_info),
+            )
+        })?;
 
         let pi = PublicInputs::new(&final_proof.proof.public_inputs);
 
-        let mut block_util = build_test_data(epoch).await;
         // Check the output hash
         {
             assert_eq!(
@@ -603,23 +530,31 @@ pub mod tests {
             assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
         }
 
-        // Check that the number of rows is zero
+        // Check that the number of rows is equal to the length of
         {
-            assert_eq!(pi.n(), GFp::ZERO);
+            assert_eq!(pi.n(), GFp::from_canonical_usize(proof_info.len()));
         }
         Ok(())
     }
 
+    type TestData = (BlockUtil, EventLogInfo<2, 1>, Vec<ReceiptProofInfo>);
     /// Function that fetches a block together with its transaction trie and receipt trie for testing purposes.
-    async fn build_test_data(block_number: u64) -> BlockUtil {
+    async fn build_test_data(block_number: u64) -> Result<TestData> {
         let url = get_mainnet_url();
         // get some tx and receipt
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let provider = ProviderBuilder::new().on_http(url.parse()?);
 
         // We fetch a specific block which we know includes transactions relating to the PudgyPenguins contract.
-        BlockUtil::fetch(&provider, BlockNumberOrTag::Number(block_number))
-            .await
-            .unwrap()
+        let block_util =
+            BlockUtil::fetch(&provider, BlockNumberOrTag::Number(block_number)).await?;
+
+        let event_info = test_receipt_trie_helper().await?;
+
+        let proof_info = event_info
+            .query_receipt_proofs(&provider, block_number.into())
+            .await?;
+
+        Ok((block_util, event_info, proof_info))
     }
 
     /// Function to build a list of [`ReceiptProofInfo`] for a set block.

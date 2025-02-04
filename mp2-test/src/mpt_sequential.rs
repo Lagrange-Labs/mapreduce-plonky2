@@ -8,7 +8,7 @@ use alloy::{
 };
 use eth_trie::{EthTrie, MemoryDB, Trie};
 
-use mp2_common::eth::{ReceiptProofInfo, ReceiptQuery};
+use mp2_common::eth::{EventLogInfo, ReceiptProofInfo};
 use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
 use std::sync::Arc;
 
@@ -52,8 +52,8 @@ pub fn generate_random_storage_mpt<const DEPTH: usize, const VALUE_LEN: usize>(
 
 #[derive(Debug, Clone)]
 pub struct ReceiptTestInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
-    /// The query which we have returned proofs for
-    pub query: ReceiptQuery<NO_TOPICS, MAX_DATA_WORDS>,
+    /// The event which we have returned proofs for
+    pub event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
     /// The proofs for receipts relating to `self.query`
     pub proofs: Vec<ReceiptProofInfo>,
 }
@@ -66,8 +66,8 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
         self.proofs.clone()
     }
     /// Getter for the query
-    pub fn query(&self) -> &ReceiptQuery<NO_TOPICS, MAX_DATA_WORDS> {
-        &self.query
+    pub fn info(&self) -> &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS> {
+        &self.event
     }
 }
 /// This function is used so that we can generate a Receipt Trie for a blog with varying transactions
@@ -270,19 +270,16 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: 
             _ => panic!(),
         };
 
-        let receipt_query = ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS>::new(
+        let event = EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(
             *event_contract.address(),
             &events[0].signature(),
         );
 
-        let proofs = receipt_query
+        let proofs = event
             .query_receipt_proofs(rpc.root(), BlockNumberOrTag::Number(block_number))
             .await
             .unwrap();
 
-        ReceiptTestInfo {
-            query: receipt_query,
-            proofs,
-        }
+        ReceiptTestInfo { event, proofs }
     })
 }
