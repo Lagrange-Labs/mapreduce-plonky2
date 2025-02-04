@@ -292,17 +292,6 @@ pub struct ProofQuery {
     pub(crate) slot: StorageSlot,
 }
 
-/// Struct used for storing relevant data to query blocks as they come in.
-/// The constant `NO_TOPICS` is the number of indexed items in the event (excluding the event signature) and
-/// `MAX_DATA_WORDS` is the number of 32 byte words of data we want to extract in addition to the topics.
-#[derive(Debug, Clone)]
-pub struct ReceiptQuery<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
-    /// The contract that emits the event we care about
-    pub contract: Address,
-    /// The signature of the event we wish to monitor for
-    pub event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-}
-
 /// Struct used to store all the information needed for proving a leaf is in the Receipt Trie.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiptProofInfo {
@@ -431,6 +420,77 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
             ))?;
 
         Ok(relevant_log_offset)
+    }
+
+    /// Function that returns the MPT Trie inclusion proofs for all receipts in a block whose logs contain
+    /// the specified event for the contract.
+    pub async fn query_receipt_proofs<T: Transport + Clone>(
+        &self,
+        provider: &RootProvider<T>,
+        block: BlockNumberOrTag,
+    ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
+        // Retrieve the transaction indices for the relevant logs
+        let tx_indices = self.retrieve_tx_indices(provider, block).await?;
+
+        // Construct the Receipt Trie for this block so we can retrieve MPT proofs.
+        let mut block_util = BlockUtil::fetch(provider, block).await?;
+        EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::extract_info(&tx_indices, &mut block_util)
+    }
+
+    /// Function to query for relevant logs at a specific block, it returns a [`BTreeSet`] of the transaction indices that are relevant.
+    pub async fn retrieve_tx_indices<T: Transport + Clone>(
+        &self,
+        provider: &RootProvider<T>,
+        block: BlockNumberOrTag,
+    ) -> Result<BTreeSet<u64>, MP2EthError> {
+        let filter = Filter::new()
+            .select(block)
+            .address(self.address)
+            .event_signature(B256::from(self.event_signature));
+        for i in 0..RETRY_NUM - 1 {
+            debug!(
+                "Querying Receipt logs:\n\tevent signature = {:?}",
+                self.event_signature,
+            );
+            match provider.get_logs(&filter).await {
+                // For each of the logs return the transacion its included in, then sort and remove duplicates.
+                Ok(response) => {
+                    return Ok(BTreeSet::from_iter(
+                        response.iter().map_while(|log| log.transaction_index),
+                    ))
+                }
+                Err(e) => println!("Failed to query the Receipt logs at {i} time: {e:?}"),
+            }
+        }
+        match provider.get_logs(&filter).await {
+            // For each of the logs return the transacion its included in, then sort and remove duplicates.
+            Ok(response) => Ok(BTreeSet::from_iter(
+                response.iter().map_while(|log| log.transaction_index),
+            )),
+            Err(_) => Err(MP2EthError::FetchError),
+        }
+    }
+
+    /// Function that takes a list of transaction indices in the form of a [`BTreeSet`] and a [`BlockUtil`] and returns a list of [`ReceiptProofInfo`].
+    pub fn extract_info(
+        tx_indices: &BTreeSet<u64>,
+        block_util: &mut BlockUtil,
+    ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
+        let mpt_root = block_util.receipts_trie.root_hash()?;
+        tx_indices
+            .iter()
+            .map(|&tx_index| {
+                let key = tx_index.rlp_bytes();
+
+                let proof = block_util.receipts_trie.get_proof(&key[..])?;
+
+                Ok(ReceiptProofInfo {
+                    mpt_proof: proof,
+                    mpt_root,
+                    tx_index,
+                })
+            })
+            .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()
     }
 }
 
@@ -707,87 +767,6 @@ impl ReceiptProofInfo {
 
         let rlp_receipt = rlp::Rlp::new(&valid[1..]);
         ReceiptWithBloom::decode(&mut rlp_receipt.as_raw()).map_err(|e| e.into())
-    }
-}
-
-impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptQuery<NO_TOPICS, MAX_DATA_WORDS> {
-    /// Construct a new [`ReceiptQuery`] from the contract [`Address`] and the event's name as a [`str`].
-    pub fn new(contract: Address, event_name: &str) -> Self {
-        Self {
-            contract,
-            event: EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(contract, event_name),
-        }
-    }
-
-    /// Function that returns the MPT Trie inclusion proofs for all receipts in a block whose logs contain
-    /// the specified event for the contract.
-    pub async fn query_receipt_proofs<T: Transport + Clone>(
-        &self,
-        provider: &RootProvider<T>,
-        block: BlockNumberOrTag,
-    ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
-        // Retrieve the transaction indices for the relevant logs
-        let tx_indices = self.retrieve_tx_indices(provider, block).await?;
-
-        // Construct the Receipt Trie for this block so we can retrieve MPT proofs.
-        let mut block_util = BlockUtil::fetch(provider, block).await?;
-        ReceiptQuery::<NO_TOPICS, MAX_DATA_WORDS>::extract_info(&tx_indices, &mut block_util)
-    }
-
-    /// Function to query for relevant logs at a specific block, it returns a [`BTreeSet`] of the transaction indices that are relevant.
-    pub async fn retrieve_tx_indices<T: Transport + Clone>(
-        &self,
-        provider: &RootProvider<T>,
-        block: BlockNumberOrTag,
-    ) -> Result<BTreeSet<u64>, MP2EthError> {
-        let filter = Filter::new()
-            .select(block)
-            .address(self.contract)
-            .event_signature(B256::from(self.event.event_signature));
-        for i in 0..RETRY_NUM - 1 {
-            debug!(
-                "Querying Receipt logs:\n\tevent signature = {:?}",
-                self.event.event_signature,
-            );
-            match provider.get_logs(&filter).await {
-                // For each of the logs return the transacion its included in, then sort and remove duplicates.
-                Ok(response) => {
-                    return Ok(BTreeSet::from_iter(
-                        response.iter().map_while(|log| log.transaction_index),
-                    ))
-                }
-                Err(e) => println!("Failed to query the Receipt logs at {i} time: {e:?}"),
-            }
-        }
-        match provider.get_logs(&filter).await {
-            // For each of the logs return the transacion its included in, then sort and remove duplicates.
-            Ok(response) => Ok(BTreeSet::from_iter(
-                response.iter().map_while(|log| log.transaction_index),
-            )),
-            Err(_) => Err(MP2EthError::FetchError),
-        }
-    }
-
-    /// Function that takes a list of transaction indices in the form of a [`BTreeSet`] and a [`BlockUtil`] and returns a list of [`ReceiptProofInfo`].
-    pub fn extract_info(
-        tx_indices: &BTreeSet<u64>,
-        block_util: &mut BlockUtil,
-    ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
-        let mpt_root = block_util.receipts_trie.root_hash()?;
-        tx_indices
-            .iter()
-            .map(|&tx_index| {
-                let key = tx_index.rlp_bytes();
-
-                let proof = block_util.receipts_trie.get_proof(&key[..])?;
-
-                Ok(ReceiptProofInfo {
-                    mpt_proof: proof,
-                    mpt_root,
-                    tx_index,
-                })
-            })
-            .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()
     }
 }
 
@@ -1107,7 +1086,7 @@ mod test {
         // Now for each transaction we fetch the block, then get the MPT Trie proof that the receipt is included and verify it
         let test_info = generate_receipt_test_info::<NO_TOPICS, MAX_DATA_WORDS>();
         let proofs = test_info.proofs();
-        let query = test_info.query();
+        let event = test_info.info();
         for proof in proofs.iter() {
             let memdb = Arc::new(MemoryDB::new(true));
             let tx_trie = EthTrie::new(Arc::clone(&memdb));
@@ -1122,7 +1101,7 @@ mod test {
                 .mpt_proof
                 .last()
                 .ok_or(anyhow!("Couldn't get first node in proof"))?;
-            let expected_sig: [u8; 32] = query.event.event_signature;
+            let expected_sig: [u8; 32] = event.event_signature;
 
             // Convert to Rlp form so we can use provided methods.
             let node_rlp = rlp::Rlp::new(last_node);
@@ -1148,11 +1127,11 @@ mod test {
                 .filter_map(|(log_rlp, log_off)| {
                     let mut bytes = log_rlp.data().ok()?;
                     let log = Log::decode(&mut bytes).ok()?;
-                    if log.address == query.contract
+                    if log.address == event.address
                         && log
                             .data
                             .topics()
-                            .contains(&B256::from(query.event.event_signature))
+                            .contains(&B256::from(event.event_signature))
                     {
                         Some(logs_offset + log_off)
                     } else {
@@ -1162,19 +1141,19 @@ mod test {
                 .collect::<Vec<usize>>();
 
             for log_offset in relevant_logs_offset.iter() {
-                let mut buf = &last_node[*log_offset..*log_offset + query.event.size];
+                let mut buf = &last_node[*log_offset..*log_offset + event.size];
                 let decoded_log = Log::decode(&mut buf)?;
-                let raw_bytes: [u8; 20] = last_node[*log_offset + query.event.add_rel_offset
-                    ..*log_offset + query.event.add_rel_offset + 20]
+                let raw_bytes: [u8; 20] = last_node
+                    [*log_offset + event.add_rel_offset..*log_offset + event.add_rel_offset + 20]
                     .to_vec()
                     .try_into()
                     .unwrap();
-                assert_eq!(decoded_log.address, query.contract);
-                assert_eq!(raw_bytes, query.contract);
+                assert_eq!(decoded_log.address, event.address);
+                assert_eq!(raw_bytes, event.address);
                 let topics = decoded_log.topics();
                 assert_eq!(topics[0].0, expected_sig);
-                let raw_bytes: [u8; 32] = last_node[*log_offset + query.event.sig_rel_offset
-                    ..*log_offset + query.event.sig_rel_offset + 32]
+                let raw_bytes: [u8; 32] = last_node
+                    [*log_offset + event.sig_rel_offset..*log_offset + event.sig_rel_offset + 32]
                     .to_vec()
                     .try_into()
                     .unwrap();
