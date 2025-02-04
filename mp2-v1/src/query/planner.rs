@@ -1,5 +1,5 @@
 use alloy::primitives::U256;
-use anyhow::Context;
+use anyhow::{ensure, Context};
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use core::hash::Hash;
@@ -9,12 +9,11 @@ use mp2_common::types::HashOutput;
 use parsil::{bracketer::bracket_secondary_index, symbols::ContextProvider, ParsilSettings};
 use ryhope::{
     storage::{
-        pgsql::{PgsqlStorage, ToFromBytea},
-        updatetree::UpdateTree,
-        FromSettings, PayloadStorage, TransactionalStorage, TreeStorage, WideLineage,
+        pgsql::ToFromBytea, updatetree::UpdateTree, FromSettings, PayloadStorage,
+        TransactionalStorage, TreeStorage, WideLineage,
     },
     tree::{MutableTree, NodeContext, TreeTopology},
-    Epoch, MerkleTreeKvDb, NodePayload,
+    MerkleTreeKvDb, NodePayload, UserEpoch,
 };
 use std::{fmt::Debug, future::Future};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql, NoTls};
@@ -25,13 +24,13 @@ use verifiable_db::query::{
 
 use crate::indexing::{
     block::BlockPrimaryIndex,
-    row::{RowPayload, RowTree, RowTreeKey},
+    row::{RowPayload, RowStorage, RowTree, RowTreeKey},
     LagrangeNode,
 };
 
 /// There is only the PSQL storage fully supported for the non existence case since one needs to
 /// executor particular requests on the DB in this case.
-pub type DBRowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
+pub type DBRowStorage = RowStorage;
 /// The type of connection to psql backend
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 
@@ -69,25 +68,41 @@ impl<'a, C: ContextProvider> NonExistenceInput<'a, C> {
         &self,
         primary: BlockPrimaryIndex,
     ) -> anyhow::Result<RowTreeKey> {
-        let (query_for_min, query_for_max) = bracket_secondary_index(
+        let (preliminary_query, query_for_min, query_for_max) = bracket_secondary_index(
             &self.table_name,
             self.settings,
-            primary as Epoch,
+            primary as UserEpoch,
             &self.bounds,
         );
 
+        let params = execute_row_query(self.pool, &preliminary_query, &[]).await?;
+        ensure!(
+            params.len() == 1,
+            "Preliminary query returned more than one row"
+        );
+        let param = params[0].get::<_, U256>(0);
+
         // try first with lower node than secondary min query bound
-        let to_be_proven_node =
-            match find_node_for_proof(self.pool, self.row_tree, query_for_min, primary, true)
-                .await?
-            {
-                Some(node) => node,
-                None => {
-                    find_node_for_proof(self.pool, self.row_tree, query_for_max, primary, false)
-                        .await?
-                        .expect("No valid node found to prove non-existence, something is wrong")
-                }
-            };
+        let to_be_proven_node = match find_node_for_proof(
+            self.pool,
+            self.row_tree,
+            query_for_min.map(|q| (q, param)),
+            primary,
+            true,
+        )
+        .await?
+        {
+            Some(node) => node,
+            None => find_node_for_proof(
+                self.pool,
+                self.row_tree,
+                query_for_max.map(|q| (q, param)),
+                primary,
+                false,
+            )
+            .await?
+            .expect("No valid node found to prove non-existence, something is wrong"),
+        };
 
         Ok(to_be_proven_node)
     }
@@ -100,13 +115,13 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
     fn fetch_ctx_and_payload_at(
         &self,
         k: &K,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> impl Future<Output = Option<(NodeContext<K>, V)>> + Send;
 
     fn compute_path(
         &self,
         node_key: &K,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> impl Future<Output = Option<TreePathInputs>> {
         async move {
             let (node_ctx, node_payload) = self.fetch_ctx_and_payload_at(node_key, epoch).await?;
@@ -152,7 +167,7 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
         &self,
         node_ctx: NodeContext<K>,
         node_payload: V,
-        at: Epoch,
+        at: UserEpoch,
     ) -> impl Future<Output = NodeInfo> {
         async move {
             let child_hash = async |k: Option<K>| -> Option<HashOutput> {
@@ -183,7 +198,7 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
     fn get_successor(
         &self,
         node_ctx: &NodeContext<K>,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> impl Future<Output = Option<(NodeContext<K>, V)>>
     where
         K: Clone + Debug + Eq + PartialEq,
@@ -264,7 +279,7 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
     fn get_predecessor(
         &self,
         node_ctx: &NodeContext<K>,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> impl Future<Output = Option<(NodeContext<K>, V)>>
     where
         K: Clone + Debug + Eq + PartialEq,
@@ -349,7 +364,11 @@ where
 {
     const IS_WIDE_LINEAGE: bool = true;
 
-    async fn fetch_ctx_and_payload_at(&self, k: &K, epoch: Epoch) -> Option<(NodeContext<K>, V)> {
+    async fn fetch_ctx_and_payload_at(
+        &self,
+        k: &K,
+        epoch: UserEpoch,
+    ) -> Option<(NodeContext<K>, V)> {
         self.ctx_and_payload_at(epoch, k)
     }
 }
@@ -369,7 +388,7 @@ impl<
     async fn fetch_ctx_and_payload_at(
         &self,
         k: &T::Key,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> Option<(NodeContext<T::Key>, V)> {
         self.try_fetch_with_context_at(k, epoch)
             .await
@@ -386,7 +405,7 @@ impl<
 async fn fetch_existing_node_from_tree<K, V: LagrangeNode, T: TreeFetcher<K, V>>(
     tree: &T,
     k: &K,
-    epoch: Epoch,
+    epoch: UserEpoch,
 ) -> Option<(NodeContext<K>, V)>
 where
     K: Clone + Debug + Eq + PartialEq,
@@ -415,7 +434,7 @@ async fn get_successor_node_with_same_value(
     primary: BlockPrimaryIndex,
 ) -> Option<NodeContext<RowTreeKey>> {
     row_tree
-        .get_successor(node_ctx, primary as Epoch)
+        .get_successor(node_ctx, primary as UserEpoch)
         .await
         .and_then(|(successor_ctx, successor_payload)| {
             if successor_payload.value() != value {
@@ -438,7 +457,7 @@ async fn get_predecessor_node_with_same_value(
     primary: BlockPrimaryIndex,
 ) -> Option<NodeContext<RowTreeKey>> {
     row_tree
-        .get_predecessor(node_ctx, primary as Epoch)
+        .get_predecessor(node_ctx, primary as UserEpoch)
         .await
         .and_then(|(predecessor_ctx, predecessor_payload)| {
             if predecessor_payload.value() != value {
@@ -454,14 +473,15 @@ async fn get_predecessor_node_with_same_value(
 async fn find_node_for_proof(
     db: &DBPool,
     row_tree: &MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
-    query: Option<String>,
+    query_with_param: Option<(String, U256)>,
     primary: BlockPrimaryIndex,
     is_min_query: bool,
 ) -> anyhow::Result<Option<RowTreeKey>> {
-    if query.is_none() {
+    let rows = if let Some((query, param)) = query_with_param {
+        execute_row_query(db, &query, &[param]).await?
+    } else {
         return Ok(None);
-    }
-    let rows = execute_row_query(db, &query.unwrap(), &[]).await?;
+    };
     if rows.is_empty() {
         // no node found, return None
         return Ok(None);
@@ -490,7 +510,7 @@ async fn find_node_for_proof(
     //   the value of the predecessor of the "first" node is necessarily smaller than `min_query_secondary`,
     //   and so it implies that we found the node satisfying the property mentioned above
     let (mut node_ctx, node_value) = row_tree
-        .fetch_with_context_at(&row_key, primary as Epoch)
+        .fetch_with_context_at(&row_key, primary as UserEpoch)
         .await?
         .unwrap();
     let value = node_value.value();
@@ -569,7 +589,7 @@ async fn get_node_info_from_ctx_and_payload<
     tree: &T,
     node_ctx: NodeContext<K>,
     node_payload: V,
-    at: Epoch,
+    at: UserEpoch,
 ) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>) {
     // this looks at the value of a child node (left and right), and fetches the grandchildren
     // information to be able to build their respective node info.
@@ -642,7 +662,7 @@ pub async fn get_node_info<
 >(
     tree: &T,
     k: &K,
-    at: Epoch,
+    at: UserEpoch,
 ) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>) {
     let (node_ctx, node_payload) = tree
         .fetch_ctx_and_payload_at(k, at)
