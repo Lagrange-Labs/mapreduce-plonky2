@@ -17,10 +17,14 @@ use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTa
 use sha3::Digest;
 use sha3::Keccak256;
 
-use crate::array::Targetable;
-use crate::poseidon::{HashableField, H};
 use crate::serialization::circuit_data_serialization::SerializableRichField;
-use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
+use crate::{
+    array::Targetable,
+    group_hashing::EXTENSION_DEGREE,
+    poseidon::{HashableField, H},
+    types::HashOutput,
+    ProofTuple,
+};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
@@ -552,6 +556,7 @@ pub trait PackableRichField: RichField {}
 
 impl PackableRichField for GoldilocksField {}
 
+#[derive(Clone, Copy, Debug)]
 pub enum Endianness {
     Big,
     Little,
@@ -793,7 +798,6 @@ impl<F: RichField + Extendable<D>, const D: usize> SliceConnector for CircuitBui
 
 #[cfg(test)]
 mod test {
-
     use super::{bits_to_num, Packer, ToFields};
     use crate::utils::{
         greater_than, greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits,
@@ -808,7 +812,6 @@ mod test {
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
-
     use rand::{thread_rng, Rng, RngCore};
 
     #[test]

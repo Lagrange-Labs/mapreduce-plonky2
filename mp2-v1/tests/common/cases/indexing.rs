@@ -3,6 +3,7 @@
 
 use log::{debug, info};
 use mp2_v1::{
+    api::SlotInput,
     contract_extraction,
     indexing::{
         block::BlockPrimaryIndex,
@@ -10,7 +11,7 @@ use mp2_v1::{
         row::{CellCollection, CellInfo, Row, RowTreeKey},
         ColumnID,
     },
-    values_extraction::identifier_block_column,
+    values_extraction::{identifier_block_column, identifier_for_value_column},
 };
 use ryhope::storage::RoEpochKvStorage;
 
@@ -18,11 +19,10 @@ use crate::common::{
     bindings::simple::Simple::{self, MappingChange, MappingOperation},
     cases::{
         contract::Contract,
-        identifier_for_mapping_key_column, identifier_for_mapping_value_column,
-        identifier_single_var_column,
+        identifier_for_mapping_key_column,
         table_source::{
-            LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs, MergeSource,
-            SingleValuesExtractionArgs, DEFAULT_ADDRESS,
+            single_var_slot_info, LengthExtractionArgs, MappingIndex, MappingValuesExtractionArgs,
+            MergeSource, SingleValuesExtractionArgs, DEFAULT_ADDRESS,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
@@ -62,6 +62,18 @@ const LENGTH_VALUE: u8 = 2;
 /// Test slot for contract extraction
 const CONTRACT_SLOT: usize = 1;
 
+/// Test slot for single Struct extractin
+#[allow(dead_code)]
+const SINGLE_STRUCT_SLOT: usize = 6;
+
+/// Test slot for mapping Struct extraction
+#[allow(dead_code)]
+const MAPPING_STRUCT_SLOT: usize = 7;
+
+/// Test slot for mapping of mappings extraction
+#[allow(dead_code)]
+const MAPPING_OF_MAPPINGS_SLOT: usize = 8;
+
 /// human friendly name about the column containing the block number
 pub(crate) const BLOCK_COLUMN_NAME: &str = "block_number";
 pub(crate) const MAPPING_VALUE_COLUMN: &str = "map_value";
@@ -92,12 +104,22 @@ impl TableIndexing {
             // this test puts the mapping value as secondary index so there is no index for the
             // single variable slots.
             index_slot: None,
-            slots: SINGLE_SLOTS.to_vec(),
+            slots: single_var_slot_info(contract_address, chain_id),
         };
         // to toggle off and on
         let value_as_index = true;
-        let value_id =
-            identifier_for_mapping_value_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
+        let slot_input = SlotInput::new(
+            MAPPING_SLOT,
+            // byte_offset
+            0,
+            // bit_offset
+            0,
+            // length
+            0,
+            // evm_word
+            0,
+        );
+        let value_id = identifier_for_value_column(&slot_input, contract_address, chain_id, vec![]);
         let key_id =
             identifier_for_mapping_key_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
         let (mapping_index_id, mapping_index, mapping_cell_id) = match value_as_index {
@@ -119,8 +141,15 @@ impl TableIndexing {
             .iter()
             .enumerate()
             .map(|(i, slot)| {
+                let slot_input = SlotInput::new(
+                    *slot, // byte_offset
+                    0,     // bit_offset
+                    0,     // length
+                    0,     // evm_word
+                    0,
+                );
                 let identifier =
-                    identifier_single_var_column(*slot, contract_address, chain_id, vec![]);
+                    identifier_for_value_column(&slot_input, contract_address, chain_id, vec![]);
                 TableColumn {
                     name: format!("column_{}", i),
                     identifier,
@@ -214,7 +243,7 @@ impl TableIndexing {
 
         let mut source = TableSource::SingleValues(SingleValuesExtractionArgs {
             index_slot: Some(INDEX_SLOT),
-            slots: SINGLE_SLOTS.to_vec(),
+            slots: single_var_slot_info(contract_address, chain_id),
         });
         let genesis_updates = source.init_contract_data(ctx, &contract).await;
 
@@ -231,8 +260,14 @@ impl TableIndexing {
             },
             secondary: TableColumn {
                 name: "column_value".to_string(),
-                identifier: identifier_single_var_column(
-                    INDEX_SLOT,
+                identifier: identifier_for_value_column(
+                    &SlotInput::new(
+                        INDEX_SLOT, // byte_offset
+                        0,          // bit_offset
+                        0,          // length
+                        0,          // evm_word
+                        0,
+                    ),
                     contract_address,
                     chain_id,
                     vec![],
@@ -247,8 +282,19 @@ impl TableIndexing {
                 .filter_map(|(i, slot)| match i {
                     _ if *slot == INDEX_SLOT => None,
                     _ => {
-                        let identifier =
-                            identifier_single_var_column(*slot, contract_address, chain_id, vec![]);
+                        let slot_input = SlotInput::new(
+                            *slot, // byte_offset
+                            0,     // bit_offset
+                            0,     // length
+                            0,     // evm_word
+                            0,
+                        );
+                        let identifier = identifier_for_value_column(
+                            &slot_input,
+                            contract_address,
+                            chain_id,
+                            vec![],
+                        );
                         Some(TableColumn {
                             name: format!("column_{}", i),
                             identifier,
@@ -293,8 +339,18 @@ impl TableIndexing {
         let chain_id = ctx.rpc.get_chain_id().await.unwrap();
         // to toggle off and on
         let value_as_index = true;
-        let value_id =
-            identifier_for_mapping_value_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
+        let slot_input = SlotInput::new(
+            MAPPING_SLOT,
+            // byte_offset
+            0,
+            // bit_offset
+            0,
+            // length
+            0,
+            // evm_word
+            0,
+        );
+        let value_id = identifier_for_value_column(&slot_input, contract_address, chain_id, vec![]);
         let key_id =
             identifier_for_mapping_key_column(MAPPING_SLOT, contract_address, chain_id, vec![]);
         let (index_identifier, mapping_index, cell_identifier) = match value_as_index {
@@ -302,6 +358,7 @@ impl TableIndexing {
             false => (key_id, MappingIndex::Key(key_id), value_id),
         };
 
+        // mapping(uint256 => address) public m1
         let mapping_args = MappingValuesExtractionArgs {
             slot: MAPPING_SLOT,
             index: mapping_index,
