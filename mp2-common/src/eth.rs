@@ -10,8 +10,8 @@ use alloy::{
     rpc::{
         json_rpc::RpcError,
         types::{
-            Block, BlockTransactions, EIP1186AccountProofResponse, Filter, ReceiptEnvelope,
-            Transaction, TransactionReceipt,
+            Block, BlockTransactions, EIP1186AccountProofResponse, ReceiptEnvelope, Transaction,
+            TransactionReceipt,
         },
     },
     transports::Transport,
@@ -429,60 +429,54 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
         provider: &RootProvider<T>,
         block: BlockNumberOrTag,
     ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
-        // Retrieve the transaction indices for the relevant logs
-        let tx_indices = self.retrieve_tx_indices(provider, block).await?;
+        let receipts = query_block_receipts(provider, block).await?;
 
-        // Construct the Receipt Trie for this block so we can retrieve MPT proofs.
-        let mut block_util = BlockUtil::fetch(provider, block).await?;
-        EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::extract_info(&tx_indices, &mut block_util)
-    }
+        let memdb = Arc::new(MemoryDB::new(true));
+        let mut receipts_trie = EthTrie::new(memdb.clone());
 
-    /// Function to query for relevant logs at a specific block, it returns a [`BTreeSet`] of the transaction indices that are relevant.
-    pub async fn retrieve_tx_indices<T: Transport + Clone>(
-        &self,
-        provider: &RootProvider<T>,
-        block: BlockNumberOrTag,
-    ) -> Result<BTreeSet<u64>, MP2EthError> {
-        let filter = Filter::new()
-            .select(block)
-            .address(self.address)
-            .event_signature(B256::from(self.event_signature));
-        for i in 0..RETRY_NUM - 1 {
-            debug!(
-                "Querying Receipt logs:\n\tevent signature = {:?}",
-                self.event_signature,
-            );
-            match provider.get_logs(&filter).await {
-                // For each of the logs return the transacion its included in, then sort and remove duplicates.
-                Ok(response) => {
-                    return Ok(BTreeSet::from_iter(
-                        response.iter().map_while(|log| log.transaction_index),
-                    ))
+        let mut indices = BTreeSet::<u64>::new();
+        receipts.into_iter().try_for_each(|receipt| {
+            let tx_index_u64 = receipt.transaction_index.unwrap();
+
+            let tx_index = tx_index_u64.rlp_bytes();
+
+            let receipt_primitive = match receipt.inner {
+                CRE::Legacy(ref r) => CRE::Legacy(from_rpc_logs_to_consensus(r)),
+                CRE::Eip2930(ref r) => CRE::Eip2930(from_rpc_logs_to_consensus(r)),
+                CRE::Eip1559(ref r) => CRE::Eip1559(from_rpc_logs_to_consensus(r)),
+                CRE::Eip4844(ref r) => CRE::Eip4844(from_rpc_logs_to_consensus(r)),
+                CRE::Eip7702(ref r) => CRE::Eip7702(from_rpc_logs_to_consensus(r)),
+                _ => panic!("aie"),
+            };
+            // To receipt method is infallible so unwrap is safe here
+            let receipt = receipt_primitive.as_receipt().unwrap();
+            let relevant = receipt.logs.iter().find(|log| {
+                let address_check = log.address == self.address;
+                let topics = log.topics();
+                if topics.is_empty() {
+                    false
+                } else {
+                    let sig_check = topics[0].0 == self.event_signature;
+                    sig_check && address_check
                 }
-                Err(e) => println!("Failed to query the Receipt logs at {i} time: {e:?}"),
-            }
-        }
-        match provider.get_logs(&filter).await {
-            // For each of the logs return the transacion its included in, then sort and remove duplicates.
-            Ok(response) => Ok(BTreeSet::from_iter(
-                response.iter().map_while(|log| log.transaction_index),
-            )),
-            Err(_) => Err(MP2EthError::FetchError),
-        }
-    }
+            });
 
-    /// Function that takes a list of transaction indices in the form of a [`BTreeSet`] and a [`BlockUtil`] and returns a list of [`ReceiptProofInfo`].
-    pub fn extract_info(
-        tx_indices: &BTreeSet<u64>,
-        block_util: &mut BlockUtil,
-    ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
-        let mpt_root = block_util.receipts_trie.root_hash()?;
-        tx_indices
+            if relevant.is_some() {
+                indices.insert(tx_index_u64);
+            }
+
+            let body_rlp = receipt_primitive.encoded_2718();
+
+            receipts_trie.insert(&tx_index, &body_rlp)
+        })?;
+        let mpt_root = receipts_trie.root_hash()?;
+
+        indices
             .iter()
             .map(|&tx_index| {
                 let key = tx_index.rlp_bytes();
 
-                let proof = block_util.receipts_trie.get_proof(&key[..])?;
+                let proof = receipts_trie.get_proof(&key[..])?;
 
                 Ok(ReceiptProofInfo {
                     mpt_proof: proof,
