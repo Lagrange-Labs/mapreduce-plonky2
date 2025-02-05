@@ -863,7 +863,7 @@ where
             let block_number = ctx.block_number().await;
             let new_block_number = block_number as BlockPrimaryIndex;
 
-            let proof_infos = event
+            let (proof_infos, _) = event
                 .query_receipt_proofs(provider.root(), block_number.into())
                 .await
                 .unwrap();
@@ -934,7 +934,7 @@ where
             let block_number = ctx.block_number().await;
             let new_block_number = block_number as BlockPrimaryIndex;
 
-            let proof_infos = event
+            let (proof_infos, _) = event
                 .query_receipt_proofs(provider.root(), block_number.into())
                 .await
                 .unwrap();
