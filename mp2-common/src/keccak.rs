@@ -23,7 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     array::{Array, Vector, VectorWire},
-    utils::{keccak256, less_than, Endianness, FromTargets, PackerTarget, ToTargets},
+    utils::{
+        keccak256, less_than, less_than_unsafe, Endianness, FromTargets, PackerTarget, ToTargets,
+    },
 };
 
 /// Length of a hash in bytes.
@@ -87,7 +89,7 @@ pub struct KeccakCircuit<const N: usize> {
 /// outside the circuit that requires the original input data.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct KeccakWires<const N: usize> {
-    input_array: VectorWire<Target, N>,
+    pub input_array: VectorWire<Target, N>,
     diff: Target,
     // 256/u32 = 8
     pub output_array: OutputHash,
@@ -126,14 +128,14 @@ impl<const N: usize> KeccakCircuit<N> {
         a: &VectorWire<Target, N>,
     ) -> KeccakWires<N> {
         let diff_target = b.add_virtual_target();
-        let end_padding = b.add(a.real_len, diff_target);
+        let end_padding_offset = b.add(a.real_len, diff_target);
         let one = b.one();
-        let end_padding = b.sub(end_padding, one); // inclusive range
-                                                   // little endian so we start padding from the end of the byte
-        let single_pad = b.constant(F::from_canonical_usize(0x81)); // 1000 0001
+        let end_padding = b.sub(end_padding_offset, one); // inclusive range
+                                                          // little endian so we start padding from the end of the byte
+
         let begin_pad = b.constant(F::from_canonical_usize(0x01)); // 0000 0001
         let end_pad = b.constant(F::from_canonical_usize(0x80)); // 1000 0000
-                                                                 // TODO : make that const generic
+
         let padded_node = a
             .arr
             .arr
@@ -141,31 +143,17 @@ impl<const N: usize> KeccakCircuit<N> {
             .enumerate()
             .map(|(i, byte)| {
                 let i_target = b.constant(F::from_canonical_usize(i));
-                // condition if we are within the data range ==> i < length
-                let is_data = less_than(b, i_target, a.real_len, 32);
+                // vector wires are filled with zeroes beyond a.real_len
+                // so we can just take the value no matter what and add padding if appropriate.
+
                 // condition if we start the padding ==> i == length
                 let is_start_padding = b.is_equal(i_target, a.real_len);
                 // condition if we are done with the padding ==> i == length + diff - 1
                 let is_end_padding = b.is_equal(i_target, end_padding);
-                // condition if we only need to add one byte 1000 0001 to pad
-                // because we work on u8 data, we know we're at least adding 1 byte and in
-                // this case it's 0x81 = 1000 0001
-                // i == length == diff - 1
-                let is_start_and_end = b.and(is_start_padding, is_end_padding);
 
-                // nikko XXX: Is this sound ? I think so but not 100% sure.
-                // I think it's ok to not use `quin_selector` or `b.random_acess` because
-                // if the prover gives another byte target, then the resulting hash would be invalid,
-                let item_data = b.mul(is_data.target, *byte);
-                let item_start_padding = b.mul(is_start_padding.target, begin_pad);
-                let item_end_padding = b.mul(is_end_padding.target, end_pad);
-                let item_start_and_end = b.mul(is_start_and_end.target, single_pad);
-                // if all of these conditions are false, then item will be 0x00,i.e. the padding
-                let mut item = item_data;
-                item = b.add(item, item_start_padding);
-                item = b.add(item, item_end_padding);
-                item = b.add(item, item_start_and_end);
-                item
+                // Adds the padding to the byte based on the calculated conditions.
+                let item = b.mul_add(is_start_padding.target, begin_pad, *byte);
+                b.mul_add(is_end_padding.target, end_pad, item)
             })
             .collect::<Vec<_>>();
 
@@ -176,7 +164,7 @@ impl<const N: usize> KeccakCircuit<N> {
         // to only look at a certain portion of our data, each bool says if the hash function
         // will update its state for this block or not.
         let rate_bytes = b.constant(F::from_canonical_usize(KECCAK256_R / 8));
-        let end_padding_offset = b.add(end_padding, one);
+
         let nb_blocks = b.div(end_padding_offset, rate_bytes);
         // - 1 because keccak always take first block so we don't count it
         let nb_actual_blocks = b.sub(nb_blocks, one);
@@ -184,13 +172,17 @@ impl<const N: usize> KeccakCircuit<N> {
         let blocks = (0..total_num_blocks)
             .map(|i| {
                 let i_target = b.constant(F::from_canonical_usize(i));
-                less_than(b, i_target, nb_actual_blocks, 8)
+                if i == 0 {
+                    less_than(b, i_target, nb_actual_blocks, 8)
+                } else {
+                    less_than_unsafe(b, i_target, nb_actual_blocks, 8)
+                }
             })
             .collect::<Vec<_>>();
 
         let hash_target = HashInputTarget {
             input: BigUintTarget {
-                limbs: node_u32_target.clone(),
+                limbs: node_u32_target,
             },
             input_bits: 0,
             blocks,

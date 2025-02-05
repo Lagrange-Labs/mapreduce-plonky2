@@ -140,7 +140,7 @@ mod tests {
 
             // Compute the root hash of cells tree.
             let (input_ids, input_values): (Vec<_>, Vec<_>) =
-                input_cells.iter().map(|c| (c.id, c.value.clone())).unzip();
+                input_cells.iter().map(|c| (c.id, c.value)).unzip();
             let real_root_hash = build_cells_tree(b, &input_values, &input_ids, &is_real_cell);
 
             // Check the output root hash.

@@ -2,28 +2,26 @@
 //! is another mapping. In this case, we refer to the key for the first-layer mapping entry as the
 //! outer key, while the key for the mapping stored in the entry mapping is referred to as inner key.
 
-use crate::values_extraction::{
-    gadgets::{
-        column_gadget::ColumnGadget,
-        metadata_gadget::{ColumnsMetadata, MetadataTarget},
+use crate::{
+    values_extraction::{
+        gadgets::metadata_gadget::TableMetadataTarget,
+        public_inputs::{PublicInputs, PublicInputsArgs},
     },
-    public_inputs::{PublicInputs, PublicInputsArgs},
-    INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
+    MAX_LEAF_NODE_LEN,
 };
 use anyhow::Result;
-use itertools::Itertools;
+
 use mp2_common::{
     array::{Array, Vector, VectorWire},
+    eth::left_pad32,
     group_hashing::CircuitBuilderGroupHashing,
-    keccak::{InputData, KeccakCircuit, KeccakWires},
-    mpt_sequential::{
-        utils::left_pad_leaf_value, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN,
-    },
+    keccak::{InputData, KeccakCircuit, KeccakWires, PACKED_HASH_LEN},
+    mpt_sequential::{utils::left_pad_leaf_value, MPTLeafOrExtensionNode, PAD_LEN},
     poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
     storage_key::{MappingOfMappingsSlotWires, MappingSlot},
     types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
-    utils::{Endianness, ToTargets},
+    utils::{Endianness, Packer, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{
@@ -34,162 +32,116 @@ use plonky2::{
     },
     plonk::proof::ProofWithPublicInputsTarget,
 };
+use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use plonky2_ecdsa::gadgets::nonnative::CircuitBuilderNonNative;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::{iter, iter::once};
+use std::iter::once;
 
-use super::gadgets::metadata_gadget::MetadataGadget;
+use super::{gadgets::metadata_gadget::TableMetadata, INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct LeafMappingOfMappingsWires<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
-> where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
+pub struct LeafMappingOfMappingsWires<const MAX_EXTRACTED_COLUMNS: usize> {
     /// Full node from the MPT proof
-    pub(crate) node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
+    pub(crate) node: VectorWire<Target, { PAD_LEN(MAX_LEAF_NODE_LEN) }>,
     /// Leaf value
-    pub(crate) value: Array<Target, MAPPING_LEAF_VALUE_LEN>,
+    pub(crate) value: Array<Target, 32>,
     /// MPT root
-    pub(crate) root: KeccakWires<{ PAD_LEN(NODE_LEN) }>,
+    pub(crate) root: KeccakWires<{ PAD_LEN(MAX_LEAF_NODE_LEN) }>,
     /// Mapping slot associating wires including outer and inner mapping keys
     pub(crate) slot: MappingOfMappingsSlotWires,
-    /// Identifier of the column of the table storing the outer key of the current mapping entry
-    pub(crate) outer_key_id: Target,
-    /// Identifier of the column of the table storing the inner key of the indexed mapping entry
-    pub(crate) inner_key_id: Target,
     /// MPT metadata
-    metadata: MetadataTarget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
+    offset: Target,
 }
 
 /// Circuit to prove the correct derivation of the MPT key from mappings where
 /// the value stored in each mapping entry is another mapping
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LeafMappingOfMappingsCircuit<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
-> where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
+pub struct LeafMappingOfMappingsCircuit<const MAX_EXTRACTED_COLUMNS: usize> {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: MappingSlot,
     pub(crate) inner_key: Vec<u8>,
-    pub(crate) outer_key_id: F,
-    pub(crate) inner_key_id: F,
-    pub(crate) metadata: ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    pub(crate) metadata: TableMetadata,
+    pub(crate) evm_word: u8,
 }
 
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    LeafMappingOfMappingsCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
-{
-    pub fn build(
-        b: &mut CBuilder,
-    ) -> LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM> {
-        let zero = b.zero();
-        let two = b.two();
+impl<const MAX_EXTRACTED_COLUMNS: usize> LeafMappingOfMappingsCircuit<MAX_EXTRACTED_COLUMNS> {
+    pub fn build(b: &mut CBuilder) -> LeafMappingOfMappingsWires<MAX_EXTRACTED_COLUMNS> {
+        let offset = b.add_virtual_target();
+        let metadata = TableMetadata::build(b, 2);
+        let slot = MappingSlot::build_mapping_of_mappings(b, offset);
 
-        let [outer_key_id, inner_key_id] = b.add_virtual_target_arr();
-        let metadata = MetadataGadget::build(b);
-        let slot = MappingSlot::build_mapping_of_mappings(b, metadata.evm_word);
+        let zero = b.zero();
 
         // Build the node wires.
-        let wires =
-            MPTLeafOrExtensionNode::build_and_advance_key::<_, D, NODE_LEN, MAX_LEAF_VALUE_LEN>(
-                b,
-                &slot.keccak_mpt.base.mpt_key,
-            );
-        let node = wires.node;
+        let wires = MPTLeafOrExtensionNode::build_and_advance_key::<_, D, 69, 33>(
+            b,
+            &slot.keccak_mpt.base.mpt_key,
+        );
+        let node: VectorWire<Target, { PAD_LEN(MAX_LEAF_NODE_LEN) }> = wires.node;
         let root = wires.root;
 
         // Left pad the leaf value.
-        let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
+        let value: Array<Target, 32> = left_pad_leaf_value(b, &wires.value);
 
-        // Compute the metadata digest and number of actual columns.
-        let (metadata_digest, num_actual_columns) = metadata.digest_info(b, slot.mapping_slot);
-        // Add inner key and outer key columns to the number of actual columns.
-        let num_actual_columns = b.add(num_actual_columns, two);
+        // Compute the metadata digest and the value digest
+        let input_values: [Array<U32Target, PACKED_HASH_LEN>; 2] =
+            [&slot.outer_key, &slot.inner_key]
+                .map(|key| Array::<Target, 32>::pack(key, b, Endianness::Big));
+        // Add the key prefixes to the circuit as constants
+        let outer_key_prefix: [Target; PACKED_HASH_LEN] = left_pad32(OUTER_KEY_ID_PREFIX)
+            .pack(Endianness::Big)
+            .iter()
+            .map(|num| b.constant(F::from_canonical_u32(*num)))
+            .collect::<Vec<Target>>()
+            .try_into()
+            .expect("This should never fail");
+        let inner_key_prefix: [Target; PACKED_HASH_LEN] = left_pad32(INNER_KEY_ID_PREFIX)
+            .pack(Endianness::Big)
+            .iter()
+            .map(|num| b.constant(F::from_canonical_u32(*num)))
+            .collect::<Vec<Target>>()
+            .try_into()
+            .expect("This should never fail");
+        let extraction_id = [zero, zero, zero, zero, zero, zero, zero, slot.mapping_slot];
+        let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(
+            b,
+            &input_values,
+            &[&outer_key_prefix, &inner_key_prefix],
+            &extraction_id,
+        );
+        let (extracted_metadata_digest, extracted_value_digest) =
+            metadata.extracted_digests::<MAPPING_LEAF_VALUE_LEN>(b, &value, offset, &extraction_id);
 
-        // Compute the outer and inner key metadata digests.
-        let [outer_key_digest, inner_key_digest] = [
-            (OUTER_KEY_ID_PREFIX, outer_key_id),
-            (INNER_KEY_ID_PREFIX, inner_key_id),
-        ]
-        .map(|(prefix, key_id)| {
-            let prefix = b.constant(F::from_canonical_u64(u64::from_be_bytes(
-                prefix.try_into().unwrap(),
-            )));
-
-            // key_column_md = H(KEY_ID_PREFIX || slot)
-            let inputs = vec![prefix, slot.mapping_slot];
-            let key_column_md = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
-
-            // key_digest = D(key_column_md || key_id)
-            let inputs = key_column_md
-                .to_targets()
-                .into_iter()
-                .chain(once(key_id))
-                .collect_vec();
-            b.map_to_curve_point(&inputs)
-        });
-
-        // Add the outer and inner key digests into the metadata digest.
-        // metadata_digest += outer_key_digest + inner_key_digest
         let metadata_digest =
-            b.add_curve_point(&[metadata_digest, inner_key_digest, outer_key_digest]);
+            b.add_curve_point(&[input_metadata_digest, extracted_metadata_digest]);
 
-        // Compute the values digest.
-        let values_digest = ColumnGadget::<MAX_FIELD_PER_EVM>::new(
-            &value.arr,
-            &metadata.table_info[..MAX_FIELD_PER_EVM],
-            &metadata.is_extracted_columns[..MAX_FIELD_PER_EVM],
-        )
-        .build(b);
-
-        // Compute the outer and inner key values digests.
+        let input_selector = b.is_equal(zero, offset);
         let curve_zero = b.curve_zero();
-        let [packed_outer_key, packed_inner_key] =
-            [&slot.outer_key, &slot.inner_key].map(|key| key.pack(b, Endianness::Big).to_targets());
-        let is_evm_word_zero = b.is_equal(metadata.evm_word, zero);
-        let [outer_key_digest, inner_key_digest] = [
-            (outer_key_id, packed_outer_key.clone()),
-            (inner_key_id, packed_inner_key.clone()),
-        ]
-        .map(|(key_id, packed_key)| {
-            // D(key_id || pack(key))
-            let inputs = iter::once(key_id).chain(packed_key).collect_vec();
-            let key_digest = b.map_to_curve_point(&inputs);
-            // key_digest = evm_word == 0 ? key_digset : CURVE_ZERO
-            b.curve_select(is_evm_word_zero, key_digest, curve_zero)
-        });
-        // values_digest += outer_key_digest + inner_key_digest
-        let values_digest = b.add_curve_point(&[values_digest, inner_key_digest, outer_key_digest]);
+        let input_value_digest = b.curve_select(input_selector, input_value_digest, curve_zero);
+        let value_digest = b.add_curve_point(&[input_value_digest, extracted_value_digest]);
 
         // Compute the unique data to identify a row is the mapping key:
         // row_unique_data = H(outer_key || inner_key)
-        let inputs = packed_outer_key
-            .into_iter()
-            .chain(packed_inner_key)
-            .collect();
+        let inputs = input_values
+            .iter()
+            .flat_map(|arr| arr.downcast_to_targets().arr)
+            .collect::<Vec<Target>>();
         let row_unique_data = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         // row_id = H2int(row_unique_data || num_actual_columns)
         let inputs = row_unique_data
             .to_targets()
             .into_iter()
-            .chain(once(num_actual_columns))
+            .chain(once(metadata.num_actual_columns))
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         let row_id = hash_to_int_target(b, hash);
 
         // values_digest = values_digest * row_id
         let row_id = b.biguint_to_nonnative(&row_id);
-        let values_digest = b.curve_scalar_mul(values_digest, &row_id);
+        let values_digest = b.curve_scalar_mul(value_digest, &row_id);
 
         // Only one leaf in this node.
         let n = b.one();
@@ -209,46 +161,42 @@ where
             value,
             root,
             slot,
-            outer_key_id,
-            inner_key_id,
             metadata,
+            offset,
         }
     }
 
     pub fn assign(
         &self,
         pw: &mut PartialWitness<GFp>,
-        wires: &LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+        wires: &LeafMappingOfMappingsWires<MAX_EXTRACTED_COLUMNS>,
     ) {
         let padded_node =
-            Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(&self.node).expect("Invalid node");
+            Vector::<u8, { PAD_LEN(69) }>::from_vec(&self.node).expect("Invalid node");
         wires.node.assign(pw, &padded_node);
-        KeccakCircuit::<{ PAD_LEN(NODE_LEN) }>::assign(
+        KeccakCircuit::<{ PAD_LEN(69) }>::assign(
             pw,
             &wires.root,
             &InputData::Assigned(&padded_node),
         );
-        pw.set_target(wires.outer_key_id, self.outer_key_id);
-        pw.set_target(wires.inner_key_id, self.inner_key_id);
+
         self.slot.assign_mapping_of_mappings(
             pw,
             &wires.slot,
             &self.inner_key,
-            self.metadata.evm_word,
+            self.evm_word as u32,
         );
-        MetadataGadget::assign(pw, &self.metadata, &wires.metadata);
+        TableMetadata::assign(pw, &self.metadata, &wires.metadata);
+        pw.set_target(wires.offset, F::from_canonical_u8(self.evm_word));
     }
 }
 
 /// Num of children = 0
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    CircuitLogicWires<F, D, 0>
-    for LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
-where
-    [(); PAD_LEN(NODE_LEN)]:,
+impl<const MAX_EXTRACTED_COLUMNS: usize> CircuitLogicWires<F, D, 0>
+    for LeafMappingOfMappingsWires<MAX_EXTRACTED_COLUMNS>
 {
     type CircuitBuilderParams = ();
-    type Inputs = LeafMappingOfMappingsCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>;
+    type Inputs = LeafMappingOfMappingsCircuit<MAX_EXTRACTED_COLUMNS>;
 
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
 
@@ -270,12 +218,10 @@ where
 mod tests {
     use super::*;
     use crate::{
-        tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
+        tests::TEST_MAX_COLUMNS,
         values_extraction::{
-            compute_leaf_mapping_of_mappings_metadata_digest,
-            compute_leaf_mapping_of_mappings_values_digest,
+            storage_value_digest, StorageSlotInfo, INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
         },
-        MAX_LEAF_NODE_LEN,
     };
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
@@ -283,6 +229,7 @@ mod tests {
         eth::{StorageSlot, StorageSlotNode},
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
+        types::MAPPING_LEAF_VALUE_LEN,
         utils::{keccak256, Endianness, Packer},
         C, D, F,
     };
@@ -295,26 +242,25 @@ mod tests {
         field::types::Field,
         iop::{target::Target, witness::PartialWitness},
     };
+
     use rand::{thread_rng, Rng};
     use std::array;
 
-    type LeafCircuit =
-        LeafMappingOfMappingsCircuit<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
-    type LeafWires =
-        LeafMappingOfMappingsWires<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
-
     #[derive(Clone, Debug)]
-    struct TestLeafMappingOfMappingsCircuit {
-        c: LeafCircuit,
+    struct TestNewLeafMappingOfMappingsCircuit {
+        c: LeafMappingOfMappingsCircuit<TEST_MAX_COLUMNS>,
         exp_value: Vec<u8>,
     }
 
-    impl UserCircuit<F, D> for TestLeafMappingOfMappingsCircuit {
+    impl UserCircuit<F, D> for TestNewLeafMappingOfMappingsCircuit {
         // Leaf wires + expected extracted value
-        type Wires = (LeafWires, Array<Target, MAPPING_LEAF_VALUE_LEN>);
+        type Wires = (
+            LeafMappingOfMappingsWires<TEST_MAX_COLUMNS>,
+            Array<Target, MAPPING_LEAF_VALUE_LEN>,
+        );
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let leaf_wires = LeafCircuit::build(b);
+            let leaf_wires = LeafMappingOfMappingsCircuit::<TEST_MAX_COLUMNS>::build(b);
             let exp_value = Array::<Target, MAPPING_LEAF_VALUE_LEN>::new(b);
             leaf_wires.value.enforce_equal(b, &exp_value);
 
@@ -330,12 +276,10 @@ mod tests {
     }
 
     fn test_circuit_for_storage_slot(
-        outer_key: Vec<u8>,
-        inner_key: Vec<u8>,
+        outer_key: &[u8; 32],
+        inner_key: &[u8; 32],
         storage_slot: StorageSlot,
     ) {
-        let rng = &mut thread_rng();
-
         let (mut trie, _) = generate_random_storage_mpt::<3, MAPPING_LEAF_VALUE_LEN>();
         let value = random_vector(MAPPING_LEAF_VALUE_LEN);
         let encoded_value: Vec<u8> = rlp::encode(&value).to_vec();
@@ -349,40 +293,43 @@ mod tests {
 
         let slot = storage_slot.slot();
         let evm_word = storage_slot.evm_offset();
-        let [outer_key_id, inner_key_id] = array::from_fn(|_| rng.gen());
-        let metadata =
-            ColumnsMetadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
-        let table_info = metadata.actual_table_info().to_vec();
-        let extracted_column_identifiers = metadata.extracted_column_identifiers();
-        let metadata_digest = compute_leaf_mapping_of_mappings_metadata_digest::<
-            TEST_MAX_COLUMNS,
-            TEST_MAX_FIELD_PER_EVM,
-        >(table_info.clone(), slot, outer_key_id, inner_key_id);
-        // Compute the values digest.
-        let values_digest = compute_leaf_mapping_of_mappings_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-            table_info,
-            &extracted_column_identifiers,
-            value.clone().try_into().unwrap(),
-            evm_word,
-            (outer_key.clone(), outer_key_id),
-            (inner_key.clone(), inner_key_id),
+        let table_metadata = TableMetadata::sample::<TEST_MAX_COLUMNS>(
+            true,
+            &[OUTER_KEY_ID_PREFIX, INNER_KEY_ID_PREFIX],
+            &[slot],
+            F::from_canonical_u32(evm_word),
         );
-        let slot = MappingSlot::new(slot, outer_key.clone());
-        let c = LeafCircuit {
+
+        let metadata_digest = table_metadata.digest();
+        let slot_info = StorageSlotInfo::new(
+            storage_slot.clone(),
+            table_metadata.extracted_columns.clone(),
+        );
+
+        let values_digest = storage_value_digest(
+            &table_metadata,
+            &[outer_key, inner_key],
+            &value.clone().try_into().unwrap(),
+            &slot_info,
+        );
+
+        let slot = MappingSlot::new(slot, outer_key.to_vec());
+
+        let new_c = LeafMappingOfMappingsCircuit::<TEST_MAX_COLUMNS> {
             node: node.clone(),
-            slot,
-            inner_key: inner_key.clone(),
-            outer_key_id: F::from_canonical_u64(outer_key_id),
-            inner_key_id: F::from_canonical_u64(inner_key_id),
-            metadata,
+            slot: slot.clone(),
+            inner_key: inner_key.to_vec(),
+            metadata: table_metadata,
+            evm_word: evm_word as u8,
         };
-        let test_circuit = TestLeafMappingOfMappingsCircuit {
-            c,
+
+        let new_test_circuit = TestNewLeafMappingOfMappingsCircuit {
+            c: new_c,
             exp_value: value.clone(),
         };
 
-        let proof = run_circuit::<F, D, C, _>(test_circuit);
+        let proof = run_circuit::<F, D, C, _>(new_test_circuit);
         let pi = PublicInputs::new(&proof.public_inputs);
         // Check root hash
         {
@@ -408,30 +355,33 @@ mod tests {
         assert_eq!(pi.n(), F::ONE);
         // Check metadata digest
         assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
+
         // Check values digest
         assert_eq!(pi.values_digest(), values_digest.to_weierstrass());
     }
 
     #[test]
     fn test_values_extraction_leaf_mapping_of_mappings_variable() {
-        let outer_key = random_vector(10);
-        let inner_key = random_vector(20);
-        let parent = StorageSlot::Mapping(outer_key.clone(), 2);
+        let rng = &mut thread_rng();
+        let outer_key: [u8; 32] = array::from_fn(|_| rng.gen());
+        let inner_key: [u8; 32] = array::from_fn(|_| rng.gen());
+        let parent = StorageSlot::Mapping(outer_key.to_vec(), 2);
         let storage_slot =
-            StorageSlot::Node(StorageSlotNode::new_mapping(parent, inner_key.clone()).unwrap());
+            StorageSlot::Node(StorageSlotNode::new_mapping(parent, inner_key.to_vec()).unwrap());
 
-        test_circuit_for_storage_slot(outer_key, inner_key, storage_slot);
+        test_circuit_for_storage_slot(&outer_key, &inner_key, storage_slot);
     }
 
     #[test]
     fn test_values_extraction_leaf_mapping_of_mappings_struct() {
-        let outer_key = random_vector(10);
-        let inner_key = random_vector(20);
-        let grand = StorageSlot::Mapping(outer_key.clone(), 2);
+        let rng = &mut thread_rng();
+        let outer_key: [u8; 32] = array::from_fn(|_| rng.gen());
+        let inner_key: [u8; 32] = array::from_fn(|_| rng.gen());
+        let grand = StorageSlot::Mapping(outer_key.to_vec(), 2);
         let parent =
-            StorageSlot::Node(StorageSlotNode::new_mapping(grand, inner_key.clone()).unwrap());
+            StorageSlot::Node(StorageSlotNode::new_mapping(grand, inner_key.to_vec()).unwrap());
         let storage_slot = StorageSlot::Node(StorageSlotNode::new_struct(parent, 30));
 
-        test_circuit_for_storage_slot(outer_key, inner_key, storage_slot);
+        test_circuit_for_storage_slot(&outer_key, &inner_key, storage_slot);
     }
 }

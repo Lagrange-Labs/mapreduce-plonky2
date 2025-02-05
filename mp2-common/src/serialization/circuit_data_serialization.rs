@@ -1,5 +1,7 @@
 use std::marker::PhantomData;
 
+use plonky2::field::extension::quintic::QuinticExtension;
+use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::{
     field::extension::Extendable,
@@ -61,7 +63,7 @@ use plonky2_crypto::{
     },
 };
 use plonky2_ecgfp5::{
-    curve::base_field::InverseOrZero,
+    curve::{base_field::InverseOrZero, curve::Point},
     gadgets::base_field::{QuinticQuotientGenerator, QuinticSqrtGenerator},
 };
 use poseidon2_plonky2::poseidon2_gate::{Poseidon2Gate, Poseidon2Generator};
@@ -70,6 +72,29 @@ use poseidon2_plonky2::poseidon2_hash::Poseidon2;
 use crate::u256::UInt256DivGenerator;
 
 use super::{FromBytes, SerializationError, ToBytes};
+
+impl ToBytes for Point {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        let encoded = self.encode();
+        buffer
+            .write_field_ext::<GoldilocksField, 5>(encoded)
+            .expect("Writing to a byte-vector cannot fail.");
+        buffer
+    }
+}
+
+impl FromBytes for Point {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, SerializationError> {
+        let mut buffer = Buffer::new(bytes);
+        let compact: QuinticExtension<GoldilocksField> =
+            buffer.read_field_ext::<GoldilocksField, 5>()?;
+
+        Point::decode(compact).ok_or(SerializationError(
+            "Could not decode quintic extension to point".to_string(),
+        ))
+    }
+}
 
 impl<F: RichField, H: Hasher<F>> ToBytes for MerkleTree<F, H> {
     fn to_bytes(&self) -> Vec<u8> {
@@ -366,5 +391,21 @@ pub(super) mod tests {
         let decoded_mt: TestMerkleTreeSerialization = bincode::deserialize(&encoded).unwrap();
 
         assert_eq!(decoded_mt.0, mt.0);
+    }
+
+    #[test]
+    fn test_point_serialization() {
+        let point = Point::rand();
+
+        #[derive(Serialize, Deserialize)]
+        struct TestPointSerialization(
+            #[serde(serialize_with = "serialize", deserialize_with = "deserialize")] Point,
+        );
+
+        let p = TestPointSerialization(point);
+        let encoded = bincode::serialize(&p).unwrap();
+        let decoded_p: TestPointSerialization = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(decoded_p.0, point);
     }
 }

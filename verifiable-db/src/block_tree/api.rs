@@ -3,6 +3,7 @@
 use crate::extraction::{ExtractionPI, ExtractionPIWrap};
 
 use super::{
+    empty::{EmptyCircuit, RecursiveEmptyInput, RecursiveEmptyWires},
     leaf::{LeafCircuit, RecursiveLeafInput, RecursiveLeafWires},
     membership::{MembershipCircuit, MembershipWires},
     parent::{ParentCircuit, RecursiveParentInput, RecursiveParentWires},
@@ -39,6 +40,10 @@ pub enum CircuitInput {
     Membership {
         witness: MembershipCircuit,
         right_child_proof: Vec<u8>,
+    },
+    Empty {
+        witness: EmptyCircuit,
+        extraction_proof: Vec<u8>,
     },
 }
 
@@ -104,6 +109,22 @@ impl CircuitInput {
             right_child_proof,
         }
     }
+
+    /// Create a circuit input for proving an "empty" node. So we prove a node that contained no values
+    /// so it isn't added to the tree. Used to not break the IVC proof.
+    pub fn new_empty(
+        index_identifier: u64,
+        tree_hash: &HashOutput,
+        extraction_proof: Vec<u8>,
+    ) -> Self {
+        CircuitInput::Empty {
+            witness: EmptyCircuit {
+                index_identifier: F::from_canonical_u64(index_identifier),
+                h_old: HashOut::<F>::from_bytes(tree_hash.into()),
+            },
+            extraction_proof,
+        }
+    }
 }
 
 /// Main struct holding the different circuit parameters for each of the circuits defined here.
@@ -116,14 +137,15 @@ where
     leaf: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveLeafWires<E>>,
     parent: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveParentWires<E>>,
     membership: CircuitWithUniversalVerifier<F, C, D, 1, MembershipWires>,
+    empty: CircuitWithUniversalVerifier<F, C, D, 0, RecursiveEmptyWires<E>>,
     set: RecursiveCircuits<F, C, D>,
 }
 
 const BLOCK_INDEX_IO_LEN: usize = PublicInputs::<F>::TOTAL_LEN;
 
 /// Number of circuits in the set
-/// 1 leaf + 1 parent + 1 membership
-const CIRCUIT_SET_SIZE: usize = 3;
+/// 1 leaf + 1 parent + 1 membership + 1 empty
+const CIRCUIT_SET_SIZE: usize = 4;
 
 impl<E> PublicParameters<E>
 where
@@ -146,12 +168,14 @@ where
         let leaf = builder.build_circuit((extraction_set.clone(), rows_tree_set.clone()));
         let parent = builder.build_circuit((extraction_set.clone(), rows_tree_set.clone()));
         let membership = builder.build_circuit(());
+        let empty = builder.build_circuit(extraction_set.clone());
 
         // Build the circuit set.
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&leaf),
             prepare_recursive_circuit_for_circuit_set(&parent),
             prepare_recursive_circuit_for_circuit_set(&membership),
+            prepare_recursive_circuit_for_circuit_set(&empty),
         ];
         let set = RecursiveCircuits::<F, C, D>::new(circuits);
 
@@ -159,6 +183,7 @@ where
             leaf,
             parent,
             membership,
+            empty,
             set,
         }
     }
@@ -204,6 +229,10 @@ where
                 witness,
                 right_child_proof,
             } => self.generate_membership_proof(witness, right_child_proof),
+            CircuitInput::Empty {
+                witness,
+                extraction_proof,
+            } => self.genererate_empty_proof(witness, extraction_proof, extraction_set),
         }
     }
 
@@ -261,6 +290,24 @@ where
             self.set
                 .generate_proof(&self.membership, [child_proof], [&child_vk], witness)?;
         ProofWithVK::from((proof, self.membership.circuit_data().verifier_only.clone())).serialize()
+    }
+
+    fn genererate_empty_proof(
+        &self,
+        witness: EmptyCircuit,
+        extraction_proof: Vec<u8>,
+        extraction_set: &RecursiveCircuits<F, C, D>,
+    ) -> Result<Vec<u8>> {
+        let extraction_proof = ProofWithVK::deserialize(&extraction_proof)?;
+
+        let empty = RecursiveEmptyInput {
+            witness,
+            extraction_proof,
+            extraction_set: extraction_set.clone(),
+        };
+
+        let proof = self.set.generate_proof(&self.empty, [], [], empty)?;
+        ProofWithVK::from((proof, self.empty.circuit_data().verifier_only.clone())).serialize()
     }
 }
 

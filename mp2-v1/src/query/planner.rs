@@ -217,7 +217,7 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
                 } else {
                     // we don't found the right child node in the tree, which means that the
                     // successor might be out of range, so we return None
-                    return None;
+                    None
                 }
             } else {
                 // find successor among the ancestors of current node: we go up in the path
@@ -298,7 +298,7 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
                 } else {
                     // we don't found the left child node in the tree, which means that the
                     // predecessor might be out of range, so we return None
-                    return None;
+                    None
                 }
             } else {
                 // find predecessor among the ancestors of current node: we go up in the path

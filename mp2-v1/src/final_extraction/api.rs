@@ -11,6 +11,7 @@ use super::{
     base_circuit::BaseCircuitInput,
     lengthed_circuit::LengthedRecursiveWires,
     merge_circuit::{MergeTable, MergeTableRecursiveWires},
+    receipt_circuit::{ReceiptCircuitInput, ReceiptCircuitProofInputs, ReceiptCircuitProofWires},
     simple_circuit::SimpleCircuitRecursiveWires,
     BaseCircuitProofInputs, LengthedCircuit, MergeCircuit, PublicInputs, SimpleCircuit,
 };
@@ -20,6 +21,7 @@ pub enum CircuitInput {
     Simple(SimpleCircuitInput),
     Lengthed(LengthedCircuitInput),
     MergeTable(MergeCircuitInput),
+    Receipt(ReceiptCircuitInput),
 }
 #[derive(Clone, Debug)]
 pub struct FinalExtractionBuilderParams {
@@ -51,10 +53,11 @@ pub struct PublicParameters {
     simple: CircuitWithUniversalVerifier<F, C, D, 0, SimpleCircuitRecursiveWires>,
     lengthed: CircuitWithUniversalVerifier<F, C, D, 0, LengthedRecursiveWires>,
     merge: CircuitWithUniversalVerifier<F, C, D, 0, MergeTableRecursiveWires>,
+    receipt: CircuitWithUniversalVerifier<F, C, D, 0, ReceiptCircuitProofWires>,
     circuit_set: RecursiveCircuits<F, C, D>,
 }
 
-const FINAL_EXTRACTION_CIRCUIT_SET_SIZE: usize = 2;
+const FINAL_EXTRACTION_CIRCUIT_SET_SIZE: usize = 4;
 pub(super) const NUM_IO: usize = PublicInputs::<Target>::TOTAL_LEN;
 
 impl PublicParameters {
@@ -76,12 +79,14 @@ impl PublicParameters {
         );
         let simple = builder.build_circuit(builder_params.clone());
         let lengthed = builder.build_circuit(builder_params.clone());
-        let merge = builder.build_circuit(builder_params);
+        let merge = builder.build_circuit(builder_params.clone());
+        let receipt = builder.build_circuit(builder_params);
 
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&simple),
             prepare_recursive_circuit_for_circuit_set(&lengthed),
             prepare_recursive_circuit_for_circuit_set(&merge),
+            prepare_recursive_circuit_for_circuit_set(&receipt),
         ];
 
         let circuit_set = RecursiveCircuits::new(circuits);
@@ -90,6 +95,7 @@ impl PublicParameters {
             simple,
             lengthed,
             merge,
+            receipt,
             circuit_set,
         }
     }
@@ -153,6 +159,19 @@ impl PublicParameters {
             .circuit_set
             .generate_proof(&self.lengthed, [], [], lengthed_input)?;
         ProofWithVK::serialize(&(proof, self.lengthed.circuit_data().verifier_only.clone()).into())
+    }
+
+    pub(crate) fn generate_receipt_proof(
+        &self,
+        input: ReceiptCircuitInput,
+        value_circuit_set: &RecursiveCircuits<F, C, D>,
+    ) -> Result<Vec<u8>> {
+        let receipt_input =
+            ReceiptCircuitProofInputs::new_from_proofs(input, value_circuit_set.clone());
+        let proof = self
+            .circuit_set
+            .generate_proof(&self.receipt, [], [], receipt_input)?;
+        ProofWithVK::serialize(&(proof, self.receipt.circuit_data().verifier_only.clone()).into())
     }
 
     pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
@@ -219,6 +238,13 @@ impl CircuitInput {
         let length_proof = ProofWithVK::deserialize(&length_proof)?;
         Ok(Self::Lengthed(LengthedCircuitInput { base, length_proof }))
     }
+
+    pub fn new_receipt_input(block_proof: Vec<u8>, value_proof: Vec<u8>) -> Result<Self> {
+        Ok(Self::Receipt(ReceiptCircuitInput::new(
+            block_proof,
+            value_proof,
+        )?))
+    }
 }
 
 #[cfg(test)]
@@ -235,6 +261,7 @@ mod tests {
         final_extraction::{
             base_circuit::{test::ProofsPi, CONTRACT_SET_NUM_IO, VALUE_SET_NUM_IO},
             lengthed_circuit::LENGTH_SET_NUM_IO,
+            receipt_circuit::test::ReceiptsProofsPi,
         },
         length_extraction,
     };
@@ -258,6 +285,7 @@ mod tests {
         );
 
         let proof_pis = ProofsPi::random();
+        let receipt_proof_pis = ReceiptsProofsPi::generate_from_proof_pi_value(&proof_pis);
         let length_pis = proof_pis.length_inputs();
         let len_dm = length_extraction::PublicInputs::<F>::from_slice(&length_pis).metadata_point();
         let block_proof = block_circuit
@@ -271,6 +299,13 @@ mod tests {
             .unwrap()[0];
         let length_proof = &length_params
             .generate_input_proofs::<1>([length_pis.try_into().unwrap()])
+            .unwrap()[0];
+        let receipt_proof = &values_params
+            .generate_input_proofs::<1>([receipt_proof_pis
+                .value_inputs()
+                .proof_inputs
+                .try_into()
+                .unwrap()])
             .unwrap()[0];
 
         let contract_proof: ProofWithVK = (
@@ -333,5 +368,31 @@ mod tests {
         )
         .unwrap();
         proof_pis.check_proof_public_inputs(proof.proof(), Some(len_dm));
+
+        let receipt_proof: ProofWithVK = (
+            receipt_proof.clone(),
+            values_params.verifier_data_for_input_proofs::<1>()[0].clone(),
+        )
+            .into();
+
+        let circuit_input = CircuitInput::new_receipt_input(
+            serialize_proof(&block_proof).unwrap(),
+            receipt_proof.serialize().unwrap(),
+        )
+        .unwrap();
+        let proof = ProofWithVK::deserialize(
+            &params
+                .generate_receipt_proof(
+                    match circuit_input {
+                        CircuitInput::Receipt(input) => input,
+                        _ => unreachable!(),
+                    },
+                    values_params.get_recursive_circuit_set(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+
+        receipt_proof_pis.check_proof_public_inputs(proof.proof());
     }
 }

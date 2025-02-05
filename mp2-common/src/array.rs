@@ -1,6 +1,9 @@
 use crate::{
     serialization::{deserialize_long_array, serialize_long_array},
-    utils::{less_than_or_equal_to_unsafe, range_check_optimized, Endianness, PackerTarget},
+    utils::{
+        less_than_or_equal_to_unsafe, less_than_unsafe, range_check_optimized, Endianness,
+        PackerTarget,
+    },
 };
 use anyhow::{anyhow, Result};
 use plonky2::{
@@ -485,12 +488,13 @@ where
         slice_len: Target,
     ) {
         let tru = b._true();
+        let mut take = b._false();
         for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
             let it = b.constant(F::from_canonical_usize(i));
-            // TODO: fixed to 6 becaues max nibble len = 64 - TO CHANGE
-            let before_end = less_than(b, it, slice_len, 6);
+            let reached_end = b.is_equal(slice_len, it);
+            take = b.or(take, reached_end);
             let eq = b.is_equal(our.to_target(), other.to_target());
-            let res = b.select(before_end, eq.target, tru.target);
+            let res = b.select(take, tru.target, eq.target);
             b.connect(res, tru.target);
         }
     }
@@ -523,25 +527,19 @@ where
         b: &mut CircuitBuilder<F, D>,
         at: Target,
     ) -> Array<T, SUB_SIZE> {
+        let tru = b._true();
         let m = b.constant(F::from_canonical_usize(SUB_SIZE));
+        let orig_size = b.constant(F::from_canonical_usize(SIZE));
         let upper_bound = b.add(at, m);
         let num_bits_size = SIZE.ilog2() + 1;
+        // By enforcing that upper_bound is less than or equal to total size we don't need to check at each step
+        let lt = less_than_or_equal_to_unsafe(b, upper_bound, orig_size, num_bits_size as usize);
+        b.connect(lt.target, tru.target);
         Array::<T, SUB_SIZE> {
             arr: core::array::from_fn(|i| {
                 let i_target = b.constant(F::from_canonical_usize(i));
                 let i_plus_n_target = b.add(at, i_target);
-                // ((i + offset) <= n + M)
-                // unsafe should be ok since the function assumes that `at + SUB_SIZE <= SIZE`
-                let lt = less_than_or_equal_to_unsafe(
-                    b,
-                    i_plus_n_target,
-                    upper_bound,
-                    num_bits_size as usize,
-                );
-                // ((i+n) <= n+M) * (i+n)
-                let j = b.mul(lt.target, i_plus_n_target);
-                // out_val = arr[((i+n)<=n+M) * (i+n)]
-                self.value_at(b, j)
+                self.value_at(b, i_plus_n_target)
             }),
         }
     }
@@ -605,6 +603,54 @@ where
     pub fn last(&self) -> T {
         self.arr[SIZE - 1]
     }
+
+    /// This function allows you to search a larger [`Array`] by representing it as a number of
+    /// smaller [`Array`]s with size [`RANDOM_ACCESS_SIZE`], padding the final smaller array where required.
+    /// For example if we have an array of length `512` and we wish to find the value at index `324` the following
+    /// occurs:
+    ///     1) Split the original [`Array`] into `512 / 64 = 8` chunks `[A_0, ... , A_7]`
+    ///     2) Express `324` in base 64 (Little Endian)  `[4, 5]`
+    ///     3) For each `i \in [0, 7]` use a [`RandomAccesGate`] to lookup the `4`th element, `v_i,3` of `A_i`
+    ///        and create a new list of length `8` that consists of `[v_0,3, v_1,3, ... v_7,3]`
+    ///     4) Now use another [`RandomAccessGate`] to select the `5`th elemnt of this new list (`v_4,3` as we have zero-indexed both times)
+    ///
+    /// For comparison using [`Self::value_at`] on an [`Array`] with length `512` results in 129 rows, using this method
+    /// on the same [`Array`] results in 15 rows.
+    ///
+    /// As an aside, if the [`Array`] length is not divisible by `64` then we pad with zero values, since the size of the
+    /// [`Array`] is a compile time constant this will not affect circuit preprocessing.
+    pub fn random_access_large_array<F: RichField + Extendable<D>, const D: usize>(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        at: Target,
+    ) -> T {
+        large_slice_random_access(b, &self.arr, at)
+    }
+
+    /// Returns [`Self[at..at+SUB_SIZE]`].
+    /// This is more expensive than [`Self::extract_array`] for [`Array`]s that are shorter than 64 elements long due to using [`Self::random_access_large_array`]
+    /// instead of [`Self::value_at`]. This function enforces that the values extracted are within the array.
+    ///
+    /// For comparison usin [`Self::extract_array`] on an [`Array`] of size `512` results in 5179 rows, using this method instead
+    /// results in 508 rows.
+    pub fn extract_array_large<
+        F: RichField + Extendable<D>,
+        const D: usize,
+        const SUB_SIZE: usize,
+    >(
+        &self,
+        b: &mut CircuitBuilder<F, D>,
+        at: Target,
+    ) -> Array<T, SUB_SIZE> {
+        Array::<T, SUB_SIZE> {
+            arr: core::array::from_fn(|i| {
+                let i_target = b.constant(F::from_canonical_usize(i));
+                let i_plus_n_target = b.add(at, i_target);
+
+                self.random_access_large_array(b, i_plus_n_target)
+            }),
+        }
+    }
 }
 /// Returns the size of the array in 32-bit units, rounded up.
 #[allow(non_snake_case)]
@@ -636,6 +682,114 @@ impl<const SIZE: usize> Array<Target, SIZE> {
 /// Maximum size of the array where we can call b.random_access() from native
 /// Plonky2 API
 const RANDOM_ACCESS_SIZE: usize = 64;
+
+/// This function allows you to search a large slice of [`Targetable`] by representing it as a number of
+/// smaller [`Array`]s with size [`RANDOM_ACCESS_SIZE`], padding the final smaller array where required.
+/// For example if we have an array of length `512` and we wish to find the value at index `324` the following
+/// occurs:
+///     1) Split the original slice into `512 / 64 = 8` chunks `[A_0, ... , A_7]`
+///     2) Express `324` in base 64 (Little Endian)  `[4, 5]`
+///     3) For each `i \in [0, 7]` use a [`RandomAccesGate`] to lookup the `4`th element, `v_i,3` of `A_i`
+///        and create a new list of length `8` that consists of `[v_0,3, v_1,3, ... v_7,3]`
+///     4) Now use another [`RandomAccessGate`] to select the `5`th elemnt of this new list (`v_4,3` as we have zero-indexed both times)
+///
+/// For comparison using [`Array::value_at`] on an [`Array`] with length `512` results in 129 rows, using this method
+/// on the same [`Array`] results in 15 rows.
+pub(crate) fn large_slice_random_access<F, const D: usize, T>(
+    b: &mut CircuitBuilder<F, D>,
+    slice: &[T],
+    at: Target,
+) -> T
+where
+    F: RichField + Extendable<D>,
+    T: Targetable + Clone + Serialize + for<'de> Deserialize<'de>,
+{
+    let zero = b.zero();
+    // We will split the array into smaller arrays of size 64, padding the last array with zeroes if required
+    let padded_size = (slice.len() - 1) / RANDOM_ACCESS_SIZE + 1;
+
+    // Create an array of `Array`s
+    let arrays: Vec<Array<T, RANDOM_ACCESS_SIZE>> = (0..padded_size)
+        .map(|i| Array {
+            arr: create_array(|j| {
+                let index = RANDOM_ACCESS_SIZE * i + j;
+                if index < slice.len() {
+                    slice[index]
+                } else {
+                    T::from_target(b.zero())
+                }
+            }),
+        })
+        .collect();
+
+    // We need to express `at` in base 64, we are also assuming that the initial array was smaller than 64^2 = 4096 which we enforce with a range check.
+    // We also check that `at` is smaller that the size of the array, if it is not the output defaults to zero.
+    let array_size = b.constant(F::from_noncanonical_u64(slice.len() as u64));
+    let less_than_check = less_than_unsafe(b, at, array_size, 12);
+
+    let lookup_index = b.select(less_than_check, at, zero);
+    let (low_bits, high_bits) = b.split_low_high(lookup_index, 6, 12);
+    // Search each of the smaller arrays for the target at `low_bits`
+    let mut first_search = arrays
+        .into_iter()
+        .map(|array| {
+            b.random_access(
+                low_bits,
+                array
+                    .arr
+                    .iter()
+                    .map(Targetable::to_target)
+                    .collect::<Vec<Target>>(),
+            )
+        })
+        .collect::<Vec<Target>>();
+
+    // Now we push a number of zero targets into the array to make it a power of 2
+    let next_power_of_two = first_search.len().next_power_of_two();
+    let zero_target = b.zero();
+    first_search.resize(next_power_of_two, zero_target);
+    // Serach the result for the Target at `high_bits`
+    let second_search = b.random_access(high_bits, first_search);
+    T::from_target(b.select(less_than_check, second_search, zero))
+}
+
+/// Function to extract value from a slice using random access gates.
+/// If `at` is outside the range of the slice it defaults to return zero.
+pub fn extract_value<F, const D: usize, T>(
+    b: &mut CircuitBuilder<F, D>,
+    data: &[T],
+    at: Target,
+) -> T
+where
+    F: RichField + Extendable<D>,
+    T: Targetable + Clone + Serialize + for<'de> Deserialize<'de>,
+{
+    // We check to see if the index `at` is a constant, if it is we can directly return the value
+    if let Some(val) = b.target_as_constant(at) {
+        let index = val.to_canonical_u64() as usize;
+        return data[index];
+    }
+    let data_len = data.len();
+    let zero = b.zero();
+    // Only use random_access when SIZE is a power of 2 and smaller than 64
+    // see https://stackoverflow.com/a/600306/1202623 for the trick
+    if data_len <= RANDOM_ACCESS_SIZE {
+        let next_power_two = data_len.next_power_of_two();
+        // Escape hatch when we can use random_access from plonky2 base
+        T::from_target(
+            b.random_access(
+                at,
+                data.iter()
+                    .map(Targetable::to_target)
+                    .chain(std::iter::repeat(zero))
+                    .take(next_power_two)
+                    .collect::<Vec<Target>>(),
+            ),
+        )
+    } else {
+        large_slice_random_access(b, data, at)
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -821,6 +975,53 @@ mod test {
     }
 
     #[test]
+    fn test_random_access_large_array() {
+        const SIZE: usize = 512;
+        #[derive(Clone, Debug)]
+        struct ValueAtCircuit {
+            arr: [u8; SIZE],
+            idx: usize,
+            exp: u8,
+        }
+        impl<F, const D: usize> UserCircuit<F, D> for ValueAtCircuit
+        where
+            F: RichField + Extendable<D>,
+        {
+            type Wires = (Array<Target, SIZE>, Target, Target);
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let array = Array::<Target, SIZE>::new(c);
+                let exp_value = c.add_virtual_target();
+                let index = c.add_virtual_target();
+                let extracted = array.random_access_large_array(c, index);
+                c.connect(exp_value, extracted);
+
+                (array, index, exp_value)
+            }
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .0
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
+                pw.set_target(wires.1, F::from_canonical_usize(self.idx));
+                pw.set_target(wires.2, F::from_canonical_u8(self.exp));
+            }
+        }
+
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..]);
+        let idx: usize = rng.gen_range(0..SIZE);
+        let exp = arr[idx];
+        run_circuit::<F, D, C, _>(ValueAtCircuit { arr, idx, exp });
+
+        // Now we check that it fails when the index is too large
+        let idx = SIZE;
+        let result = std::panic::catch_unwind(|| {
+            run_circuit::<F, D, C, _>(ValueAtCircuit { arr, idx, exp })
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_extract_array() {
         const SIZE: usize = 80;
         const SUBSIZE: usize = 40;
@@ -861,6 +1062,57 @@ mod test {
         let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
         let exp = create_array(|i| arr[idx + i]);
         run_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp });
+    }
+
+    #[test]
+    fn test_extract_array_large() {
+        const SIZE: usize = 512;
+        const SUBSIZE: usize = 40;
+        #[derive(Clone, Debug)]
+        struct ExtractArrayCircuit {
+            arr: [u8; SIZE],
+            idx: usize,
+            exp: [u8; SUBSIZE],
+        }
+        impl<F, const D: usize> UserCircuit<F, D> for ExtractArrayCircuit
+        where
+            F: RichField + Extendable<D>,
+        {
+            type Wires = (Array<Target, SIZE>, Target, Array<Target, SUBSIZE>);
+            fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {
+                let array = Array::<Target, SIZE>::new(c);
+                let index = c.add_virtual_target();
+                let expected = Array::<Target, SUBSIZE>::new(c);
+                let extracted = array.extract_array_large::<_, _, SUBSIZE>(c, index);
+                let are_equal = expected.equals(c, &extracted);
+                let tru = c._true();
+                c.connect(are_equal.target, tru.target);
+                (array, index, expected)
+            }
+            fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+                wires
+                    .0
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.arr[i])));
+                pw.set_target(wires.1, F::from_canonical_usize(self.idx));
+                wires
+                    .2
+                    .assign(pw, &create_array(|i| F::from_canonical_u8(self.exp[i])));
+            }
+        }
+
+        let mut rng = thread_rng();
+        let mut arr = [0u8; SIZE];
+        rng.fill(&mut arr[..]);
+        let idx: usize = rng.gen_range(0..(SIZE - SUBSIZE));
+        let exp = create_array(|i| arr[idx + i]);
+        run_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp });
+
+        // It should panic if we try to extract an array where some of the indices fall outside of (0..SIZE)
+        let idx = SIZE;
+        let result = std::panic::catch_unwind(|| {
+            run_circuit::<F, D, C, _>(ExtractArrayCircuit { arr, idx, exp })
+        });
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1093,7 +1345,10 @@ mod test {
         };
         run_circuit::<F, D, C, _>(circuit);
 
-        arr2[0] += 1; // ensure arr2 is different from arr
+        arr2[0] = match arr2[0].checked_add(1) {
+            Some(num) => num,
+            None => arr2[0] - 1,
+        };
         let res = panic::catch_unwind(|| {
             let circuit = TestSliceEqual {
                 arr,

@@ -36,13 +36,18 @@ pub struct UpdateTreeNode<K: Clone + Hash + Eq> {
     /// Whether this node is a leaf of an update path
     is_path_end: bool,
 }
+
 impl<K: Debug + Clone + Hash + Eq> UpdateTreeNode<K> {
     fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
+
+    pub fn k(&self) -> K {
+        self.k.clone()
+    }
 }
 
-impl<K: Clone + Hash + Eq> UpdateTree<K> {
+impl<K: Clone + Hash + Eq + Debug> UpdateTree<K> {
     pub fn root(&self) -> &K {
         &self.nodes[0].k
     }
@@ -63,6 +68,31 @@ impl<K: Clone + Hash + Eq> UpdateTree<K> {
     /// Return an iterator over the key contained in this `UpdateTree`.
     pub fn nodes(&self) -> impl Iterator<Item = &K> {
         self.nodes.iter().map(|n| &n.k)
+    }
+    pub fn get_node(&self, key: &K) -> Option<&UpdateTreeNode<K>> {
+        self.idx.get(key).map(|idx| self.node(*idx))
+    }
+    pub fn get_node_mut(&mut self, key: &K) -> Option<&mut UpdateTreeNode<K>> {
+        let idx = self.idx.get(key).cloned();
+        idx.map(|index| self.node_mut(index))
+    }
+
+    pub fn get_child_keys(&self, node: &UpdateTreeNode<K>) -> Vec<K> {
+        node.children
+            .iter()
+            .map(|idx| self.node(*idx).k())
+            .collect()
+    }
+
+    pub fn get_parent_key(&self, key: &K) -> Option<K> {
+        let idx = self.idx.get(key);
+        if let Some(&idx) = idx {
+            self.nodes[idx]
+                .parent
+                .map(|parent_idx| self.nodes[parent_idx].k())
+        } else {
+            None
+        }
     }
 }
 
@@ -426,6 +456,11 @@ impl<T: Debug + Clone + Hash + Eq> UpdatePlan<T> {
     /// Return a non-mutable reference to the tree this plan is build around.
     pub fn tree(&self) -> &UpdateTree<T> {
         &self.t
+    }
+
+    /// Return a mutable reference to the tree this plan is built around.
+    pub fn tree_mut(&mut self) -> &mut UpdateTree<T> {
+        &mut self.t
     }
 
     /// Mark the given item as having been completed. Its dependent will not be

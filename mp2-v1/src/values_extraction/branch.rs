@@ -6,11 +6,11 @@ use mp2_common::{
     array::{Array, Vector, VectorWire},
     group_hashing::CircuitBuilderGroupHashing,
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
-    mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
+    mpt_sequential::{advance_key_branch, MPTKeyWire, NIBBLES_TO_BYTES, PAD_LEN},
     public_inputs::PublicInputCommon,
-    rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
+    rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
     types::{CBuilder, GFp},
-    utils::{less_than, Endianness, PackerTarget},
+    utils::{Endianness, PackerTarget},
     D,
 };
 use plonky2::{
@@ -56,7 +56,10 @@ where
     pub fn build(
         b: &mut CBuilder,
         inputs: &[PublicInputs<Target>; N_CHILDREN],
-    ) -> BranchWires<NODE_LEN> {
+    ) -> BranchWires<NODE_LEN>
+    where
+        [(); NIBBLES_TO_BYTES(MAX_KEY_NIBBLE_LEN)]:,
+    {
         let zero = b.zero();
         let one = b.one();
         let ttrue = b._true();
@@ -90,14 +93,16 @@ where
         let headers = decode_fixed_list::<_, D, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
 
         let zero_point = b.curve_zero();
+        let mut should_process = b._false();
         let mut seen_nibbles = vec![];
         for (i, proof_inputs) in inputs.iter().enumerate() {
             let it = b.constant(GFp::from_canonical_usize(i));
-            let should_process = less_than(b, it, n_proof_valid, 5);
+            let proof_limit = b.is_equal(it, n_proof_valid);
+            should_process = b.or(should_process, proof_limit);
 
             // Accumulate the values digest.
             let child_digest = proof_inputs.values_digest_target();
-            let child_digest = b.curve_select(should_process, child_digest, zero_point);
+            let child_digest = b.curve_select(should_process, zero_point, child_digest);
             values_digest = b.curve_add(values_digest, child_digest);
 
             let child_digest = proof_inputs.metadata_digest_target();
@@ -109,12 +114,12 @@ where
             }
 
             // Add the number of leaves this proof has processed.
-            let maybe_n = b.select(should_process, proof_inputs.n(), zero);
+            let maybe_n = b.select(should_process, zero, proof_inputs.n());
             n = b.add(n, maybe_n);
 
             let child_key = proof_inputs.mpt_key();
             let (_, hash, is_valid, nibble) =
-                MPTCircuit::<1, NODE_LEN>::advance_key_branch(b, &node.arr, &child_key, &headers);
+                advance_key_branch(b, &node.arr, &child_key, &headers);
 
             // We always enforce it's a branch node, i.e. that it has 17 entries.
             b.connect(is_valid.target, ttrue.target);
@@ -122,7 +127,7 @@ where
             // Make sure we don't process twice the same proof for same nibble.
             seen_nibbles.iter().for_each(|sn| {
                 let is_equal = b.is_equal(*sn, nibble);
-                let should_be_false = b.select(should_process, is_equal.target, ffalse.target);
+                let should_be_false = b.select(should_process, ffalse.target, is_equal.target);
                 b.connect(should_be_false, ffalse.target);
             });
             seen_nibbles.push(nibble);

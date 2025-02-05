@@ -540,8 +540,8 @@ where
             embedded_tree_hash: end_node_tree_hash,
             child_hashes: [left_child_hash, right_child_hash],
             value: end_node_value,
-            min: end_node_info.node_min.clone(),
-            max: end_node_info.node_max.clone(),
+            min: end_node_info.node_min,
+            max: end_node_info.node_max,
         };
         let end_node_hash = end_node.compute_node_hash(b, index_id);
         let (inputs, path) = MerklePathGadget::build_path(b, end_node_hash, index_id);
@@ -665,8 +665,8 @@ where
         self.path_gadget.assign(pw, &wires.path_inputs);
         pw.set_u256_target_arr(
             &[
-                wires.end_node_inputs.node_min.clone(),
-                wires.end_node_inputs.node_max.clone(),
+                wires.end_node_inputs.node_min,
+                wires.end_node_inputs.node_max,
             ],
             &[self.end_node_min, self.end_node_max],
         );
@@ -869,7 +869,7 @@ pub(crate) mod tests {
             let end_node_value = c.add_virtual_u256_unsafe();
             let merkle_path_wires = MerklePathWithNeighborsGadget::build(
                 c,
-                end_node_value.clone(),
+                end_node_value,
                 end_node_tree_hash,
                 index_id,
             );

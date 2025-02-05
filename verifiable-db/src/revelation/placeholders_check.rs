@@ -380,7 +380,7 @@ pub(crate) fn check_placeholders<const PH: usize, const PP: usize>(
         "random_access function cannot handle more than 64 elements"
     );
     padded_placeholder_ids.resize(pad_len, placeholder_ids[0]);
-    padded_placeholder_values.resize(pad_len, placeholder_values[0].clone());
+    padded_placeholder_values.resize(pad_len, placeholder_values[0]);
 
     let mut check_placeholder_pair = |id: &Target, value, pos| {
         // Check that the pair (id, value) is same as:

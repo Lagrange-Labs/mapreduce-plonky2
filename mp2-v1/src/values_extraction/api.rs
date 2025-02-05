@@ -2,19 +2,26 @@
 
 use super::{
     branch::{BranchCircuit, BranchWires},
+    dummy::{DummyNodeCircuit, DummyNodeWires},
     extension::{ExtensionNodeCircuit, ExtensionNodeWires},
-    gadgets::{column_gadget::filter_table_column_identifiers, metadata_gadget::ColumnsMetadata},
+    gadgets::{
+        column_info::{ExtractedColumnInfo, InputColumnInfo},
+        metadata_gadget::TableMetadata,
+    },
     leaf_mapping::{LeafMappingCircuit, LeafMappingWires},
     leaf_mapping_of_mappings::{LeafMappingOfMappingsCircuit, LeafMappingOfMappingsWires},
+    leaf_receipt::{ReceiptLeafCircuit, ReceiptLeafWires},
     leaf_single::{LeafSingleCircuit, LeafSingleWires},
     public_inputs::PublicInputs,
-    ColumnId, ColumnInfo, MappingKey,
+    ColumnId, MappingKey, INNER_KEY_ID_PREFIX, KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
 };
-use crate::{api::InputNode, MAX_BRANCH_NODE_LEN};
+use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_RECEIPT_COLUMNS};
+use alloy::primitives::B256;
 use anyhow::{bail, ensure, Result};
 use log::debug;
 use mp2_common::{
     default_config,
+    eth::EventLogInfo,
     mpt_sequential::PAD_LEN,
     poseidon::H,
     proof::{ProofInputSerialized, ProofWithVK},
@@ -22,11 +29,8 @@ use mp2_common::{
     C, D, F,
 };
 use paste::paste;
-use plonky2::{
-    field::types::{Field, PrimeField64},
-    hash::hash_types::HashOut,
-    plonk::config::Hasher,
-};
+use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::Hasher};
+use plonky2_ecgfp5::curve::curve::Point;
 #[cfg(test)]
 use recursion_framework::framework_testing::{
     new_universal_circuit_builder_for_testing, TestingRecursiveCircuits,
@@ -44,36 +48,33 @@ const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 
 /// CircuitInput is a wrapper around the different specialized circuits that can
 /// be used to prove a MPT node recursively.
-#[derive(Serialize, Deserialize)]
-pub enum CircuitInput<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
-> where
-    [(); PAD_LEN(NODE_LEN)]:,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CircuitInput<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>
+where
+    [(); PAD_LEN(LEAF_LEN)]:,
 {
-    LeafSingle(LeafSingleCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
-    LeafMapping(LeafMappingCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
-    LeafMappingOfMappings(LeafMappingOfMappingsCircuit<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>),
+    LeafSingle(LeafSingleCircuit<MAX_EXTRACTED_COLUMNS>),
+    LeafMapping(LeafMappingCircuit<MAX_EXTRACTED_COLUMNS>),
+    LeafMappingOfMappings(LeafMappingOfMappingsCircuit<MAX_EXTRACTED_COLUMNS>),
+    LeafReceipt(ReceiptLeafCircuit<LEAF_LEN, MAX_RECEIPT_COLUMNS>),
     Extension(ExtensionInput),
     Branch(BranchInput),
+    Dummy(DummyNodeCircuit),
 }
 
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    CircuitInput<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+impl<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>
+    CircuitInput<LEAF_LEN, MAX_EXTRACTED_COLUMNS>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(LEAF_LEN)]:,
 {
     /// Create a circuit input for proving a leaf MPT node of single variable.
     pub fn new_single_variable_leaf(
         node: Vec<u8>,
         slot: u8,
         evm_word: u32,
-        table_info: Vec<ColumnInfo>,
+        table_info: Vec<ExtractedColumnInfo>,
     ) -> Self {
-        let extracted_column_identifiers =
-            filter_table_column_identifiers(&table_info, slot, evm_word);
-        let metadata = ColumnsMetadata::new(table_info, &extracted_column_identifiers, evm_word);
+        let metadata = TableMetadata::new(&[], &table_info);
 
         let slot = SimpleSlot::new(slot);
 
@@ -81,6 +82,7 @@ where
             node,
             slot,
             metadata,
+            offset: evm_word,
         })
     }
 
@@ -88,23 +90,22 @@ where
     pub fn new_mapping_variable_leaf(
         node: Vec<u8>,
         slot: u8,
-        mapping_key: Vec<u8>,
+        mapping_key: MappingKey,
         key_id: u64,
         evm_word: u32,
-        table_info: Vec<ColumnInfo>,
+        table_info: Vec<ExtractedColumnInfo>,
     ) -> Self {
-        let extracted_column_identifiers =
-            filter_table_column_identifiers(&table_info, slot, evm_word);
-        let metadata = ColumnsMetadata::new(table_info, &extracted_column_identifiers, evm_word);
+        let input_column = InputColumnInfo::new(&[slot], key_id, KEY_ID_PREFIX);
+
+        let metadata = TableMetadata::new(&[input_column], &table_info);
 
         let slot = MappingSlot::new(slot, mapping_key);
-        let key_id = F::from_canonical_u64(key_id);
 
         CircuitInput::LeafMapping(LeafMappingCircuit {
             node,
             slot,
-            key_id,
             metadata,
+            offset: evm_word,
         })
     }
 
@@ -116,24 +117,41 @@ where
         outer_key_data: (MappingKey, ColumnId),
         inner_key_data: (MappingKey, ColumnId),
         evm_word: u32,
-        table_info: Vec<ColumnInfo>,
+        table_info: Vec<ExtractedColumnInfo>,
     ) -> Self {
-        let extracted_column_identifiers =
-            filter_table_column_identifiers(&table_info, slot, evm_word);
-        let metadata = ColumnsMetadata::new(table_info, &extracted_column_identifiers, evm_word);
+        // We calculate so called "Input" columns here. These are columns that involve data not explicitly extractable from an MPT node
+        // but are used in proving we are looking at the correct node. For instance mapping keys are used to calculate the position of a leaf node
+        // that we need to extract from, but only the output of a keccak hash of some combination of them is included in the node, hence we feed them in as witness.
+        let outer_input_column =
+            InputColumnInfo::new(&[slot], outer_key_data.1, OUTER_KEY_ID_PREFIX);
+        let inner_input_column =
+            InputColumnInfo::new(&[slot], inner_key_data.1, INNER_KEY_ID_PREFIX);
+
+        let metadata = TableMetadata::new(&[outer_input_column, inner_input_column], &table_info);
 
         let slot = MappingSlot::new(slot, outer_key_data.0);
-        let [outer_key_id, inner_key_id] =
-            [outer_key_data.1, inner_key_data.1].map(F::from_canonical_u64);
 
         CircuitInput::LeafMappingOfMappings(LeafMappingOfMappingsCircuit {
             node,
             slot,
             inner_key: inner_key_data.0,
-            outer_key_id,
-            inner_key_id,
             metadata,
+            evm_word: evm_word as u8,
         })
+    }
+
+    /// Create a circuit input for proving a leaf MPT node of a transaction receipt.
+    pub fn new_receipt_leaf<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+        node: &[u8],
+        tx_index: u64,
+        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+    ) -> Self {
+        CircuitInput::LeafReceipt(
+            ReceiptLeafCircuit::<LEAF_LEN, MAX_RECEIPT_COLUMNS>::new::<NO_TOPICS, MAX_DATA_WORDS>(
+                node, tx_index, event,
+            )
+            .expect("Could not construct Receipt Leaf Circuit"),
+        )
     }
 
     /// Create a circuit input for proving an extension MPT node.
@@ -151,6 +169,14 @@ where
             serialized_child_proofs: child_proofs,
         })
     }
+
+    /// Create a circuit input for proving a dummy node.
+    pub fn new_dummy(trie_root: B256, metadata_digest: Point) -> Self {
+        CircuitInput::Dummy(DummyNodeCircuit {
+            root_hash: trie_root,
+            metadata_digest,
+        })
+    }
 }
 
 /// Main struct holding the different circuit parameters for each of the MPT
@@ -158,35 +184,18 @@ where
 /// Most notably, it holds them in a way to use the recursion framework allowing
 /// us to specialize circuits according to the situation.
 #[derive(Eq, PartialEq, Serialize, Deserialize)]
-pub struct PublicParameters<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
-> where
-    [(); PAD_LEN(NODE_LEN)]:,
+pub struct PublicParameters<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>
+where
+    [(); PAD_LEN(LEAF_LEN)]:,
 {
-    leaf_single: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        0,
-        LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    >,
-    leaf_mapping: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        0,
-        LeafMappingWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    >,
-    leaf_mapping_of_mappings: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        0,
-        LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    >,
+    leaf_single: CircuitWithUniversalVerifier<F, C, D, 0, LeafSingleWires<MAX_EXTRACTED_COLUMNS>>,
+    leaf_mapping: CircuitWithUniversalVerifier<F, C, D, 0, LeafMappingWires<MAX_EXTRACTED_COLUMNS>>,
+    leaf_mapping_of_mappings:
+        CircuitWithUniversalVerifier<F, C, D, 0, LeafMappingOfMappingsWires<MAX_EXTRACTED_COLUMNS>>,
+    leaf_receipt:
+        CircuitWithUniversalVerifier<F, C, D, 0, ReceiptLeafWires<LEAF_LEN, MAX_RECEIPT_COLUMNS>>,
     extension: CircuitWithUniversalVerifier<F, C, D, 1, ExtensionNodeWires>,
+    dummy: CircuitWithUniversalVerifier<F, C, D, 0, DummyNodeWires>,
     #[cfg(not(test))]
     branches: BranchCircuits,
     #[cfg(test)]
@@ -199,13 +208,10 @@ pub struct PublicParameters<
 
 /// Public API employed to build the MPT circuits, which are returned in
 /// serialized form.
-pub fn build_circuits_params<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
->() -> PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+pub fn build_circuits_params<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>(
+) -> PublicParameters<LEAF_LEN, MAX_EXTRACTED_COLUMNS>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(LEAF_LEN)]:,
 {
     PublicParameters::build()
 }
@@ -213,16 +219,12 @@ where
 /// Public API employed to generate a proof for the circuit specified by
 /// `CircuitInput`, employing the `circuit_params` generated with the
 /// `build_circuits_params` API.
-pub fn generate_proof<
-    const NODE_LEN: usize,
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
->(
-    circuit_params: &PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    circuit_type: CircuitInput<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+pub fn generate_proof<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>(
+    circuit_params: &PublicParameters<LEAF_LEN, MAX_EXTRACTED_COLUMNS>,
+    circuit_type: CircuitInput<LEAF_LEN, MAX_EXTRACTED_COLUMNS>,
 ) -> Result<Vec<u8>>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(LEAF_LEN)]:,
 {
     circuit_params.generate_proof(circuit_type)?.serialize()
 }
@@ -375,13 +377,13 @@ impl_branch_circuits!(BranchCircuits, 2, 9, 16);
 impl_branch_circuits!(TestBranchCircuits, 1, 4, 9);
 
 /// Number of circuits in the set
-/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 leaf mapping of mappings
-const MAPPING_CIRCUIT_SET_SIZE: usize = 7;
+/// 3 branch circuits + 1 extension + 1 leaf single + 1 leaf mapping + 1 leaf mapping of mappings + 1 leaf receipt + 1 dummy circuit
+const MAPPING_CIRCUIT_SET_SIZE: usize = 9;
 
-impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    PublicParameters<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
+impl<const LEAF_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>
+    PublicParameters<LEAF_LEN, MAX_EXTRACTED_COLUMNS>
 where
-    [(); PAD_LEN(NODE_LEN)]:,
+    [(); PAD_LEN(LEAF_LEN)]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     /// Generates the circuit parameters for the MPT circuits.
@@ -399,24 +401,26 @@ where
         );
 
         debug!("Building leaf single circuit");
-        let leaf_single = circuit_builder
-            .build_circuit::<C, 0, LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>>(());
+        let leaf_single =
+            circuit_builder.build_circuit::<C, 0, LeafSingleWires<MAX_EXTRACTED_COLUMNS>>(());
 
         debug!("Building leaf mapping circuit");
-        let leaf_mapping = circuit_builder.build_circuit::<C, 0, LeafMappingWires<
-            NODE_LEN,
-            MAX_COLUMNS,
-            MAX_FIELD_PER_EVM,
-        >>(());
+        let leaf_mapping =
+            circuit_builder.build_circuit::<C, 0, LeafMappingWires<MAX_EXTRACTED_COLUMNS>>(());
 
         debug!("Building leaf mapping of mappings circuit");
-        let leaf_mapping_of_mappings =
-                        circuit_builder.build_circuit::<C, 0,
-                LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>
-                        >(());
+        let leaf_mapping_of_mappings = circuit_builder
+            .build_circuit::<C, 0, LeafMappingOfMappingsWires<MAX_EXTRACTED_COLUMNS>>(());
+
+        debug!("Building leaf receipt circuit");
+        let leaf_receipt = circuit_builder
+            .build_circuit::<C, 0, ReceiptLeafWires<LEAF_LEN, MAX_RECEIPT_COLUMNS>>(());
 
         debug!("Building extension circuit");
         let extension = circuit_builder.build_circuit::<C, 1, ExtensionNodeWires>(());
+
+        debug!("Building dummy circuit");
+        let dummy = circuit_builder.build_circuit::<C, 0, DummyNodeWires>(());
 
         debug!("Building branch circuits");
         #[cfg(not(test))]
@@ -428,7 +432,9 @@ where
             leaf_single.get_verifier_data().circuit_digest,
             leaf_mapping.get_verifier_data().circuit_digest,
             leaf_mapping_of_mappings.get_verifier_data().circuit_digest,
+            leaf_receipt.get_verifier_data().circuit_digest,
             extension.get_verifier_data().circuit_digest,
+            dummy.get_verifier_data().circuit_digest,
         ];
         circuits_set.extend(branches.circuit_set());
         assert_eq!(circuits_set.len(), MAPPING_CIRCUIT_SET_SIZE);
@@ -437,7 +443,9 @@ where
             leaf_single,
             leaf_mapping,
             leaf_mapping_of_mappings,
+            leaf_receipt,
             extension,
+            dummy,
             branches,
             #[cfg(not(test))]
             set: RecursiveCircuits::new_from_circuit_digests(circuits_set),
@@ -448,7 +456,7 @@ where
 
     fn generate_proof(
         &self,
-        circuit_type: CircuitInput<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+        circuit_type: CircuitInput<LEAF_LEN, MAX_EXTRACTED_COLUMNS>,
     ) -> Result<ProofWithVK> {
         let set = &self.get_circuit_set();
         match circuit_type {
@@ -461,6 +469,12 @@ where
             CircuitInput::LeafMappingOfMappings(leaf) => set
                 .generate_proof(&self.leaf_mapping_of_mappings, [], [], leaf)
                 .map(|p| (p, self.leaf_mapping_of_mappings.get_verifier_data().clone()).into()),
+            CircuitInput::LeafReceipt(leaf) => set
+                .generate_proof(&self.leaf_receipt, [], [], leaf)
+                .map(|p| (p, self.leaf_receipt.get_verifier_data().clone()).into()),
+            CircuitInput::Dummy(dummy) => set
+                .generate_proof(&self.dummy, [], [], dummy)
+                .map(|p| (p, self.dummy.get_verifier_data().clone()).into()),
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
                 let (child_proof, child_vk) = child_proofs
@@ -503,14 +517,13 @@ mod tests {
         *,
     };
     use crate::{
-        tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
+        tests::TEST_MAX_COLUMNS,
         values_extraction::{
             compute_leaf_mapping_metadata_digest, compute_leaf_mapping_of_mappings_metadata_digest,
             compute_leaf_mapping_of_mappings_values_digest, compute_leaf_mapping_values_digest,
             compute_leaf_single_metadata_digest, compute_leaf_single_values_digest,
-            identifier_raw_extra,
         },
-        MAX_LEAF_NODE_LEN,
+        MAX_RECEIPT_LEAF_NODE_LEN,
     };
     use alloy::primitives::Address;
     use eth_trie::{EthTrie, MemoryDB, Trie};
@@ -522,16 +535,17 @@ mod tests {
         mpt_sequential::utils::bytes_to_nibbles,
         types::MAPPING_LEAF_VALUE_LEN,
     };
-    use mp2_test::{mpt_sequential::generate_random_storage_mpt, utils::random_vector};
-    use plonky2::field::types::Field;
+    use mp2_test::{
+        mpt_sequential::{generate_random_storage_mpt, generate_receipt_test_info},
+        utils::random_vector,
+    };
+    use plonky2::field::types::{Field, Sample};
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
     use std::{str::FromStr, sync::Arc};
 
-    type CircuitInput =
-        super::CircuitInput<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
-    type PublicParameters =
-        super::PublicParameters<MAX_LEAF_NODE_LEN, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>;
+    type CircuitInput = super::CircuitInput<MAX_RECEIPT_LEAF_NODE_LEN, TEST_MAX_COLUMNS>;
+    type PublicParameters = super::PublicParameters<MAX_RECEIPT_LEAF_NODE_LEN, TEST_MAX_COLUMNS>;
 
     #[derive(Debug)]
     struct TestEthTrie {
@@ -551,11 +565,20 @@ mod tests {
         let table_info = TEST_SLOTS
             .into_iter()
             .map(|slot| {
-                let mut col_info = ColumnInfo::sample();
-                col_info.slot = F::from_canonical_u8(slot);
-                col_info.evm_word = F::ZERO;
-
-                col_info
+                ExtractedColumnInfo::sample(
+                    true,
+                    &[
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::from_canonical_u8(slot),
+                    ],
+                    F::ZERO,
+                )
             })
             .collect_vec();
 
@@ -585,11 +608,20 @@ mod tests {
         let table_info = TEST_EVM_WORDS
             .into_iter()
             .map(|evm_word| {
-                let mut col_info = ColumnInfo::sample();
-                col_info.slot = F::from_canonical_u8(TEST_SLOT);
-                col_info.evm_word = F::from_canonical_u32(evm_word);
-
-                col_info
+                ExtractedColumnInfo::sample(
+                    true,
+                    &[
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::from_canonical_u8(TEST_SLOT),
+                    ],
+                    F::from_canonical_u32(evm_word),
+                )
             })
             .collect_vec();
 
@@ -613,14 +645,23 @@ mod tests {
         let storage_slot2 = StorageSlot::Mapping(mapping_key2, TEST_SLOT as usize);
 
         // The first and second column infos are same (only for testing).
-        let table_info = [0; 2]
+        let table_info = [0u32; 2]
             .into_iter()
-            .map(|_| {
-                let mut col_info = ColumnInfo::sample();
-                col_info.slot = F::from_canonical_u8(TEST_SLOT);
-                col_info.evm_word = F::ZERO;
-
-                col_info
+            .map(|evm_word| {
+                ExtractedColumnInfo::sample(
+                    true,
+                    &[
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::from_canonical_u8(TEST_SLOT),
+                    ],
+                    F::from_canonical_u32(evm_word),
+                )
             })
             .collect_vec();
 
@@ -650,11 +691,20 @@ mod tests {
         let table_info = TEST_EVM_WORDS
             .into_iter()
             .map(|evm_word| {
-                let mut col_info = ColumnInfo::sample();
-                col_info.slot = F::from_canonical_u8(TEST_SLOT);
-                col_info.evm_word = F::from_canonical_u32(evm_word);
-
-                col_info
+                ExtractedColumnInfo::sample(
+                    true,
+                    &[
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::from_canonical_u8(TEST_SLOT),
+                    ],
+                    F::from_canonical_u32(evm_word),
+                )
             })
             .collect_vec();
 
@@ -686,11 +736,20 @@ mod tests {
         let table_info = TEST_EVM_WORDS
             .into_iter()
             .map(|evm_word| {
-                let mut col_info = ColumnInfo::sample();
-                col_info.slot = F::from_canonical_u8(TEST_SLOT);
-                col_info.evm_word = F::from_canonical_u32(evm_word);
-
-                col_info
+                ExtractedColumnInfo::sample(
+                    true,
+                    &[
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
+                        F::from_canonical_u8(TEST_SLOT),
+                    ],
+                    F::from_canonical_u32(evm_word),
+                )
             })
             .collect_vec();
 
@@ -711,11 +770,20 @@ mod tests {
 
         let storage_slot = StorageSlot::Simple(TEST_SLOT as usize);
         let table_info = {
-            let mut col_info = ColumnInfo::sample();
-            col_info.slot = F::from_canonical_u8(TEST_SLOT);
-            col_info.evm_word = F::ZERO;
-
-            vec![col_info]
+            vec![ExtractedColumnInfo::sample(
+                true,
+                &[
+                    F::ZERO,
+                    F::ZERO,
+                    F::ZERO,
+                    F::ZERO,
+                    F::ZERO,
+                    F::ZERO,
+                    F::ZERO,
+                    F::from_canonical_u8(TEST_SLOT),
+                ],
+                F::ZERO,
+            )]
         };
         let test_slot = StorageSlotInfo::new(storage_slot, table_info);
 
@@ -755,11 +823,20 @@ mod tests {
 
         // Construct the table info for testing.
         let table_info = {
-            let mut col_info = ColumnInfo::sample();
-            col_info.slot = F::from_canonical_u8(TEST_SLOT);
-            col_info.evm_word = F::from_canonical_u32(TEST_EVM_WORD);
-
-            vec![col_info]
+            vec![ExtractedColumnInfo::sample(
+                true,
+                &[
+                    F::ZERO,
+                    F::ZERO,
+                    F::ZERO,
+                    F::ZERO,
+                    F::ZERO,
+                    F::ZERO,
+                    F::ZERO,
+                    F::from_canonical_u8(TEST_SLOT),
+                ],
+                F::from_canonical_u32(TEST_EVM_WORD),
+            )]
         };
 
         // Test for single variable leaf.
@@ -826,6 +903,11 @@ mod tests {
             },
             serialized_child_proofs: vec![encoded],
         }));
+
+        // Test for dummy
+        let dummy_hash = B256::random();
+        let dummy_md = Point::rand();
+        test_circuit_input(CircuitInput::new_dummy(dummy_hash, dummy_md));
     }
 
     fn test_api(test_slots: [StorageSlotInfo; 2]) {
@@ -879,43 +961,136 @@ mod tests {
         let input = CircuitInput::new_branch(node, leaf_proofs);
         generate_proof(params, input).unwrap()
     }
+    #[test]
+    fn test_receipt_api() {
+        let receipt_proof_infos = generate_receipt_test_info::<1, 0>();
+        let receipt_proofs = receipt_proof_infos.proofs();
+        let event = receipt_proof_infos.info();
+        // We need two nodes that are children of the same branch so we compare the last but two nodes for each of them until we find a case that works
+        let (info_one, info_two) = if let Some((one, two)) = receipt_proofs
+            .iter()
+            .enumerate()
+            .find_map(|(i, current_proof)| {
+                let current_node_second_to_last =
+                    current_proof.mpt_proof[current_proof.mpt_proof.len() - 2].clone();
+                receipt_proofs
+                    .iter()
+                    .skip(i + 1)
+                    .find(|find_info| {
+                        find_info.mpt_proof[find_info.mpt_proof.len() - 2].clone()
+                            == current_node_second_to_last
+                    })
+                    .map(|matching| (current_proof, matching))
+            }) {
+            (one, two)
+        } else {
+            panic!("No relevant events with same branch node parent")
+        };
+
+        let proof_length_1 = info_one.mpt_proof.len();
+        let proof_length_2 = info_two.mpt_proof.len();
+
+        let list_one = rlp::decode_list::<Vec<u8>>(&info_one.mpt_proof[proof_length_1 - 2]);
+        let list_two = rlp::decode_list::<Vec<u8>>(&info_two.mpt_proof[proof_length_2 - 2]);
+
+        assert_eq!(list_one, list_two);
+        assert!(list_one.len() == 17);
+
+        println!("Generating params...");
+        let params = build_circuits_params();
+
+        println!("Proving leaf 1...");
+        let leaf_input_1 = CircuitInput::new_receipt_leaf(
+            info_one.mpt_proof.last().unwrap(),
+            info_one.tx_index,
+            event,
+        );
+        let now = std::time::Instant::now();
+        let leaf_proof1 = generate_proof(&params, leaf_input_1).unwrap();
+        {
+            let lp = ProofWithVK::deserialize(&leaf_proof1).unwrap();
+            let pub1 = PublicInputs::new(&lp.proof.public_inputs);
+            let (_, ptr) = pub1.mpt_key_info();
+            println!("pointer: {}", ptr);
+        }
+        println!(
+            "Proof for leaf 1 generated in {} ms",
+            now.elapsed().as_millis()
+        );
+
+        println!("Proving leaf 2...");
+        let leaf_input_2 = CircuitInput::new_receipt_leaf(
+            info_two.mpt_proof.last().unwrap(),
+            info_two.tx_index,
+            event,
+        );
+        let now = std::time::Instant::now();
+        let leaf_proof2 = generate_proof(&params, leaf_input_2).unwrap();
+        println!(
+            "Proof for leaf 2 generated in {} ms",
+            now.elapsed().as_millis()
+        );
+
+        // The branch case for receipts is identical to that of a mapping so we use the same api.
+        println!("Proving branch...");
+        let branch_input = CircuitInput::new_branch(
+            info_two.mpt_proof[proof_length_1 - 2].clone(),
+            vec![leaf_proof1, leaf_proof2],
+        );
+
+        let now = std::time::Instant::now();
+        generate_proof(&params, branch_input).unwrap();
+        println!(
+            "Proof for branch node generated in {} ms",
+            now.elapsed().as_millis()
+        );
+    }
+
+    #[test]
+    fn test_dummy_api() {
+        println!("Generating params...");
+        let params = build_circuits_params();
+
+        let dummy_hash = B256::random();
+        let dummy_md = Point::rand();
+
+        println!("Proving dummy circuit");
+        let dummy_input = CircuitInput::new_dummy(dummy_hash, dummy_md);
+
+        let now = std::time::Instant::now();
+        generate_proof(&params, dummy_input).unwrap();
+        println!(
+            "Proof for dummy node generated in {} ms",
+            now.elapsed().as_millis()
+        );
+    }
 
     /// Generate a leaf proof.
     fn prove_leaf(params: &PublicParameters, node: Vec<u8>, test_slot: StorageSlotInfo) -> Vec<u8> {
         // RLP(RLP(compact(partial_key_in_nibble)), RLP(value))
         let leaf_tuple: Vec<Vec<u8>> = rlp::decode_list(&node);
         assert_eq!(leaf_tuple.len(), 2);
-        let value = leaf_tuple[1][1..].to_vec().try_into().unwrap();
+        let value: [u8; 32] = leaf_tuple[1][1..].to_vec().try_into().unwrap();
 
         let evm_word = test_slot.evm_word();
+
         let table_info = test_slot.table_info();
-        let metadata = test_slot.metadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>();
-        let extracted_column_identifiers = metadata.extracted_column_identifiers();
 
         // Build the identifier extra data, it's used to compute the key IDs.
         const TEST_CONTRACT_ADDRESS: &str = "0x105dD0eF26b92a3698FD5AaaF688577B9Cafd970";
         const TEST_CHAIN_ID: u64 = 1000;
-        let id_extra = identifier_raw_extra(
-            &Address::from_str(TEST_CONTRACT_ADDRESS).unwrap(),
-            TEST_CHAIN_ID,
-            vec![],
-        );
+
+        let contract_address = Address::from_str(TEST_CONTRACT_ADDRESS).unwrap();
+
+        let metadata = test_slot.table_columns(&contract_address, TEST_CHAIN_ID, vec![]);
 
         let (expected_metadata_digest, expected_values_digest, circuit_input) = match &test_slot
             .slot
         {
             // Simple variable slot
             StorageSlot::Simple(slot) => {
-                let metadata_digest = compute_leaf_single_metadata_digest::<
-                    TEST_MAX_COLUMNS,
-                    TEST_MAX_FIELD_PER_EVM,
-                >(table_info.to_vec());
-
-                let values_digest = compute_leaf_single_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                    table_info.to_vec(),
-                    &extracted_column_identifiers,
-                    value,
-                );
+                let metadata_digest = compute_leaf_single_metadata_digest(&test_slot);
+                let values_digest = compute_leaf_single_values_digest(&test_slot, value);
 
                 let circuit_input = CircuitInput::new_single_variable_leaf(
                     node,
@@ -928,22 +1103,16 @@ mod tests {
             }
             // Mapping variable
             StorageSlot::Mapping(mapping_key, slot) => {
-                let outer_key_id = test_slot.outer_key_id_raw(id_extra).unwrap();
-                let metadata_digest = compute_leaf_mapping_metadata_digest::<
-                    TEST_MAX_COLUMNS,
-                    TEST_MAX_FIELD_PER_EVM,
-                >(
-                    table_info.to_vec(), *slot as u8, outer_key_id
-                );
-
-                let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                    table_info.to_vec(),
-                    &extracted_column_identifiers,
+                let key_id = metadata.input_columns()[0].identifier().to_canonical_u64();
+                let metadata_digest = compute_leaf_mapping_metadata_digest(&test_slot, key_id);
+                let values_digest = compute_leaf_mapping_values_digest(
+                    &test_slot,
                     value,
                     mapping_key.clone(),
-                    evm_word,
-                    outer_key_id,
+                    key_id,
                 );
+
+                let outer_key_id = metadata.input_columns()[0].identifier().0;
 
                 let circuit_input = CircuitInput::new_mapping_variable_leaf(
                     node,
@@ -959,16 +1128,8 @@ mod tests {
             StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => match *parent.clone() {
                 // Simple Struct
                 StorageSlot::Simple(slot) => {
-                    let metadata_digest = compute_leaf_single_metadata_digest::<
-                        TEST_MAX_COLUMNS,
-                        TEST_MAX_FIELD_PER_EVM,
-                    >(table_info.to_vec());
-
-                    let values_digest = compute_leaf_single_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                        table_info.to_vec(),
-                        &extracted_column_identifiers,
-                        value,
-                    );
+                    let metadata_digest = compute_leaf_single_metadata_digest(&test_slot);
+                    let values_digest = compute_leaf_single_values_digest(&test_slot, value);
 
                     let circuit_input = CircuitInput::new_single_variable_leaf(
                         node,
@@ -981,27 +1142,20 @@ mod tests {
                 }
                 // Mapping Struct
                 StorageSlot::Mapping(mapping_key, slot) => {
-                    let outer_key_id = test_slot.outer_key_id_raw(id_extra).unwrap();
-                    let metadata_digest =
-                        compute_leaf_mapping_metadata_digest::<
-                            TEST_MAX_COLUMNS,
-                            TEST_MAX_FIELD_PER_EVM,
-                        >(table_info.to_vec(), slot as u8, outer_key_id);
-
-                    let values_digest = compute_leaf_mapping_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-                        table_info.to_vec(),
-                        &extracted_column_identifiers,
+                    let key_id = metadata.input_columns()[0].identifier().to_canonical_u64();
+                    let metadata_digest = compute_leaf_mapping_metadata_digest(&test_slot, key_id);
+                    let values_digest = compute_leaf_mapping_values_digest(
+                        &test_slot,
                         value,
                         mapping_key.clone(),
-                        evm_word,
-                        outer_key_id,
+                        key_id,
                     );
 
                     let circuit_input = CircuitInput::new_mapping_variable_leaf(
                         node,
                         slot as u8,
-                        mapping_key,
-                        outer_key_id,
+                        mapping_key.clone(),
+                        key_id,
                         evm_word,
                         table_info.to_vec(),
                     );
@@ -1012,33 +1166,28 @@ mod tests {
                 StorageSlot::Node(StorageSlotNode::Mapping(grand, inner_mapping_key)) => {
                     match *grand {
                         StorageSlot::Mapping(outer_mapping_key, slot) => {
-                            let outer_key_id =
-                                test_slot.outer_key_id_raw(id_extra.clone()).unwrap();
-                            let inner_key_id = test_slot.inner_key_id_raw(id_extra).unwrap();
-                            let metadata_digest =
-                                compute_leaf_mapping_of_mappings_metadata_digest::<
-                                    TEST_MAX_COLUMNS,
-                                    TEST_MAX_FIELD_PER_EVM,
-                                >(
-                                    table_info.to_vec(), slot as u8, outer_key_id, inner_key_id
-                                );
-
-                            let values_digest = compute_leaf_mapping_of_mappings_values_digest::<
-                                TEST_MAX_FIELD_PER_EVM,
-                            >(
-                                table_info.to_vec(),
-                                &extracted_column_identifiers,
+                            let input_columns = metadata.input_columns();
+                            let outer_key_id = input_columns[0].identifier().to_canonical_u64();
+                            let inner_key_id = input_columns[1].identifier().to_canonical_u64();
+                            let outer_mapping_data = (outer_mapping_key, outer_key_id);
+                            let inner_mapping_data = (inner_mapping_key, inner_key_id);
+                            let metadata_digest = compute_leaf_mapping_of_mappings_metadata_digest(
+                                &test_slot,
+                                outer_key_id,
+                                inner_key_id,
+                            );
+                            let values_digest = compute_leaf_mapping_of_mappings_values_digest(
+                                &test_slot,
                                 value,
-                                evm_word,
-                                (outer_mapping_key.clone(), outer_key_id),
-                                (inner_mapping_key.clone(), inner_key_id),
+                                outer_mapping_data.clone(),
+                                inner_mapping_data.clone(),
                             );
 
                             let circuit_input = CircuitInput::new_mapping_of_mappings_leaf(
                                 node,
                                 slot as u8,
-                                (outer_mapping_key, outer_key_id),
-                                (inner_mapping_key, inner_key_id),
+                                outer_mapping_data,
+                                inner_mapping_data,
                                 evm_word,
                                 table_info.to_vec(),
                             );
@@ -1176,7 +1325,10 @@ mod tests {
             assert_eq!(branch_pi.metadata_digest(), leaf_metadata_digest);
             assert_eq!(
                 branch_pi.values_digest(),
-                branch_values_digest.to_weierstrass()
+                branch_values_digest.to_weierstrass(),
+                "Value digests did not agree pi: {:?}, calculated: {:?}",
+                branch_pi.values_digest(),
+                branch_values_digest.to_weierstrass(),
             );
             assert_eq!(branch_pi.n(), F::from_canonical_usize(num_children));
         };
