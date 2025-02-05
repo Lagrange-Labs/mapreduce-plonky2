@@ -5,7 +5,7 @@ use mp2_common::{
 };
 use mp2_v1::{
     api, contract_extraction,
-    final_extraction::{CircuitInput, PublicInputs},
+    final_extraction::{CircuitInput, OffChainRootOfTrust, PublicInputs},
     indexing::{block::BlockPrimaryIndex, row::CellCollection, ColumnID},
     values_extraction,
 };
@@ -27,7 +27,7 @@ pub struct MergeExtractionProof {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct OffChainExtractionProof {
-    pub(crate) hash: HashOutput,
+    pub(crate) hash: OffChainRootOfTrust,
     pub(crate) prev_hash: HashOutput,
     pub(crate) primary_index: BlockPrimaryIndex,
     pub(crate) rows: Vec<CellCollection<BlockPrimaryIndex>>,
@@ -51,7 +51,11 @@ impl TestContext {
         // first, extract block number, hash and previous block hash to later check public inputs
         let (primary_index, block_hash, prev_block_hash) =
             if let ExtractionProofInput::Offchain(inputs) = &value_proofs {
-                (inputs.primary_index as u64, inputs.hash, inputs.prev_hash)
+                (
+                    inputs.primary_index as u64,
+                    inputs.hash.hash(),
+                    inputs.prev_hash,
+                )
             } else {
                 let block = self.query_current_block().await;
                 let primary_index = block.header.number;

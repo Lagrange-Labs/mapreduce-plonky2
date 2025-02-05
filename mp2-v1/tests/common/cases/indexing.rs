@@ -933,12 +933,17 @@ impl TableIndexing {
         let table_id = &self.table.public_name.clone();
         // we construct the proof key for both mappings and single variable in the same way since
         // it is derived from the table id which should be different for any tables we create.
-        let value_key = ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex));
+        let proof_key = if let TableSource::OffChain(_) = &self.source {
+            let current_epoch = self.table.index.current_epoch().await?;
+            ProofKey::IVC(current_epoch as BlockPrimaryIndex)
+        } else {
+            ProofKey::ValueExtraction((table_id.clone(), bn as BlockPrimaryIndex))
+        };
         // final extraction for single variables combining the different proofs generated before
         let final_key = ProofKey::FinalExtraction((table_id.clone(), bn as BlockPrimaryIndex));
         let (extraction, metadata_hash) = self
             .source
-            .generate_extraction_proof_inputs(ctx, &self.contract, value_key)
+            .generate_extraction_proof_inputs(ctx, &self.contract, proof_key)
             .await?;
 
         // no need to generate it if it's already present

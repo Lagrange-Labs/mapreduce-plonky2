@@ -4,15 +4,18 @@ use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK};
 use mp2_v1::{
     api,
     indexing::{
-        block::{BlockPrimaryIndex, BlockTreeKey, MerkleIndexTree},
+        block::{get_previous_epoch, BlockPrimaryIndex, BlockTreeKey, MerkleIndexTree},
         index::IndexNode,
     },
     values_extraction::identifier_block_column,
 };
 use plonky2::plonk::config::GenericHashOut;
-use ryhope::storage::{
-    updatetree::{Next, UpdateTree},
-    RoEpochKvStorage,
+use ryhope::{
+    storage::{
+        updatetree::{Next, UpdateTree},
+        RoEpochKvStorage,
+    },
+    UserEpoch,
 };
 use verifiable_db::block_tree::compute_final_digest;
 
@@ -163,8 +166,12 @@ impl TestContext {
                 // here we are simply proving the new updated nodes from the new node to
                 // the root. We fetch the same node but at the previous version of the
                 // tree to prove the update.
+                let previous_epoch =
+                    get_previous_epoch(t, t.current_epoch().await? as BlockPrimaryIndex)
+                        .await?
+                        .expect("No previous epoch found, we shouldn't be in this case");
                 let previous_node = t
-                    .try_fetch_at(k, t.current_epoch().await.unwrap() - 1)
+                    .try_fetch_at(k, previous_epoch as UserEpoch)
                     .await?
                     .unwrap();
                 let left_key = context.left.expect("should always be a left child");

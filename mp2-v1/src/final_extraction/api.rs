@@ -2,7 +2,11 @@ use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
-    self, default_config, proof::ProofWithVK, types::HashOutput, utils::Packer, C, D, F,
+    self, default_config,
+    proof::ProofWithVK,
+    types::HashOutput,
+    utils::{keccak256, Packer},
+    C, D, F,
 };
 use plonky2::{field::types::Field, iop::target::Target, plonk::circuit_data::VerifierCircuitData};
 use recursion_framework::{
@@ -198,6 +202,28 @@ pub struct MergeCircuitInput {
     is_table_a_multiplier: bool,
 }
 
+/// Represent the root of trust for the offchain data. It can be an actual hash if
+/// there is a root of trust, or dummy if there is no root of trust
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OffChainRootOfTrust {
+    Hash(HashOutput),
+    Dummy,
+}
+
+impl OffChainRootOfTrust {
+    const DUMMY_HASH_PAYLOAD: &str = "DUMMY_ROOT_OF_TRUST";
+
+    /// Return the actual hash employed as root of trust
+    pub fn hash(&self) -> HashOutput {
+        match self {
+            Self::Hash(h) => *h,
+            Self::Dummy => {
+                HashOutput::try_from(keccak256(Self::DUMMY_HASH_PAYLOAD.as_bytes())).unwrap()
+            }
+        }
+    }
+}
+
 impl CircuitInput {
     /// Create a circuit input for merging  single table and a mapping table together.
     /// Both tables should belong to the same contract.
@@ -246,12 +272,12 @@ impl CircuitInput {
     /// Instantiate inputs for the dummy circuit dealing with no provable extraction case
     pub fn new_no_provable_input<PrimaryIndex: PartialEq + Eq + Default + Clone + Debug>(
         block_number: U256,
-        block_hash: HashOutput,
+        block_hash: OffChainRootOfTrust,
         prev_block_hash: HashOutput,
         table_rows: &[CellCollection<PrimaryIndex>],
         row_unique_columns: &[ColumnID],
     ) -> Result<Self> {
-        let [block_hash, prev_block_hash] = [block_hash, prev_block_hash].map(|h| {
+        let [block_hash, prev_block_hash] = [block_hash.hash(), prev_block_hash].map(|h| {
             h.pack(mp2_common::utils::Endianness::Little)
                 .into_iter()
                 .map(F::from_canonical_u32)

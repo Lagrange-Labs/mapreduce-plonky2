@@ -26,6 +26,7 @@ use mp2_v1::{
         compute_table_info, merge_metadata_hash, metadata_hash, no_provable_metadata_hash,
         SlotInput, SlotInputs,
     },
+    final_extraction::OffChainRootOfTrust,
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
@@ -345,34 +346,36 @@ impl TableSource {
         &self,
         ctx: &mut TestContext,
         contract: &Option<Contract>,
-        value_key: ProofKey,
+        proof_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
         match self {
             TableSource::Single(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
             TableSource::MappingValues(ref args, _) => {
-                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
             TableSource::MappingStruct(ref args, _) => {
-                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
             TableSource::MappingOfSingleValueMappings(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
             TableSource::MappingOfStructMappings(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
             TableSource::Merge(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
-            TableSource::OffChain(ref off_chain) => off_chain.generate_extraction_proof_inputs(ctx),
+            TableSource::OffChain(ref off_chain) => {
+                off_chain.generate_extraction_proof_inputs(ctx, proof_key)
+            }
         }
     }
 
@@ -1723,8 +1726,7 @@ impl OffChainDataArgs {
             return vec![];
         }
 
-        self.last_update_epoch += 1; //ToDo: use bigger gaps as soon as we support index trees without
-                                     // consecutive values
+        self.last_update_epoch += rng.gen_range(1..10);
         match c {
             ChangeType::Deletion => {
                 // randomly choose a couple of rows to delete
@@ -1835,6 +1837,7 @@ impl OffChainDataArgs {
     pub(crate) fn generate_extraction_proof_inputs(
         &self,
         ctx: &mut TestContext,
+        proof_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
         // convert current row values to row cells
         let rows = self
@@ -1843,10 +1846,11 @@ impl OffChainDataArgs {
             .map(CellCollection::try_from)
             .collect::<Result<Vec<_>>>()?;
         let rng = &mut thread_rng();
+        // This could be computed from the table data according to any logic,
+        // here for simplicity we just generate it at random
         let hash = HashOutput::from(array::from_fn(|_| rng.gen()));
         // fetch previous hash from IVC proof for previous primary index, if any
         let prev_hash = {
-            let proof_key = ProofKey::IVC(self.last_update_epoch - 1);
             if let Ok(proof) = ctx.storage.get_proof_exact(&proof_key) {
                 // fetch previous hash from the proof
                 let pproof = ProofWithVK::deserialize(&proof)?;
@@ -1860,7 +1864,7 @@ impl OffChainDataArgs {
 
         let metadata_hash = no_provable_metadata_hash(self.column_ids());
         let input = ExtractionProofInput::Offchain(OffChainExtractionProof {
-            hash,
+            hash: OffChainRootOfTrust::Hash(hash),
             prev_hash,
             primary_index: self.last_update_epoch,
             rows,

@@ -1,9 +1,12 @@
 //! Module to handle the block number as a primary index
+use anyhow::anyhow;
 use ryhope::{
-    storage::pgsql::PgsqlStorage,
+    storage::{pgsql::PgsqlStorage, RoEpochKvStorage},
     tree::{sbbst, TreeTopology},
     MerkleTreeKvDb,
 };
+
+use crate::query::planner::TreeFetcher;
 
 use super::index::IndexNode;
 
@@ -21,3 +24,20 @@ pub type BlockPrimaryIndex = BlockTreeKey;
 
 pub type IndexStorage = PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>, false>;
 pub type MerkleIndexTree = MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>;
+
+/// Get the previous epoch of `epoch` in `tree`
+pub async fn get_previous_epoch(
+    tree: &MerkleIndexTree,
+    epoch: BlockPrimaryIndex,
+) -> anyhow::Result<Option<BlockPrimaryIndex>> {
+    let current_epoch = tree.current_epoch().await?;
+    let epoch_ctx = tree
+        .node_context(&epoch)
+        .await?
+        .ok_or(anyhow!("epoch {epoch} not found in the tree"))?;
+
+    Ok(tree
+        .get_predecessor(&epoch_ctx, current_epoch)
+        .await
+        .map(|(ctx, _)| ctx.node_id))
+}
