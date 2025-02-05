@@ -1,7 +1,7 @@
 //! Module handling the single variable inside a storage trie
 #![allow(clippy::identity_op)]
 use crate::values_extraction::{
-    gadgets::metadata_gadget::{TableMetadata, TableMetadataGadget, TableMetadataTarget},
+    gadgets::metadata_gadget::{TableMetadata, TableMetadataTarget},
     public_inputs::{PublicInputs, PublicInputsArgs},
 };
 use anyhow::Result;
@@ -14,7 +14,7 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, hash_to_int_target},
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleStructSlotWires},
-    types::{CBuilder, GFp},
+    types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
     utils::ToTargets,
     CHasher, D, F,
 };
@@ -44,7 +44,7 @@ pub struct LeafSingleWires<const MAX_EXTRACTED_COLUMNS: usize> {
     /// Storage single variable slot
     slot: SimpleStructSlotWires,
     /// MPT metadata
-    metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS, 0>,
+    metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
     /// Offset from the base slot,
     offset: Target,
 }
@@ -60,7 +60,7 @@ pub struct LeafSingleCircuit<const MAX_EXTRACTED_COLUMNS: usize> {
 
 impl<const MAX_EXTRACTED_COLUMNS: usize> LeafSingleCircuit<MAX_EXTRACTED_COLUMNS> {
     pub fn build(b: &mut CBuilder) -> LeafSingleWires<MAX_EXTRACTED_COLUMNS> {
-        let metadata = TableMetadataGadget::build(b);
+        let metadata = TableMetadata::build(b, 0);
         let offset = b.add_virtual_target();
         let slot = SimpleSlot::build_struct(b, offset);
         let zero = b.zero();
@@ -73,10 +73,10 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> LeafSingleCircuit<MAX_EXTRACTED_COLUMNS
         let root = wires.root;
 
         // Left pad the leaf value.
-        let value: Array<Target, 32> = left_pad_leaf_value(b, &wires.value);
+        let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
 
         // Compute the metadata digest and the value digest
-        let (metadata_digest, value_digest) = metadata.extracted_digests::<32>(
+        let (metadata_digest, value_digest) = metadata.extracted_digests::<MAPPING_LEAF_VALUE_LEN>(
             b,
             &value,
             offset,
@@ -134,7 +134,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> LeafSingleCircuit<MAX_EXTRACTED_COLUMNS
             &InputData::Assigned(&padded_node),
         );
         self.slot.assign_struct(pw, &wires.slot, self.offset);
-        TableMetadataGadget::assign(pw, &self.metadata, &wires.metadata);
+        TableMetadata::assign(pw, &self.metadata, &wires.metadata);
         pw.set_target(wires.offset, GFp::from_canonical_u32(self.offset));
     }
 }

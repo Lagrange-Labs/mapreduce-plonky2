@@ -16,15 +16,13 @@ use mp2_v1::{
         ColumnID,
     },
     values_extraction::{
-        identifier_block_column, identifier_for_inner_mapping_key_column,
-        identifier_for_outer_mapping_key_column, identifier_for_value_column, DATA_NAME,
-        DATA_PREFIX, GAS_USED_NAME, GAS_USED_PREFIX, TOPIC_NAME, TOPIC_PREFIX,
+        identifier_block_column, identifier_for_data_column, identifier_for_gas_used_column,
+        identifier_for_inner_mapping_key_column, identifier_for_outer_mapping_key_column,
+        identifier_for_topic_column, identifier_for_value_column, DATA_NAME, GAS_USED_NAME,
+        TOPIC_NAME,
     },
 };
-use plonky2::{
-    field::types::{Field, PrimeField64},
-    plonk::config::Hasher,
-};
+
 use rand::{thread_rng, Rng};
 use ryhope::storage::RoEpochKvStorage;
 
@@ -60,10 +58,8 @@ use alloy::{
 };
 use mp2_common::{
     eth::{EventLogInfo, StorageSlot},
-    poseidon::H,
     proof::ProofWithVK,
     types::HashOutput,
-    F,
 };
 
 /// Test slots for single values extraction
@@ -1020,35 +1016,17 @@ pub fn compute_non_indexed_receipt_column_ids<
 >(
     event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
 ) -> Vec<(String, ColumnID)> {
-    let gas_used_input = [
-        event.address.as_slice(),
-        event.event_signature.as_slice(),
-        GAS_USED_PREFIX,
-    ]
-    .concat()
-    .into_iter()
-    .map(F::from_canonical_u8)
-    .collect::<Vec<F>>();
-    let gas_used_column_id = H::hash_no_pad(&gas_used_input).elements[0];
+    let gas_used_column_id =
+        identifier_for_gas_used_column(&event.event_signature, &event.address, &[]);
 
     let topic_ids = event
         .topics
         .iter()
         .enumerate()
         .map(|(j, _)| {
-            let input = [
-                event.address.as_slice(),
-                event.event_signature.as_slice(),
-                TOPIC_PREFIX,
-                &[j as u8 + 1],
-            ]
-            .concat()
-            .into_iter()
-            .map(F::from_canonical_u8)
-            .collect::<Vec<F>>();
             (
                 format!("{}_{}", TOPIC_NAME, j + 1),
-                H::hash_no_pad(&input).elements[0].to_canonical_u64(),
+                identifier_for_topic_column(&event.event_signature, &event.address, &[j as u8 + 1]),
             )
         })
         .collect::<Vec<(String, ColumnID)>>();
@@ -1058,28 +1036,15 @@ pub fn compute_non_indexed_receipt_column_ids<
         .iter()
         .enumerate()
         .map(|(j, _)| {
-            let input = [
-                event.address.as_slice(),
-                event.event_signature.as_slice(),
-                DATA_PREFIX,
-                &[j as u8 + 1],
-            ]
-            .concat()
-            .into_iter()
-            .map(F::from_canonical_u8)
-            .collect::<Vec<F>>();
             (
                 format!("{}_{}", DATA_NAME, j + 1),
-                H::hash_no_pad(&input).elements[0].to_canonical_u64(),
+                identifier_for_data_column(&event.event_signature, &event.address, &[j as u8 + 1]),
             )
         })
         .collect::<Vec<(String, ColumnID)>>();
 
     [
-        vec![(
-            GAS_USED_NAME.to_string(),
-            gas_used_column_id.to_canonical_u64(),
-        )],
+        vec![(GAS_USED_NAME.to_string(), gas_used_column_id)],
         topic_ids,
         data_ids,
     ]

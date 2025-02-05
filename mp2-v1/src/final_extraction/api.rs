@@ -11,7 +11,7 @@ use super::{
     base_circuit::BaseCircuitInput,
     lengthed_circuit::LengthedRecursiveWires,
     merge_circuit::{MergeTable, MergeTableRecursiveWires},
-    receipt_circuit::{ReceiptCircuitInput, ReceiptCircuitProofInputs, ReceiptRecursiveWires},
+    receipt_circuit::{ReceiptCircuitInput, ReceiptCircuitProofInputs, ReceiptCircuitProofWires},
     simple_circuit::SimpleCircuitRecursiveWires,
     BaseCircuitProofInputs, LengthedCircuit, MergeCircuit, PublicInputs, SimpleCircuit,
 };
@@ -53,7 +53,7 @@ pub struct PublicParameters {
     simple: CircuitWithUniversalVerifier<F, C, D, 0, SimpleCircuitRecursiveWires>,
     lengthed: CircuitWithUniversalVerifier<F, C, D, 0, LengthedRecursiveWires>,
     merge: CircuitWithUniversalVerifier<F, C, D, 0, MergeTableRecursiveWires>,
-    receipt: CircuitWithUniversalVerifier<F, C, D, 0, ReceiptRecursiveWires>,
+    receipt: CircuitWithUniversalVerifier<F, C, D, 0, ReceiptCircuitProofWires>,
     circuit_set: RecursiveCircuits<F, C, D>,
 }
 

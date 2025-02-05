@@ -95,7 +95,7 @@ where
         evm_word: u32,
         table_info: Vec<ExtractedColumnInfo>,
     ) -> Self {
-        let input_column = InputColumnInfo::new(&[slot], key_id, KEY_ID_PREFIX, 32);
+        let input_column = InputColumnInfo::new(&[slot], key_id, KEY_ID_PREFIX);
 
         let metadata = TableMetadata::new(&[input_column], &table_info);
 
@@ -123,9 +123,9 @@ where
         // but are used in proving we are looking at the correct node. For instance mapping keys are used to calculate the position of a leaf node
         // that we need to extract from, but only the output of a keccak hash of some combination of them is included in the node, hence we feed them in as witness.
         let outer_input_column =
-            InputColumnInfo::new(&[slot], outer_key_data.1, OUTER_KEY_ID_PREFIX, 32);
+            InputColumnInfo::new(&[slot], outer_key_data.1, OUTER_KEY_ID_PREFIX);
         let inner_input_column =
-            InputColumnInfo::new(&[slot], inner_key_data.1, INNER_KEY_ID_PREFIX, 32);
+            InputColumnInfo::new(&[slot], inner_key_data.1, INNER_KEY_ID_PREFIX);
 
         let metadata = TableMetadata::new(&[outer_input_column, inner_input_column], &table_info);
 
@@ -517,14 +517,20 @@ mod tests {
         *,
     };
     use crate::{
-        tests::TEST_MAX_COLUMNS, values_extraction::storage_value_digest, MAX_RECEIPT_LEAF_NODE_LEN,
+        tests::TEST_MAX_COLUMNS,
+        values_extraction::{
+            compute_leaf_mapping_metadata_digest, compute_leaf_mapping_of_mappings_metadata_digest,
+            compute_leaf_mapping_of_mappings_values_digest, compute_leaf_mapping_values_digest,
+            compute_leaf_single_metadata_digest, compute_leaf_single_values_digest,
+        },
+        MAX_RECEIPT_LEAF_NODE_LEN,
     };
     use alloy::primitives::Address;
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use itertools::Itertools;
     use log::info;
     use mp2_common::{
-        eth::{left_pad32, StorageSlot, StorageSlotNode},
+        eth::{StorageSlot, StorageSlotNode},
         group_hashing::weierstrass_to_point,
         mpt_sequential::utils::bytes_to_nibbles,
         types::MAPPING_LEAF_VALUE_LEN,
@@ -1083,8 +1089,8 @@ mod tests {
         {
             // Simple variable slot
             StorageSlot::Simple(slot) => {
-                let metadata_digest = metadata.digest();
-                let values_digest = storage_value_digest(&metadata, &[], &value, &test_slot);
+                let metadata_digest = compute_leaf_single_metadata_digest(&test_slot);
+                let values_digest = compute_leaf_single_values_digest(&test_slot, value);
 
                 let circuit_input = CircuitInput::new_single_variable_leaf(
                     node,
@@ -1097,10 +1103,14 @@ mod tests {
             }
             // Mapping variable
             StorageSlot::Mapping(mapping_key, slot) => {
-                let padded_key = left_pad32(mapping_key);
-                let metadata_digest = metadata.digest();
-                let values_digest =
-                    storage_value_digest(&metadata, &[&padded_key], &value, &test_slot);
+                let key_id = metadata.input_columns()[0].identifier().to_canonical_u64();
+                let metadata_digest = compute_leaf_mapping_metadata_digest(&test_slot, key_id);
+                let values_digest = compute_leaf_mapping_values_digest(
+                    &test_slot,
+                    value,
+                    mapping_key.clone(),
+                    key_id,
+                );
 
                 let outer_key_id = metadata.input_columns()[0].identifier().0;
 
@@ -1118,8 +1128,8 @@ mod tests {
             StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => match *parent.clone() {
                 // Simple Struct
                 StorageSlot::Simple(slot) => {
-                    let metadata_digest = metadata.digest();
-                    let values_digest = storage_value_digest(&metadata, &[], &value, &test_slot);
+                    let metadata_digest = compute_leaf_single_metadata_digest(&test_slot);
+                    let values_digest = compute_leaf_single_values_digest(&test_slot, value);
 
                     let circuit_input = CircuitInput::new_single_variable_leaf(
                         node,
@@ -1132,18 +1142,20 @@ mod tests {
                 }
                 // Mapping Struct
                 StorageSlot::Mapping(mapping_key, slot) => {
-                    let padded_key = left_pad32(&mapping_key);
-                    let metadata_digest = metadata.digest();
-                    let values_digest =
-                        storage_value_digest(&metadata, &[&padded_key], &value, &test_slot);
-
-                    let outer_key_id = metadata.input_columns()[0].identifier().0;
+                    let key_id = metadata.input_columns()[0].identifier().to_canonical_u64();
+                    let metadata_digest = compute_leaf_mapping_metadata_digest(&test_slot, key_id);
+                    let values_digest = compute_leaf_mapping_values_digest(
+                        &test_slot,
+                        value,
+                        mapping_key.clone(),
+                        key_id,
+                    );
 
                     let circuit_input = CircuitInput::new_mapping_variable_leaf(
                         node,
                         slot as u8,
-                        mapping_key,
-                        outer_key_id,
+                        mapping_key.clone(),
+                        key_id,
                         evm_word,
                         table_info.to_vec(),
                     );
@@ -1154,27 +1166,28 @@ mod tests {
                 StorageSlot::Node(StorageSlotNode::Mapping(grand, inner_mapping_key)) => {
                     match *grand {
                         StorageSlot::Mapping(outer_mapping_key, slot) => {
-                            let padded_outer_key = left_pad32(&outer_mapping_key);
-                            let padded_inner_key = left_pad32(&inner_mapping_key);
-                            let metadata_digest = metadata.digest();
-                            let values_digest = storage_value_digest(
-                                &metadata,
-                                &[&padded_outer_key, &padded_inner_key],
-                                &value,
+                            let input_columns = metadata.input_columns();
+                            let outer_key_id = input_columns[0].identifier().to_canonical_u64();
+                            let inner_key_id = input_columns[1].identifier().to_canonical_u64();
+                            let outer_mapping_data = (outer_mapping_key, outer_key_id);
+                            let inner_mapping_data = (inner_mapping_key, inner_key_id);
+                            let metadata_digest = compute_leaf_mapping_of_mappings_metadata_digest(
                                 &test_slot,
+                                outer_key_id,
+                                inner_key_id,
                             );
-
-                            let key_ids = metadata
-                                .input_columns()
-                                .iter()
-                                .map(|col| col.identifier().0)
-                                .collect::<Vec<u64>>();
+                            let values_digest = compute_leaf_mapping_of_mappings_values_digest(
+                                &test_slot,
+                                value,
+                                outer_mapping_data.clone(),
+                                inner_mapping_data.clone(),
+                            );
 
                             let circuit_input = CircuitInput::new_mapping_of_mappings_leaf(
                                 node,
                                 slot as u8,
-                                (outer_mapping_key, key_ids[0]),
-                                (inner_mapping_key, key_ids[1]),
+                                outer_mapping_data,
+                                inner_mapping_data,
                                 evm_word,
                                 table_info.to_vec(),
                             );

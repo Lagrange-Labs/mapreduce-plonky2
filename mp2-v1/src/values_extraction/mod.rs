@@ -9,7 +9,8 @@ use itertools::Itertools;
 use alloy::primitives::Address;
 use mp2_common::{
     digest::Digest,
-    eth::{left_pad32, StorageSlot},
+    eth::{left_pad32, EventLogInfo, StorageSlot},
+    keccak::HASH_LEN,
     poseidon::{empty_poseidon_hash, H},
     types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
@@ -149,7 +150,7 @@ impl StorageSlotInfo {
                     chain_id,
                     extra.clone(),
                 );
-                let input_column = InputColumnInfo::new(&[slot], identifier, KEY_ID_PREFIX, 32);
+                let input_column = InputColumnInfo::new(&[slot], identifier, KEY_ID_PREFIX);
                 vec![input_column]
             }
             2 => {
@@ -168,8 +169,8 @@ impl StorageSlotInfo {
                     extra.clone(),
                 );
                 vec![
-                    InputColumnInfo::new(&[slot], outer_identifier, OUTER_KEY_ID_PREFIX, 32),
-                    InputColumnInfo::new(&[slot], inner_identifier, INNER_KEY_ID_PREFIX, 32),
+                    InputColumnInfo::new(&[slot], outer_identifier, OUTER_KEY_ID_PREFIX),
+                    InputColumnInfo::new(&[slot], inner_identifier, INNER_KEY_ID_PREFIX),
                 ]
             }
             _ => vec![],
@@ -198,6 +199,76 @@ pub const TX_INDEX_NAME: &str = "tx_index";
 pub const GAS_USED_PREFIX: &[u8] = b"gas_used";
 /// [`GAS_USED_PREFIX`] as a [`str`]
 pub const GAS_USED_NAME: &str = "gas_used";
+
+impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
+    From<EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>> for TableMetadata
+{
+    fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>) -> Self {
+        let extraction_id = event.event_signature;
+
+        let tx_index_column_id =
+            identifier_for_tx_index_column(&event.event_signature, &event.address, &[]);
+
+        let gas_used_column_id =
+            identifier_for_gas_used_column(&event.event_signature, &event.address, &[]);
+
+        let tx_index_input_column = InputColumnInfo::new(
+            extraction_id.as_slice(),
+            tx_index_column_id,
+            TX_INDEX_PREFIX,
+        );
+        let gas_used_index_column = InputColumnInfo::new(
+            extraction_id.as_slice(),
+            gas_used_column_id,
+            GAS_USED_PREFIX,
+        );
+
+        let topic_columns = event
+            .topics
+            .iter()
+            .enumerate()
+            .map(|(j, &offset)| {
+                ExtractedColumnInfo::new(
+                    extraction_id.as_slice(),
+                    identifier_for_topic_column(
+                        &event.event_signature,
+                        &event.address,
+                        &[j as u8 + 1],
+                    ),
+                    offset,
+                    32,
+                    0,
+                )
+            })
+            .collect::<Vec<ExtractedColumnInfo>>();
+
+        let data_columns = event
+            .data
+            .iter()
+            .enumerate()
+            .map(|(j, &offset)| {
+                ExtractedColumnInfo::new(
+                    extraction_id.as_slice(),
+                    identifier_for_data_column(
+                        &event.event_signature,
+                        &event.address,
+                        &[j as u8 + 1],
+                    ),
+                    offset,
+                    32,
+                    0,
+                )
+            })
+            .collect::<Vec<ExtractedColumnInfo>>();
+
+        let extracted_columns = [topic_columns, data_columns].concat();
+
+        TableMetadata::new(
+            &[tx_index_input_column, gas_used_index_column],
+            &extracted_columns,
+        )
+    }
+}
 
 pub fn identifier_block_column() -> ColumnId {
     let inputs: Vec<F> = BLOCK_ID_DST.to_fields();
@@ -301,6 +372,86 @@ pub fn identifier_for_inner_mapping_key_column_raw(slot: u8, extra: Vec<u8>) -> 
     compute_id_with_prefix_raw(INNER_KEY_ID_PREFIX, slot, extra)
 }
 
+/// Compute tx index identifier for tx index variable.
+/// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+pub fn identifier_for_tx_index_column(
+    event_signature: &[u8; HASH_LEN],
+    contract_address: &Address,
+    extra: &[u8],
+) -> ColumnId {
+    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+
+    let inputs: Vec<F> = TX_INDEX_PREFIX
+        .iter()
+        .copied()
+        .chain(*event_signature)
+        .chain(extra)
+        .collect_vec()
+        .to_fields();
+
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+}
+
+/// Compute gas used identifier for gas used variable.
+/// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+pub fn identifier_for_gas_used_column(
+    event_signature: &[u8; HASH_LEN],
+    contract_address: &Address,
+    extra: &[u8],
+) -> ColumnId {
+    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+
+    let inputs: Vec<F> = GAS_USED_PREFIX
+        .iter()
+        .copied()
+        .chain(*event_signature)
+        .chain(extra)
+        .collect_vec()
+        .to_fields();
+
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+}
+
+/// Compute topic identifier for topic variable.
+/// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+pub fn identifier_for_topic_column(
+    event_signature: &[u8; HASH_LEN],
+    contract_address: &Address,
+    extra: &[u8],
+) -> ColumnId {
+    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+
+    let inputs: Vec<F> = TOPIC_PREFIX
+        .iter()
+        .copied()
+        .chain(*event_signature)
+        .chain(extra)
+        .collect_vec()
+        .to_fields();
+
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+}
+
+/// Compute data identifier for data variable.
+/// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+pub fn identifier_for_data_column(
+    event_signature: &[u8; HASH_LEN],
+    contract_address: &Address,
+    extra: &[u8],
+) -> ColumnId {
+    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+
+    let inputs: Vec<F> = DATA_PREFIX
+        .iter()
+        .copied()
+        .chain(*event_signature)
+        .chain(extra)
+        .collect_vec()
+        .to_fields();
+
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+}
+
 /// Calculate ID with prefix.
 pub(crate) fn compute_id_with_prefix(
     prefix: &[u8],
@@ -374,7 +525,7 @@ pub fn row_unique_data_for_mapping_of_mappings_leaf(
 }
 
 /// Function to compute a storage value digest
-pub fn storage_value_digest(
+fn storage_value_digest(
     table_metadata: &TableMetadata,
     keys: &[&[u8]],
     value: &[u8; MAPPING_LEAF_VALUE_LEN],
@@ -393,4 +544,99 @@ pub fn storage_value_digest(
         table_metadata.input_columns.len()
     );
     table_metadata.storage_values_digest(padded_keys.as_slice(), value.as_slice(), slot.slot())
+}
+
+/// Compute the metadata digest for single variable leaf.
+pub fn compute_leaf_single_metadata_digest(slot_info: &StorageSlotInfo) -> Digest {
+    TableMetadata::new(&[], slot_info.table_info()).digest()
+}
+
+/// Compute the values digest for single variable leaf.
+pub fn compute_leaf_single_values_digest(
+    slot_info: &StorageSlotInfo,
+    value: [u8; MAPPING_LEAF_VALUE_LEN],
+) -> Digest {
+    let table_metadata = TableMetadata::new(&[], slot_info.table_info());
+    storage_value_digest(&table_metadata, &[], &value, slot_info)
+}
+
+/// Compute the metadata digest for mapping variable leaf.
+pub fn compute_leaf_mapping_metadata_digest(
+    slot_info: &StorageSlotInfo,
+    key_id: ColumnId,
+) -> Digest {
+    let input_column = InputColumnInfo::new(&[slot_info.slot().slot()], key_id, KEY_ID_PREFIX);
+    TableMetadata::new(&[input_column], slot_info.table_info()).digest()
+}
+
+/// Compute the values digest for mapping variable leaf.
+pub fn compute_leaf_mapping_values_digest(
+    slot_info: &StorageSlotInfo,
+    value: [u8; MAPPING_LEAF_VALUE_LEN],
+    mapping_key: MappingKey,
+    key_id: ColumnId,
+) -> Digest {
+    let input_column = InputColumnInfo::new(&[slot_info.slot().slot()], key_id, KEY_ID_PREFIX);
+    let table_metadata = TableMetadata::new(&[input_column], slot_info.table_info());
+    storage_value_digest(
+        &table_metadata,
+        &[mapping_key.as_slice()],
+        &value,
+        slot_info,
+    )
+}
+
+/// Compute the metadata digest for mapping of mappings leaf.
+pub fn compute_leaf_mapping_of_mappings_metadata_digest(
+    slot_info: &StorageSlotInfo,
+    outer_key_id: ColumnId,
+    inner_key_id: ColumnId,
+) -> Digest {
+    let outer_key_column = InputColumnInfo::new(
+        &[slot_info.slot().slot()],
+        outer_key_id,
+        OUTER_KEY_ID_PREFIX,
+    );
+    let inner_key_column = InputColumnInfo::new(
+        &[slot_info.slot().slot()],
+        inner_key_id,
+        INNER_KEY_ID_PREFIX,
+    );
+    TableMetadata::new(
+        &[outer_key_column, inner_key_column],
+        slot_info.table_info(),
+    )
+    .digest()
+}
+
+/// Compute the values digest for mapping of mappings leaf.
+pub fn compute_leaf_mapping_of_mappings_values_digest(
+    slot_info: &StorageSlotInfo,
+    value: [u8; MAPPING_LEAF_VALUE_LEN],
+    outer_mapping_data: (MappingKey, ColumnId),
+    inner_mapping_data: (MappingKey, ColumnId),
+) -> Digest {
+    let (outer_key, outer_key_id) = outer_mapping_data;
+    let (inner_key, inner_key_id) = inner_mapping_data;
+    let outer_key_column = InputColumnInfo::new(
+        &[slot_info.slot().slot()],
+        outer_key_id,
+        OUTER_KEY_ID_PREFIX,
+    );
+    let inner_key_column = InputColumnInfo::new(
+        &[slot_info.slot().slot()],
+        inner_key_id,
+        INNER_KEY_ID_PREFIX,
+    );
+    let table_metadata = TableMetadata::new(
+        &[outer_key_column, inner_key_column],
+        slot_info.table_info(),
+    );
+
+    storage_value_digest(
+        &table_metadata,
+        &[outer_key.as_slice(), inner_key.as_slice()],
+        &value,
+        slot_info,
+    )
 }

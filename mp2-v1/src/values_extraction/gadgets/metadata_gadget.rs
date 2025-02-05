@@ -1,7 +1,5 @@
 //! The metadata gadget is used to ensure the correct extraction from the set of all identifiers.
 
-use crate::values_extraction::{DATA_PREFIX, GAS_USED_PREFIX, TOPIC_PREFIX, TX_INDEX_PREFIX};
-
 use super::column_info::{
     CircuitBuilderColumnInfo, ExtractedColumnInfo, ExtractedColumnInfoTarget, InputColumnInfo,
     InputColumnInfoTarget, WitnessWriteColumnInfo,
@@ -12,6 +10,7 @@ use mp2_common::{
     array::{Array, Targetable},
     eth::{left_pad32, EventLogInfo, StorageSlot},
     group_hashing::CircuitBuilderGroupHashing,
+    keccak::PACKED_HASH_LEN,
     poseidon::{empty_poseidon_hash, hash_to_int_value, H},
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
@@ -21,7 +20,7 @@ use mp2_common::{
     F,
 };
 use plonky2::{
-    field::types::{Field, PrimeField64},
+    field::types::Field,
     hash::hash_types::HashOut,
     iop::{
         target::{BoolTarget, Target},
@@ -81,7 +80,7 @@ impl TableMetadata {
 
         let input_columns = input_prefixes
             .iter()
-            .map(|prefix| InputColumnInfo::new(extraction_identifier, rng.gen(), prefix, 32))
+            .map(|prefix| InputColumnInfo::new(extraction_identifier, rng.gen(), prefix))
             .collect::<Vec<InputColumnInfo>>();
 
         let num_actual_columns = rng.gen_range(1..=NUM_EXTRACTED_COLUMNS);
@@ -291,26 +290,32 @@ impl TableMetadata {
     }
 }
 
-pub struct TableMetadataGadget<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>;
-
-impl<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>
-    TableMetadataGadget<MAX_EXTRACTED_COLUMNS, INPUT_COLUMNS>
-{
-    pub(crate) fn build(
+impl TableMetadata {
+    pub(crate) fn build<const MAX_EXTRACTED_COLUMNS: usize>(
         b: &mut CBuilder,
-    ) -> TableMetadataTarget<MAX_EXTRACTED_COLUMNS, INPUT_COLUMNS> {
+        num_input_columns: usize,
+    ) -> TableMetadataTarget<MAX_EXTRACTED_COLUMNS> {
+        let real_columns = array::from_fn(|_| b.add_virtual_bool_target_safe());
+
+        let num_actual_columns = b.add_many(real_columns.iter().map(|bool_tar| bool_tar.target));
+        let num_actual_columns = b.add_const(
+            num_actual_columns,
+            F::from_canonical_usize(num_input_columns),
+        );
         TableMetadataTarget {
-            input_columns: array::from_fn(|_| b.add_virtual_input_column_info()),
+            input_columns: (0..num_input_columns)
+                .map(|_| b.add_virtual_input_column_info())
+                .collect::<Vec<InputColumnInfoTarget>>(),
             extracted_columns: array::from_fn(|_| b.add_virtual_extracted_column_info()),
-            real_columns: array::from_fn(|_| b.add_virtual_bool_target_safe()),
-            num_actual_columns: b.add_virtual_target(),
+            real_columns,
+            num_actual_columns,
         }
     }
 
-    pub(crate) fn assign(
+    pub(crate) fn assign<const MAX_EXTRACTED_COLUMNS: usize>(
         pw: &mut PartialWitness<F>,
         columns_metadata: &TableMetadata,
-        metadata_target: &TableMetadataTarget<MAX_EXTRACTED_COLUMNS, INPUT_COLUMNS>,
+        metadata_target: &TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
     ) {
         // First we check that we are trying to assign from a `TableMetadata` with the correct
         // number of columns
@@ -345,117 +350,13 @@ impl<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>
             .for_each(|(i, &b_target)| {
                 pw.set_bool_target(b_target, i < columns_metadata.extracted_columns.len())
             });
-
-        pw.set_target(
-            metadata_target.num_actual_columns,
-            F::from_canonical_usize(columns_metadata.num_actual_columns),
-        );
-    }
-}
-
-impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
-    From<EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>> for TableMetadata
-{
-    fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>) -> Self {
-        let extraction_id = event.event_signature;
-
-        let tx_index_input = [
-            event.address.as_slice(),
-            event.event_signature.as_slice(),
-            TX_INDEX_PREFIX,
-        ]
-        .concat()
-        .into_iter()
-        .map(F::from_canonical_u8)
-        .collect::<Vec<F>>();
-        let tx_index_column_id = H::hash_no_pad(&tx_index_input).elements[0].to_canonical_u64();
-
-        let gas_used_input = [
-            event.address.as_slice(),
-            event.event_signature.as_slice(),
-            GAS_USED_PREFIX,
-        ]
-        .concat()
-        .into_iter()
-        .map(F::from_canonical_u8)
-        .collect::<Vec<F>>();
-        let gas_used_column_id = H::hash_no_pad(&gas_used_input).elements[0].to_canonical_u64();
-
-        let tx_index_input_column = InputColumnInfo::new(
-            extraction_id.as_slice(),
-            tx_index_column_id,
-            TX_INDEX_PREFIX,
-            32,
-        );
-        let gas_used_index_column = InputColumnInfo::new(
-            extraction_id.as_slice(),
-            gas_used_column_id,
-            GAS_USED_PREFIX,
-            32,
-        );
-
-        let topic_columns = event
-            .topics
-            .iter()
-            .enumerate()
-            .map(|(j, &offset)| {
-                let input = [
-                    event.address.as_slice(),
-                    event.event_signature.as_slice(),
-                    TOPIC_PREFIX,
-                    &[j as u8 + 1],
-                ]
-                .concat()
-                .into_iter()
-                .map(F::from_canonical_u8)
-                .collect::<Vec<F>>();
-
-                let topic_id = H::hash_no_pad(&input).elements[0].to_canonical_u64();
-                ExtractedColumnInfo::new(extraction_id.as_slice(), topic_id, offset, 32, 0)
-            })
-            .collect::<Vec<ExtractedColumnInfo>>();
-
-        let data_columns = event
-            .data
-            .iter()
-            .enumerate()
-            .map(|(j, &offset)| {
-                let input = [
-                    event.address.as_slice(),
-                    event.event_signature.as_slice(),
-                    DATA_PREFIX,
-                    &[j as u8 + 1],
-                ]
-                .concat()
-                .into_iter()
-                .map(F::from_canonical_u8)
-                .collect::<Vec<F>>();
-
-                let data_id = H::hash_no_pad(&input).elements[0].to_canonical_u64();
-                ExtractedColumnInfo::new(extraction_id.as_slice(), data_id, offset, 32, 0)
-            })
-            .collect::<Vec<ExtractedColumnInfo>>();
-
-        let extracted_columns = [topic_columns, data_columns].concat();
-
-        TableMetadata::new(
-            &[tx_index_input_column, gas_used_index_column],
-            &extracted_columns,
-        )
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct TableMetadataTarget<
-    const MAX_EXTRACTED_COLUMNS: usize,
-    const INPUT_COLUMNS: usize,
-> {
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
+pub(crate) struct TableMetadataTarget<const MAX_EXTRACTED_COLUMNS: usize> {
     /// Information about all input columns of the table
-    pub(crate) input_columns: [InputColumnInfoTarget; INPUT_COLUMNS],
+    pub(crate) input_columns: Vec<InputColumnInfoTarget>,
     #[serde(
         serialize_with = "serialize_long_array",
         deserialize_with = "deserialize_long_array"
@@ -479,15 +380,19 @@ type ReceiptExtractedOutput = (
     CurveTarget,
 );
 
-impl<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>
-    TableMetadataTarget<MAX_EXTRACTED_COLUMNS, INPUT_COLUMNS>
-{
+impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUMNS> {
     #[cfg(test)]
-    pub fn metadata_digest(&self, b: &mut CBuilder) -> CurveTarget {
+    pub fn metadata_digest(
+        &self,
+        b: &mut CBuilder,
+        metadata_prefixes: &[&[Target; PACKED_HASH_LEN]],
+        extraction_id: &[Target; PACKED_HASH_LEN],
+    ) -> CurveTarget {
         let input_points = self
             .input_columns
             .iter()
-            .map(|column| column.digest(b))
+            .zip_eq(metadata_prefixes.iter())
+            .map(|(column, metadata_prefix)| column.digest(b, metadata_prefix, extraction_id))
             .collect::<Vec<CurveTarget>>();
 
         let curve_zero = b.curve_zero();
@@ -511,17 +416,23 @@ impl<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>
     pub(crate) fn inputs_digests(
         &self,
         b: &mut CBuilder,
-        input_values: &[Array<U32Target, 8>; INPUT_COLUMNS],
+        input_values: &[Array<U32Target, PACKED_HASH_LEN>],
+        metadata_prefixes: &[&[Target; PACKED_HASH_LEN]],
+        extraction_id: &[Target; PACKED_HASH_LEN],
     ) -> (CurveTarget, CurveTarget) {
         let (metadata_points, value_points): (Vec<CurveTarget>, Vec<CurveTarget>) = self
             .input_columns
             .iter()
-            .zip(input_values.iter())
-            .map(|(column, input_val)| {
+            .zip_eq(input_values.iter())
+            .zip_eq(metadata_prefixes)
+            .map(|((column, input_val), metadata_prefix)| {
                 let inputs = once(column.identifier)
                     .chain(input_val.arr.iter().map(|t| t.to_target()))
                     .collect_vec();
-                (column.digest(b), b.map_to_curve_point(&inputs))
+                (
+                    column.digest(b, metadata_prefix, extraction_id),
+                    b.map_to_curve_point(&inputs),
+                )
             })
             .unzip();
 
@@ -541,13 +452,13 @@ impl<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>
         b: &mut CBuilder,
         value: &Array<Target, VALUE_LEN>,
         offset: Target,
-        extraction_id: &[Target; 8],
+        extraction_id: &[Target; PACKED_HASH_LEN],
     ) -> (CurveTarget, CurveTarget) {
         let one = b.one();
 
         let curve_zero = b.curve_zero();
 
-        let ex_id_arr = Array::<Target, 8>::from(*extraction_id);
+        let ex_id_arr = Array::<Target, PACKED_HASH_LEN>::from(*extraction_id);
 
         let (metadata_points, value_points): (Vec<CurveTarget>, Vec<CurveTarget>) = self
             .extracted_columns
@@ -562,7 +473,8 @@ impl<const MAX_EXTRACTED_COLUMNS: usize, const INPUT_COLUMNS: usize>
                 let correct_offset = b.is_equal(offset, column.location_offset());
 
                 // We check that we have the correct base extraction id
-                let column_ex_id_arr = Array::<Target, 8>::from(column.extraction_id());
+                let column_ex_id_arr =
+                    Array::<Target, PACKED_HASH_LEN>::from(column.extraction_id());
                 let correct_extraction_id = column_ex_id_arr.equals(b, &ex_id_arr);
 
                 // We only extract if we are in the correct location AND `column.is_extracted` is true
@@ -686,19 +598,20 @@ pub(crate) mod tests {
     impl UserCircuit<F, D> for TestMedataCircuit {
         // Metadata target + slot + expected number of actual columns + expected metadata digest
         type Wires = (
-            TableMetadataTarget<TEST_MAX_COLUMNS, 0>,
+            TableMetadataTarget<TEST_MAX_COLUMNS>,
             Target,
             Target,
             CurveTarget,
         );
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let metadata_target = TableMetadataGadget::build(b);
+            let metadata_target = TableMetadata::build(b, 0);
             let slot = b.add_virtual_target();
+            let zero = b.zero();
             let expected_num_actual_columns = b.add_virtual_target();
             let expected_metadata_digest = b.add_virtual_curve_target();
-
-            let metadata_digest = metadata_target.metadata_digest(b);
+            let extraction_id = [zero, zero, zero, zero, zero, zero, zero, slot];
+            let metadata_digest = metadata_target.metadata_digest(b, &[], &extraction_id);
 
             b.connect_curve_points(metadata_digest, expected_metadata_digest);
 
@@ -716,7 +629,7 @@ pub(crate) mod tests {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            TableMetadataGadget::assign(pw, &self.columns_metadata, &wires.0);
+            TableMetadata::assign(pw, &self.columns_metadata, &wires.0);
 
             pw.set_target(wires.1, F::from_canonical_u8(self.slot));
             pw.set_target(
