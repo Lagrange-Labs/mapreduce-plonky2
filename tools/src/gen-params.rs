@@ -1,29 +1,4 @@
 #![feature(generic_const_exprs)]
-
-/// To use:
-/// - From Remote machine:
-///   - ssh root@135.181.224.230
-///   - cd distributed-query
-///   - RUST_LOG=info cargo run -r -p tools --bin gen-params-v1 -- --config tools/config.toml
-/// - From local computer:
-///   - Update verifier.sol:
-///     - curl https://pub-2124403768df4a0285b77bcb8d224083.r2.dev/groth16_assets/verifier.sol -O
-///     - Update mapreduce-plonky2/groth16-framework/test_data/TestGroth16Verifier.sol
-///     - From `lagrange-lpn-contracts`, run `./script/uti/copy-verifier.sh`
-///     - Double check diff, only v1/Groth16Verifier.sol should have changes
-///   - Deploy to testnet:
-///     - Set the PRIVATE_KEY environment variable to the testnet admin key
-///     - Run `make holesky_testnet_deploy_registry`
-///
-/// This binary generates and manages various parameters and assets for a distributed query system:
-/// - Preprocessing parameters
-/// - Query parameters
-/// - Groth16 assets
-///
-/// Use the `--only-groth16` flag to generate Groth16 parameters from existing query parameters.
-/// Use the `--multipart-chunk-size` option to set the chunk size for multipart uploads (default: 1GB).
-///
-/// Configuration is loaded from a specified file and can be overridden by environment variables.
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -60,10 +35,9 @@ type QueryParams = QueryParameters<
     MAX_NUM_ITEMS_PER_OUTPUT,
     MAX_NUM_PLACEHOLDERS,
 >;
-
 type PreprocessingParameters = PublicParameters;
 
-/// Command-line arguments for the parameter generation tool
+/// Generate the public parameters for the current version of MR2.
 #[derive(Debug, Parser)]
 struct Args {
     /// Where to serialize the public parameters.
