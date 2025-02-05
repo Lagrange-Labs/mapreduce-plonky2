@@ -10,8 +10,8 @@ use alloy::{
     rpc::{
         json_rpc::RpcError,
         types::{
-            Block, BlockTransactions, EIP1186AccountProofResponse, Filter, ReceiptEnvelope,
-            Transaction, TransactionReceipt,
+            Block, BlockTransactions, EIP1186AccountProofResponse, ReceiptEnvelope, Transaction,
+            TransactionReceipt,
         },
     },
     transports::Transport,
@@ -428,69 +428,66 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
         &self,
         provider: &RootProvider<T>,
         block: BlockNumberOrTag,
-    ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
-        // Retrieve the transaction indices for the relevant logs
-        let tx_indices = self.retrieve_tx_indices(provider, block).await?;
+    ) -> Result<(Vec<ReceiptProofInfo>, B256), MP2EthError> {
+        let receipts = query_block_receipts(provider, block).await?;
 
-        // Construct the Receipt Trie for this block so we can retrieve MPT proofs.
-        let mut block_util = BlockUtil::fetch(provider, block).await?;
-        EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::extract_info(&tx_indices, &mut block_util)
-    }
+        let memdb = Arc::new(MemoryDB::new(true));
+        let mut receipts_trie = EthTrie::new(memdb.clone());
 
-    /// Function to query for relevant logs at a specific block, it returns a [`BTreeSet`] of the transaction indices that are relevant.
-    pub async fn retrieve_tx_indices<T: Transport + Clone>(
-        &self,
-        provider: &RootProvider<T>,
-        block: BlockNumberOrTag,
-    ) -> Result<BTreeSet<u64>, MP2EthError> {
-        let filter = Filter::new()
-            .select(block)
-            .address(self.address)
-            .event_signature(B256::from(self.event_signature));
-        for i in 0..RETRY_NUM - 1 {
-            debug!(
-                "Querying Receipt logs:\n\tevent signature = {:?}",
-                self.event_signature,
-            );
-            match provider.get_logs(&filter).await {
-                // For each of the logs return the transacion its included in, then sort and remove duplicates.
-                Ok(response) => {
-                    return Ok(BTreeSet::from_iter(
-                        response.iter().map_while(|log| log.transaction_index),
-                    ))
+        let mut indices = BTreeSet::<u64>::new();
+        receipts.into_iter().try_for_each(|receipt| {
+            let tx_index_u64 = receipt.transaction_index.unwrap();
+
+            let tx_index = tx_index_u64.rlp_bytes();
+
+            let receipt_primitive = match receipt.inner {
+                CRE::Legacy(ref r) => CRE::Legacy(from_rpc_logs_to_consensus(r)),
+                CRE::Eip2930(ref r) => CRE::Eip2930(from_rpc_logs_to_consensus(r)),
+                CRE::Eip1559(ref r) => CRE::Eip1559(from_rpc_logs_to_consensus(r)),
+                CRE::Eip4844(ref r) => CRE::Eip4844(from_rpc_logs_to_consensus(r)),
+                CRE::Eip7702(ref r) => CRE::Eip7702(from_rpc_logs_to_consensus(r)),
+                _ => panic!("aie"),
+            };
+            // To receipt method is infallible so unwrap is safe here
+            let receipt = receipt_primitive.as_receipt().unwrap();
+            let relevant = receipt.logs.iter().find(|log| {
+                let address_check = log.address == self.address;
+                let topics = log.topics();
+                if topics.is_empty() {
+                    false
+                } else {
+                    let sig_check = topics[0].0 == self.event_signature;
+                    sig_check && address_check
                 }
-                Err(e) => println!("Failed to query the Receipt logs at {i} time: {e:?}"),
+            });
+
+            if relevant.is_some() {
+                indices.insert(tx_index_u64);
             }
-        }
-        match provider.get_logs(&filter).await {
-            // For each of the logs return the transacion its included in, then sort and remove duplicates.
-            Ok(response) => Ok(BTreeSet::from_iter(
-                response.iter().map_while(|log| log.transaction_index),
-            )),
-            Err(_) => Err(MP2EthError::FetchError),
-        }
-    }
 
-    /// Function that takes a list of transaction indices in the form of a [`BTreeSet`] and a [`BlockUtil`] and returns a list of [`ReceiptProofInfo`].
-    pub fn extract_info(
-        tx_indices: &BTreeSet<u64>,
-        block_util: &mut BlockUtil,
-    ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
-        let mpt_root = block_util.receipts_trie.root_hash()?;
-        tx_indices
-            .iter()
-            .map(|&tx_index| {
-                let key = tx_index.rlp_bytes();
+            let body_rlp = receipt_primitive.encoded_2718();
 
-                let proof = block_util.receipts_trie.get_proof(&key[..])?;
+            receipts_trie.insert(&tx_index, &body_rlp)
+        })?;
+        let mpt_root = receipts_trie.root_hash()?;
 
-                Ok(ReceiptProofInfo {
-                    mpt_proof: proof,
-                    mpt_root,
-                    tx_index,
+        Ok((
+            indices
+                .iter()
+                .map(|&tx_index| {
+                    let key = tx_index.rlp_bytes();
+
+                    let proof = receipts_trie.get_proof(&key[..])?;
+
+                    Ok(ReceiptProofInfo {
+                        mpt_proof: proof,
+                        mpt_root,
+                        tx_index,
+                    })
                 })
-            })
-            .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()
+                .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()?,
+            B256::from(mpt_root.0),
+        ))
     }
 }
 
@@ -954,11 +951,7 @@ mod test {
         let mut block = BlockUtil::fetch(&provider, bna).await?;
         // check if we compute the RLP correctly now
         block.check()?;
-        let mut be = tryethers::BlockData::fetch(bn, url).await?;
-        be.check()?;
-        let er = be.receipts_trie.root_hash()?;
-        let ar = block.receipts_trie.root_hash()?;
-        assert_eq!(er, ar);
+
         // dissect one receipt entry in the trie
         let tx_receipt = block.txs.first().unwrap();
         // https://sepolia.etherscan.io/tx/0x9bef12fafd3962b0e0d66b738445d6ea2c1f3daabe10c889bd1916acc75d698b#eventlog
@@ -1453,175 +1446,6 @@ mod test {
     pub(crate) fn rlp_opt<T: rlp::Encodable>(rlp: &mut rlp::RlpStream, opt: &Option<T>) {
         if let Some(inner) = opt {
             rlp.append(inner);
-        }
-    }
-    // for compatibility check with alloy
-    mod tryethers {
-
-        use std::sync::Arc;
-
-        use anyhow::Result;
-        use eth_trie::{EthTrie, MemoryDB, Trie};
-        use ethers::{
-            providers::{Http, Middleware, Provider},
-            types::{BlockId, Bytes, Transaction, TransactionReceipt, U64},
-        };
-        use rlp::{Encodable, RlpStream};
-
-        /// A wrapper around a transaction and its receipt. The receipt is used to filter
-        /// bad transactions, so we only compute over valid transactions.
-        pub struct TxAndReceipt(Transaction, TransactionReceipt);
-
-        impl TxAndReceipt {
-            pub fn tx(&self) -> &Transaction {
-                &self.0
-            }
-            pub fn receipt(&self) -> &TransactionReceipt {
-                &self.1
-            }
-            pub fn tx_rlp(&self) -> Bytes {
-                self.0.rlp()
-            }
-            // TODO: this should be upstreamed to ethers-rs
-            pub fn receipt_rlp(&self) -> Bytes {
-                let tx_type = self.tx().transaction_type;
-                let mut rlp = RlpStream::new();
-                rlp.begin_unbounded_list();
-                match &self.1.status {
-                    Some(s) if s.as_u32() == 1 => rlp.append(s),
-                    _ => rlp.append_empty_data(),
-                };
-                rlp.append(&self.1.cumulative_gas_used)
-                    .append(&self.1.logs_bloom)
-                    .append_list(&self.1.logs);
-
-                rlp.finalize_unbounded_list();
-                let rlp_bytes: Bytes = rlp.out().freeze().into();
-                let mut encoded = vec![];
-                match tx_type {
-                    // EIP-2930 (0x01)
-                    Some(x) if x == U64::from(0x1) => {
-                        encoded.extend_from_slice(&[0x1]);
-                        encoded.extend_from_slice(rlp_bytes.as_ref());
-                        encoded.into()
-                    }
-                    // EIP-1559 (0x02)
-                    Some(x) if x == U64::from(0x2) => {
-                        encoded.extend_from_slice(&[0x2]);
-                        encoded.extend_from_slice(rlp_bytes.as_ref());
-                        encoded.into()
-                    }
-                    _ => rlp_bytes,
-                }
-            }
-        }
-        /// Structure containing the block header and its transactions / receipts. Amongst other things,
-        /// it is used to create a proof of inclusion for any transaction inside this block.
-        pub struct BlockData {
-            pub block: ethers::types::Block<Transaction>,
-            // TODO: add generics later - this may be re-used amongst different workers
-            pub tx_trie: EthTrie<MemoryDB>,
-            pub receipts_trie: EthTrie<MemoryDB>,
-        }
-
-        impl BlockData {
-            pub async fn fetch<T: Into<BlockId> + Send + Sync>(
-                blockid: T,
-                url: String,
-            ) -> Result<Self> {
-                let provider =
-                    Provider::<Http>::try_from(url).expect("could not instantiate HTTP Provider");
-                Self::fetch_from(&provider, blockid).await
-            }
-            pub async fn fetch_from<T: Into<BlockId> + Send + Sync>(
-                provider: &Provider<Http>,
-                blockid: T,
-            ) -> Result<Self> {
-                let block = provider
-                    .get_block_with_txs(blockid)
-                    .await?
-                    .expect("should have been a block");
-                let receipts = provider
-                    .get_block_receipts(
-                        block
-                            .number
-                            .ok_or(anyhow::anyhow!("Couldn't unwrap block number"))?,
-                    )
-                    .await
-                    .map_err(|e| {
-                        anyhow::anyhow!("Couldn't get ethers block receipts with error: {:?}", e)
-                    })?;
-
-                let tx_with_receipt = block
-                    .transactions
-                    .clone()
-                    .into_iter()
-                    .map(|tx| {
-                        let tx_hash = tx.hash();
-                        let r = receipts
-                            .iter()
-                            .find(|r| r.transaction_hash == tx_hash)
-                            .expect("RPC sending invalid data");
-                        // TODO remove cloning
-                        TxAndReceipt(tx, r.clone())
-                    })
-                    .collect::<Vec<_>>();
-
-                // check transaction root
-                let memdb = Arc::new(MemoryDB::new(true));
-                let mut tx_trie = EthTrie::new(Arc::clone(&memdb));
-                for tr in tx_with_receipt.iter() {
-                    tx_trie
-                        .insert(&tr.receipt().transaction_index.rlp_bytes(), &tr.tx_rlp())
-                        .expect("can't insert tx");
-                }
-
-                // check receipt root
-                let memdb = Arc::new(MemoryDB::new(true));
-                let mut receipts_trie = EthTrie::new(Arc::clone(&memdb));
-                for tr in tx_with_receipt.iter() {
-                    if tr.tx().transaction_index.unwrap() == U64::from(0) {
-                        println!(
-                            "Ethers: Index {} -> {:?}",
-                            tr.tx().transaction_index.unwrap(),
-                            tr.receipt_rlp().to_vec()
-                        );
-                    }
-                    receipts_trie
-                        .insert(
-                            &tr.receipt().transaction_index.rlp_bytes(),
-                            // TODO: make getter value for rlp encoding
-                            &tr.receipt_rlp(),
-                        )
-                        .expect("can't insert tx");
-                }
-                let computed = tx_trie.root_hash().expect("root hash problem");
-                let expected = block.transactions_root;
-                assert_eq!(expected, computed);
-
-                let computed = receipts_trie.root_hash().expect("root hash problem");
-                let expected = block.receipts_root;
-                assert_eq!(expected, computed);
-
-                Ok(BlockData {
-                    block,
-                    tx_trie,
-                    receipts_trie,
-                })
-            }
-
-            // recompute the receipts trie by first converting all receipts form RPC type to consensus type
-            // since in Alloy these are two different types and RLP functions are only implemented for
-            // consensus ones.
-            pub fn check(&mut self) -> Result<()> {
-                let computed = self.receipts_trie.root_hash()?;
-                let tx_computed = self.tx_trie.root_hash()?;
-                let expected = self.block.receipts_root;
-                let tx_expected = self.block.transactions_root;
-                assert_eq!(expected.0, computed.0);
-                assert_eq!(tx_expected.0, tx_computed.0);
-                Ok(())
-            }
         }
     }
 }

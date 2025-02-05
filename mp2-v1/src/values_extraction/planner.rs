@@ -1,9 +1,8 @@
 //! This code returns an [`UpdateTree`] used to plan how we prove a series of values was extracted from a Merkle Patricia Trie.
 use alloy::{
-    eips::BlockNumberOrTag,
     network::Ethereum,
     primitives::{keccak256, B256},
-    providers::{Provider, RootProvider},
+    providers::RootProvider,
     transports::Transport,
 };
 use anyhow::Result;
@@ -310,21 +309,12 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
         provider: &RootProvider<T, Ethereum>,
     ) -> Result<ExtractionUpdatePlan<Self>, MP2PlannerError> {
         // Query for the receipt proofs relating to this event at block number `epoch`
-        let proofs = self.query_receipt_proofs(provider, epoch.into()).await?;
+        let (proofs, receipt_root) = self.query_receipt_proofs(provider, epoch.into()).await?;
 
         let mut proof_cache = HashMap::<B256, ProofData<Self>>::new();
 
         // Convert the paths into their keys using keccak
         if proofs.is_empty() {
-            let block = provider
-                .get_block_by_number(BlockNumberOrTag::Number(epoch), false.into())
-                .await
-                .map_err(|_| MP2PlannerError::FetchError)?
-                .ok_or(MP2PlannerError::UpdateTreeError(
-                    "Fetched Block with no relevant events but the result was None".to_string(),
-                ))?;
-            let receipt_root = block.header.receipts_root;
-
             let dummy_input = InputEnum::Dummy(receipt_root);
             let proof_data = ProofData::<Self> {
                 node: vec![],
@@ -426,12 +416,12 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
 #[cfg(test)]
 pub mod tests {
 
-    use alloy::{eips::BlockNumberOrTag, primitives::Address, providers::ProviderBuilder, sol};
+    use alloy::{primitives::Address, providers::ProviderBuilder, sol};
     use anyhow::anyhow;
-    use eth_trie::Trie;
+
     use mp2_common::{
         digest::Digest,
-        eth::{BlockUtil, ReceiptProofInfo},
+        eth::ReceiptProofInfo,
         proof::ProofWithVK,
         types::GFp,
         utils::{Endianness, Packer},
@@ -451,7 +441,7 @@ pub mod tests {
     async fn test_receipt_update_tree() -> Result<()> {
         // First get the info we will feed in to our function
         let epoch: u64 = 21362445;
-        let (block_util, event_info, _) = build_test_data(epoch).await?;
+        let (receipts_root, event_info, _) = build_test_data(epoch).await?;
 
         let url = get_mainnet_url();
         // get some tx and receipt
@@ -459,10 +449,7 @@ pub mod tests {
 
         let extraction_plan = event_info.create_update_plan(epoch, &provider).await?;
 
-        assert_eq!(
-            *extraction_plan.update_tree.root(),
-            block_util.block.header.receipts_root
-        );
+        assert_eq!(*extraction_plan.update_tree.root(), receipts_root);
         Ok(())
     }
 
@@ -477,7 +464,7 @@ pub mod tests {
 
     async fn test_receipt_proving(epoch: u64, pp: &PublicParameters<512, 5>) -> Result<()> {
         // First get the info we will feed in to our function
-        let (mut block_util, event_info, proof_info) = build_test_data(epoch).await?;
+        let (receipts_root, event_info, proof_info) = build_test_data(epoch).await?;
 
         let url = get_mainnet_url();
         // get some tx and receipt
@@ -511,12 +498,7 @@ pub mod tests {
         {
             assert_eq!(
                 pi.root_hash(),
-                block_util
-                    .receipts_trie
-                    .root_hash()?
-                    .0
-                    .to_vec()
-                    .pack(Endianness::Little)
+                receipts_root.0.to_vec().pack(Endianness::Little)
             );
         }
 
@@ -537,19 +519,16 @@ pub mod tests {
         Ok(())
     }
 
-    type TestData = (BlockUtil, EventLogInfo<2, 1>, Vec<ReceiptProofInfo>);
+    type TestData = (B256, EventLogInfo<2, 1>, Vec<ReceiptProofInfo>);
     /// Function that fetches a block together with its transaction trie and receipt trie for testing purposes.
     async fn build_test_data(block_number: u64) -> Result<TestData> {
         let url = get_mainnet_url();
         // get some tx and receipt
         let provider = ProviderBuilder::new().on_http(url.parse()?);
 
-        // We fetch a specific block which we know includes transactions relating to the PudgyPenguins contract.
-        let block_util =
-            BlockUtil::fetch(&provider, BlockNumberOrTag::Number(block_number)).await?;
-
         let event_info = test_receipt_trie_helper().await?;
         let mut proof_info = vec![];
+        let mut root = B256::default();
         let mut success = false;
         for _ in 0..10 {
             match event_info
@@ -557,8 +536,9 @@ pub mod tests {
                 .await
             {
                 // For each of the logs return the transacion its included in, then sort and remove duplicates.
-                Ok(response) => {
+                Ok((response, fetched_root)) => {
                     proof_info = response;
+                    root = fetched_root;
                     success = true;
                     break;
                 }
@@ -573,7 +553,7 @@ pub mod tests {
             return Err(anyhow!("Could not query mainnet successfully"));
         }
 
-        Ok((block_util, event_info, proof_info))
+        Ok((root, event_info, proof_info))
     }
 
     /// Function to build a list of [`ReceiptProofInfo`] for a set block.
