@@ -64,7 +64,8 @@ pub fn left_pad_leaf_value<
     let tmp = b.add(offset, value_len);
     let start = b.sub(tmp, one);
 
-    let mut last_byte_found = b._false();
+    // In the case that prefix is exactly 128 the value is precisely zero so we should not extract anything
+    let mut last_byte_found = b.is_equal(value_len_80, zero);
 
     let mut result_bytes = [zero; PADDED_LEN];
 
@@ -83,7 +84,6 @@ pub fn left_pad_leaf_value<
         .rev()
         .enumerate()
         .for_each(|(i, out_byte)| {
-            // offset = info.byte_offset + i
             let index = b.constant(F::from_canonical_usize(i));
             let inner_offset = b.sub(start, index);
             // Set to 0 if found the last byte.
@@ -91,7 +91,7 @@ pub fn left_pad_leaf_value<
 
             // Since VALUE_LEN is a constant that is determined at compile time this conditional won't
             // cause any issues with the circuit.
-            let byte = if RLP_VALUE_LEN <= 64 {
+            let byte: Target = if RLP_VALUE_LEN <= 64 {
                 b.random_access(inner_offset, ram_value.clone())
             } else {
                 value.random_access_large_array(b, inner_offset)
@@ -108,14 +108,6 @@ pub fn left_pad_leaf_value<
         });
 
     Array::<Target, PADDED_LEN>::from_array(result_bytes)
-
-    // value
-    //     // WARNING: this is a hack to avoid another const generic but
-    //     // what we should really do here is extract RLP_VALUE_LEN-1 because we
-    //     // consider 1 extra byte for the RLP header always (which may or may not exist)
-    //     .extract_array::<F, _, RLP_VALUE_LEN>(b, offset)
-    //     .into_vec(value_len)
-    //     .normalize_left::<_, _, PADDED_LEN>(b)
 }
 
 pub fn visit_proof(proof: &[Vec<u8>]) {

@@ -23,7 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     array::{Array, Vector, VectorWire},
-    utils::{keccak256, less_than, Endianness, FromTargets, PackerTarget, ToTargets},
+    utils::{
+        keccak256, less_than, less_than_unsafe, Endianness, FromTargets, PackerTarget, ToTargets,
+    },
 };
 
 /// Length of a hash in bytes.
@@ -170,13 +172,17 @@ impl<const N: usize> KeccakCircuit<N> {
         let blocks = (0..total_num_blocks)
             .map(|i| {
                 let i_target = b.constant(F::from_canonical_usize(i));
-                less_than(b, i_target, nb_actual_blocks, 8)
+                if i == 0 {
+                    less_than(b, i_target, nb_actual_blocks, 8)
+                } else {
+                    less_than_unsafe(b, i_target, nb_actual_blocks, 8)
+                }
             })
             .collect::<Vec<_>>();
 
         let hash_target = HashInputTarget {
             input: BigUintTarget {
-                limbs: node_u32_target.clone(),
+                limbs: node_u32_target,
             },
             input_bits: 0,
             blocks,

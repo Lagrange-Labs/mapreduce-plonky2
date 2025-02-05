@@ -1,23 +1,24 @@
 //! Module handling the leaf node inside a Receipt Trie
 
 use super::{
-    gadgets::metadata_gadget::{TableMetadata, TableMetadataGadget, TableMetadataTarget},
+    gadgets::metadata_gadget::{TableMetadata, TableMetadataTarget},
     public_inputs::{PublicInputs, PublicInputsArgs},
+    GAS_USED_PREFIX, TX_INDEX_PREFIX,
 };
 
 use alloy::primitives::Address;
 use anyhow::Result;
 use mp2_common::{
-    array::{Array, Targetable, Vector, VectorWire},
-    eth::EventLogInfo,
+    array::{extract_value, Array, Targetable, Vector, VectorWire},
+    eth::{left_pad32, EventLogInfo},
     group_hashing::CircuitBuilderGroupHashing,
-    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
+    keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN, PACKED_HASH_LEN},
     mpt_sequential::{utils::bytes_to_nibbles, MPTKeyWire, MPTReceiptLeafNode, PAD_LEN},
     poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
     rlp::MAX_KEY_NIBBLE_LEN,
     types::{CBuilder, GFp},
-    utils::{less_than_or_equal_to_unsafe, less_than_unsafe, ToTargets},
+    utils::{less_than_unsafe, Endianness, Packer, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{
@@ -57,14 +58,12 @@ where
     /// The key in the MPT Trie
     pub(crate) mpt_key: MPTKeyWire,
     /// The table metadata
-    pub(crate) metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS, 2>,
+    pub(crate) metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
 }
 
 /// Contains all the information for an [`Event`] in rlp form
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EventWires {
-    /// Size in bytes of the whole event
-    size: Target,
     /// Packed contract address to check
     address: Array<Target, 20>,
     /// Byte offset for the address from the beginning of a Log
@@ -142,7 +141,7 @@ where
         // Build the event wires
         let event_wires = Self::build_event_wires(b);
         // Build the metadata
-        let metadata = TableMetadataGadget::build(b);
+        let metadata = TableMetadata::build(b, 2);
         let zero = b.zero();
 
         let one = b.one();
@@ -166,7 +165,9 @@ where
             node.arr.arr[0],
             F::from_canonical_u64(1) - F::from_canonical_u64(247),
         );
-        let key_header = node.arr.random_access_large_array(b, header_len_len);
+        // Since header_len_len can be at most 8 bytes its safe for us to just take the first 64 elements of the array here as it will
+        // always be in this range
+        let key_header = extract_value(b, &node.arr.arr[..64], header_len_len);
         let less_than_val = b.constant(F::from_canonical_u8(128));
         let single_value = less_than_unsafe(b, key_header, less_than_val, 8);
         let key_len_maybe = b.add_const(key_header, F::ONE - F::from_canonical_u64(128));
@@ -192,21 +193,22 @@ where
         let gas_used_len = b.add_const(gas_used_header, -F::from_canonical_u64(128));
 
         let initial_gas_index = b.add(gas_used_offset, one);
-        let final_gas_index = b.add(gas_used_offset, gas_used_len);
+        // We want gas_used_offset + gas_used_len + one here because we want to stop our sum one
+        // after the gas_used_offset + gas_used_len
+        let final_gas_index = b.add(initial_gas_index, gas_used_len);
 
         let combiner = b.constant(F::from_canonical_u64(1 << 8));
-
+        let mut last_byte_found = b._false();
         let gas_used = (0..MAX_GAS_SIZE).fold(zero, |acc, i| {
             let access_index = b.add_const(initial_gas_index, F::from_canonical_u64(i));
             let array_value = node.arr.random_access_large_array(b, access_index);
 
-            // If we have extracted a value from an index in the desired range (so lte final_gas_index) we want to add it.
-            // If access_index was strictly less than final_gas_index we need to multiply by 1 << 8 after (since the encoding is big endian)
-            let valid = less_than_or_equal_to_unsafe(b, access_index, final_gas_index, 12);
+            // Check to see if we have reached the index where we stop summing
+            let at_end = b.is_equal(access_index, final_gas_index);
+            last_byte_found = b.or(at_end, last_byte_found);
 
-            let tmp = b.mul(acc, combiner);
-            let tmp = b.add(tmp, array_value);
-            b.select(valid, tmp, acc)
+            let tmp = b.mul_add(acc, combiner, array_value);
+            b.select(last_byte_found, acc, tmp)
         });
 
         let zero_u32 = b.zero_u32();
@@ -230,10 +232,31 @@ where
             zero_u32,
             U32Target::from_target(gas_used),
         ]);
+        // Add the key prefixes to the circuit as constants
+        let tx_index_prefix: [Target; PACKED_HASH_LEN] = left_pad32(TX_INDEX_PREFIX)
+            .pack(Endianness::Big)
+            .iter()
+            .map(|num| b.constant(F::from_canonical_u32(*num)))
+            .collect::<Vec<Target>>()
+            .try_into()
+            .expect("This should never fail");
+        let gas_used_prefix: [Target; PACKED_HASH_LEN] = left_pad32(GAS_USED_PREFIX)
+            .pack(Endianness::Big)
+            .iter()
+            .map(|num| b.constant(F::from_canonical_u32(*num)))
+            .collect::<Vec<Target>>()
+            .try_into()
+            .expect("This should never fail");
 
+        let extraction_id_packed = event_wires.event_signature.pack(b, Endianness::Big);
+        let extraction_id = extraction_id_packed.downcast_to_targets();
         // Extract input values
-        let (input_metadata_digest, input_value_digest) =
-            metadata.inputs_digests(b, &[tx_index_input.clone(), gas_used_input.clone()]);
+        let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(
+            b,
+            &[tx_index_input.clone(), gas_used_input.clone()],
+            &[&tx_index_prefix, &gas_used_prefix],
+            &extraction_id.arr,
+        );
         // Now we verify extracted values
         let (address_extract, signature_extract, extracted_metadata_digest, extracted_value_digest) =
             metadata.extracted_receipt_digests(
@@ -295,8 +318,6 @@ where
     }
 
     fn build_event_wires(b: &mut CBuilder) -> EventWires {
-        let size = b.add_virtual_target();
-
         // Packed address
         let address = Array::<Target, 20>::new(b);
 
@@ -310,7 +331,6 @@ where
         let sig_rel_offset = b.add_virtual_target();
 
         EventWires {
-            size,
             address,
             add_rel_offset,
             event_signature,
@@ -349,16 +369,10 @@ where
 
         wires.mpt_key.assign(pw, &key_nibbles, ptr);
 
-        TableMetadataGadget::<MAX_EXTRACTED_COLUMNS, 2>::assign(
-            pw,
-            &self.metadata,
-            &wires.metadata,
-        );
+        TableMetadata::assign(pw, &self.metadata, &wires.metadata);
     }
 
     pub fn assign_event_wires(&self, pw: &mut PartialWitness<GFp>, wires: &EventWires) {
-        pw.set_target(wires.size, F::from_canonical_usize(self.size));
-
         wires
             .address
             .assign(pw, &self.address.0.map(GFp::from_canonical_u8));

@@ -2,22 +2,26 @@
 //! is another mapping. In this case, we refer to the key for the first-layer mapping entry as the
 //! outer key, while the key for the mapping stored in the entry mapping is referred to as inner key.
 
-use crate::values_extraction::{
-    gadgets::metadata_gadget::{TableMetadataGadget, TableMetadataTarget},
-    public_inputs::{PublicInputs, PublicInputsArgs},
+use crate::{
+    values_extraction::{
+        gadgets::metadata_gadget::TableMetadataTarget,
+        public_inputs::{PublicInputs, PublicInputsArgs},
+    },
+    MAX_LEAF_NODE_LEN,
 };
 use anyhow::Result;
 
 use mp2_common::{
-    array::{Array, Targetable, Vector, VectorWire, L32},
+    array::{Array, Vector, VectorWire},
+    eth::left_pad32,
     group_hashing::CircuitBuilderGroupHashing,
-    keccak::{InputData, KeccakCircuit, KeccakWires},
+    keccak::{InputData, KeccakCircuit, KeccakWires, PACKED_HASH_LEN},
     mpt_sequential::{utils::left_pad_leaf_value, MPTLeafOrExtensionNode, PAD_LEN},
     poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
     storage_key::{MappingOfMappingsSlotWires, MappingSlot},
-    types::{CBuilder, GFp},
-    utils::{Endianness, ToTargets},
+    types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
+    utils::{Endianness, Packer, ToTargets},
     CHasher, D, F,
 };
 use plonky2::{
@@ -35,20 +39,20 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter::once;
 
-use super::gadgets::metadata_gadget::TableMetadata;
+use super::{gadgets::metadata_gadget::TableMetadata, INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafMappingOfMappingsWires<const MAX_EXTRACTED_COLUMNS: usize> {
     /// Full node from the MPT proof
-    pub(crate) node: VectorWire<Target, { PAD_LEN(69) }>,
+    pub(crate) node: VectorWire<Target, { PAD_LEN(MAX_LEAF_NODE_LEN) }>,
     /// Leaf value
     pub(crate) value: Array<Target, 32>,
     /// MPT root
-    pub(crate) root: KeccakWires<{ PAD_LEN(69) }>,
+    pub(crate) root: KeccakWires<{ PAD_LEN(MAX_LEAF_NODE_LEN) }>,
     /// Mapping slot associating wires including outer and inner mapping keys
     pub(crate) slot: MappingOfMappingsSlotWires,
     /// MPT metadata
-    metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS, 2>,
+    metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
     offset: Target,
 }
 
@@ -66,7 +70,7 @@ pub struct LeafMappingOfMappingsCircuit<const MAX_EXTRACTED_COLUMNS: usize> {
 impl<const MAX_EXTRACTED_COLUMNS: usize> LeafMappingOfMappingsCircuit<MAX_EXTRACTED_COLUMNS> {
     pub fn build(b: &mut CBuilder) -> LeafMappingOfMappingsWires<MAX_EXTRACTED_COLUMNS> {
         let offset = b.add_virtual_target();
-        let metadata = TableMetadataGadget::<MAX_EXTRACTED_COLUMNS, 2>::build(b);
+        let metadata = TableMetadata::build(b, 2);
         let slot = MappingSlot::build_mapping_of_mappings(b, offset);
 
         let zero = b.zero();
@@ -76,23 +80,40 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> LeafMappingOfMappingsCircuit<MAX_EXTRAC
             b,
             &slot.keccak_mpt.base.mpt_key,
         );
-        let node: VectorWire<Target, { PAD_LEN(69) }> = wires.node;
+        let node: VectorWire<Target, { PAD_LEN(MAX_LEAF_NODE_LEN) }> = wires.node;
         let root = wires.root;
 
         // Left pad the leaf value.
         let value: Array<Target, 32> = left_pad_leaf_value(b, &wires.value);
 
         // Compute the metadata digest and the value digest
-        let input_values: [Array<U32Target, { L32(32) }>; 2] = [&slot.outer_key, &slot.inner_key]
-            .map(|key| Array::<Target, 32>::pack(key, b, Endianness::Big));
-
-        let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(b, &input_values);
-        let (extracted_metadata_digest, extracted_value_digest) = metadata.extracted_digests::<32>(
+        let input_values: [Array<U32Target, PACKED_HASH_LEN>; 2] =
+            [&slot.outer_key, &slot.inner_key]
+                .map(|key| Array::<Target, 32>::pack(key, b, Endianness::Big));
+        // Add the key prefixes to the circuit as constants
+        let outer_key_prefix: [Target; PACKED_HASH_LEN] = left_pad32(OUTER_KEY_ID_PREFIX)
+            .pack(Endianness::Big)
+            .iter()
+            .map(|num| b.constant(F::from_canonical_u32(*num)))
+            .collect::<Vec<Target>>()
+            .try_into()
+            .expect("This should never fail");
+        let inner_key_prefix: [Target; PACKED_HASH_LEN] = left_pad32(INNER_KEY_ID_PREFIX)
+            .pack(Endianness::Big)
+            .iter()
+            .map(|num| b.constant(F::from_canonical_u32(*num)))
+            .collect::<Vec<Target>>()
+            .try_into()
+            .expect("This should never fail");
+        let extraction_id = [zero, zero, zero, zero, zero, zero, zero, slot.mapping_slot];
+        let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(
             b,
-            &value,
-            offset,
-            &[zero, zero, zero, zero, zero, zero, zero, slot.mapping_slot],
+            &input_values,
+            &[&outer_key_prefix, &inner_key_prefix],
+            &extraction_id,
         );
+        let (extracted_metadata_digest, extracted_value_digest) =
+            metadata.extracted_digests::<MAPPING_LEAF_VALUE_LEN>(b, &value, offset, &extraction_id);
 
         let metadata_digest =
             b.add_curve_point(&[input_metadata_digest, extracted_metadata_digest]);
@@ -106,12 +127,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> LeafMappingOfMappingsCircuit<MAX_EXTRAC
         // row_unique_data = H(outer_key || inner_key)
         let inputs = input_values
             .iter()
-            .flat_map(|arr| {
-                arr.arr
-                    .iter()
-                    .map(|t| t.to_target())
-                    .collect::<Vec<Target>>()
-            })
+            .flat_map(|arr| arr.downcast_to_targets().arr)
             .collect::<Vec<Target>>();
         let row_unique_data = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         // row_id = H2int(row_unique_data || num_actual_columns)
@@ -170,11 +186,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> LeafMappingOfMappingsCircuit<MAX_EXTRAC
             &self.inner_key,
             self.evm_word as u32,
         );
-        TableMetadataGadget::<MAX_EXTRACTED_COLUMNS, 2>::assign(
-            pw,
-            &self.metadata,
-            &wires.metadata,
-        );
+        TableMetadata::assign(pw, &self.metadata, &wires.metadata);
         pw.set_target(wires.offset, F::from_canonical_u8(self.evm_word));
     }
 }
@@ -294,6 +306,7 @@ mod tests {
             storage_slot.clone(),
             table_metadata.extracted_columns.clone(),
         );
+
         let values_digest = storage_value_digest(
             &table_metadata,
             &[outer_key, inner_key],
