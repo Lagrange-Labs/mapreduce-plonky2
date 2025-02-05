@@ -2,7 +2,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::TransactionBuilder,
     node_bindings::Anvil,
-    primitives::{Address, U256},
+    primitives::{Address, B256, U256},
     providers::{ext::AnvilApi, Provider, ProviderBuilder},
     sol,
 };
@@ -56,6 +56,8 @@ pub struct ReceiptTestInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> 
     pub event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
     /// The proofs for receipts relating to `self.query`
     pub proofs: Vec<ReceiptProofInfo>,
+    /// The root of the Receipt Trie at this block (in case there are no relevant events)
+    pub receipts_root: B256,
 }
 
 impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
@@ -275,11 +277,15 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: 
             &events[0].signature(),
         );
 
-        let proofs = event
+        let (proofs, receipts_root) = event
             .query_receipt_proofs(rpc.root(), BlockNumberOrTag::Number(block_number))
             .await
             .unwrap();
 
-        ReceiptTestInfo { event, proofs }
+        ReceiptTestInfo {
+            event,
+            proofs,
+            receipts_root,
+        }
     })
 }

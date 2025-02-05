@@ -428,7 +428,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
         &self,
         provider: &RootProvider<T>,
         block: BlockNumberOrTag,
-    ) -> Result<Vec<ReceiptProofInfo>, MP2EthError> {
+    ) -> Result<(Vec<ReceiptProofInfo>, B256), MP2EthError> {
         let receipts = query_block_receipts(provider, block).await?;
 
         let memdb = Arc::new(MemoryDB::new(true));
@@ -471,20 +471,23 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
         })?;
         let mpt_root = receipts_trie.root_hash()?;
 
-        indices
-            .iter()
-            .map(|&tx_index| {
-                let key = tx_index.rlp_bytes();
+        Ok((
+            indices
+                .iter()
+                .map(|&tx_index| {
+                    let key = tx_index.rlp_bytes();
 
-                let proof = receipts_trie.get_proof(&key[..])?;
+                    let proof = receipts_trie.get_proof(&key[..])?;
 
-                Ok(ReceiptProofInfo {
-                    mpt_proof: proof,
-                    mpt_root,
-                    tx_index,
+                    Ok(ReceiptProofInfo {
+                        mpt_proof: proof,
+                        mpt_root,
+                        tx_index,
+                    })
                 })
-            })
-            .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()
+                .collect::<Result<Vec<ReceiptProofInfo>, MP2EthError>>()?,
+            B256::from(mpt_root.0),
+        ))
     }
 }
 
