@@ -10,13 +10,14 @@ use crate::{
         self, compute_metadata_digest as length_metadata_digest, LengthCircuitInput,
     },
     values_extraction::{
-        self, compute_id_with_prefix,
+        self,
         gadgets::{
             column_info::{ExtractedColumnInfo, InputColumnInfo},
             metadata_gadget::TableMetadata,
         },
-        identifier_block_column, identifier_for_value_column, INNER_KEY_ID_PREFIX, KEY_ID_PREFIX,
-        OUTER_KEY_ID_PREFIX,
+        identifier_block_column, identifier_for_inner_mapping_key_column,
+        identifier_for_outer_mapping_key_column, identifier_for_value_column, INNER_KEY_ID_PREFIX,
+        KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
     },
     MAX_RECEIPT_LEAF_NODE_LEN,
 };
@@ -255,34 +256,32 @@ impl SlotInputs {
         let input_columns = match num_mapping_keys {
             0 => vec![],
             1 => {
-                let identifier = compute_id_with_prefix(
-                    KEY_ID_PREFIX,
+                let identifier = identifier_for_outer_mapping_key_column(
                     slot,
                     contract_address,
                     chain_id,
                     extra.clone(),
                 );
-                let input_column = InputColumnInfo::new(&[slot], identifier, KEY_ID_PREFIX, 32);
+
+                let input_column = InputColumnInfo::new(&[slot], identifier, KEY_ID_PREFIX);
                 vec![input_column]
             }
             2 => {
-                let outer_identifier = compute_id_with_prefix(
-                    OUTER_KEY_ID_PREFIX,
+                let outer_identifier = identifier_for_outer_mapping_key_column(
                     slot,
                     contract_address,
                     chain_id,
                     extra.clone(),
                 );
-                let inner_identifier = compute_id_with_prefix(
-                    INNER_KEY_ID_PREFIX,
+                let inner_identifier = identifier_for_inner_mapping_key_column(
                     slot,
                     contract_address,
                     chain_id,
                     extra.clone(),
                 );
                 vec![
-                    InputColumnInfo::new(&[slot], outer_identifier, OUTER_KEY_ID_PREFIX, 32),
-                    InputColumnInfo::new(&[slot], inner_identifier, INNER_KEY_ID_PREFIX, 32),
+                    InputColumnInfo::new(&[slot], outer_identifier, OUTER_KEY_ID_PREFIX),
+                    InputColumnInfo::new(&[slot], inner_identifier, INNER_KEY_ID_PREFIX),
                 ]
             }
             _ => vec![],

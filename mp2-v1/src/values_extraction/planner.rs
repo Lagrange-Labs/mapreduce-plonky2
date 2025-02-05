@@ -549,10 +549,29 @@ pub mod tests {
             BlockUtil::fetch(&provider, BlockNumberOrTag::Number(block_number)).await?;
 
         let event_info = test_receipt_trie_helper().await?;
+        let mut proof_info = vec![];
+        let mut success = false;
+        for _ in 0..10 {
+            match event_info
+                .query_receipt_proofs(&provider, block_number.into())
+                .await
+            {
+                // For each of the logs return the transacion its included in, then sort and remove duplicates.
+                Ok(response) => {
+                    proof_info = response;
+                    success = true;
+                    break;
+                }
+                Err(_) => {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                }
+            }
+        }
 
-        let proof_info = event_info
-            .query_receipt_proofs(&provider, block_number.into())
-            .await?;
+        if !success {
+            return Err(anyhow!("Could not query mainnet successfully"));
+        }
 
         Ok((block_util, event_info, proof_info))
     }

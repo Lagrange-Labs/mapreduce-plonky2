@@ -624,53 +624,7 @@ where
         b: &mut CircuitBuilder<F, D>,
         at: Target,
     ) -> T {
-        // We will split the array into smaller arrays of size 64, padding the last array with zeroes if required
-        let padded_size = (SIZE - 1) / RANDOM_ACCESS_SIZE + 1;
-
-        // Create an array of `Array`s
-        let arrays: Vec<Array<T, RANDOM_ACCESS_SIZE>> = (0..padded_size)
-            .map(|i| Array {
-                arr: create_array(|j| {
-                    let index = RANDOM_ACCESS_SIZE * i + j;
-                    if index < self.arr.len() {
-                        self.arr[index]
-                    } else {
-                        T::from_target(b.zero())
-                    }
-                }),
-            })
-            .collect();
-
-        // We need to express `at` in base 64, we are also assuming that the initial array was smaller than 64^2 = 4096 which we enforce with a range check.
-        // We also check that `at` is smaller that the size of the array.
-        let array_size = b.constant(F::from_noncanonical_u64(SIZE as u64));
-        let less_than_check = less_than_unsafe(b, at, array_size, 12);
-        let true_target = b._true();
-        b.connect(less_than_check.target, true_target.target);
-
-        let (low_bits, high_bits) = b.split_low_high(at, 6, 12);
-
-        // Search each of the smaller arrays for the target at `low_bits`
-        let mut first_search = arrays
-            .into_iter()
-            .map(|array| {
-                b.random_access(
-                    low_bits,
-                    array
-                        .arr
-                        .iter()
-                        .map(Targetable::to_target)
-                        .collect::<Vec<Target>>(),
-                )
-            })
-            .collect::<Vec<Target>>();
-
-        // Now we push a number of zero targets into the array to make it a power of 2
-        let next_power_of_two = first_search.len().next_power_of_two();
-        let zero_target = b.zero();
-        first_search.resize(next_power_of_two, zero_target);
-        // Serach the result for the Target at `high_bits`
-        T::from_target(b.random_access(high_bits, first_search))
+        large_slice_random_access(b, &self.arr, at)
     }
 
     /// Returns [`Self[at..at+SUB_SIZE]`].
@@ -728,6 +682,114 @@ impl<const SIZE: usize> Array<Target, SIZE> {
 /// Maximum size of the array where we can call b.random_access() from native
 /// Plonky2 API
 const RANDOM_ACCESS_SIZE: usize = 64;
+
+/// This function allows you to search a large slice of [`Targetable`] by representing it as a number of
+/// smaller [`Array`]s with size [`RANDOM_ACCESS_SIZE`], padding the final smaller array where required.
+/// For example if we have an array of length `512` and we wish to find the value at index `324` the following
+/// occurs:
+///     1) Split the original slice into `512 / 64 = 8` chunks `[A_0, ... , A_7]`
+///     2) Express `324` in base 64 (Little Endian)  `[4, 5]`
+///     3) For each `i \in [0, 7]` use a [`RandomAccesGate`] to lookup the `4`th element, `v_i,3` of `A_i`
+///        and create a new list of length `8` that consists of `[v_0,3, v_1,3, ... v_7,3]`
+///     4) Now use another [`RandomAccessGate`] to select the `5`th elemnt of this new list (`v_4,3` as we have zero-indexed both times)
+///
+/// For comparison using [`Array::value_at`] on an [`Array`] with length `512` results in 129 rows, using this method
+/// on the same [`Array`] results in 15 rows.
+pub(crate) fn large_slice_random_access<F, const D: usize, T>(
+    b: &mut CircuitBuilder<F, D>,
+    slice: &[T],
+    at: Target,
+) -> T
+where
+    F: RichField + Extendable<D>,
+    T: Targetable + Clone + Serialize + for<'de> Deserialize<'de>,
+{
+    let zero = b.zero();
+    // We will split the array into smaller arrays of size 64, padding the last array with zeroes if required
+    let padded_size = (slice.len() - 1) / RANDOM_ACCESS_SIZE + 1;
+
+    // Create an array of `Array`s
+    let arrays: Vec<Array<T, RANDOM_ACCESS_SIZE>> = (0..padded_size)
+        .map(|i| Array {
+            arr: create_array(|j| {
+                let index = RANDOM_ACCESS_SIZE * i + j;
+                if index < slice.len() {
+                    slice[index]
+                } else {
+                    T::from_target(b.zero())
+                }
+            }),
+        })
+        .collect();
+
+    // We need to express `at` in base 64, we are also assuming that the initial array was smaller than 64^2 = 4096 which we enforce with a range check.
+    // We also check that `at` is smaller that the size of the array, if it is not the output defaults to zero.
+    let array_size = b.constant(F::from_noncanonical_u64(slice.len() as u64));
+    let less_than_check = less_than_unsafe(b, at, array_size, 12);
+
+    let lookup_index = b.select(less_than_check, at, zero);
+    let (low_bits, high_bits) = b.split_low_high(lookup_index, 6, 12);
+    // Search each of the smaller arrays for the target at `low_bits`
+    let mut first_search = arrays
+        .into_iter()
+        .map(|array| {
+            b.random_access(
+                low_bits,
+                array
+                    .arr
+                    .iter()
+                    .map(Targetable::to_target)
+                    .collect::<Vec<Target>>(),
+            )
+        })
+        .collect::<Vec<Target>>();
+
+    // Now we push a number of zero targets into the array to make it a power of 2
+    let next_power_of_two = first_search.len().next_power_of_two();
+    let zero_target = b.zero();
+    first_search.resize(next_power_of_two, zero_target);
+    // Serach the result for the Target at `high_bits`
+    let second_search = b.random_access(high_bits, first_search);
+    T::from_target(b.select(less_than_check, second_search, zero))
+}
+
+/// Function to extract value from a slice using random access gates.
+/// If `at` is outside the range of the slice it defaults to return zero.
+pub fn extract_value<F, const D: usize, T>(
+    b: &mut CircuitBuilder<F, D>,
+    data: &[T],
+    at: Target,
+) -> T
+where
+    F: RichField + Extendable<D>,
+    T: Targetable + Clone + Serialize + for<'de> Deserialize<'de>,
+{
+    // We check to see if the index `at` is a constant, if it is we can directly return the value
+    if let Some(val) = b.target_as_constant(at) {
+        let index = val.to_canonical_u64() as usize;
+        return data[index];
+    }
+    let data_len = data.len();
+    let zero = b.zero();
+    // Only use random_access when SIZE is a power of 2 and smaller than 64
+    // see https://stackoverflow.com/a/600306/1202623 for the trick
+    if data_len <= RANDOM_ACCESS_SIZE {
+        let next_power_two = data_len.next_power_of_two();
+        // Escape hatch when we can use random_access from plonky2 base
+        T::from_target(
+            b.random_access(
+                at,
+                data.iter()
+                    .map(Targetable::to_target)
+                    .chain(std::iter::repeat(zero))
+                    .take(next_power_two)
+                    .collect::<Vec<Target>>(),
+            ),
+        )
+    } else {
+        large_slice_random_access(b, data, at)
+    }
+}
 
 #[cfg(test)]
 mod test {

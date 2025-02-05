@@ -50,21 +50,12 @@ pub struct InputColumnInfo {
     pub identifier: F,
     /// Prefix used in computing mpt metadata
     pub metadata_prefix: [u8; 32],
-    /// The length (in bits) of the field to extract in the EVM word
-    pub length: F,
 }
 
 impl InputColumnInfo {
     /// Construct a new instance of [`ColumnInfo`]
-    pub fn new(
-        extraction_identifier: &[u8],
-        identifier: u64,
-        metadata_prefix: &[u8],
-        length: usize,
-    ) -> Self {
-        let mut extraction_vec = extraction_identifier.pack(Endianness::Little);
-        extraction_vec.resize(PACKED_HASH_LEN, 0u32);
-        extraction_vec.reverse();
+    pub fn new(extraction_identifier: &[u8], identifier: u64, metadata_prefix: &[u8]) -> Self {
+        let extraction_vec = left_pad32(extraction_identifier).pack(Endianness::Big);
         let extraction_identifier = extraction_vec
             .into_iter()
             .map(F::from_canonical_u32)
@@ -72,13 +63,11 @@ impl InputColumnInfo {
             .try_into()
             .expect("This should never fail");
         let identifier = F::from_canonical_u64(identifier);
-        let length = F::from_canonical_usize(length);
 
         Self {
             extraction_identifier,
             identifier,
             metadata_prefix: left_pad::<32>(metadata_prefix),
-            length,
         }
     }
 
@@ -118,10 +107,6 @@ impl InputColumnInfo {
             .into_iter()
             .map(F::from_canonical_u32)
             .collect()
-    }
-
-    pub fn length(&self) -> F {
-        self.length
     }
 
     pub fn value_digest(&self, value: &[u8]) -> Point {
@@ -296,40 +281,33 @@ impl ExtractedColumnInfo {
     pub fn value_digest(&self, value: &[u8]) -> Point {
         // If the column identifier is zero then its a dummy column. This is because the column identifier
         // is always computed as the output of a hash which is EXTREMELY unlikely to be exactly zero.
-        if self.identifier() == F::ZERO {
-            Point::NEUTRAL
-        } else {
-            let bytes = self.extract_value(value);
 
-            let inputs = once(self.identifier())
-                .chain(
-                    bytes
-                        .pack(Endianness::Big)
-                        .into_iter()
-                        .map(F::from_canonical_u32),
-                )
-                .collect_vec();
-            map_to_curve_point(&inputs)
-        }
+        let bytes = self.extract_value(value);
+
+        let inputs = once(self.identifier())
+            .chain(
+                bytes
+                    .pack(Endianness::Big)
+                    .into_iter()
+                    .map(F::from_canonical_u32),
+            )
+            .collect_vec();
+        map_to_curve_point(&inputs)
     }
 
     pub fn receipt_value_digest(&self, value: &[u8], offset: usize) -> Point {
-        if self.identifier().0 == 0 {
-            Point::NEUTRAL
-        } else {
-            let start = offset + self.byte_offset().0 as usize;
-            let bytes = left_pad32(&value[start..start + self.length.0 as usize]);
+        let start = offset + self.byte_offset().0 as usize;
+        let bytes = left_pad32(&value[start..start + self.length.0 as usize]);
 
-            let inputs = once(self.identifier())
-                .chain(
-                    bytes
-                        .pack(Endianness::Big)
-                        .into_iter()
-                        .map(F::from_canonical_u32),
-                )
-                .collect_vec();
-            map_to_curve_point(&inputs)
-        }
+        let inputs = once(self.identifier())
+            .chain(
+                bytes
+                    .pack(Endianness::Big)
+                    .into_iter()
+                    .map(F::from_canonical_u32),
+            )
+            .collect_vec();
+        map_to_curve_point(&inputs)
     }
 }
 
@@ -365,10 +343,9 @@ pub struct ExtractedColumnInfoTarget {
     /// this would be either the offset from the start of the receipt or from the start of the
     /// relevant log       
     pub(crate) byte_offset: Target,
-    /// The length (in bits) of the field to extract in the EVM word
+    /// The length in bytes of the field to extract in the EVM word
     pub(crate) length: Target,
-    /// For storage this is the EVM word, for receipts this is either 1 or 0 and indicates whether to
-    /// use the relevant log offset or not.
+    /// For storage this is the EVM word, for receipts this is zero
     pub(crate) location_offset: Target,
 }
 
@@ -473,24 +450,30 @@ pub struct InputColumnInfoTarget {
     pub extraction_identifier: [Target; PACKED_HASH_LEN],
     /// Column identifier
     pub identifier: Target,
-    /// Prefix used in computing mpt metadata
-    pub metadata_prefix: [Target; PACKED_HASH_LEN],
-    /// The length of the field to extract in the EVM word
-    pub length: Target,
 }
 
 impl InputColumnInfoTarget {
     /// Compute the MPT metadata.
-    pub fn mpt_metadata(&self, b: &mut CBuilder) -> HashOutTarget {
+    pub fn mpt_metadata(
+        &self,
+        b: &mut CBuilder,
+        metadata_prefix: &[Target; PACKED_HASH_LEN],
+        extraction_id: &[Target; PACKED_HASH_LEN],
+    ) -> HashOutTarget {
         // key_column_md = H( "\0KEY" || slot)
-        let inputs = [self.metadata_prefix(), self.extraction_id().as_slice()].concat();
+        let inputs = [metadata_prefix.as_slice(), extraction_id.as_slice()].concat();
 
         b.hash_n_to_hash_no_pad::<CHasher>(inputs)
     }
 
     /// Compute the column information digest.
-    pub fn digest(&self, b: &mut CBuilder) -> CurveTarget {
-        let metadata = self.mpt_metadata(b);
+    pub fn digest(
+        &self,
+        b: &mut CBuilder,
+        metadata_prefix: &[Target; PACKED_HASH_LEN],
+        extraction_id: &[Target; PACKED_HASH_LEN],
+    ) -> CurveTarget {
+        let metadata = self.mpt_metadata(b, metadata_prefix, extraction_id);
 
         // digest = D(mpt_metadata || info.identifier)
         let inputs = [metadata.elements.as_slice(), &[self.identifier()]].concat();
@@ -504,14 +487,6 @@ impl InputColumnInfoTarget {
 
     pub fn identifier(&self) -> Target {
         self.identifier
-    }
-
-    pub fn metadata_prefix(&self) -> &[Target] {
-        self.metadata_prefix.as_slice()
-    }
-
-    pub fn length(&self) -> Target {
-        self.length
     }
 }
 
@@ -541,15 +516,11 @@ impl CircuitBuilderColumnInfo for CBuilder {
     fn add_virtual_input_column_info(&mut self) -> InputColumnInfoTarget {
         let extraction_identifier: [Target; PACKED_HASH_LEN] = self.add_virtual_target_arr();
 
-        let metadata_prefix: [Target; PACKED_HASH_LEN] = self.add_virtual_target_arr();
-
-        let [identifier, length] = self.add_virtual_target_arr();
+        let identifier = self.add_virtual_target();
 
         InputColumnInfoTarget {
             extraction_identifier,
             identifier,
-            metadata_prefix,
-            length,
         }
     }
 }
@@ -617,13 +588,7 @@ impl<T: WitnessWrite<F>> WitnessWriteColumnInfo for T {
             .iter()
             .zip(value.extraction_identifier.iter())
             .for_each(|(t, v)| self.set_target(*t, *v));
-        target
-            .metadata_prefix
-            .iter()
-            .zip(value.metadata_prefix().iter())
-            .for_each(|(t, v)| self.set_target(*t, *v));
 
-        self.set_target(target.length, value.length());
         self.set_target(target.identifier, value.identifier());
     }
 }

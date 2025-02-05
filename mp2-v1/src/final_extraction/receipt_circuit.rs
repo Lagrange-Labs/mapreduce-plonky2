@@ -57,7 +57,7 @@ impl ReceiptExtractionCircuit {
         // enforce the MPT key extraction reached the root
         b.connect(value_pi.mpt_key().pointer, minus_one);
 
-        // enforce block_pi.state_root == contract_pi.state_root
+        // enforce block_pi.receipt_root == value_pi.root
         block_pi
             .receipt_root()
             .enforce_equal(b, &OutputHash::from_targets(value_pi.root_hash_info()));
@@ -76,15 +76,7 @@ impl ReceiptExtractionCircuit {
     }
 }
 
-/// The wires that are needed for the recursive framework, that concerns verifying  the input
-/// proofs
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub(crate) struct ReceiptRecursiveWires {
-    /// Wires containing the block and value proof
-    verification: ReceiptCircuitProofWires,
-}
-
-impl CircuitLogicWires<F, D, 0> for ReceiptRecursiveWires {
+impl CircuitLogicWires<F, D, 0> for ReceiptCircuitProofWires {
     type CircuitBuilderParams = FinalExtractionBuilderParams;
 
     type Inputs = ReceiptCircuitProofInputs;
@@ -102,11 +94,11 @@ impl CircuitLogicWires<F, D, 0> for ReceiptRecursiveWires {
             verification.get_block_public_inputs(),
             verification.get_value_public_inputs(),
         );
-        Self { verification }
+        verification
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> anyhow::Result<()> {
-        inputs.assign_proof_targets(pw, &self.verification)?;
+        inputs.assign_proof_targets(pw, self)?;
         Ok(())
     }
 }
