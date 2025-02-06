@@ -208,7 +208,8 @@ impl State {
         k: &NodeIdx,
         mapper: &M,
     ) -> Option<NodeContext<NodeIdx>> {
-        if let Some(inner) = self.node_context_inner(&mapper.to_inner_idx(OuterIdx(*k)).await) {
+        let inner_idx = mapper.try_to_inner_idx(OuterIdx(*k)).await?;
+        if let Some(inner) = self.node_context_inner(&inner_idx) {
             let parent_outer = mapper.to_outer_idx_map(inner.parent).await.map(|idx| idx.0);
             let left_outer = mapper.to_outer_idx_map(inner.left).await.map(|idx| idx.0);
             let right_outer = mapper.to_outer_idx_map(inner.right).await.map(|idx| idx.0);
@@ -355,6 +356,10 @@ impl State {
 }
 
 trait IndexMapper: Sized + Send + Sync + Clone {
+    fn try_to_inner_idx(
+        &self,
+        outer_idx: OuterIdx,
+    ) -> impl Future<Output = Option<InnerIdx>> + Send;
     fn to_inner_idx(&self, outer_idx: OuterIdx) -> impl Future<Output = InnerIdx> + Send;
 
     fn to_outer_idx(&self, inner_idx: InnerIdx) -> impl Future<Output = OuterIdx> + Send;
@@ -374,6 +379,11 @@ trait IndexMapper: Sized + Send + Sync + Clone {
 }
 
 impl<T: EpochMapper> IndexMapper for T {
+    async fn try_to_inner_idx(&self, outer_idx: OuterIdx) -> Option<InnerIdx> {
+        self.try_to_incremental_epoch(outer_idx.0 as UserEpoch)
+            .await
+            .map(|idx| InnerIdx(idx.try_into().unwrap()))
+    }
     async fn to_inner_idx(&self, outer_idx: OuterIdx) -> InnerIdx {
         InnerIdx(
             self.to_incremental_epoch(outer_idx.0 as UserEpoch)
@@ -389,6 +399,9 @@ impl<T: EpochMapper> IndexMapper for T {
 }
 
 impl IndexMapper for State {
+    async fn try_to_inner_idx(&self, outer_idx: OuterIdx) -> Option<InnerIdx> {
+        Some(self.inner_idx(outer_idx))
+    }
     async fn to_inner_idx(&self, outer_idx: OuterIdx) -> InnerIdx {
         self.inner_idx(outer_idx)
     }

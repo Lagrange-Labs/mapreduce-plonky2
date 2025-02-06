@@ -16,8 +16,8 @@ use crate::{
             metadata_gadget::TableMetadata,
         },
         identifier_block_column, identifier_for_inner_mapping_key_column,
-        identifier_for_outer_mapping_key_column, identifier_for_value_column, INNER_KEY_ID_PREFIX,
-        KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
+        identifier_for_mapping_key_column, identifier_for_outer_mapping_key_column,
+        identifier_for_value_column, INNER_KEY_ID_PREFIX, KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
     },
     MAX_RECEIPT_LEAF_NODE_LEN,
 };
@@ -247,16 +247,10 @@ impl SlotInputs {
             ),
         };
 
-        let num_mapping_keys = match self {
-            SlotInputs::Simple(..) => 0usize,
-            SlotInputs::Mapping(..) | SlotInputs::MappingWithLength(..) => 1,
-            SlotInputs::MappingOfMappings(..) => 2,
-        };
-
-        let input_columns = match num_mapping_keys {
-            0 => vec![],
-            1 => {
-                let identifier = identifier_for_outer_mapping_key_column(
+        let input_columns = match self {
+            SlotInputs::Simple(..) => vec![],
+            SlotInputs::Mapping(..) | SlotInputs::MappingWithLength(..) => {
+                let identifier = identifier_for_mapping_key_column(
                     slot,
                     contract_address,
                     chain_id,
@@ -266,7 +260,7 @@ impl SlotInputs {
                 let input_column = InputColumnInfo::new(&[slot], identifier, KEY_ID_PREFIX);
                 vec![input_column]
             }
-            2 => {
+            SlotInputs::MappingOfMappings(..) => {
                 let outer_identifier = identifier_for_outer_mapping_key_column(
                     slot,
                     contract_address,
@@ -284,7 +278,6 @@ impl SlotInputs {
                     InputColumnInfo::new(&[slot], inner_identifier, INNER_KEY_ID_PREFIX),
                 ]
             }
-            _ => vec![],
         };
 
         TableMetadata::new(&input_columns, &extracted_columns)

@@ -335,7 +335,13 @@ impl TableMetadata {
             .extracted_columns
             .iter()
             .copied()
-            .chain(std::iter::repeat(columns_metadata.extracted_columns[0]))
+            .chain(std::iter::repeat(
+                columns_metadata
+                    .extracted_columns
+                    .first()
+                    .copied()
+                    .unwrap_or_default(),
+            ))
             .take(MAX_EXTRACTED_COLUMNS)
             .collect::<Vec<ExtractedColumnInfo>>();
         pw.set_extracted_column_info_target_arr(

@@ -97,8 +97,8 @@ async fn integrated_indexing() -> Result<()> {
         TableIndexing::<EventLogInfo<0, 0>>::receipt_test_case(0, 0, &mut ctx).await?;
     let changes = vec![
         ChangeType::Receipt(1, 10),
-        ChangeType::Receipt(10, 1),
-        ChangeType::Receipt(5, 5),
+        ChangeType::Receipt(0, 5),
+        ChangeType::Receipt(5, 1),
     ];
     receipt.run(&mut ctx, genesis, changes.clone()).await?;
 
