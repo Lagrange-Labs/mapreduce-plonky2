@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 use colored::Colorize;
 use dialoguer::{console, theme::ColorfulTheme, FuzzySelect, Input};
 use itertools::Itertools;
@@ -8,7 +8,7 @@ use ryhope::{
         TreeStorage,
     },
     tree::{MutableTree, PrintableTree, TreeTopology},
-    Epoch, MerkleTreeKvDb, NodePayload,
+    MerkleTreeKvDb, NodePayload, UserEpoch,
 };
 use std::io::Write;
 use tabled::{builder::Builder, settings::Style};
@@ -57,7 +57,7 @@ pub(crate) struct Repl<
     F: PayloadFormatter<V>,
 > {
     current_key: T::Key,
-    current_epoch: Epoch,
+    current_epoch: UserEpoch,
     db: MerkleTreeKvDb<T, V, S>,
     tty: console::Term,
     payload_fmt: F,
@@ -77,7 +77,7 @@ impl<
 {
     pub async fn new(db: MerkleTreeKvDb<T, V, S>, payload_fmt: F) -> anyhow::Result<Self> {
         let current_key = db.root().await?.ok_or(anyhow!("tree is empty"))?;
-        let current_epoch = db.current_epoch();
+        let current_epoch = db.current_epoch().await?;
 
         Ok(Self {
             current_key,
@@ -105,19 +105,19 @@ impl<
         .unwrap();
     }
 
-    pub fn set_epoch(&mut self, epoch: Epoch) -> anyhow::Result<()> {
-        if epoch < self.db.initial_epoch() {
+    pub async fn set_epoch(&mut self, epoch: UserEpoch) -> Result<()> {
+        if epoch < self.db.initial_epoch().await {
             bail!(
                 "epoch `{}` is older than initial epoch `{}`",
                 epoch,
-                self.db.initial_epoch()
+                self.db.initial_epoch().await
             );
         }
-        if epoch > self.db.current_epoch() {
+        if epoch > self.db.current_epoch().await? {
             bail!(
                 "epoch `{}` is newer than latest epoch `{}`",
                 epoch,
-                self.db.current_epoch()
+                self.db.current_epoch().await?
             );
         }
 
@@ -147,9 +147,9 @@ impl<
 
     async fn travel(&mut self) -> anyhow::Result<()> {
         loop {
-            let epoch: Epoch = Input::new().with_prompt("target epoch:").interact_text()?;
+            let epoch: UserEpoch = Input::new().with_prompt("target epoch:").interact_text()?;
 
-            self.set_epoch(epoch)?;
+            self.set_epoch(epoch).await?;
         }
     }
 

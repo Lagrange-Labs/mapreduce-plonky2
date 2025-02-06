@@ -1,6 +1,8 @@
 use thiserror::Error;
 use tokio_postgres::error::Error as PgError;
 
+use crate::IncrementalEpoch;
+
 #[derive(Error, Debug)]
 pub enum RyhopeError {
     /// An error that occured while interacting with the DB.
@@ -34,6 +36,12 @@ pub enum RyhopeError {
 
     #[error("key not found in tree")]
     KeyNotFound,
+
+    #[error("Current epoch is undefined: internal epoch is {0}, but no corresponding user epoch was found")]
+    CurrenEpochUndefined(IncrementalEpoch),
+
+    #[error("Error in epoch mapper operation: {0}")]
+    EpochMapperError(String),
 }
 impl RyhopeError {
     pub fn from_db<S: AsRef<str>>(msg: S, err: PgError) -> Self {
@@ -63,6 +71,10 @@ impl RyhopeError {
 
     pub fn fatal<S: AsRef<str>>(msg: S) -> Self {
         RyhopeError::Fatal(msg.as_ref().to_string())
+    }
+
+    pub fn epoch_error<S: AsRef<str>>(msg: S) -> Self {
+        RyhopeError::EpochMapperError(msg.as_ref().to_string())
     }
 }
 

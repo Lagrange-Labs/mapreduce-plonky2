@@ -13,14 +13,16 @@ use crate::{
     storage::{
         memory::InMemory,
         pgsql::{PgsqlStorage, SqlServerConnection, SqlStorageSettings},
-        EpochKvStorage, PayloadStorage, RoEpochKvStorage, SqlTreeTransactionalStorage, TreeStorage,
+        EpochKvStorage, EpochMapper, PayloadStorage, RoEpochKvStorage, SqlTreeTransactionalStorage,
+        TreeStorage,
     },
     tree::{
-        sbbst::{self, Tree},
+        sbbst,
         scapegoat::{self, Alpha},
         PrintableTree, TreeTopology,
     },
-    Epoch, InitSettings, MerkleTreeKvDb, NodePayload, EPOCH, KEY, VALID_FROM, VALID_UNTIL,
+    IncrementalEpoch, InitSettings, MerkleTreeKvDb, NodePayload, UserEpoch, EPOCH, KEY, VALID_FROM,
+    VALID_UNTIL,
 };
 
 use super::TreeTransactionalStorage;
@@ -33,12 +35,12 @@ impl NodePayload for usize {}
 impl NodePayload for String {}
 impl NodePayload for i64 {}
 
-async fn _storage_in_memory(initial_epoch: Epoch) -> Result<()> {
+async fn _storage_in_memory(initial_epoch: UserEpoch) -> Result<()> {
     type K = String;
     type V = usize;
 
     type TestTree = scapegoat::Tree<K>;
-    type Storage = InMemory<TestTree, V>;
+    type Storage = InMemory<TestTree, V, false>;
 
     let mut s = MerkleTreeKvDb::<TestTree, V, Storage>::new(
         InitSettings::ResetAt(scapegoat::Tree::empty(Alpha::new(0.8)), initial_epoch),
@@ -96,12 +98,12 @@ async fn shifted_storage_in_memory() -> Result<()> {
     _storage_in_memory(388).await
 }
 
-async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
+async fn _storage_in_pgsql(initial_epoch: UserEpoch) -> Result<()> {
     type K = String;
     type V = usize;
 
     type TestTree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<TestTree, V>;
+    type Storage = PgsqlStorage<TestTree, V, false>;
     let table = format!("simple_{}", initial_epoch);
 
     let mut s = MerkleTreeKvDb::<TestTree, V, Storage>::new(
@@ -109,6 +111,7 @@ async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: table.clone(),
+            external_mapper: None,
         },
     )
     .await?;
@@ -121,6 +124,7 @@ async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table,
+            external_mapper: None,
         },
     )
     .await?;
@@ -255,15 +259,16 @@ impl From<&str> for ShaizedString {
 #[tokio::test]
 async fn sbbst_storage_in_pgsql() -> Result<()> {
     type V = ShaizedString;
-    type TestTree = sbbst::Tree;
-    type SqlStorage = PgsqlStorage<TestTree, V>;
-    type RamStorage = InMemory<TestTree, V>;
+    type TestTree = sbbst::IncrementalTree;
+    type SqlStorage = PgsqlStorage<TestTree, V, false>;
+    type RamStorage = InMemory<TestTree, V, false>;
 
     let mut s_psql = MerkleTreeKvDb::<TestTree, V, SqlStorage>::new(
-        InitSettings::Reset(sbbst::Tree::empty()),
+        InitSettings::Reset(TestTree::empty()),
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "simple_sbbst".to_string(),
+            external_mapper: None,
         },
     )
     .await?;
@@ -299,6 +304,7 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "simple_sbbst".to_string(),
+            external_mapper: None,
         },
     )
     .await?;
@@ -316,11 +322,9 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
         s_psql.diff_at(i).await?.unwrap().print();
     }
 
-    let mut s_ram = MerkleTreeKvDb::<TestTree, V, RamStorage>::new(
-        InitSettings::Reset(sbbst::Tree::empty()),
-        (),
-    )
-    .await?;
+    let mut s_ram =
+        MerkleTreeKvDb::<TestTree, V, RamStorage>::new(InitSettings::Reset(TestTree::empty()), ())
+            .await?;
     s_ram
         .in_transaction(|t| {
             Box::pin(async {
@@ -418,7 +422,7 @@ async fn hashes() -> Result<()> {
     type V = ShaizedString;
 
     type Tree = scapegoat::Tree<K>;
-    type Storage = InMemory<Tree, V>;
+    type Storage = InMemory<Tree, V, false>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::ResetAt(Tree::empty(Alpha::fully_balanced()), 392),
@@ -458,7 +462,7 @@ async fn hashes_pgsql() -> Result<()> {
     type V = ShaizedString;
 
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, false>;
 
     {
         let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
@@ -466,6 +470,7 @@ async fn hashes_pgsql() -> Result<()> {
             SqlStorageSettings {
                 source: SqlServerConnection::NewConnection(db_url()),
                 table: "test_hashes".into(),
+                external_mapper: None,
             },
         )
         .await?;
@@ -501,6 +506,7 @@ async fn hashes_pgsql() -> Result<()> {
             SqlStorageSettings {
                 source: SqlServerConnection::NewConnection(db_url()),
                 table: "test_hashes".into(),
+                external_mapper: None,
             },
         )
         .await?;
@@ -528,11 +534,11 @@ async fn hashes_pgsql() -> Result<()> {
 }
 
 #[tokio::test]
-async fn sbbst_requires_sequential_keys() -> Result<()> {
-    type Tree = sbbst::Tree;
+async fn incremental_sbbst_requires_sequential_keys() -> Result<()> {
+    type Tree = sbbst::IncrementalTree;
     type V = i64;
 
-    type Storage = InMemory<Tree, V>;
+    type Storage = InMemory<Tree, V, false>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::with_shift_and_capacity(10, 0)),
@@ -551,17 +557,175 @@ async fn sbbst_requires_sequential_keys() -> Result<()> {
 }
 
 #[tokio::test]
+async fn epoch_sbbst_can_use_non_sequential_keys() -> Result<()> {
+    type Tree = sbbst::EpochTree;
+    type V = i64;
+
+    type Storage = InMemory<Tree, V, false>;
+
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::Reset(Tree::with_shift_and_capacity(10, 0)),
+        (),
+    )
+    .await?;
+
+    s.start_transaction().await?;
+    assert!(s.store(2, 2).await.is_err()); // try insert key smaller than initial shift
+    assert!(s.store(12, 2).await.is_ok());
+    assert!(s.store(11, 2).await.is_err()); // try insert key smaller than previous one
+    assert!(s.store(14, 2).await.is_ok());
+    assert!(s.store(15, 2).await.is_ok());
+    s.commit_transaction().await?;
+
+    // check that values have been inserted
+    assert_eq!(s.try_fetch(&12).await?.unwrap(), 2);
+    assert_eq!(s.try_fetch(&14).await?.unwrap(), 2);
+    assert_eq!(s.try_fetch(&15).await?.unwrap(), 2);
+
+    // chekc that 11 has not been inserted
+    assert!(s.try_fetch(&11).await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn epoch_sbbst_over_pgsql_with_non_sequential_keys() -> Result<()> {
+    type Tree = sbbst::EpochTree;
+    type V = i64;
+
+    type Storage = PgsqlStorage<Tree, V, false>;
+
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::Reset(Tree::with_shift_and_capacity(10, 0)),
+        SqlStorageSettings {
+            table: "epoch_sbbst".to_string(),
+            source: SqlServerConnection::NewConnection(db_url()),
+            external_mapper: None,
+        },
+    )
+    .await?;
+
+    s.start_transaction().await?;
+    assert!(s.store(2, 2).await.is_err()); // try insert key smaller than initial shift
+    assert!(s.store(12, 2).await.is_ok());
+    assert!(s.store(11, 2).await.is_err()); // try insert key smaller than previous one
+    s.commit_transaction().await?;
+
+    // start a new transaction
+    s.start_transaction().await?;
+    assert!(s.store(14, 2).await.is_ok());
+    s.commit_transaction().await?;
+
+    // check that values have been inserted
+    assert_eq!(s.try_fetch(&12).await?.unwrap(), 2);
+    assert_eq!(s.try_fetch(&14).await?.unwrap(), 2);
+
+    // check that 11 has not been inserted
+    assert!(s.try_fetch(&11).await?.is_none());
+
+    assert_eq!(s.storage.epoch_mapper().to_incremental_epoch(12).await, 1);
+    assert_eq!(s.storage.epoch_mapper().to_incremental_epoch(14).await, 2);
+    assert!(s
+        .storage
+        .epoch_mapper()
+        .try_to_incremental_epoch(11)
+        .await
+        .is_none());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_caching_mechanism() -> Result<()> {
+    const MAX_ENTRIES: usize = 10;
+    const INITIAL_EPOCH: UserEpoch = 4;
+
+    // test that we never erase from an `InMemoryEpochMapper`
+    let mut epoch_mapper = crate::storage::memory::InMemoryEpochMapper::new_at(INITIAL_EPOCH);
+
+    for i in 0..2 * MAX_ENTRIES {
+        epoch_mapper
+            .add_epoch_map(INITIAL_EPOCH + i as UserEpoch, i as IncrementalEpoch)
+            .await?;
+    }
+
+    assert_eq!(epoch_mapper.initial_epoch(), INITIAL_EPOCH);
+    for i in 0..2 * MAX_ENTRIES {
+        // check that no epoch has been erased from the storage
+        assert!(epoch_mapper
+            .try_to_incremental_epoch(INITIAL_EPOCH + i as UserEpoch)
+            .await
+            .is_some())
+    }
+
+    // test that epochs are not erased from cache if we insert them sequentially
+    let mut epoch_cache =
+        crate::storage::memory::EpochMapperCache::<MAX_ENTRIES>::new_at(INITIAL_EPOCH);
+
+    for i in 0..2 * MAX_ENTRIES {
+        epoch_cache
+            .add_epoch_map(INITIAL_EPOCH + i as UserEpoch, i as IncrementalEpoch)
+            .await?;
+    }
+
+    assert_eq!(epoch_cache.initial_epoch(), INITIAL_EPOCH);
+    println!("{}", epoch_cache.last_epoch());
+    for i in 0..2 * MAX_ENTRIES {
+        // check that no epoch has been erased from the storage
+        assert!(
+            epoch_cache
+                .try_to_incremental_epoch(INITIAL_EPOCH + i as UserEpoch)
+                .await
+                .is_some(),
+            "failed for epoch {i}"
+        );
+    }
+
+    // now, insert epochs not sequentially, and test that epochs starts to be erased
+    for i in 0..MAX_ENTRIES {
+        epoch_cache
+            .add_epoch_map(
+                (3 * MAX_ENTRIES as UserEpoch + INITIAL_EPOCH) * (i + 1) as UserEpoch,
+                (2 * MAX_ENTRIES + i) as IncrementalEpoch,
+            )
+            .await?;
+    }
+
+    assert_eq!(epoch_cache.initial_epoch(), INITIAL_EPOCH);
+    // count number of epochs still in the storage
+    let mut num_epochs = 0;
+    for i in 0..2 * MAX_ENTRIES {
+        num_epochs += epoch_cache
+            .try_to_incremental_epoch(INITIAL_EPOCH + i as UserEpoch)
+            .await
+            .is_some() as usize;
+    }
+    for i in 0..MAX_ENTRIES {
+        num_epochs += epoch_cache
+            .try_to_incremental_epoch(
+                (3 * MAX_ENTRIES as UserEpoch + INITIAL_EPOCH) * (i + 1) as UserEpoch,
+            )
+            .await
+            .is_some() as usize;
+    }
+
+    assert_eq!(num_epochs, MAX_ENTRIES);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn thousand_rows() -> Result<()> {
     type K = i64;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, false>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::fully_balanced())),
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "thousand".to_string(),
+            external_mapper: None,
         },
     )
     .await?;
@@ -612,14 +776,13 @@ async fn thousand_rows() -> Result<()> {
 
 #[tokio::test]
 async fn aggregation_memory() -> Result<()> {
-    type Tree = sbbst::Tree;
+    type Tree = sbbst::IncrementalTree;
     type V = MinMaxi64;
 
-    type Storage = InMemory<Tree, V>;
+    type Storage = InMemory<Tree, V, false>;
 
     let mut s =
-        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(sbbst::Tree::empty()), ())
-            .await?;
+        MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ()).await?;
 
     s.in_transaction(|s| {
         Box::pin(async {
@@ -645,15 +808,16 @@ async fn aggregation_memory() -> Result<()> {
 
 #[tokio::test]
 async fn aggregation_pgsql() -> Result<()> {
-    type Tree = sbbst::Tree;
+    type Tree = sbbst::IncrementalTree;
     type V = MinMaxi64;
 
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, false>;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::ResetAt(Tree::empty(), 32),
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "agg".to_string(),
+            external_mapper: None,
         },
     )
     .await?;
@@ -685,7 +849,7 @@ async fn test_rollback<
     S: EpochKvStorage<i64, MinMaxi64> + TreeTransactionalStorage<i64, MinMaxi64> + Send + Sync,
 >(
     s: &mut S,
-    initial_epoch: Epoch,
+    initial_epoch: UserEpoch,
 ) {
     for i in 0..3 {
         s.in_transaction(|s| {
@@ -699,7 +863,7 @@ async fn test_rollback<
         .unwrap();
     }
 
-    assert_eq!(s.current_epoch(), 3 + initial_epoch);
+    assert_eq!(s.current_epoch().await.unwrap(), 3 + initial_epoch);
     assert_eq!(s.size().await, 6);
     for i in 0..=5 {
         assert!(s.contains(&i.into()).await.unwrap());
@@ -709,7 +873,7 @@ async fn test_rollback<
     s.rollback_to(1 + initial_epoch)
         .await
         .unwrap_or_else(|_| panic!("failed to rollback to {}", 1 + initial_epoch));
-    assert_eq!(s.current_epoch(), 1 + initial_epoch);
+    assert_eq!(s.current_epoch().await.unwrap(), 1 + initial_epoch);
     assert_eq!(s.size().await, 2);
     for i in 0..=5 {
         if i <= 1 {
@@ -721,13 +885,15 @@ async fn test_rollback<
 
     // rollback once to reach to epoch 0
     s.rollback().await.unwrap();
-    assert_eq!(s.current_epoch(), initial_epoch);
+    println!("Rollbacked to initial epoch");
+    assert_eq!(s.current_epoch().await.unwrap(), initial_epoch);
     assert_eq!(s.size().await, 0);
     for i in 0..=5 {
         assert!(!s.contains(&i.into()).await.unwrap());
     }
 
     // Can not rollback before epoch 0
+    println!("Rolling back before initial epoch");
     assert!(s.rollback().await.is_err());
 }
 
@@ -737,7 +903,7 @@ async fn rollback_memory() {
     type V = MinMaxi64;
     type Tree = scapegoat::Tree<K>;
 
-    type Storage = InMemory<Tree, V>;
+    type Storage = InMemory<Tree, V, false>;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::new(0.7))),
         (),
@@ -754,9 +920,9 @@ async fn rollback_memory_at() {
     type V = MinMaxi64;
     type Tree = scapegoat::Tree<K>;
 
-    type Storage = InMemory<Tree, V>;
+    type Storage = InMemory<Tree, V, false>;
 
-    const INITIAL_EPOCH: Epoch = 4875;
+    const INITIAL_EPOCH: UserEpoch = 4875;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::ResetAt(Tree::empty(Alpha::new(0.7)), INITIAL_EPOCH),
         (),
@@ -773,12 +939,13 @@ async fn rollback_psql() {
     type V = MinMaxi64;
     type Tree = scapegoat::Tree<K>;
 
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, false>;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::new(0.7))),
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "rollback".to_string(),
+            external_mapper: None,
         },
     )
     .await
@@ -793,13 +960,14 @@ async fn rollback_psql_at() {
     type V = MinMaxi64;
     type Tree = scapegoat::Tree<K>;
 
-    const INITIAL_EPOCH: Epoch = 4875;
-    type Storage = PgsqlStorage<Tree, V>;
+    const INITIAL_EPOCH: UserEpoch = 4875;
+    type Storage = PgsqlStorage<Tree, V, false>;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::ResetAt(Tree::empty(Alpha::new(0.7)), INITIAL_EPOCH),
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "rollback_at".to_string(),
+            external_mapper: None,
         },
     )
     .await
@@ -810,9 +978,9 @@ async fn rollback_psql_at() {
 
 #[tokio::test]
 async fn context_at() {
-    type Tree = sbbst::Tree;
+    type Tree = sbbst::IncrementalTree;
     type V = MinMaxi64;
-    type Storage = InMemory<Tree, V>;
+    type Storage = InMemory<Tree, V, false>;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ())
         .await
         .unwrap();
@@ -862,7 +1030,7 @@ async fn initial_state() {
     type K = i64;
     type V = MinMaxi64;
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, false>;
 
     // Create an empty tree
     {
@@ -871,6 +1039,7 @@ async fn initial_state() {
             SqlStorageSettings {
                 source: SqlServerConnection::NewConnection(db_url()),
                 table: "empty_tree".to_string(),
+                external_mapper: None,
             },
         )
         .await
@@ -883,6 +1052,7 @@ async fn initial_state() {
             SqlStorageSettings {
                 source: SqlServerConnection::NewConnection(db_url()),
                 table: "empty_tree".to_string(),
+                external_mapper: None,
             },
         )
         .await
@@ -897,9 +1067,9 @@ async fn initial_state() {
 
 #[tokio::test]
 async fn dirties() {
-    type Tree = sbbst::Tree;
+    type Tree = sbbst::IncrementalTree;
     type V = MinMaxi64;
-    type Storage = InMemory<Tree, V>;
+    type Storage = InMemory<Tree, V, false>;
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(InitSettings::Reset(Tree::empty()), ())
         .await
         .unwrap();
@@ -947,16 +1117,17 @@ async fn grouped_txs() -> Result<()> {
     type K = i64;
     type V = MinMaxi64;
 
-    type SbbstTree = sbbst::Tree;
-    type SbbstStorage = PgsqlStorage<SbbstTree, V>;
+    type SbbstTree = sbbst::EpochTree;
+    type SbbstStorage = PgsqlStorage<SbbstTree, V, false>;
     type ScapeTree = scapegoat::Tree<K>;
-    type ScapeStorage = PgsqlStorage<ScapeTree, V>;
+    type ScapeStorage = PgsqlStorage<ScapeTree, V, true>;
 
     let mut t1 = MerkleTreeKvDb::<SbbstTree, V, SbbstStorage>::new(
-        InitSettings::Reset(Tree::empty()),
+        InitSettings::Reset(SbbstTree::empty()),
         SqlStorageSettings {
             table: "nested_sbbst".into(),
             source: SqlServerConnection::Pool(db_pool.clone()),
+            external_mapper: None,
         },
     )
     .await
@@ -967,6 +1138,7 @@ async fn grouped_txs() -> Result<()> {
         SqlStorageSettings {
             table: "nested_scape".into(),
             source: SqlServerConnection::Pool(db_pool.clone()),
+            external_mapper: Some("nested_sbbst".into()),
         },
     )
     .await
@@ -983,7 +1155,6 @@ async fn grouped_txs() -> Result<()> {
     t2.start_transaction().await?;
 
     t1.store(1, 456.into()).await?;
-    t1.store(2, 789.into()).await?;
 
     t2.store(8786384, 456.into()).await?;
     t2.store(4, 329.into()).await?;
@@ -997,14 +1168,14 @@ async fn grouped_txs() -> Result<()> {
 
     tx.commit().await?;
 
-    t1.commit_success();
-    t2.commit_success();
+    t1.commit_success().await;
+    t2.commit_success().await;
 
     // The commited root must be equal to its in-flight snapshot
     let commited_root = t1.root().await.unwrap().unwrap();
     assert_eq!(commited_root, in_flight_root);
     // Sizes must have been commited coorectly
-    assert_eq!(t1.size().await, 2);
+    assert_eq!(t1.size().await, 1);
     assert_eq!(t2.size().await, 3);
 
     assert!(t2.try_fetch(&4).await.unwrap().is_some());
@@ -1016,7 +1187,6 @@ async fn grouped_txs() -> Result<()> {
     t2.start_transaction().await?;
 
     t1.store(3, 456.into()).await?;
-    t1.store(4, 789.into()).await?;
 
     t2.store(578943, 542.into()).await?;
     t2.store(943, commited_root.into()).await?;
@@ -1025,11 +1195,11 @@ async fn grouped_txs() -> Result<()> {
     t2.commit_in(&mut tx).await?;
 
     tx.rollback().await?;
-    t1.commit_failed();
-    t2.commit_failed();
+    t1.commit_failed().await;
+    t2.commit_failed().await;
 
     // Size should not have changed
-    assert_eq!(t1.size().await, 2);
+    assert_eq!(t1.size().await, 1);
     assert_eq!(t2.size().await, 3);
 
     // Old data must still be there
@@ -1048,13 +1218,14 @@ async fn fetch_many() {
     type K = String;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, false>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "many".to_string(),
+            external_mapper: None,
         },
     )
     .await
@@ -1089,17 +1260,17 @@ async fn fetch_many() {
     let many = s
         .try_fetch_many_at([
             // OK
-            (1i64, "restera".to_string()),
+            (1i64 as UserEpoch, "restera".to_string()),
             // OK
-            (2i64, "restera".to_string()),
+            (2i64 as UserEpoch, "restera".to_string()),
             // non-existing epoch
-            (4i64, "restera".to_string()),
+            (4i64 as UserEpoch, "restera".to_string()),
             // does not exist yet
-            (1i64, "car".to_string()),
+            (1i64 as UserEpoch, "car".to_string()),
             // OK
-            (2i64, "car".to_string()),
+            (2i64 as UserEpoch, "car".to_string()),
             // non-existing key
-            (1i64, "meumeu".to_string()),
+            (1i64 as UserEpoch, "meumeu".to_string()),
         ])
         .await
         .unwrap()
@@ -1111,12 +1282,9 @@ async fn fetch_many() {
     assert_eq!(
         many,
         [
-            (1i64, "restera".to_string(), 12),
-            (2i64, "restera".to_string(), 12),
-            (2i64, "car".to_string(), 0),
-            // This should not exist, but as we use infinity to mark alive
-            // nodes, it will still appear
-            (4i64, "restera".to_string(), 12),
+            (1i64 as UserEpoch, "restera".to_string(), 12),
+            (2i64 as UserEpoch, "restera".to_string(), 12),
+            (2i64 as UserEpoch, "car".to_string(), 0),
         ]
         .into_iter()
         .collect::<HashSet<_>>()
@@ -1128,13 +1296,14 @@ async fn wide_update_trees() {
     type K = String;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, false>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "wide".to_string(),
+            external_mapper: None,
         },
     )
     .await
@@ -1189,13 +1358,14 @@ async fn all_pgsql() {
     type K = String;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
-    type Storage = PgsqlStorage<Tree, V>;
+    type Storage = PgsqlStorage<Tree, V, false>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
             table: "fetch_all".to_string(),
+            external_mapper: None,
         },
     )
     .await
@@ -1261,7 +1431,7 @@ async fn all_memory() {
     type K = String;
     type V = usize;
     type Tree = scapegoat::Tree<K>;
-    type Storage = InMemory<Tree, V>;
+    type Storage = InMemory<Tree, V, false>;
 
     let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
         InitSettings::Reset(Tree::empty(Alpha::never_balanced())),

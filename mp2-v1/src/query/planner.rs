@@ -1,22 +1,25 @@
 use alloy::primitives::U256;
-use anyhow::Context;
+use anyhow::{ensure, Context};
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use core::hash::Hash;
 use futures::stream::TryStreamExt;
 use itertools::Itertools;
 use mp2_common::types::HashOutput;
-use parsil::{bracketer::bracket_secondary_index, symbols::ContextProvider, ParsilSettings};
+use parsil::{
+    bracketer::{bracket_primary_index, bracket_secondary_index},
+    symbols::ContextProvider,
+    ParsilSettings,
+};
 use ryhope::{
     storage::{
-        pgsql::{PgsqlStorage, ToFromBytea},
-        updatetree::UpdateTree,
-        FromSettings, PayloadStorage, TransactionalStorage, TreeStorage, WideLineage,
+        pgsql::ToFromBytea, updatetree::UpdateTree, FromSettings, PayloadStorage,
+        TransactionalStorage, TreeStorage, WideLineage,
     },
     tree::{MutableTree, NodeContext, TreeTopology},
-    Epoch, MerkleTreeKvDb, NodePayload,
+    MerkleTreeKvDb, NodePayload, UserEpoch,
 };
-use std::{fmt::Debug, future::Future};
+use std::{fmt::Debug, future::Future, marker::PhantomData};
 use tokio_postgres::{row::Row as PsqlRow, types::ToSql, NoTls};
 use verifiable_db::query::{
     api::TreePathInputs,
@@ -24,14 +27,12 @@ use verifiable_db::query::{
 };
 
 use crate::indexing::{
-    block::BlockPrimaryIndex,
-    row::{RowPayload, RowTree, RowTreeKey},
+    block::{BlockPrimaryIndex, MerkleIndexTree},
+    index::IndexNode,
+    row::{MerkleRowTree, RowPayload, RowTreeKey},
     LagrangeNode,
 };
 
-/// There is only the PSQL storage fully supported for the non existence case since one needs to
-/// executor particular requests on the DB in this case.
-pub type DBRowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>;
 /// The type of connection to psql backend
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 
@@ -39,57 +40,171 @@ pub struct NonExistenceInfo<K: Clone + std::hash::Hash + std::cmp::Eq> {
     pub proving_plan: UpdateTree<K>,
 }
 
+pub type NonExistenceInputRow<'a, C> =
+    NonExistenceInput<'a, C, RowTreeKey, RowPayload<BlockPrimaryIndex>, MerkleRowTree, true>;
+pub type NonExistenceInputIndex<'a, C> = NonExistenceInput<
+    'a,
+    C,
+    BlockPrimaryIndex,
+    IndexNode<BlockPrimaryIndex>,
+    MerkleIndexTree,
+    false,
+>;
 #[derive(Clone)]
-pub struct NonExistenceInput<'a, C: ContextProvider> {
-    pub(crate) row_tree: &'a MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
+pub struct NonExistenceInput<
+    'a,
+    C: ContextProvider,
+    K: Debug + Clone + Eq + PartialEq,
+    V: LagrangeNode,
+    T: TreeFetcher<K, V>,
+    const ROWS_TREE: bool,
+> {
+    pub(crate) tree: &'a T,
     pub(crate) table_name: String,
     pub(crate) pool: &'a DBPool,
     pub(crate) settings: &'a ParsilSettings<C>,
     pub(crate) bounds: QueryBounds,
+    _k: PhantomData<K>,
+    _v: PhantomData<V>,
 }
 
-impl<'a, C: ContextProvider> NonExistenceInput<'a, C> {
+impl<
+        'a,
+        C: ContextProvider,
+        K: Debug + Clone + Eq + PartialEq + ToFromBytea,
+        V: LagrangeNode,
+        T: TreeFetcher<K, V>,
+        const ROWS_TREE: bool,
+    > NonExistenceInput<'a, C, K, V, T, ROWS_TREE>
+{
     pub fn new(
-        row_tree: &'a MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
+        tree: &'a T,
         table_name: String,
         pool: &'a DBPool,
         settings: &'a ParsilSettings<C>,
         bounds: &'a QueryBounds,
     ) -> Self {
         Self {
-            row_tree,
+            tree,
             table_name,
             pool,
             settings,
             bounds: bounds.clone(),
+            _k: PhantomData,
+            _v: PhantomData,
         }
     }
 
-    pub async fn find_row_node_for_non_existence(
+    pub async fn find_node_for_non_existence(
         &self,
         primary: BlockPrimaryIndex,
-    ) -> anyhow::Result<RowTreeKey> {
-        let (query_for_min, query_for_max) = bracket_secondary_index(
-            &self.table_name,
-            self.settings,
-            primary as Epoch,
-            &self.bounds,
+    ) -> anyhow::Result<K> {
+        let (preliminary_query, query_for_min, query_for_max) = if ROWS_TREE {
+            bracket_secondary_index(
+                &self.table_name,
+                self.settings,
+                primary as UserEpoch,
+                &self.bounds,
+            )
+        } else {
+            bracket_primary_index(&self.table_name, primary as UserEpoch, &self.bounds)
+        };
+
+        let params = execute_row_query(self.pool, &preliminary_query, &[]).await?;
+        ensure!(
+            params.len() == 1,
+            "Preliminary query returned more than one row"
         );
+        let param = params[0].get::<_, U256>(0);
 
         // try first with lower node than secondary min query bound
-        let to_be_proven_node =
-            match find_node_for_proof(self.pool, self.row_tree, query_for_min, primary, true)
+        let to_be_proven_node = match self
+            .find_node_for_proof(query_for_min.map(|q| (q, param)), primary, true)
+            .await?
+        {
+            Some(node) => node,
+            None => self
+                .find_node_for_proof(query_for_max.map(|q| (q, param)), primary, false)
                 .await?
-            {
-                Some(node) => node,
-                None => {
-                    find_node_for_proof(self.pool, self.row_tree, query_for_max, primary, false)
-                        .await?
-                        .expect("No valid node found to prove non-existence, something is wrong")
-                }
-            };
+                .expect("No valid node found to prove non-existence, something is wrong"),
+        };
 
         Ok(to_be_proven_node)
+    }
+
+    async fn find_node_for_proof(
+        &self,
+        query_with_param: Option<(String, U256)>,
+        primary: BlockPrimaryIndex,
+        is_min_query: bool,
+    ) -> anyhow::Result<Option<K>> {
+        let rows = if let Some((query, param)) = query_with_param {
+            execute_row_query(self.pool, &query, &[param]).await?
+        } else {
+            return Ok(None);
+        };
+        if rows.is_empty() {
+            // no node found, return None
+            return Ok(None);
+        }
+        let row_key = rows[0]
+            .get::<_, Option<Vec<u8>>>(0)
+            .map(K::from_bytea)
+            .context("unable to parse row key tree")
+            .expect("");
+        // among the nodes with the same index value of the node with `row_key`, we need to find
+        // the one that satisfies the following property: all its successor nodes have values bigger
+        // than `max_query_secondary`, and all its predecessor nodes have values smaller than
+        // `min_query_secondary`. Such a node can be found differently, depending on the case:
+        // - if `is_min_query = true`, then we are looking among nodes with the highest value smaller
+        //   than `min_query_secondary` bound (call this value `min_value`);
+        //   therefore, we need to find the "last" node among the nodes with value `min_value`, that
+        //   is the node whose successor (if exists) has a value bigger than `min_value`. Since there
+        //   are no nodes in the tree in the range [`min_query_secondary, max_query_secondary`], then
+        //   the value of the successor of the "last" node is necessarily bigger than `max_query_secondary`,
+        //   and so it implies that we found the node satisfying the property mentioned above
+        // - if `is_min_query = false`, then we are looking among nodes with the smallest value higher
+        //   than `max_query_secondary` bound (call this value `max_value`);
+        //   therefore, we need to find the "first" node among the nodes with value `max_value`, that
+        //   is the node whose predecessor (if exists) has a value smaller than `max_value`. Since there
+        //   are no nodes in the tree in the range [`min_query_secondary, max_query_secondary`], then
+        //   the value of the predecessor of the "first" node is necessarily smaller than `min_query_secondary`,
+        //   and so it implies that we found the node satisfying the property mentioned above
+        let (mut node_ctx, node_value) = self
+            .tree
+            .fetch_ctx_and_payload_at(&row_key, primary as UserEpoch)
+            .await
+            .unwrap();
+        let value = node_value.value();
+
+        if is_min_query {
+            // starting from the node with key `row_key`, we iterate over its successor nodes in the tree,
+            // until we found a node that either has no successor or whose successor stores a value different
+            // from the value `value` stored in the node with key `row_key`; the node found is the one to be
+            // employed to generate the non-existence proof
+            let mut successor_ctx =
+                get_successor_node_with_same_value(self.tree, &node_ctx, value, primary).await;
+            while successor_ctx.is_some() {
+                node_ctx = successor_ctx.unwrap();
+                successor_ctx =
+                    get_successor_node_with_same_value(self.tree, &node_ctx, value, primary).await;
+            }
+        } else {
+            // starting from the node with key `row_key`, we iterate over its predecessor nodes in the tree,
+            // until we found a node that either has no predecessor or whose predecessor stores a value different
+            // from the value `value` stored in the node with key `row_key`; the node found is the one to be
+            // employed to generate the non-existence proof
+            let mut predecessor_ctx =
+                get_predecessor_node_with_same_value(self.tree, &node_ctx, value, primary).await;
+            while predecessor_ctx.is_some() {
+                node_ctx = predecessor_ctx.unwrap();
+                predecessor_ctx =
+                    get_predecessor_node_with_same_value(self.tree, &node_ctx, value, primary)
+                        .await;
+            }
+        }
+
+        Ok(Some(node_ctx.node_id))
     }
 }
 
@@ -100,13 +215,13 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
     fn fetch_ctx_and_payload_at(
         &self,
         k: &K,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> impl Future<Output = Option<(NodeContext<K>, V)>> + Send;
 
     fn compute_path(
         &self,
         node_key: &K,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> impl Future<Output = Option<TreePathInputs>> {
         async move {
             let (node_ctx, node_payload) = self.fetch_ctx_and_payload_at(node_key, epoch).await?;
@@ -152,7 +267,7 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
         &self,
         node_ctx: NodeContext<K>,
         node_payload: V,
-        at: Epoch,
+        at: UserEpoch,
     ) -> impl Future<Output = NodeInfo> {
         async move {
             let child_hash = async |k: Option<K>| -> Option<HashOutput> {
@@ -183,7 +298,7 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
     fn get_successor(
         &self,
         node_ctx: &NodeContext<K>,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> impl Future<Output = Option<(NodeContext<K>, V)>>
     where
         K: Clone + Debug + Eq + PartialEq,
@@ -264,7 +379,7 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
     fn get_predecessor(
         &self,
         node_ctx: &NodeContext<K>,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> impl Future<Output = Option<(NodeContext<K>, V)>>
     where
         K: Clone + Debug + Eq + PartialEq,
@@ -349,7 +464,11 @@ where
 {
     const IS_WIDE_LINEAGE: bool = true;
 
-    async fn fetch_ctx_and_payload_at(&self, k: &K, epoch: Epoch) -> Option<(NodeContext<K>, V)> {
+    async fn fetch_ctx_and_payload_at(
+        &self,
+        k: &K,
+        epoch: UserEpoch,
+    ) -> Option<(NodeContext<K>, V)> {
         self.ctx_and_payload_at(epoch, k)
     }
 }
@@ -369,7 +488,7 @@ impl<
     async fn fetch_ctx_and_payload_at(
         &self,
         k: &T::Key,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> Option<(NodeContext<T::Key>, V)> {
         self.try_fetch_with_context_at(k, epoch)
             .await
@@ -386,7 +505,7 @@ impl<
 async fn fetch_existing_node_from_tree<K, V: LagrangeNode, T: TreeFetcher<K, V>>(
     tree: &T,
     k: &K,
-    epoch: Epoch,
+    epoch: UserEpoch,
 ) -> Option<(NodeContext<K>, V)>
 where
     K: Clone + Debug + Eq + PartialEq,
@@ -408,14 +527,17 @@ where
 // this method returns the `NodeContext` of the successor of the node provided as input,
 // if the successor exists in the row tree and it stores the same value of the input node (i.e., `value`);
 // returns `None` otherwise, as it means that the input node can be used to prove non-existence
-async fn get_successor_node_with_same_value(
-    row_tree: &MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
-    node_ctx: &NodeContext<RowTreeKey>,
+async fn get_successor_node_with_same_value<
+    K: Debug + Clone + Eq + PartialEq,
+    V: LagrangeNode,
+    T: TreeFetcher<K, V>,
+>(
+    tree: &T,
+    node_ctx: &NodeContext<K>,
     value: U256,
     primary: BlockPrimaryIndex,
-) -> Option<NodeContext<RowTreeKey>> {
-    row_tree
-        .get_successor(node_ctx, primary as Epoch)
+) -> Option<NodeContext<K>> {
+    tree.get_successor(node_ctx, primary as UserEpoch)
         .await
         .and_then(|(successor_ctx, successor_payload)| {
             if successor_payload.value() != value {
@@ -431,14 +553,17 @@ async fn get_successor_node_with_same_value(
 // this method returns the `NodeContext` of the predecessor of the node provided as input,
 // if the predecessor exists in the row tree and it stores the same value of the input node (i.e., `value`);
 // returns `None` otherwise, as it means that the input node can be used to prove non-existence
-async fn get_predecessor_node_with_same_value(
-    row_tree: &MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
-    node_ctx: &NodeContext<RowTreeKey>,
+async fn get_predecessor_node_with_same_value<
+    K: Debug + Clone + Eq + PartialEq,
+    V: LagrangeNode,
+    T: TreeFetcher<K, V>,
+>(
+    tree: &T,
+    node_ctx: &NodeContext<K>,
     value: U256,
     primary: BlockPrimaryIndex,
-) -> Option<NodeContext<RowTreeKey>> {
-    row_tree
-        .get_predecessor(node_ctx, primary as Epoch)
+) -> Option<NodeContext<K>> {
+    tree.get_predecessor(node_ctx, primary as UserEpoch)
         .await
         .and_then(|(predecessor_ctx, predecessor_payload)| {
             if predecessor_payload.value() != value {
@@ -451,78 +576,6 @@ async fn get_predecessor_node_with_same_value(
         })
 }
 
-async fn find_node_for_proof(
-    db: &DBPool,
-    row_tree: &MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, DBRowStorage>,
-    query: Option<String>,
-    primary: BlockPrimaryIndex,
-    is_min_query: bool,
-) -> anyhow::Result<Option<RowTreeKey>> {
-    if query.is_none() {
-        return Ok(None);
-    }
-    let rows = execute_row_query(db, &query.unwrap(), &[]).await?;
-    if rows.is_empty() {
-        // no node found, return None
-        return Ok(None);
-    }
-    let row_key = rows[0]
-        .get::<_, Option<Vec<u8>>>(0)
-        .map(RowTreeKey::from_bytea)
-        .context("unable to parse row key tree")
-        .expect("");
-    // among the nodes with the same index value of the node with `row_key`, we need to find
-    // the one that satisfies the following property: all its successor nodes have values bigger
-    // than `max_query_secondary`, and all its predecessor nodes have values smaller than
-    // `min_query_secondary`. Such a node can be found differently, depending on the case:
-    // - if `is_min_query = true`, then we are looking among nodes with the highest value smaller
-    //   than `min_query_secondary` bound (call this value `min_value`);
-    //   therefore, we need to find the "last" node among the nodes with value `min_value`, that
-    //   is the node whose successor (if exists) has a value bigger than `min_value`. Since there
-    //   are no nodes in the tree in the range [`min_query_secondary, max_query_secondary`], then
-    //   the value of the successor of the "last" node is necessarily bigger than `max_query_secondary`,
-    //   and so it implies that we found the node satisfying the property mentioned above
-    // - if `is_min_query = false`, then we are looking among nodes with the smallest value higher
-    //   than `max_query_secondary` bound (call this value `max_value`);
-    //   therefore, we need to find the "first" node among the nodes with value `max_value`, that
-    //   is the node whose predecessor (if exists) has a value smaller than `max_value`. Since there
-    //   are no nodes in the tree in the range [`min_query_secondary, max_query_secondary`], then
-    //   the value of the predecessor of the "first" node is necessarily smaller than `min_query_secondary`,
-    //   and so it implies that we found the node satisfying the property mentioned above
-    let (mut node_ctx, node_value) = row_tree
-        .fetch_with_context_at(&row_key, primary as Epoch)
-        .await?
-        .unwrap();
-    let value = node_value.value();
-
-    if is_min_query {
-        // starting from the node with key `row_key`, we iterate over its successor nodes in the tree,
-        // until we found a node that either has no successor or whose successor stores a value different
-        // from the value `value` stored in the node with key `row_key`; the node found is the one to be
-        // employed to generate the non-existence proof
-        let mut successor_ctx =
-            get_successor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
-        while successor_ctx.is_some() {
-            node_ctx = successor_ctx.unwrap();
-            successor_ctx =
-                get_successor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
-        }
-    } else {
-        // starting from the node with key `row_key`, we iterate over its predecessor nodes in the tree,
-        // until we found a node that either has no predecessor or whose predecessor stores a value different
-        // from the value `value` stored in the node with key `row_key`; the node found is the one to be
-        // employed to generate the non-existence proof
-        let mut predecessor_ctx =
-            get_predecessor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
-        while predecessor_ctx.is_some() {
-            node_ctx = predecessor_ctx.unwrap();
-            predecessor_ctx =
-                get_predecessor_node_with_same_value(row_tree, &node_ctx, value, primary).await;
-        }
-    }
-
-    Ok(Some(node_ctx.node_id))
-}
 pub async fn execute_row_query2(
     pool: &DBPool,
     query: &str,
@@ -569,7 +622,7 @@ async fn get_node_info_from_ctx_and_payload<
     tree: &T,
     node_ctx: NodeContext<K>,
     node_payload: V,
-    at: Epoch,
+    at: UserEpoch,
 ) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>) {
     // this looks at the value of a child node (left and right), and fetches the grandchildren
     // information to be able to build their respective node info.
@@ -642,7 +695,7 @@ pub async fn get_node_info<
 >(
     tree: &T,
     k: &K,
-    at: Epoch,
+    at: UserEpoch,
 ) -> (NodeInfo, Option<NodeInfo>, Option<NodeInfo>) {
     let (node_ctx, node_payload) = tree
         .fetch_ctx_and_payload_at(k, at)
