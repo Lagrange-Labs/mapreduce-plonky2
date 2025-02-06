@@ -23,12 +23,6 @@ pub fn core_keys_for_index_tree(
     table_name: &str,
 ) -> Result<String> {
     let (query_min_block, query_max_block) = query_epoch_bounds;
-    ensure!(
-        query_max_block as i64 <= execution_epoch,
-        "query can not be executed in the past ({} < {})",
-        execution_epoch,
-        query_max_block
-    );
 
     let mapper_table_name = mapper_table_name(table_name);
 
