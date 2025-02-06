@@ -11,13 +11,10 @@ use crate::{
             table_source::BASE_VALUE,
         },
         proof_storage::{ProofKey, ProofStorage},
-        rowtree::MerkleRowTree,
         table::Table,
         TableInfo,
     },
-    proof_storage::{ProofKey, ProofStorage},
-    table::Table,
-    TableInfo, TableSource,
+    TableSource,
 };
 
 use crate::context::TestContext;

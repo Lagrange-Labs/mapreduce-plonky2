@@ -21,9 +21,8 @@ use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
     eth::{EventLogInfo, ProofQuery, ReceiptProofInfo, StorageSlot, StorageSlotNode},
-    poseidon::H,
     proof::ProofWithVK,
-    types::{GFp, HashOutput},
+    types::HashOutput,
 };
 use mp2_v1::{
     api::{
@@ -38,7 +37,8 @@ use mp2_v1::{
     values_extraction::{
         gadgets::{column_info::ExtractedColumnInfo, metadata_gadget::TableMetadata},
         identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
-        identifier_for_outer_mapping_key_column, identifier_for_value_column,
+        identifier_for_outer_mapping_key_column, identifier_for_tx_index_column,
+        identifier_for_value_column,
         planner::Extractable,
         StorageSlotInfo,
     },
@@ -53,7 +53,7 @@ use rand::{
 use crate::common::{
     cases::{
         contract::EventContract,
-        indexing::{ReceiptUpdate, TableRowValues, TX_INDEX_COLUMN},
+        indexing::{ReceiptUpdate, TableRowValues},
     },
     final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
     proof_storage::{ProofKey, ProofStorage},
@@ -485,13 +485,14 @@ impl MergeSource {
                 // all updates of table b
                 update_single.iter().map(|us| match (refm, us) {
                     // We start by a few impossible methods
-                    (_, TableRowUpdate::Deletion(_)) => panic!("no deletion on single table"),
+                    (_, TableRowUpdate::Deletion(_)) | (_, TableRowUpdate::DeleteAll) => panic!("no deletion on single table"),
                     (TableRowUpdate::Update(_), TableRowUpdate::Insertion(_, _)) => {
                         panic!("insertion on single only happens at genesis")
                     }
                     // WARNING: when a mapping row is deleted, it deletes the whole row even for single
                     // values
                     (TableRowUpdate::Deletion(ref d), _) => TableRowUpdate::Deletion(d.clone()),
+                    (TableRowUpdate::DeleteAll, _) => panic!("Cannot currently delete all mapping entries"),
                     // Regular update on both 
                     (TableRowUpdate::Update(ref update_a), TableRowUpdate::Update(update_b)) => {
                         let mut update_a = update_a.clone();
@@ -586,6 +587,7 @@ impl MergeSource {
                         match row_update {
                             // nothing else to do for deletion
                             TableRowUpdate::Deletion(k) => TableRowUpdate::Deletion(k),
+                            TableRowUpdate::DeleteAll => panic!("Cannot delete all for a mapping"),
                             // NOTE: nothing else to do for update as well since we know the
                             // update comes from the mapping, so single didn't change, so no need
                             // to add anything.
@@ -700,9 +702,8 @@ pub trait ReceiptExtractionArgs:
             .map(|col| col.identifier().0)
             .collect::<Vec<u64>>();
 
-        proof_infos
-            .iter()
-            .flat_map(|info| {
+        std::iter::once(TableRowUpdate::DeleteAll)
+            .chain(proof_infos.iter().flat_map(|info| {
                 let receipt_with_bloom = info.to_receipt().unwrap();
 
                 let tx_index_cell = Cell::new(input_columns_ids[0], U256::from(info.tx_index));
@@ -759,7 +760,7 @@ pub trait ReceiptExtractionArgs:
                         TableRowUpdate::<PrimaryIndex>::Insertion(collection, secondary)
                     })
                     .collect::<Vec<TableRowUpdate<PrimaryIndex>>>()
-            })
+            }))
             .collect::<Vec<TableRowUpdate<PrimaryIndex>>>()
     }
 }
@@ -806,21 +807,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptExtractionArgs
     }
 
     fn get_index(&self) -> u64 {
-        use plonky2::{
-            field::types::{Field, PrimeField64},
-            plonk::config::Hasher,
-        };
-
-        let tx_index_input = [
-            self.address.as_slice(),
-            self.event_signature.as_slice(),
-            TX_INDEX_COLUMN.as_bytes(),
-        ]
-        .concat()
-        .into_iter()
-        .map(GFp::from_canonical_u8)
-        .collect::<Vec<GFp>>();
-        H::hash_no_pad(&tx_index_input).elements[0].to_canonical_u64()
+        identifier_for_tx_index_column(&self.event_signature, &self.address, &[])
     }
 }
 
@@ -847,7 +834,7 @@ where
         let event = self.get_event();
         async move {
             let contract_update =
-                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA_WORDS as u8), 5, 15);
+                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA_WORDS as u8), 1, 5);
 
             let provider = ProviderBuilder::new()
                 .with_recommended_fillers()
