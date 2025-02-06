@@ -26,7 +26,7 @@ use crate::{
     query::planner::TreeFetcher,
 };
 
-use super::planner::NonExistenceInput;
+use super::planner::NonExistenceInputRow;
 
 async fn compute_input_for_row<T: TreeFetcher<RowTreeKey, RowPayload<BlockPrimaryIndex>>>(
     tree: &T,
@@ -92,7 +92,7 @@ pub async fn generate_chunks_and_update_tree<
     row_cache: WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     index_cache: WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     column_ids: &ColumnIDs,
-    non_existence_inputs: NonExistenceInput<'_, C>,
+    non_existence_inputs: NonExistenceInputRow<'_, C>,
     epoch: UserEpoch,
 ) -> Result<(
     HashMap<UTKey<NUM_CHUNKS>, Vec<RowInput>>,
@@ -108,7 +108,7 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
     row_cache: WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     index_cache: WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     column_ids: &ColumnIDs,
-    non_existence_inputs: NonExistenceInput<'_, C>,
+    non_existence_inputs: NonExistenceInputRow<'_, C>,
 ) -> Result<Vec<Vec<RowInput>>> {
     let index_keys_by_epochs = index_cache.keys_by_epochs();
     assert_eq!(index_keys_by_epochs.len(), 1);
@@ -137,13 +137,13 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
                 .await
         } else {
             let proven_node = non_existence_inputs
-                .find_row_node_for_non_existence(index_value)
+                .find_node_for_non_existence(index_value)
                 .await
                 .unwrap_or_else(|e| {
                     panic!("node for non-existence not found for index value {index_value}: {e:?}")
                 });
             let row_input = compute_input_for_row(
-                non_existence_inputs.row_tree,
+                non_existence_inputs.tree,
                 &proven_node,
                 index_value,
                 &index_path,

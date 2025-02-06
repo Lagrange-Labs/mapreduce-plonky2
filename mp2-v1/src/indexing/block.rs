@@ -41,3 +41,20 @@ pub async fn get_previous_epoch(
         .await
         .map(|(ctx, _)| ctx.node_id))
 }
+
+/// Get the next epoch of `epoch` in `tree`
+pub async fn get_next_epoch(
+    tree: &MerkleIndexTree,
+    epoch: BlockPrimaryIndex,
+) -> anyhow::Result<Option<BlockPrimaryIndex>> {
+    let current_epoch = tree.current_epoch().await?;
+    let epoch_ctx = tree
+        .node_context(&epoch)
+        .await?
+        .ok_or(anyhow!("epoch {epoch} not found in the tree"))?;
+
+    Ok(tree
+        .get_successor(&epoch_ctx, current_epoch)
+        .await
+        .map(|(ctx, _)| ctx.node_id))
+}
