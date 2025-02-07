@@ -294,13 +294,13 @@ mod tests {
             let index_id = c.add_virtual_target();
             let first_node_path = MerklePathWithNeighborsGadget::build(
                 c,
-                first_node_value.clone(),
+                first_node_value,
                 first_node_tree_hash,
                 index_id,
             );
             let second_node_path = MerklePathWithNeighborsGadget::build(
                 c,
-                second_node_value.clone(),
+                second_node_value,
                 second_node_tree_hash,
                 index_id,
             );

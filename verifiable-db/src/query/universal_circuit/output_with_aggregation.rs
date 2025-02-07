@@ -87,7 +87,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponentValueWires for ValueWires<MAX_
     type FirstT = UInt256Target;
 
     fn first_output_value(&self) -> Self::FirstT {
-        self.output_values[0].clone()
+        self.output_values[0]
     }
 
     fn other_output_values(&self) -> &[UInt256Target] {

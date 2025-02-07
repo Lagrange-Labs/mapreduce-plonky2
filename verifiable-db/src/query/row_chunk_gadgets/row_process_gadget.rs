@@ -236,7 +236,7 @@ where
         let [primary_index_id, secondary_index_id] =
             array::from_fn(|i| hash_input_wires.column_extraction_wires.column_ids[i]);
         let [primary_index_value, secondary_index_value] =
-            array::from_fn(|i| value_wires.input_wires.column_values[i].clone());
+            array::from_fn(|i| value_wires.input_wires.column_values[i]);
         let row_path = MerklePathWithNeighborsGadget::build(
             b,
             secondary_index_value,

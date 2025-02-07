@@ -196,25 +196,25 @@ mod tests {
                 array::from_fn(|_| b.add_virtual_hash());
             let left_boundary_row_path = MerklePathWithNeighborsGadget::build(
                 b,
-                left_boundary_row_value.clone(),
+                left_boundary_row_value,
                 left_boundary_row_subtree_hash,
                 secondary_index_id,
             );
             let left_boundary_index_path = MerklePathWithNeighborsGadget::build(
                 b,
-                left_boundary_index_value.clone(),
+                left_boundary_index_value,
                 left_boundary_row_path.root,
                 primary_index_id,
             );
             let right_boundary_row_path = MerklePathWithNeighborsGadget::build(
                 b,
-                right_boundary_row_value.clone(),
+                right_boundary_row_value,
                 right_boundary_row_subtree_hash,
                 secondary_index_id,
             );
             let right_boundary_index_path = MerklePathWithNeighborsGadget::build(
                 b,
-                right_boundary_index_value.clone(),
+                right_boundary_index_value,
                 right_boundary_row_path.root,
                 primary_index_id,
             );

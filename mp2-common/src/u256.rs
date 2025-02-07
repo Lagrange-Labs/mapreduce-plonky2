@@ -60,7 +60,7 @@ pub fn is_less_than_or_equal_to_u256_arr(left: &[U256], right: &[U256]) -> (bool
 }
 
 /// Circuit representation of u256
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Copy)]
 pub struct UInt256Target([U32Target; NUM_LIMBS]);
 
 impl PartialEq for UInt256Target {
@@ -231,7 +231,7 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
     }
 
     fn add_virtual_u256(&mut self) -> UInt256Target {
-        self.add_virtual_u256_arr::<1>()[0].clone()
+        self.add_virtual_u256_arr::<1>()[0]
     }
 
     fn add_virtual_u256_arr<const N: usize>(&mut self) -> [UInt256Target; N] {
@@ -530,8 +530,8 @@ impl<F: SerializableRichField<D>, const D: usize> CircuitBuilderU256<F, D>
     ) -> UInt256Target {
         // first check if `cond` is a constant
         match self.target_as_constant(cond.target) {
-            Some(val) if val == F::ZERO => return right.clone(),
-            Some(val) if val == F::ONE => return left.clone(),
+            Some(val) if val == F::ZERO => return *right,
+            Some(val) if val == F::ONE => return *left,
             _ => (),
         };
         let limbs = create_array(|i| {
@@ -739,10 +739,10 @@ impl UInt256Target {
         let quotient = b.add_virtual_u256();
         let remainder = b.add_virtual_u256();
         b.add_simple_generator(UInt256DivGenerator {
-            dividend: self.clone(),
-            divisor: other.clone(),
-            quotient: quotient.clone(),
-            remainder: remainder.clone(),
+            dividend: *self,
+            divisor: *other,
+            quotient,
+            remainder,
             is_div,
         });
         // enforce that remainder < other, if other != 0 and is_div == true;
@@ -771,9 +771,9 @@ impl UInt256Target {
         // otherwise, prod = quotient*other, as we need to later check that quotient*other + remainder == self
         let mul_input = if let Some(val) = b.target_as_constant(is_div.target) {
             if val == F::ONE {
-                quotient.clone()
+                quotient
             } else {
-                self.clone()
+                *self
             }
         } else {
             b.select_u256(is_div, &quotient, self)

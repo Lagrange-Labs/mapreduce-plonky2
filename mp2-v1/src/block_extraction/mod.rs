@@ -15,6 +15,7 @@ use mp2_common::{
 };
 use serde::{Deserialize, Serialize};
 
+pub use circuit::ExtractionType;
 pub use public_inputs::PublicInputs;
 pub struct CircuitInput(Vec<u8>);
 impl CircuitInput {
@@ -69,7 +70,7 @@ mod test {
     };
     use anyhow::Result;
     use mp2_common::{
-        eth::BlockUtil,
+        eth::Rlpable,
         proof::deserialize_proof,
         utils::{Endianness, FromFields, Packer, ToFields},
         C, D, F,
@@ -77,8 +78,9 @@ mod test {
     use mp2_test::eth::get_sepolia_url;
 
     use crate::block_extraction::{public_inputs::PublicInputs, PublicParameters};
+
     #[tokio::test]
-    async fn test_api() -> Result<()> {
+    async fn test_api_storage() -> Result<()> {
         let params = PublicParameters::build();
         let url = get_sepolia_url();
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
@@ -121,7 +123,7 @@ mod test {
         );
         assert_eq!(
             U256::from_fields(pi.block_number_raw()),
-            U256::from(block.header.number),
+            U256::from(block.header.number)
         );
         assert_eq!(
             pi.state_root_raw(),

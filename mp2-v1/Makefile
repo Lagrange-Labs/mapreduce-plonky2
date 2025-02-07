@@ -12,15 +12,12 @@ TEST_BINDINGS_OUT_PATH=$(TEST_CONTRACT_PATH)/out/$(TEST_BINDINGS_FOLDER)
 
 # Generate the integration test contract bindings.
 bindings:
-	rm -rf $(TEST_BINDINGS_MOD_PATH) $(TEST_BINDINGS_OUT_PATH)
 
 # Generate new bindings.
 	forge install --root $(TEST_CONTRACT_PATH)
-	forge bind --alloy --module --root $(TEST_CONTRACT_PATH)
-
-# Move the bindings module to the integration test location.
-	mv -f $(TEST_BINDINGS_OUT_PATH) $(TEST_BINDINGS_MOD_PATH)
+	forge bind --bindings-path $(TEST_BINDINGS_MOD_PATH) --alloy --module --root $(TEST_CONTRACT_PATH) --extra-output abi --overwrite
 	cargo fmt
+
 
 # Declare phony targets
 .PHONY: bindings

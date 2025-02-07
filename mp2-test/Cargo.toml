@@ -13,6 +13,7 @@ plonky2.workspace = true
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
 serde.workspace = true
+tokio.workspace = true
 
 mp2_common = { path = "../mp2-common" }
 recursion_framework = { path = "../recursion-framework" }

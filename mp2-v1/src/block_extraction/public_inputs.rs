@@ -12,10 +12,14 @@ use plonky2::iop::target::Target;
 // - `PREV_BH : [8]F` packed Keccak hash of the block
 // - `BN : F` Proven block number
 // - `SH : [8]F` Packed state root hash
+// - `TH : [8]F` Packed transaction root hash
+// - `RH : [8]F` Packed receipt root hash
 const BH_RANGE: PublicInputRange = 0..PACKED_HASH_LEN;
 const PREV_BH_RANGE: PublicInputRange = BH_RANGE.end..BH_RANGE.end + PACKED_HASH_LEN;
 const BN_RANGE: PublicInputRange = PREV_BH_RANGE.end..PREV_BH_RANGE.end + u256::NUM_LIMBS;
 const SH_RANGE: PublicInputRange = BN_RANGE.end..BN_RANGE.end + PACKED_HASH_LEN;
+const TH_RANGE: PublicInputRange = SH_RANGE.end..SH_RANGE.end + PACKED_HASH_LEN;
+const RH_RANGE: PublicInputRange = TH_RANGE.end..TH_RANGE.end + PACKED_HASH_LEN;
 
 /// Public inputs for the dynamic-length variable extraction.
 #[derive(Clone, Debug)]
@@ -28,16 +32,29 @@ pub struct PublicInputs<'a, T> {
     pub(crate) bn: &'a [T],
     /// Packed state root
     pub(crate) sh: &'a [T],
+    /// Packed transaction root
+    pub(crate) th: &'a [T],
+    /// Packed receipt root
+    pub(crate) rh: &'a [T],
 }
 
 impl PublicInputCommon for PublicInputs<'_, Target> {
-    const RANGES: &'static [PublicInputRange] = &[BH_RANGE, PREV_BH_RANGE, BN_RANGE, SH_RANGE];
+    const RANGES: &'static [PublicInputRange] = &[
+        BH_RANGE,
+        PREV_BH_RANGE,
+        BN_RANGE,
+        SH_RANGE,
+        TH_RANGE,
+        RH_RANGE,
+    ];
 
     fn register_args(&self, cb: &mut CBuilder) {
         cb.register_public_inputs(self.bh);
         cb.register_public_inputs(self.prev_bh);
         cb.register_public_inputs(self.bn);
         cb.register_public_inputs(self.sh);
+        cb.register_public_inputs(self.th);
+        cb.register_public_inputs(self.rh);
     }
 }
 
@@ -48,16 +65,22 @@ impl<'a> PublicInputs<'a, Target> {
         prev_bh: &'a [Target],
         bn: &'a [Target],
         sh: &'a [Target],
+        th: &'a [Target],
+        rh: &'a [Target],
     ) -> Self {
         assert!(bh.len() == PACKED_HASH_LEN);
         assert!(prev_bh.len() == PACKED_HASH_LEN);
         assert!(sh.len() == PACKED_HASH_LEN);
+        assert!(th.len() == PACKED_HASH_LEN);
+        assert!(rh.len() == PACKED_HASH_LEN);
         assert!(bn.len() == u256::NUM_LIMBS);
         Self {
             bh,
             prev_bh,
             bn,
             sh,
+            th,
+            rh,
         }
     }
 
@@ -72,6 +95,14 @@ impl<'a> PublicInputs<'a, Target> {
     pub fn state_root(&self) -> OutputHash {
         OutputHash::from_targets(self.sh)
     }
+
+    pub fn transaction_root(&self) -> OutputHash {
+        OutputHash::from_targets(self.th)
+    }
+
+    pub fn receipt_root(&self) -> OutputHash {
+        OutputHash::from_targets(self.rh)
+    }
 }
 
 impl<T: Clone> PublicInputs<'_, T> {
@@ -82,6 +113,8 @@ impl<T: Clone> PublicInputs<'_, T> {
             .chain(self.prev_bh.iter())
             .chain(self.bn.iter())
             .chain(self.sh.iter())
+            .chain(self.th.iter())
+            .chain(self.rh.iter())
             .cloned()
             .collect()
     }
@@ -89,19 +122,30 @@ impl<T: Clone> PublicInputs<'_, T> {
 
 impl<'a, T> PublicInputs<'a, T> {
     /// Total length of the public inputs.
-    pub const TOTAL_LEN: usize = SH_RANGE.end;
+    pub const TOTAL_LEN: usize = RH_RANGE.end;
 
     /// Creates a new instance from its internal parts.
-    pub fn from_parts(bh: &'a [T], prev_bh: &'a [T], bn: &'a [T], sh: &'a [T]) -> Self {
+    pub fn from_parts(
+        bh: &'a [T],
+        prev_bh: &'a [T],
+        bn: &'a [T],
+        sh: &'a [T],
+        th: &'a [T],
+        rh: &'a [T],
+    ) -> Self {
         assert_eq!(bh.len(), BH_RANGE.len());
         assert_eq!(prev_bh.len(), PREV_BH_RANGE.len());
         assert_eq!(sh.len(), SH_RANGE.len());
+        assert_eq!(th.len(), TH_RANGE.len());
+        assert_eq!(rh.len(), RH_RANGE.len());
 
         Self {
             bh,
             prev_bh,
             bn,
             sh,
+            th,
+            rh,
         }
     }
 
@@ -112,6 +156,8 @@ impl<'a, T> PublicInputs<'a, T> {
             prev_bh: &pi[PREV_BH_RANGE],
             bn: &pi[BN_RANGE],
             sh: &pi[SH_RANGE],
+            th: &pi[TH_RANGE],
+            rh: &pi[RH_RANGE],
         }
     }
 
@@ -133,5 +179,15 @@ impl<'a, T> PublicInputs<'a, T> {
     /// Returns the packed state root hash.
     pub const fn state_root_raw(&self) -> &[T] {
         self.sh
+    }
+
+    /// Returns the packed transaction root hash.
+    pub const fn transaction_root_raw(&self) -> &[T] {
+        self.th
+    }
+
+    /// Returns the packed receipt root hash.
+    pub const fn receipt_root_raw(&self) -> &[T] {
+        self.rh
     }
 }

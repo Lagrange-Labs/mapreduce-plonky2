@@ -412,7 +412,7 @@ where
     fn size_at(&self, epoch: UserEpoch) -> impl Future<Output = usize>;
 
     /// Return all the keys existing at the given epoch.
-    fn keys_at(&self, epoch: UserEpoch) -> impl Future<Output = Vec<K>>;
+    fn keys_at(&self, epoch: UserEpoch) -> impl Future<Output = Vec<K>> + Send;
 
     /// Return a key alive at epoch, if any.
     fn random_key_at(&self, epoch: UserEpoch) -> impl Future<Output = Option<K>>;
@@ -435,6 +435,23 @@ pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>:
     ///
     /// Fail if `k` does not exist.
     fn remove(&mut self, k: K) -> impl Future<Output = Result<(), RyhopeError>> + Send;
+
+    /// Within a transaction, remove all existing storage.
+    fn remove_all(&mut self) -> impl Future<Output = Result<(), RyhopeError>> + Send
+    where
+        Self: Send + Sync,
+    {
+        async {
+            let epoch = self.current_epoch().await?;
+
+            let all_keys = self.keys_at(epoch).await;
+
+            for k in all_keys {
+                self.remove(k).await?;
+            }
+            Ok(())
+        }
+    }
 
     /// Within a transaction, update the existing storage entry at `k` with
     /// value `new_value`.

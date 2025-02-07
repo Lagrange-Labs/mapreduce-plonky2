@@ -234,7 +234,7 @@ impl BasicOperationInputs {
         let op_selector = b.add_virtual_target();
 
         let input_wires = BasicOperationInputWires {
-            constant_operand: constant_operand.clone(),
+            constant_operand: *constant_operand,
             placeholder_values: placeholder_values.to_vec().try_into().unwrap(),
             placeholder_ids,
             first_input_selector,

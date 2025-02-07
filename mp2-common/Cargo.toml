@@ -32,8 +32,8 @@ hex.workspace = true
 rand.workspace = true
 rstest.workspace = true
 tokio.workspace = true
-
 mp2_test = { path = "../mp2-test" }
+
 
 [features]
 ci = ["mp2_test/ci"]

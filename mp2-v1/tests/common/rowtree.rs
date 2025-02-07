@@ -44,7 +44,7 @@ impl SecondaryIndexCell {
     }
 
     pub fn cell(&self) -> Cell {
-        self.0.clone()
+        self.0
     }
     pub fn rest(&self) -> RowTreeKeyNonce {
         self.1.clone()
@@ -125,6 +125,23 @@ impl TestContext {
                         &outer_mapping_key,
                         &inner_mapping_key,
                     )
+                }
+                TableRowUniqueID::Receipt(tx_index_id, gas_used_id) => {
+                    let [tx_index, gas_used]: [[_; MAPPING_KEY_LEN]; 2] = [tx_index_id, gas_used_id].map(|column_id| {
+                        row.column_value(column_id)
+                        .unwrap_or_else(|| {
+                            panic!("Cannot fetch the key of receipt column: column_id = {column_id}")
+                        })
+                        .to_be_bytes()
+                    });
+                    debug!(
+                        "FETCHED receipt values to compute row_unique_data: tx_index = {:?}, gas_used = {:?}",
+                        hex::encode(tx_index),
+                        hex::encode(gas_used),
+                    );
+
+                    // The receipt row unique id is computed in the same way as mapping of mappings
+                    row_unique_data_for_mapping_of_mappings_leaf(&tx_index, &gas_used)
                 }
             };
             // NOTE remove that when playing more with sec. index
