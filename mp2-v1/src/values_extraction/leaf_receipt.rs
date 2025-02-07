@@ -193,9 +193,8 @@ where
         let gas_used_len = b.add_const(gas_used_header, -F::from_canonical_u64(128));
 
         let initial_gas_index = b.add(gas_used_offset, one);
-        // We want gas_used_offset + gas_used_len + one here because we want to stop our sum one
-        // after the gas_used_offset + gas_used_len
-        let final_gas_index = b.add(initial_gas_index, gas_used_len);
+        // This is the last index in the array (so inclusive) that contains data relating to gas used
+        let final_gas_index = b.add(gas_used_offset, gas_used_len);
 
         let combiner = b.constant(F::from_canonical_u64(1 << 8));
         let mut last_byte_found = b._false();
@@ -205,10 +204,11 @@ where
 
             // Check to see if we have reached the index where we stop summing
             let at_end = b.is_equal(access_index, final_gas_index);
-            last_byte_found = b.or(at_end, last_byte_found);
 
             let tmp = b.mul_add(acc, combiner, array_value);
-            b.select(last_byte_found, acc, tmp)
+            let out = b.select(last_byte_found, acc, tmp);
+            last_byte_found = b.or(at_end, last_byte_found);
+            out
         });
 
         let zero_u32 = b.zero_u32();
@@ -258,8 +258,8 @@ where
             &extraction_id.arr,
         );
         // Now we verify extracted values
-        let (address_extract, signature_extract, extracted_metadata_digest, extracted_value_digest) =
-            metadata.extracted_receipt_digests(
+        let (address_extract, extracted_metadata_digest, extracted_value_digest) = metadata
+            .extracted_receipt_digests(
                 b,
                 &node.arr,
                 relevant_log_offset,
@@ -268,7 +268,6 @@ where
             );
 
         address_extract.enforce_equal(b, &event_wires.address);
-        signature_extract.enforce_equal(b, &event_wires.event_signature);
 
         let dm = b.add_curve_point(&[input_metadata_digest, extracted_metadata_digest]);
 
@@ -426,6 +425,10 @@ where
 #[cfg(test)]
 mod tests {
 
+    use crate::values_extraction::{
+        compute_leaf_receipt_metadata_digest, compute_leaf_receipt_values_digest,
+    };
+
     use super::*;
 
     use mp2_common::{
@@ -486,11 +489,13 @@ mod tests {
             event,
         )
         .unwrap();
-        let metadata = c.metadata.clone();
 
         let test_circuit = TestReceiptLeafCircuit { c };
 
         let node = info.mpt_proof.last().unwrap().clone();
+
+        let metadata_digest = compute_leaf_receipt_metadata_digest(event);
+        let values_digest = compute_leaf_receipt_values_digest(event, &node, info.tx_index);
 
         assert!(node.len() <= NODE_LEN);
         let proof = run_circuit::<F, D, C, _>(test_circuit);
@@ -504,14 +509,12 @@ mod tests {
 
         // Check value digest
         {
-            let exp_digest = metadata.receipt_value_digest(info.tx_index, &node, event);
-            assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
+            assert_eq!(pi.values_digest(), values_digest.to_weierstrass());
         }
 
         // Check metadata digest
         {
-            let exp_digest = metadata.digest();
-            assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
+            assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
         }
     }
 }

@@ -171,6 +171,8 @@ where
     }
 
     /// Create a circuit input for proving a dummy node.
+    /// The `metadata_digest` can be computed using one of the
+    /// functions specified in [`crate::values_extraction`].
     pub fn new_dummy(trie_root: B256, metadata_digest: Point) -> Self {
         CircuitInput::Dummy(DummyNodeCircuit {
             root_hash: trie_root,
@@ -542,10 +544,19 @@ mod tests {
     use plonky2::field::types::{Field, Sample};
     use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
-    use std::{str::FromStr, sync::Arc};
+    use std::{
+        str::FromStr,
+        sync::{Arc, OnceLock},
+    };
 
     type CircuitInput = super::CircuitInput<MAX_RECEIPT_LEAF_NODE_LEN, TEST_MAX_COLUMNS>;
     type PublicParameters = super::PublicParameters<MAX_RECEIPT_LEAF_NODE_LEN, TEST_MAX_COLUMNS>;
+
+    static PARAMS: OnceLock<PublicParameters> = OnceLock::new();
+
+    fn get_params() -> &'static PublicParameters {
+        PARAMS.get_or_init(build_circuits_params::<MAX_RECEIPT_LEAF_NODE_LEN, TEST_MAX_COLUMNS>)
+    }
 
     #[derive(Debug)]
     struct TestEthTrie {
@@ -802,10 +813,10 @@ mod tests {
         let rng = &mut thread_rng();
 
         // Test serialization for public parameters.
-        let params = PublicParameters::build();
-        let encoded = bincode::serialize(&params).unwrap();
+        let params = get_params();
+        let encoded = bincode::serialize(params).unwrap();
         let decoded_params: PublicParameters = bincode::deserialize(&encoded).unwrap();
-        assert!(decoded_params == params);
+        assert!(decoded_params == *params);
 
         let test_circuit_input = |input: CircuitInput| {
             // Test circuit input serialization.
@@ -936,7 +947,7 @@ mod tests {
         assert_eq!(branch_node, mpt_proofs[1][node_len - 2]);
 
         info!("Generating parameters");
-        let params = build_circuits_params();
+        let params = get_params();
 
         let leaf_proofs = test_slots
             .into_iter()
@@ -944,12 +955,12 @@ mod tests {
             .enumerate()
             .map(|(i, (test_slot, mut leaf_proof))| {
                 info!("Proving leaf {i}");
-                prove_leaf(&params, leaf_proof.pop().unwrap(), test_slot)
+                prove_leaf(params, leaf_proof.pop().unwrap(), test_slot)
             })
             .collect();
 
         info!("Proving branch");
-        let _branch_proof = prove_branch(&params, branch_node, leaf_proofs);
+        let _branch_proof = prove_branch(params, branch_node, leaf_proofs);
     }
 
     /// Generate a branch proof.
@@ -997,7 +1008,7 @@ mod tests {
         assert!(list_one.len() == 17);
 
         println!("Generating params...");
-        let params = build_circuits_params();
+        let params = get_params();
 
         println!("Proving leaf 1...");
         let leaf_input_1 = CircuitInput::new_receipt_leaf(
@@ -1006,7 +1017,7 @@ mod tests {
             event,
         );
         let now = std::time::Instant::now();
-        let leaf_proof1 = generate_proof(&params, leaf_input_1).unwrap();
+        let leaf_proof1 = generate_proof(params, leaf_input_1).unwrap();
         {
             let lp = ProofWithVK::deserialize(&leaf_proof1).unwrap();
             let pub1 = PublicInputs::new(&lp.proof.public_inputs);
@@ -1025,7 +1036,7 @@ mod tests {
             event,
         );
         let now = std::time::Instant::now();
-        let leaf_proof2 = generate_proof(&params, leaf_input_2).unwrap();
+        let leaf_proof2 = generate_proof(params, leaf_input_2).unwrap();
         println!(
             "Proof for leaf 2 generated in {} ms",
             now.elapsed().as_millis()
@@ -1039,7 +1050,7 @@ mod tests {
         );
 
         let now = std::time::Instant::now();
-        generate_proof(&params, branch_input).unwrap();
+        generate_proof(params, branch_input).unwrap();
         println!(
             "Proof for branch node generated in {} ms",
             now.elapsed().as_millis()
@@ -1049,7 +1060,7 @@ mod tests {
     #[test]
     fn test_dummy_api() {
         println!("Generating params...");
-        let params = build_circuits_params();
+        let params = get_params();
 
         let dummy_hash = B256::random();
         let dummy_md = Point::rand();
@@ -1058,7 +1069,7 @@ mod tests {
         let dummy_input = CircuitInput::new_dummy(dummy_hash, dummy_md);
 
         let now = std::time::Instant::now();
-        generate_proof(&params, dummy_input).unwrap();
+        generate_proof(params, dummy_input).unwrap();
         println!(
             "Proof for dummy node generated in {} ms",
             now.elapsed().as_millis()
@@ -1261,11 +1272,11 @@ mod tests {
         assert_eq!(branch_node, proof2[node_len - 2]);
 
         info!("Generating parameters");
-        let params = build_circuits_params();
+        let params = get_params();
 
         // Generate the branch proof with one leaf.
         println!("Generating leaf proof");
-        let leaf_proof_buf1 = prove_leaf(&params, proof1[node_len - 1].clone(), test_slot);
+        let leaf_proof_buf1 = prove_leaf(params, proof1[node_len - 1].clone(), test_slot);
         let leaf_proof1 = ProofWithVK::deserialize(&leaf_proof_buf1).unwrap();
         let pub1 = leaf_proof1.proof.public_inputs[..NUM_IO].to_vec();
         let pi1 = PublicInputs::new(&pub1);
@@ -1273,8 +1284,7 @@ mod tests {
         let (_, comp_ptr) = pi1.mpt_key_info();
         assert_eq!(comp_ptr, F::from_canonical_usize(63));
         println!("Generating branch proof with one leaf");
-        let branch_proof =
-            prove_branch(&params, branch_node.clone(), vec![leaf_proof_buf1.clone()]);
+        let branch_proof = prove_branch(params, branch_node.clone(), vec![leaf_proof_buf1.clone()]);
         let branch_proof = ProofWithVK::deserialize(&branch_proof).unwrap();
         let exp_vk = params.branches.b1.get_verifier_data();
         assert_eq!(branch_proof.verifier_data(), exp_vk);
@@ -1336,7 +1346,7 @@ mod tests {
         info!("Generating branch with two leaves");
         let leaf_proof_buf2 = gen_fake_proof(mpt_key2);
         let branch_proof = prove_branch(
-            &params,
+            params,
             branch_node.clone(),
             vec![leaf_proof_buf1.clone(), leaf_proof_buf2.clone()],
         );
@@ -1352,7 +1362,7 @@ mod tests {
             leaf_proofs.push(leaf_proof);
         }
         info!("Generating branch proof with {num_children} leaves");
-        let branch_proof = prove_branch(&params, branch_node, leaf_proofs);
+        let branch_proof = prove_branch(params, branch_node, leaf_proofs);
         let branch_proof = ProofWithVK::deserialize(&branch_proof).unwrap();
         let exp_vk = params.branches.b9.get_verifier_data().clone();
         assert_eq!(branch_proof.verifier_data(), &exp_vk);

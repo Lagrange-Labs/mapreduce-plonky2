@@ -308,6 +308,8 @@ pub struct ReceiptProofInfo {
 pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
     /// Size in bytes of the whole log rlp encoded
     pub size: usize,
+    /// The chain ID
+    pub chain_id: u64,
     /// Packed contract address to check
     pub address: Address,
     /// Byte offset for the address from the beginning of a Log
@@ -332,7 +334,7 @@ pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
 
 impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS, MAX_DATA_WORDS> {
     /// Create a new instance from a contract [`Address`] and a [`str`] that is the event signature
-    pub fn new(contract: Address, event_signature: &str) -> Self {
+    pub fn new(contract: Address, chain_id: u64, event_signature: &str) -> Self {
         // To calculate the total size of the log rlp encoded we use the fact that the address takes 21 bytes to encode, topics
         // take 33 bytes each to incode and form a list that has length between 33 bytes and 132 bytes and data is a string that has 32 * MAX_DATA_WORDS length
 
@@ -369,6 +371,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
 
         Self {
             size,
+            chain_id,
             address: contract,
             add_rel_offset,
             event_signature: event_sig.0,

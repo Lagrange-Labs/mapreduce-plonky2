@@ -675,7 +675,7 @@ pub trait ReceiptExtractionArgs:
     const NO_TOPICS: usize;
     const MAX_DATA_WORDS: usize;
 
-    fn new(address: Address, event_signature: &str) -> Self
+    fn new(address: Address, chain_id: u64, event_signature: &str) -> Self
     where
         Self: Sized;
 
@@ -771,11 +771,11 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptExtractionArgs
     const MAX_DATA_WORDS: usize = MAX_DATA_WORDS;
     const NO_TOPICS: usize = NO_TOPICS;
 
-    fn new(address: Address, event_signature: &str) -> Self
+    fn new(address: Address, chain_id: u64, event_signature: &str) -> Self
     where
         Self: Sized,
     {
-        EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(address, event_signature)
+        EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(address, chain_id, event_signature)
     }
 
     fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>
@@ -797,6 +797,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptExtractionArgs
             .unwrap();
         EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }> {
             size: self.size,
+            chain_id: self.chain_id,
             address: self.address,
             add_rel_offset: self.add_rel_offset,
             event_signature: self.event_signature,
@@ -807,7 +808,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptExtractionArgs
     }
 
     fn get_index(&self) -> u64 {
-        identifier_for_tx_index_column(&self.event_signature, &self.address, &[])
+        identifier_for_tx_index_column(&self.event_signature, &self.address, self.chain_id, &[])
     }
 }
 
@@ -1330,7 +1331,7 @@ where
             Ok(p) => p,
             Err(_) => {
                 let storage_slot_info = self.all_storage_slot_info(contract);
-                let mapping_values_proof = ctx
+                let mapping_values_proof: Vec<u8> = ctx
                     .prove_values_extraction(
                         &contract.address,
                         BlockNumberOrTag::Number(bn as u64),

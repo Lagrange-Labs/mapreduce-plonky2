@@ -488,13 +488,13 @@ where
         slice_len: Target,
     ) {
         let tru = b._true();
-        let mut take = b._false();
+        let mut after_end = b._false();
         for (i, (our, other)) in self.arr.iter().zip(other.arr.iter()).enumerate() {
             let it = b.constant(F::from_canonical_usize(i));
             let reached_end = b.is_equal(slice_len, it);
-            take = b.or(take, reached_end);
+            after_end = b.or(after_end, reached_end);
             let eq = b.is_equal(our.to_target(), other.to_target());
-            let res = b.select(take, tru.target, eq.target);
+            let res = b.select(after_end, tru.target, eq.target);
             b.connect(res, tru.target);
         }
     }

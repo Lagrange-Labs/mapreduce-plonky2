@@ -171,9 +171,7 @@ impl ExtractedColumnInfo {
         length: usize,
         location_offset: u32,
     ) -> Self {
-        let mut extraction_vec = extraction_identifier.pack(Endianness::Little);
-        extraction_vec.resize(PACKED_HASH_LEN, 0u32);
-        extraction_vec.reverse();
+        let extraction_vec = left_pad32(extraction_identifier).pack(Endianness::Big);
         let extraction_identifier = extraction_vec
             .into_iter()
             .map(F::from_canonical_u32)
@@ -279,9 +277,6 @@ impl ExtractedColumnInfo {
     }
 
     pub fn value_digest(&self, value: &[u8]) -> Point {
-        // If the column identifier is zero then its a dummy column. This is because the column identifier
-        // is always computed as the output of a hash which is EXTREMELY unlikely to be exactly zero.
-
         let bytes = self.extract_value(value);
 
         let inputs = once(self.identifier())
@@ -351,10 +346,14 @@ pub struct ExtractedColumnInfoTarget {
 
 impl ExtractedColumnInfoTarget {
     /// Compute the MPT metadata.
-    pub fn mpt_metadata(&self, b: &mut CBuilder) -> HashOutTarget {
+    pub fn mpt_metadata(
+        &self,
+        b: &mut CBuilder,
+        extraction_id: &[Target; PACKED_HASH_LEN],
+    ) -> HashOutTarget {
         // metadata = H(info.extraction_id || info.location_offset || info.byte_offset || info.length)
         let inputs = [
-            self.extraction_id().as_slice(),
+            extraction_id.as_slice(),
             &[self.location_offset(), self.byte_offset(), self.length()],
         ]
         .concat();
@@ -363,8 +362,12 @@ impl ExtractedColumnInfoTarget {
     }
 
     /// Compute the column information digest.
-    pub fn digest(&self, b: &mut CBuilder) -> CurveTarget {
-        let metadata = self.mpt_metadata(b);
+    pub fn digest(
+        &self,
+        b: &mut CBuilder,
+        extraction_id: &[Target; PACKED_HASH_LEN],
+    ) -> CurveTarget {
+        let metadata = self.mpt_metadata(b, extraction_id);
 
         // digest = D(mpt_metadata || info.identifier)
         let inputs = [metadata.elements.as_slice(), &[self.identifier()]].concat();
@@ -445,9 +448,6 @@ impl ExtractedColumnInfoTarget {
 /// Column info
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct InputColumnInfoTarget {
-    /// This is the information used to identify the data relative to the contract,
-    /// for storage extraction its the slot, for receipts its the event signature for example
-    pub extraction_identifier: [Target; PACKED_HASH_LEN],
     /// Column identifier
     pub identifier: Target,
 }
@@ -481,10 +481,6 @@ impl InputColumnInfoTarget {
         b.map_to_curve_point(&inputs)
     }
 
-    pub fn extraction_id(&self) -> [Target; 8] {
-        self.extraction_identifier
-    }
-
     pub fn identifier(&self) -> Target {
         self.identifier
     }
@@ -514,14 +510,9 @@ impl CircuitBuilderColumnInfo for CBuilder {
     }
 
     fn add_virtual_input_column_info(&mut self) -> InputColumnInfoTarget {
-        let extraction_identifier: [Target; PACKED_HASH_LEN] = self.add_virtual_target_arr();
-
         let identifier = self.add_virtual_target();
 
-        InputColumnInfoTarget {
-            extraction_identifier,
-            identifier,
-        }
+        InputColumnInfoTarget { identifier }
     }
 }
 
@@ -583,12 +574,6 @@ impl<T: WitnessWrite<F>> WitnessWriteColumnInfo for T {
         target: &InputColumnInfoTarget,
         value: &InputColumnInfo,
     ) {
-        target
-            .extraction_identifier
-            .iter()
-            .zip(value.extraction_identifier.iter())
-            .for_each(|(t, v)| self.set_target(*t, *v));
-
         self.set_target(target.identifier, value.identifier());
     }
 }
