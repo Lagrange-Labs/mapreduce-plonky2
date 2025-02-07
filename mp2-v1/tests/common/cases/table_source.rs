@@ -47,7 +47,6 @@ use rand::{
     thread_rng, Rng, SeedableRng,
 };
 use serde::{Deserialize, Serialize};
-use verifiable_db::ivc::PublicInputs;
 
 use crate::common::{
     final_extraction::{
@@ -1851,23 +1850,13 @@ impl OffChainTableArgs {
         // This could be computed from the table data according to any logic,
         // here for simplicity we just generate it at random
         let hash = HashOutput::from(array::from_fn(|_| rng.gen()));
-        // fetch previous hash from IVC proof for previous primary index, if any
-        let prev_hash = {
-            if let Ok(proof) = ctx.storage.get_proof_exact(&proof_key) {
-                // fetch previous hash from the proof
-                let pproof = ProofWithVK::deserialize(&proof)?;
-                let pis = PublicInputs::from_slice(&pproof.proof().public_inputs);
-                pis.block_hash_output()
-            } else {
-                // there is no previous primary index, so we generate previous hash at random
-                HashOutput::from(array::from_fn(|_| rng.gen()))
-            }
-        };
+        // fetch previous IVC proof, if any
+        let prev_proof = ctx.storage.get_proof_exact(&proof_key).ok();
 
         let metadata_hash = no_provable_metadata_hash(self.column_ids());
         let input = ExtractionProofInput::Offchain(OffChainExtractionProof {
             hash: OffChainRootOfTrust::Hash(hash),
-            prev_hash,
+            prev_proof,
             primary_index: self.last_update_epoch,
             rows,
             primary_key_columns: self.primary_key_column_ids(),

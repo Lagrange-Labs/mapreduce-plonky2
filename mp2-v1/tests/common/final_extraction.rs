@@ -9,6 +9,8 @@ use mp2_v1::{
     values_extraction,
 };
 
+use verifiable_db::ivc::PublicInputs as IvcPublicInputs;
+
 use super::TestContext;
 use anyhow::Result;
 
@@ -27,7 +29,7 @@ pub struct MergeExtractionProof {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct OffChainExtractionProof {
     pub(crate) hash: OffChainRootOfTrust,
-    pub(crate) prev_hash: HashOutput,
+    pub(crate) prev_proof: Option<Vec<u8>>,
     pub(crate) primary_index: BlockPrimaryIndex,
     pub(crate) rows: Vec<CellCollection<BlockPrimaryIndex>>,
     pub(crate) primary_key_columns: Vec<ColumnID>,
@@ -50,18 +52,21 @@ impl TestContext {
         // first, extract block number, hash and previous block hash to later check public inputs
         let (primary_index, block_hash, prev_block_hash) =
             if let ExtractionProofInput::Offchain(inputs) = &value_proofs {
-                (
-                    inputs.primary_index as u64,
-                    inputs.hash.hash(),
-                    inputs.prev_hash,
-                )
+                let prev_hash = if let Some(prev_proof) = &inputs.prev_proof {
+                    let prev_proof = ProofWithVK::deserialize(prev_proof)?;
+                    let pis = IvcPublicInputs::from_slice(&prev_proof.proof().public_inputs);
+                    Some(pis.block_hash_output())
+                } else {
+                    None // we can skip checking this public input if there is no previous proof
+                };
+                (inputs.primary_index as u64, inputs.hash.hash(), prev_hash)
             } else {
                 let block = self.query_current_block().await;
                 let primary_index = block.header.number;
                 let block_hash = HashOutput::from(block.header.hash.0);
                 let prev_block_hash = HashOutput::from(block.header.parent_hash.0);
 
-                (primary_index, block_hash, prev_block_hash)
+                (primary_index, block_hash, Some(prev_block_hash))
             };
         let circuit_input = match value_proofs {
             ExtractionProofInput::Single(inputs) if inputs.length_proof.is_some() => {
@@ -101,7 +106,7 @@ impl TestContext {
             ExtractionProofInput::Offchain(inputs) => CircuitInput::new_no_provable_input(
                 inputs.primary_index,
                 inputs.hash,
-                inputs.prev_hash,
+                inputs.prev_proof,
                 inputs.rows.as_slice(),
                 &inputs.primary_key_columns,
             ),
@@ -119,7 +124,9 @@ impl TestContext {
         let pis = PublicInputs::from_slice(pproof.proof().public_inputs.as_slice());
         assert_eq!(pis.block_number(), primary_index);
         assert_eq!(pis.block_hash_raw(), block_hash.to_fields());
-        assert_eq!(pis.prev_block_hash_raw(), prev_block_hash.to_fields());
+        if let Some(hash) = prev_block_hash {
+            assert_eq!(pis.prev_block_hash_raw(), hash.to_fields());
+        }
         debug!(
             " FINAL EXTRACTION MPT -\n\tvalues digest: {:?}\n\tmetadata digest: {:?}",
             pis.value_point(),

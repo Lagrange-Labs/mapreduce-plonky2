@@ -21,6 +21,7 @@ use crate::{
     indexing::{row::CellCollection, ColumnID},
     values_extraction::compute_table_row_digest,
 };
+use verifiable_db::ivc::PublicInputs as IvcPublicInputs;
 
 use super::{
     base_circuit::BaseCircuitInput,
@@ -269,19 +270,37 @@ impl CircuitInput {
         let length_proof = ProofWithVK::deserialize(&length_proof)?;
         Ok(Self::Lengthed(LengthedCircuitInput { base, length_proof }))
     }
-    /// Instantiate inputs for the dummy circuit dealing with no provable extraction case
+    /// Instantiate inputs for the dummy circuit dealing with no provable extraction case. It allows
+    /// to add a set of rows, all related to the same primary index value, to an off-chain table.
+    /// It requires the following inputs:
+    /// - `primary_index`: the primary index value for all the rows we are adding to the table
+    /// - `root_of_trust`: the root of trust for the data placed in the table, if any;
+    ///    `OffChainRootOfTrust::Dummy` is expected if there is no root of trust for the table
+    /// - `prev_epoch_proof`: The final IVC proof for the off-chain table, proving updates up to the table up
+    ///    to the previous epoch, if any
+    /// - `table_rows` : Rows to be added to the table; they are assumed to all have the same primary index
+    /// - `row_unique_columns` : The identifiers of the columns that uniquely identifies each row (i.e., primary key
+    ///    columns)
     pub fn new_no_provable_input<
         PrimaryIndex: PartialEq + Eq + Default + Clone + Debug + TryInto<U256>,
     >(
         primary_index: PrimaryIndex,
         root_of_trust: OffChainRootOfTrust,
-        prev_root_of_trust: HashOutput,
+        prev_epoch_proof: Option<Vec<u8>>,
         table_rows: &[CellCollection<PrimaryIndex>],
         row_unique_columns: &[ColumnID],
     ) -> Result<Self>
     where
         <PrimaryIndex as TryInto<U256>>::Error: Debug,
     {
+        let prev_root_of_trust = prev_epoch_proof.map_or_else(
+            || anyhow::Ok(HashOutput::default()), // any value would be ok as prev_root_of_trust if there is no previous epoch proof
+            |prev_proof| {
+                let prev_proof = ProofWithVK::deserialize(&prev_proof)?;
+                let pis = IvcPublicInputs::from_slice(&prev_proof.proof().public_inputs);
+                Ok(pis.block_hash_output())
+            },
+        )?;
         let [root_of_trust, prev_root_of_trust] =
             [root_of_trust.hash(), prev_root_of_trust].map(|h| {
                 h.pack(mp2_common::utils::Endianness::Little)
