@@ -1,5 +1,5 @@
 use alloy::primitives::U256;
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
     self, default_config,
@@ -270,21 +270,27 @@ impl CircuitInput {
         Ok(Self::Lengthed(LengthedCircuitInput { base, length_proof }))
     }
     /// Instantiate inputs for the dummy circuit dealing with no provable extraction case
-    pub fn new_no_provable_input<PrimaryIndex: PartialEq + Eq + Default + Clone + Debug>(
-        block_number: U256,
-        block_hash: OffChainRootOfTrust,
-        prev_block_hash: HashOutput,
+    pub fn new_no_provable_input<
+        PrimaryIndex: PartialEq + Eq + Default + Clone + Debug + TryInto<U256>,
+    >(
+        primary_index: PrimaryIndex,
+        root_of_trust: OffChainRootOfTrust,
+        prev_root_of_trust: HashOutput,
         table_rows: &[CellCollection<PrimaryIndex>],
         row_unique_columns: &[ColumnID],
-    ) -> Result<Self> {
-        let [block_hash, prev_block_hash] = [block_hash.hash(), prev_block_hash].map(|h| {
-            h.pack(mp2_common::utils::Endianness::Little)
-                .into_iter()
-                .map(F::from_canonical_u32)
-                .collect_vec()
-                .try_into()
-                .unwrap()
-        });
+    ) -> Result<Self>
+    where
+        <PrimaryIndex as TryInto<U256>>::Error: Debug,
+    {
+        let [root_of_trust, prev_root_of_trust] =
+            [root_of_trust.hash(), prev_root_of_trust].map(|h| {
+                h.pack(mp2_common::utils::Endianness::Little)
+                    .into_iter()
+                    .map(F::from_canonical_u32)
+                    .collect_vec()
+                    .try_into()
+                    .unwrap()
+            });
         ensure!(
             !table_rows.is_empty(),
             "At least one row should be provided as input to construct a table"
@@ -294,9 +300,11 @@ impl CircuitInput {
         let row_digest = compute_table_row_digest(table_rows, row_unique_columns)?;
 
         Ok(Self::NoProvable(DummyCircuit::new(
-            block_number,
-            block_hash,
-            prev_block_hash,
+            primary_index
+                .try_into()
+                .map_err(|e| anyhow!("while converting primary index to U256: {e:?}"))?,
+            root_of_trust,
+            prev_root_of_trust,
             metadata_digest,
             row_digest,
         )))

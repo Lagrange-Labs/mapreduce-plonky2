@@ -338,7 +338,7 @@ pub(crate) enum TableSource {
     MappingOfStructMappings(MappingExtractionArgs<MappingOfMappingsKey, LargeStruct>),
     /// Test arguments for the merge source of both simple and mapping values
     Merge(MergeSource),
-    OffChain(OffChainDataArgs),
+    OffChain(OffChainTableArgs),
 }
 
 impl TableSource {
@@ -1462,7 +1462,7 @@ fn evm_word_column_info(table_info: &[ColumnInfo]) -> Vec<SlotEvmWordColumns> {
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Hash)]
-pub(crate) struct OffChainDataArgs {
+pub(crate) struct OffChainTableArgs {
     pub(crate) table_name: String,
     pub(crate) secondary_index_column: ColumnMetadata,
     pub(crate) non_indexed_columns: Vec<ColumnMetadata>,
@@ -1475,7 +1475,9 @@ pub(crate) struct OffChainDataArgs {
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 /// Data structure employed to specify information a column of an off-chain table
 pub(crate) enum ColumnMetadata {
-    /// Name for a column which is part of the primary key of the table
+    /// Name for a column which is part of the primary key of the table. Note that the
+    /// primary key for a table is a subset of the columns of the table that uniquely
+    /// identifies each row.
     PrimaryKey(String),
     /// Name for a column which is not part of the primary key of the table
     NoPrimaryKey(String),
@@ -1490,7 +1492,7 @@ impl ColumnMetadata {
     }
 }
 
-impl OffChainDataArgs {
+impl OffChainTableArgs {
     pub(crate) fn new(
         table_name: String,
         secondary_index_column: ColumnMetadata,

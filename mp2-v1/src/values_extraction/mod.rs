@@ -47,10 +47,11 @@ pub(crate) const INNER_KEY_ID_PREFIX: &[u8] = b"\0\0IN_KEY";
 pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"\0OUT_KEY";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
+pub(crate) const OFFCHAIN_TABLE_DST: &str = "OFFCHAIN_TABLE";
 
 /// Compute the identifier for a column of a table containing off-chain data
 pub fn identifier_offchain_column(table_name: &str, column_name: &str) -> u64 {
-    let inputs: Vec<F> = vec![table_name, column_name]
+    let inputs: Vec<F> = vec![OFFCHAIN_TABLE_DST, table_name, column_name]
         .into_iter()
         .flat_map(|name| name.as_bytes().to_fields())
         .collect_vec();

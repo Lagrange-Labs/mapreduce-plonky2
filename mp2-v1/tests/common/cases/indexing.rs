@@ -33,7 +33,7 @@ use crate::common::{
         slot_info::LargeStruct,
         table_source::{
             ColumnMetadata, LengthExtractionArgs, MappingExtractionArgs, MappingIndex, MergeSource,
-            OffChainDataArgs, SingleExtractionArgs,
+            OffChainTableArgs, SingleExtractionArgs,
         },
     },
     proof_storage::{ProofKey, ProofStorage},
@@ -605,7 +605,7 @@ impl TableIndexing {
             ColumnMetadata::NoPrimaryKey(REMAINING_COLUMN_NAMES[0].to_string()),
             ColumnMetadata::NoPrimaryKey(REMAINING_COLUMN_NAMES[1].to_string()),
         ];
-        let mut off_chain_data_args = OffChainDataArgs::new(
+        let mut off_chain_data_args = OffChainTableArgs::new(
             TABLE_NAME.to_string(),
             secondary_index_column,
             non_indexed_columns.to_vec(),

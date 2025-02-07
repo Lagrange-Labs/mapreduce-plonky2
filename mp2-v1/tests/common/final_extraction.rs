@@ -1,4 +1,3 @@
-use alloy::primitives::U256;
 use log::debug;
 use mp2_common::{
     group_hashing::weierstrass_to_point, proof::ProofWithVK, types::HashOutput, utils::ToFields, F,
@@ -100,7 +99,7 @@ impl TestContext {
                 inputs.mapping.value_proof,
             ),
             ExtractionProofInput::Offchain(inputs) => CircuitInput::new_no_provable_input(
-                U256::from(inputs.primary_index),
+                inputs.primary_index,
                 inputs.hash,
                 inputs.prev_hash,
                 inputs.rows.as_slice(),

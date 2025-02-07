@@ -34,11 +34,11 @@ use std::array;
 #[derive(Clone, Debug, Constructor)]
 pub struct DummyCircuit {
     /// Block number
-    block_number: U256,
+    primary_index: U256,
     /// Packed block hash
-    block_hash: [F; PACKED_HASH_LEN],
+    root_of_trust: [F; PACKED_HASH_LEN],
     /// Packed block hash of the previous block
-    prev_block_hash: [F; PACKED_HASH_LEN],
+    prev_root_of_trust: [F; PACKED_HASH_LEN],
     /// Metadata digest for the rows extracted
     /// This value can be computed outside of the circuit depending on the data source,
     /// the circuits don’t care how it is computed given that we are not proving the
@@ -52,9 +52,9 @@ pub struct DummyCircuit {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DummyWires {
-    block_number: UInt256Target,
-    block_hash: [Target; PACKED_HASH_LEN],
-    prev_block_hash: [Target; PACKED_HASH_LEN],
+    primary_index: UInt256Target,
+    root_of_trust: [Target; PACKED_HASH_LEN],
+    prev_root_of_trust: [Target; PACKED_HASH_LEN],
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     metadata_digest: CurveTarget,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
@@ -63,8 +63,8 @@ pub struct DummyWires {
 
 impl DummyCircuit {
     fn build(b: &mut CBuilder) -> DummyWires {
-        let block_number = b.add_virtual_u256_unsafe();
-        let [block_hash, prev_block_hash] = array::from_fn(|_| b.add_virtual_target_arr());
+        let primary_index = b.add_virtual_u256_unsafe();
+        let [root_of_trust, prev_root_of_trust] = array::from_fn(|_| b.add_virtual_target_arr());
         let [metadata_digest, row_digest] = array::from_fn(|_| b.add_virtual_curve_target());
 
         // Add the prefix to the metadata digest to ensure the metadata digest
@@ -79,29 +79,29 @@ impl DummyCircuit {
         let _false = b._false();
 
         PublicInputs::new(
-            &block_hash,
-            &prev_block_hash,
+            &root_of_trust,
+            &prev_root_of_trust,
             &row_digest.to_targets(),
             &encoded_metadata_digest.to_targets(),
-            &block_number.to_targets(),
+            &primary_index.to_targets(),
             &[_false.target],
         )
         .register_args(b);
 
         DummyWires {
-            block_number,
-            block_hash,
-            prev_block_hash,
+            primary_index,
+            root_of_trust,
+            prev_root_of_trust,
             metadata_digest,
             row_digest,
         }
     }
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &DummyWires) {
-        pw.set_u256_target(&wires.block_number, self.block_number);
+        pw.set_u256_target(&wires.primary_index, self.primary_index);
         [
-            (wires.block_hash, self.block_hash),
-            (wires.prev_block_hash, self.prev_block_hash),
+            (wires.root_of_trust, self.root_of_trust),
+            (wires.prev_root_of_trust, self.prev_root_of_trust),
         ]
         .iter()
         .for_each(|(t, v)| {
@@ -162,14 +162,14 @@ mod test {
     fn test_final_extraction_dummy_circuit() {
         let rng = &mut thread_rng();
 
-        let block_number = U256::from(rng.gen::<u64>());
-        let [block_hash, prev_block_hash] = array::from_fn(|_| F::rand_array());
+        let primary_index = U256::from(rng.gen::<u64>());
+        let [root_of_trust, prev_root_of_trust] = array::from_fn(|_| F::rand_array());
         let [metadata_digest, row_digest] = array::from_fn(|_| Digest::sample(rng));
 
         let test_circuit = DummyCircuit::new(
-            block_number,
-            block_hash,
-            prev_block_hash,
+            primary_index,
+            root_of_trust,
+            prev_root_of_trust,
             metadata_digest,
             row_digest,
         );
@@ -178,9 +178,9 @@ mod test {
         let pi = PublicInputs::from_slice(&proof.public_inputs);
 
         // Check the public inputs.
-        assert_eq!(U256::from(pi.block_number()), block_number);
-        assert_eq!(pi.block_hash_raw(), block_hash);
-        assert_eq!(pi.prev_block_hash_raw(), prev_block_hash);
+        assert_eq!(U256::from(pi.block_number()), primary_index);
+        assert_eq!(pi.block_hash_raw(), root_of_trust);
+        assert_eq!(pi.prev_block_hash_raw(), prev_root_of_trust);
         assert_eq!(pi.value_point(), row_digest.to_weierstrass());
         {
             let prefix = DUMMY_METADATA_DIGEST_PREFIX.to_fields();
