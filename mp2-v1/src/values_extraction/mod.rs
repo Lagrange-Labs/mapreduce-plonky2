@@ -206,11 +206,19 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
     fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>) -> Self {
         let extraction_id = event.event_signature;
 
-        let tx_index_column_id =
-            identifier_for_tx_index_column(&event.event_signature, &event.address, &[]);
+        let tx_index_column_id = identifier_for_tx_index_column(
+            &event.event_signature,
+            &event.address,
+            event.chain_id,
+            &[],
+        );
 
-        let gas_used_column_id =
-            identifier_for_gas_used_column(&event.event_signature, &event.address, &[]);
+        let gas_used_column_id = identifier_for_gas_used_column(
+            &event.event_signature,
+            &event.address,
+            event.chain_id,
+            &[],
+        );
 
         let tx_index_input_column = InputColumnInfo::new(
             extraction_id.as_slice(),
@@ -233,7 +241,9 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
                     identifier_for_topic_column(
                         &event.event_signature,
                         &event.address,
-                        &[j as u8 + 1],
+                        event.chain_id,
+                        j as u8 + 1,
+                        &[],
                     ),
                     offset,
                     32,
@@ -252,7 +262,9 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
                     identifier_for_data_column(
                         &event.event_signature,
                         &event.address,
-                        &[j as u8 + 1],
+                        event.chain_id,
+                        j as u8 + 1,
+                        &[],
                     ),
                     offset,
                     32,
@@ -377,9 +389,10 @@ pub fn identifier_for_inner_mapping_key_column_raw(slot: u8, extra: Vec<u8>) -> 
 pub fn identifier_for_tx_index_column(
     event_signature: &[u8; HASH_LEN],
     contract_address: &Address,
+    chain_id: u64,
     extra: &[u8],
 ) -> ColumnId {
-    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+    let extra = identifier_raw_extra(contract_address, chain_id, extra.to_vec());
 
     let inputs: Vec<F> = TX_INDEX_PREFIX
         .iter()
@@ -397,9 +410,10 @@ pub fn identifier_for_tx_index_column(
 pub fn identifier_for_gas_used_column(
     event_signature: &[u8; HASH_LEN],
     contract_address: &Address,
+    chain_id: u64,
     extra: &[u8],
 ) -> ColumnId {
-    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+    let extra = identifier_raw_extra(contract_address, chain_id, extra.to_vec());
 
     let inputs: Vec<F> = GAS_USED_PREFIX
         .iter()
@@ -417,13 +431,16 @@ pub fn identifier_for_gas_used_column(
 pub fn identifier_for_topic_column(
     event_signature: &[u8; HASH_LEN],
     contract_address: &Address,
+    chain_id: u64,
+    topic_word: u8,
     extra: &[u8],
 ) -> ColumnId {
-    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+    let extra = identifier_raw_extra(contract_address, chain_id, extra.to_vec());
 
     let inputs: Vec<F> = TOPIC_PREFIX
         .iter()
         .copied()
+        .chain(std::iter::once(topic_word))
         .chain(*event_signature)
         .chain(extra)
         .collect_vec()
@@ -437,13 +454,16 @@ pub fn identifier_for_topic_column(
 pub fn identifier_for_data_column(
     event_signature: &[u8; HASH_LEN],
     contract_address: &Address,
+    chain_id: u64,
+    data_word: u8,
     extra: &[u8],
 ) -> ColumnId {
-    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+    let extra = identifier_raw_extra(contract_address, chain_id, extra.to_vec());
 
     let inputs: Vec<F> = DATA_PREFIX
         .iter()
         .copied()
+        .chain(std::iter::once(data_word))
         .chain(*event_signature)
         .chain(extra)
         .collect_vec()
@@ -639,4 +659,20 @@ pub fn compute_leaf_mapping_of_mappings_values_digest(
         &value,
         slot_info,
     )
+}
+
+/// Compute the metadata digest for a Receipt leaf
+pub fn compute_leaf_receipt_metadata_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+) -> Digest {
+    TableMetadata::from(*event).digest()
+}
+
+/// Compute the value digest for a Receipt leaf
+pub fn compute_leaf_receipt_values_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+    value: &[u8],
+    tx_index: u64,
+) -> Digest {
+    TableMetadata::from(*event).receipt_value_digest(tx_index, value, event)
 }

@@ -379,12 +379,7 @@ pub(crate) struct TableMetadataTarget<const MAX_EXTRACTED_COLUMNS: usize> {
     pub(crate) num_actual_columns: Target,
 }
 
-type ReceiptExtractedOutput = (
-    Array<Target, 20>,
-    Array<Target, 32>,
-    CurveTarget,
-    CurveTarget,
-);
+type ReceiptExtractedOutput = (Array<Target, 20>, CurveTarget, CurveTarget);
 
 impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUMNS> {
     #[cfg(test)]
@@ -407,7 +402,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
             .iter()
             .zip(self.real_columns.iter())
             .map(|(column, &selector)| {
-                let poss_digest = column.digest(b);
+                let poss_digest = column.digest(b, extraction_id);
                 b.select_curve_point(selector, poss_digest, curve_zero)
             })
             .collect::<Vec<CurveTarget>>();
@@ -472,7 +467,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
             .zip(self.real_columns)
             .map(|(column, selector)| {
                 // Calculate the column digest
-                let column_digest = column.digest(b);
+                let column_digest = column.digest(b, &column.extraction_id());
 
                 // Now we work out if the column is to be extracted, if it is we will take the value we recover from `value[column.byte_offset..column.byte_offset + column.length]`
                 // left padded.
@@ -542,13 +537,15 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
         let signature_start = b.add(log_offset, signature_offset);
         let signature = value.extract_array_large::<_, _, 32>(b, signature_start);
 
+        let extraction_id = signature.pack(b, Endianness::Big).downcast_to_targets();
+
         let (metadata_points, value_points): (Vec<CurveTarget>, Vec<CurveTarget>) = self
             .extracted_columns
             .into_iter()
             .zip(self.real_columns)
             .map(|(column, selector)| {
                 // Calculate the column digest
-                let column_digest = column.digest(b);
+                let column_digest = column.digest(b, &extraction_id.arr);
                 // If selector is true (from self.real_columns) we need it to be false when we feed it into `column.extract_value()` later.
                 let selector = b.not(selector);
 
@@ -578,7 +575,6 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
 
         (
             address,
-            signature,
             b.add_curve_point(&metadata_points),
             b.add_curve_point(&value_points),
         )

@@ -85,14 +85,9 @@ impl<K: Clone + Hash + Eq + Debug> UpdateTree<K> {
     }
 
     pub fn get_parent_key(&self, key: &K) -> Option<K> {
-        let idx = self.idx.get(key);
-        if let Some(&idx) = idx {
-            self.nodes[idx]
-                .parent
-                .map(|parent_idx| self.nodes[parent_idx].k())
-        } else {
-            None
-        }
+        self.idx
+            .get(key)
+            .and_then(|&i| self.nodes[i].parent.map(|j| self.nodes[j].k()))
     }
 }
 

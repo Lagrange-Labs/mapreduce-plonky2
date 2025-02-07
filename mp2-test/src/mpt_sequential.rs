@@ -263,6 +263,7 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: 
         // We want to get the event signature so we can make a ReceiptQuery
         let all_events = EventEmitter::abi::events();
 
+        let chain_id = rpc.get_chain_id().await.unwrap();
         let events = match (NO_TOPICS, MAX_DATA_WORDS) {
             (1, 0) => all_events.get("testEvent").unwrap(),
             (2, 0) => all_events.get("twoIndexed").unwrap(),
@@ -274,6 +275,7 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: 
 
         let event = EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(
             *event_contract.address(),
+            chain_id,
             &events[0].signature(),
         );
 

@@ -581,6 +581,7 @@ pub mod tests {
 
         Ok(EventLogInfo::<2, 1>::new(
             address,
+            1u64,
             &approval_event.signature(),
         ))
     }

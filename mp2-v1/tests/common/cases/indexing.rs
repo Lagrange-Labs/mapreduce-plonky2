@@ -647,8 +647,8 @@ impl<T: TableSource> TableIndexing<T> {
                 no_topics, no_data
             ),
         };
-
-        let mut source = T::new(contract.address(), event_signature);
+        let chain_id = provider.get_chain_id().await?;
+        let mut source = T::new(contract.address(), chain_id, event_signature);
         let genesis_updates = source.init_contract_data(ctx, &contract).await;
 
         let indexing_genesis_block = ctx.block_number().await;
@@ -1007,7 +1007,7 @@ pub fn compute_non_indexed_receipt_column_ids<
     event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
 ) -> Vec<(String, ColumnID)> {
     let gas_used_column_id =
-        identifier_for_gas_used_column(&event.event_signature, &event.address, &[]);
+        identifier_for_gas_used_column(&event.event_signature, &event.address, event.chain_id, &[]);
 
     let topic_ids = event
         .topics
@@ -1016,7 +1016,13 @@ pub fn compute_non_indexed_receipt_column_ids<
         .map(|(j, _)| {
             (
                 format!("{}_{}", TOPIC_NAME, j + 1),
-                identifier_for_topic_column(&event.event_signature, &event.address, &[j as u8 + 1]),
+                identifier_for_topic_column(
+                    &event.event_signature,
+                    &event.address,
+                    event.chain_id,
+                    j as u8 + 1,
+                    &[],
+                ),
             )
         })
         .collect::<Vec<(String, ColumnID)>>();
@@ -1028,7 +1034,13 @@ pub fn compute_non_indexed_receipt_column_ids<
         .map(|(j, _)| {
             (
                 format!("{}_{}", DATA_NAME, j + 1),
-                identifier_for_data_column(&event.event_signature, &event.address, &[j as u8 + 1]),
+                identifier_for_data_column(
+                    &event.event_signature,
+                    &event.address,
+                    event.chain_id,
+                    j as u8 + 1,
+                    &[],
+                ),
             )
         })
         .collect::<Vec<(String, ColumnID)>>();
