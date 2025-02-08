@@ -50,26 +50,34 @@ async fn _storage_in_memory(initial_epoch: Epoch) -> Result<()> {
 
     for i in initial_epoch + 1..initial_epoch + 6 {
         println!("\nEpoch = {i}");
-        let mut ss = s.view_at(i);
-        s.tree().print(&mut ss).await;
-        s.diff_at(i).await.unwrap().print();
+        let ss = s.view_at(i);
+        s.tree().print(&ss).await;
+        s.diff_at(i).await?.unwrap().print();
 
         match i - initial_epoch {
             1 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await?.is_some())
             }
             2 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await?.is_some())
             }
             3 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_none())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await?.is_none())
             }
             4 => {}
             5 => {
-                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_some())
+                assert!(ss
+                    .nodes()
+                    .try_fetch(&"automne".to_string())
+                    .await?
+                    .is_some())
             }
             6 => {
-                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_none())
+                assert!(ss
+                    .nodes()
+                    .try_fetch(&"automne".to_string())
+                    .await?
+                    .is_none())
             }
             _ => {}
         }
@@ -108,7 +116,7 @@ async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
     println!("Old one");
     s.print_tree().await;
 
-    let mut s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
+    let s2 = MerkleTreeKvDb::<TestTree, V, Storage>::new(
         InitSettings::MustExist,
         SqlStorageSettings {
             source: SqlServerConnection::NewConnection(db_url()),
@@ -119,34 +127,42 @@ async fn _storage_in_pgsql(initial_epoch: Epoch) -> Result<()> {
     println!("New one");
     s2.print_tree().await;
 
-    assert_eq!(s2.root_data().await, s.root_data().await);
+    assert_eq!(s2.root_data().await?, s.root_data().await?);
     assert_eq!(
-        s.tree().size(&mut s2.storage).await,
-        s2.tree().size(&s2.storage).await
+        s.tree().size(&s2.storage).await?,
+        s2.tree().size(&s2.storage).await?
     );
 
     for i in initial_epoch + 1..=initial_epoch + 6 {
         println!("\nEpoch = {i}");
-        let mut ss = s.view_at(i);
-        s.tree().print(&mut ss).await;
-        s.diff_at(i).await.unwrap().print();
+        let ss = s.view_at(i);
+        s.tree().print(&ss).await;
+        s.diff_at(i).await?.unwrap().print();
 
         match i {
             1 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await?.is_some())
             }
             2 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_some())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await?.is_some())
             }
             3 => {
-                assert!(ss.nodes().try_fetch(&"les".to_string()).await.is_none())
+                assert!(ss.nodes().try_fetch(&"les".to_string()).await?.is_none())
             }
             4 => {}
             5 => {
-                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_some())
+                assert!(ss
+                    .nodes()
+                    .try_fetch(&"automne".to_string())
+                    .await?
+                    .is_some())
             }
             6 => {
-                assert!(ss.nodes().try_fetch(&"automne".to_string()).await.is_none())
+                assert!(ss
+                    .nodes()
+                    .try_fetch(&"automne".to_string())
+                    .await?
+                    .is_none())
             }
             _ => {}
         }
@@ -258,7 +274,7 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
                 for k in 1..10 {
                     t.store(k, format!("Node-{k}").into()).await?;
                 }
-                Ok(())
+                Result::Ok(())
             })
         })
         .await?;
@@ -270,7 +286,7 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
                 t.update(8, "cava".into()).await.unwrap();
                 t.update(2, "bien".into()).await.unwrap();
 
-                Ok(())
+                Result::Ok(())
             })
         })
         .await?;
@@ -288,16 +304,16 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
     .await?;
     println!("New one");
     s2.print_tree().await;
-    let string = s_psql.root_data().await.unwrap().h;
+    let string = s_psql.root_data().await?.unwrap().h;
     println!("Root hash = {string}");
-    let string1 = s2.root_data().await.unwrap().h;
+    let string1 = s2.root_data().await?.unwrap().h;
     assert_eq!(string, string1);
 
     for i in 1..=2 {
         println!("\nEpoch = {i}");
-        let mut ss = s2.view_at(i);
-        s2.tree().print(&mut ss).await;
-        s_psql.diff_at(i).await.unwrap().print();
+        let ss = s2.view_at(i);
+        s2.tree().print(&ss).await;
+        s_psql.diff_at(i).await?.unwrap().print();
     }
 
     let mut s_ram = MerkleTreeKvDb::<TestTree, V, RamStorage>::new(
@@ -311,7 +327,7 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
                 for k in 1..10 {
                     t.store(k, format!("Node-{k}").into()).await?;
                 }
-                Ok(())
+                Result::Ok(())
             })
         })
         .await?;
@@ -322,15 +338,15 @@ async fn sbbst_storage_in_pgsql() -> Result<()> {
                 t.update(8, "cava".into()).await.unwrap();
                 t.update(2, "bien".into()).await.unwrap();
 
-                Ok(())
+                Result::Ok(())
             })
         })
         .await?;
     s_ram.print_tree().await;
 
     assert_eq!(
-        s2.root_data().await.unwrap().h,
-        s_ram.root_data().await.unwrap().h
+        s2.root_data().await?.unwrap().h,
+        s_ram.root_data().await?.unwrap().h
     );
 
     Ok(())
@@ -345,7 +361,7 @@ async fn with_storage<S: TreeTransactionalStorage<String, usize> + Send>(s: &mut
             {
                 t.store(k.to_string(), k.len()).await.unwrap();
             }
-            Ok(())
+            Result::Ok(())
         })
     })
     .await?;
@@ -353,7 +369,7 @@ async fn with_storage<S: TreeTransactionalStorage<String, usize> + Send>(s: &mut
     s.in_transaction(|t| {
         Box::pin(async {
             t.remove("blessent".to_string()).await.unwrap();
-            Ok(())
+            Result::Ok(())
         })
     })
     .await?;
@@ -361,7 +377,7 @@ async fn with_storage<S: TreeTransactionalStorage<String, usize> + Send>(s: &mut
     s.in_transaction(|t| {
         Box::pin(async {
             t.remove("les".to_string()).await.unwrap();
-            Ok(())
+            Result::Ok(())
         })
     })
     .await?;
@@ -369,7 +385,7 @@ async fn with_storage<S: TreeTransactionalStorage<String, usize> + Send>(s: &mut
     s.in_transaction(|t| {
         Box::pin(async {
             t.remove("sanglots".to_string()).await.unwrap();
-            Ok(())
+            Result::Ok(())
         })
     })
     .await?;
@@ -379,7 +395,7 @@ async fn with_storage<S: TreeTransactionalStorage<String, usize> + Send>(s: &mut
             t.update("longs".to_string(), 95000).await.unwrap();
             t.update("des".to_string(), 36000).await.unwrap();
             t.remove("des".to_string()).await.unwrap();
-            Ok(())
+            Result::Ok(())
         })
     })
     .await?;
@@ -388,7 +404,7 @@ async fn with_storage<S: TreeTransactionalStorage<String, usize> + Send>(s: &mut
         Box::pin(async {
             t.remove("automne".to_string()).await.unwrap();
             t.remove("mon".to_string()).await.unwrap();
-            Ok(())
+            Result::Ok(())
         })
     })
     .await?;
@@ -419,14 +435,20 @@ async fn hashes() -> Result<()> {
     })
     .await?;
 
-    assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("coucou"));
     assert_eq!(
-        s.storage.data().fetch(&2).await.h,
+        s.storage.data().try_fetch(&1).await?.unwrap().h,
+        sha256::digest("coucou")
+    );
+    assert_eq!(
+        s.storage.data().try_fetch(&2).await?.unwrap().h,
         sha256::digest(
             sha256::digest("coucou") + &sha256::digest("bien") + &sha256::digest("cava")
         )
     );
-    assert_eq!(s.storage.data().fetch(&3).await.h, sha256::digest("bien"));
+    assert_eq!(
+        s.storage.data().try_fetch(&3).await?.unwrap().h,
+        sha256::digest("bien")
+    );
     Ok(())
 }
 
@@ -457,14 +479,20 @@ async fn hashes_pgsql() -> Result<()> {
         })
         .await?;
 
-        assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("coucou"));
         assert_eq!(
-            s.storage.data().fetch(&2).await.h,
+            s.storage.data().try_fetch(&1).await?.unwrap().h,
+            sha256::digest("coucou")
+        );
+        assert_eq!(
+            s.storage.data().try_fetch(&2).await?.unwrap().h,
             sha256::digest(
                 sha256::digest("coucou") + &sha256::digest("bien") + &sha256::digest("cava")
             )
         );
-        assert_eq!(s.storage.data().fetch(&3).await.h, sha256::digest("bien"));
+        assert_eq!(
+            s.storage.data().try_fetch(&3).await?.unwrap().h,
+            sha256::digest("bien")
+        );
     }
 
     {
@@ -480,14 +508,20 @@ async fn hashes_pgsql() -> Result<()> {
         s.in_transaction(|s| Box::pin(async { s.update(1, "oucouc".into()).await }))
             .await?;
 
-        assert_eq!(s.storage.data().fetch(&1).await.h, sha256::digest("oucouc"));
         assert_eq!(
-            s.storage.data().fetch(&2).await.h,
+            s.storage.data().try_fetch(&1).await?.unwrap().h,
+            sha256::digest("oucouc")
+        );
+        assert_eq!(
+            s.storage.data().try_fetch(&2).await?.unwrap().h,
             sha256::digest(
                 sha256::digest("oucouc") + &sha256::digest("bien") + &sha256::digest("cava")
             )
         );
-        assert_eq!(s.storage.data().fetch(&3).await.h, sha256::digest("bien"));
+        assert_eq!(
+            s.storage.data().try_fetch(&3).await?.unwrap().h,
+            sha256::digest("bien")
+        );
     }
 
     Ok(())
@@ -539,7 +573,7 @@ async fn thousand_rows() -> Result<()> {
             for i in 0..1000 {
                 s.store(i, (10 * i).try_into().unwrap()).await?;
             }
-            Ok(())
+            Result::Ok(())
         })
     })
     .await?;
@@ -559,7 +593,7 @@ async fn thousand_rows() -> Result<()> {
                     for k in value.iter() {
                         s.remove(*k).await?;
                     }
-                    Ok(())
+                    Result::Ok(())
                 }
             })
         })
@@ -568,7 +602,7 @@ async fn thousand_rows() -> Result<()> {
 
     assert_eq!(s.size().await, 1000 - to_remove.len());
     for k in to_remove {
-        assert!(s.try_fetch(&k).await.is_none());
+        assert!(s.try_fetch(&k).await?.is_none());
     }
 
     println!("{}", rng.gen::<i32>());
@@ -596,14 +630,14 @@ async fn aggregation_memory() -> Result<()> {
                 )
                 .await?;
             }
-            Ok(())
+            Result::Ok(())
         })
     })
     .await?;
 
     let tree = s.tree();
-    let root = tree.root(&s.storage).await.unwrap();
-    let root_payload = s.fetch(&root).await;
+    let root = tree.root(&s.storage).await?.unwrap();
+    let root_payload = s.try_fetch(&root).await?.unwrap();
     assert_eq!(root_payload.1, 1);
     assert_eq!(root_payload.2, 30);
     Ok(())
@@ -633,12 +667,15 @@ async fn aggregation_pgsql() -> Result<()> {
                 )
                 .await?;
             }
-            Ok(())
+            Result::Ok(())
         })
     })
     .await?;
 
-    let root_payload = s.fetch(&s.tree().root(&s.storage).await.unwrap()).await;
+    let root_payload = s
+        .try_fetch(&s.tree().root(&s.storage).await?.unwrap())
+        .await?
+        .unwrap();
     assert_eq!(root_payload.1, 1);
     assert_eq!(root_payload.2, 30);
     Ok(())
@@ -653,9 +690,9 @@ async fn test_rollback<
     for i in 0..3 {
         s.in_transaction(|s| {
             Box::pin(async move {
-                s.store(2 * i, (2 * i).into()).await?;
-                s.store(2 * i + 1, (2 * i + 1).into()).await?;
-                Ok(())
+                s.store(2 * i, (2 * i).into()).await.unwrap();
+                s.store(2 * i + 1, (2 * i + 1).into()).await.unwrap();
+                Result::Ok(())
             })
         })
         .await
@@ -665,20 +702,20 @@ async fn test_rollback<
     assert_eq!(s.current_epoch(), 3 + initial_epoch);
     assert_eq!(s.size().await, 6);
     for i in 0..=5 {
-        assert!(s.contains(&i.into()).await);
+        assert!(s.contains(&i.into()).await.unwrap());
     }
 
     // Rollback twice to reach epoch 1
     s.rollback_to(1 + initial_epoch)
         .await
-        .expect(&format!("failed to rollback to {}", 1 + initial_epoch));
+        .unwrap_or_else(|_| panic!("failed to rollback to {}", 1 + initial_epoch));
     assert_eq!(s.current_epoch(), 1 + initial_epoch);
     assert_eq!(s.size().await, 2);
     for i in 0..=5 {
         if i <= 1 {
-            assert!(s.contains(&i.into()).await);
+            assert!(s.contains(&i.into()).await.unwrap());
         } else {
-            assert!(!s.contains(&i.into()).await);
+            assert!(!s.contains(&i.into()).await.unwrap());
         }
     }
 
@@ -687,7 +724,7 @@ async fn test_rollback<
     assert_eq!(s.current_epoch(), initial_epoch);
     assert_eq!(s.size().await, 0);
     for i in 0..=5 {
-        assert!(!s.contains(&i.into()).await);
+        assert!(!s.contains(&i.into()).await.unwrap());
     }
 
     // Can not rollback before epoch 0
@@ -783,7 +820,7 @@ async fn context_at() {
     s.in_transaction(|s| {
         Box::pin(async {
             s.store(1, 1i64.into()).await.unwrap();
-            Ok(())
+            Result::Ok(())
         })
     })
     .await
@@ -791,14 +828,30 @@ async fn context_at() {
     s.in_transaction(|s| {
         Box::pin(async {
             s.store(2, 2i64.into()).await.unwrap();
-            Ok(())
+            Result::Ok(())
         })
     })
     .await
     .unwrap();
 
-    assert_eq!(s.fetch_with_context_at(&1, 1).await.0.parent, None);
-    assert_eq!(s.fetch_with_context_at(&1, 2).await.0.parent, Some(2));
+    assert_eq!(
+        s.fetch_with_context_at(&1, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .0
+            .parent,
+        None
+    );
+    assert_eq!(
+        s.fetch_with_context_at(&1, 2)
+            .await
+            .unwrap()
+            .unwrap()
+            .0
+            .parent,
+        Some(2)
+    );
 }
 
 /// Ensure that a tree created will see its state persisted even if it is empty.
@@ -835,7 +888,7 @@ async fn initial_state() {
         .await
         .unwrap();
 
-        let tree_state = s_init.storage.state().fetch().await;
+        let tree_state = s_init.storage.state().fetch().await.unwrap();
         assert_eq!(tree_state.alpha, Alpha::new(0.8));
         assert_eq!(tree_state.node_count, 0);
         println!("Tree alpha is {:?}", tree_state);
@@ -857,7 +910,7 @@ async fn dirties() {
         async {
             s.store(1, 1i64.into()).await.unwrap();
             s.store(2, 2i64.into()).await.unwrap();
-            Ok(())
+            Result::Ok(())
         }
         .boxed()
     })
@@ -872,7 +925,7 @@ async fn dirties() {
             let dirties = s.touched().await;
             assert!(dirties.contains(&2));
             assert!(dirties.contains(&3));
-            Ok(())
+            Result::Ok(())
         }
         .boxed()
     })
@@ -924,7 +977,7 @@ async fn grouped_txs() -> Result<()> {
     let mut tx = binding.transaction().await?;
 
     // The genesis root, i.e. None
-    let first_root = t1.root().await;
+    let first_root = t1.root().await.unwrap().unwrap();
 
     t1.start_transaction().await?;
     t2.start_transaction().await?;
@@ -937,7 +990,7 @@ async fn grouped_txs() -> Result<()> {
     t2.store(88, 15.into()).await?;
 
     // The not-yet-commited root
-    let in_flight_root = t1.root().await;
+    let in_flight_root = t1.root().await.unwrap().unwrap();
     assert_ne!(first_root, in_flight_root);
     t1.commit_in(&mut tx).await?;
     t2.commit_in(&mut tx).await?;
@@ -948,14 +1001,14 @@ async fn grouped_txs() -> Result<()> {
     t2.commit_success();
 
     // The commited root must be equal to its in-flight snapshot
-    let commited_root = t1.root().await;
+    let commited_root = t1.root().await.unwrap().unwrap();
     assert_eq!(commited_root, in_flight_root);
     // Sizes must have been commited coorectly
     assert_eq!(t1.size().await, 2);
     assert_eq!(t2.size().await, 3);
 
-    assert!(t2.try_fetch(&4).await.is_some());
-    assert!(t2.try_fetch(&5).await.is_none());
+    assert!(t2.try_fetch(&4).await.unwrap().is_some());
+    assert!(t2.try_fetch(&5).await.unwrap().is_none());
 
     // Second batch - made to fail
     let mut tx = binding.transaction().await?;
@@ -966,7 +1019,7 @@ async fn grouped_txs() -> Result<()> {
     t1.store(4, 789.into()).await?;
 
     t2.store(578943, 542.into()).await?;
-    t2.store(943, commited_root.unwrap().into()).await?;
+    t2.store(943, commited_root.into()).await?;
 
     t1.commit_in(&mut tx).await?;
     t2.commit_in(&mut tx).await?;
@@ -980,13 +1033,13 @@ async fn grouped_txs() -> Result<()> {
     assert_eq!(t2.size().await, 3);
 
     // Old data must still be there
-    assert!(t2.try_fetch(&4).await.is_some());
-    assert!(t2.try_fetch(&5).await.is_none());
+    assert!(t2.try_fetch(&4).await.unwrap().is_some());
+    assert!(t2.try_fetch(&5).await.unwrap().is_none());
 
     // New insertion must have failed
-    assert!(t1.try_fetch(&3).await.is_none());
-    assert!(t1.try_fetch(&4).await.is_none());
-    assert!(t2.try_fetch(&578943).await.is_none());
+    assert!(t1.try_fetch(&3).await.unwrap().is_none());
+    assert!(t1.try_fetch(&4).await.unwrap().is_none());
+    assert!(t2.try_fetch(&578943).await.unwrap().is_none());
 
     Ok(())
 }
@@ -1014,9 +1067,9 @@ async fn fetch_many() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT1.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
-            Ok(())
+            Result::Ok(())
         })
     })
     .await
@@ -1025,9 +1078,9 @@ async fn fetch_many() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT2.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
-            Ok(())
+            Result::Ok(())
         })
     })
     .await
@@ -1051,18 +1104,19 @@ async fn fetch_many() {
         .await
         .unwrap()
         .into_iter()
+        .map(|(epoch, ctx, v)| (epoch, ctx.node_id, v))
         .collect::<HashSet<_>>();
 
     // using sets here, for PgSQL does not guarantee ordering
     assert_eq!(
         many,
         [
-            Some((1, "restera".to_string(), 12)),
-            Some((2, "restera".to_string(), 12)),
-            None,
-            Some((2, "car".to_string(), 0)),
-            None,
-            None
+            (1i64, "restera".to_string(), 12),
+            (2i64, "restera".to_string(), 12),
+            (2i64, "car".to_string(), 0),
+            // This should not exist, but as we use infinity to mark alive
+            // nodes, it will still appear
+            (4i64, "restera".to_string(), 12),
         ]
         .into_iter()
         .collect::<HashSet<_>>()
@@ -1093,9 +1147,9 @@ async fn wide_update_trees() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT1.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
-            Ok(())
+            Result::Ok(())
         })
     })
     .await
@@ -1107,9 +1161,9 @@ async fn wide_update_trees() {
     s.in_transaction(|s| {
         Box::pin(async {
             for (i, word) in TEXT2.split(' ').enumerate() {
-                s.store(word.to_string(), i.try_into().unwrap()).await?;
+                s.store(word.to_string(), i).await?;
             }
-            Ok(())
+            Result::Ok(())
         })
     })
     .await
@@ -1128,4 +1182,145 @@ WHERE {KEY} = ANY(ARRAY['\\x72657374657261'::bytea,'\\x706c7573'::bytea, '\\x636
         println!("{}:", t.epoch());
         t.print();
     }
+}
+
+#[tokio::test]
+async fn all_pgsql() {
+    type K = String;
+    type V = usize;
+    type Tree = scapegoat::Tree<K>;
+    type Storage = PgsqlStorage<Tree, V>;
+
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
+        SqlStorageSettings {
+            source: SqlServerConnection::NewConnection(db_url()),
+            table: "fetch_all".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    const TEXT1: &str = "nature berce le il a froid";
+    const TEXT2: &str = "dort tranquille deux trous rouges cote";
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT1.split(' ').enumerate() {
+                s.store(word.to_string(), i).await?;
+            }
+            Result::Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            s.remove("il".to_string()).await?;
+            s.remove("nature".to_string()).await?;
+            Result::Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT2.split(' ').enumerate() {
+                s.store(word.to_string(), i).await?;
+            }
+            Result::Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    let pairs_1 = s.pairs_at(1).await.unwrap();
+    let pairs_2 = s.pairs_at(2).await.unwrap();
+    let pairs_3 = s.pairs_at(3).await.unwrap();
+
+    assert!(s.pairs_at(0).await.unwrap().is_empty());
+
+    assert!(!pairs_1.contains_key("tranquille"));
+    assert!(!pairs_1.contains_key("rouges"));
+    assert!(pairs_1.contains_key("nature"));
+    assert!(pairs_1.contains_key("froid"));
+
+    assert!(!pairs_2.contains_key("rouges"));
+    assert!(!pairs_2.contains_key("nature"));
+
+    assert!(pairs_3.contains_key("tranquille"));
+    assert!(pairs_3.contains_key("rouges"));
+    assert!(!pairs_3.contains_key("nature"));
+    assert!(pairs_3.contains_key("froid"));
+}
+
+#[tokio::test]
+async fn all_memory() {
+    type K = String;
+    type V = usize;
+    type Tree = scapegoat::Tree<K>;
+    type Storage = InMemory<Tree, V>;
+
+    let mut s = MerkleTreeKvDb::<Tree, V, Storage>::new(
+        InitSettings::Reset(Tree::empty(Alpha::never_balanced())),
+        (),
+    )
+    .await
+    .unwrap();
+
+    const TEXT1: &str = "nature berce le il a froid";
+    const TEXT2: &str = "dort tranquille deux trous rouges cote";
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT1.split(' ').enumerate() {
+                s.store(word.to_string(), i).await?;
+            }
+            Result::Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            s.remove("il".to_string()).await?;
+            s.remove("nature".to_string()).await?;
+            Result::Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    s.in_transaction(|s| {
+        Box::pin(async {
+            for (i, word) in TEXT2.split(' ').enumerate() {
+                s.store(word.to_string(), i).await?;
+            }
+            Result::Ok(())
+        })
+    })
+    .await
+    .unwrap();
+
+    let pairs_1 = s.pairs_at(1).await.unwrap();
+    let pairs_2 = s.pairs_at(2).await.unwrap();
+    let pairs_3 = s.pairs_at(3).await.unwrap();
+
+    assert!(s.pairs_at(0).await.unwrap().is_empty());
+
+    assert!(!pairs_1.contains_key("tranquille"));
+    assert!(!pairs_1.contains_key("rouges"));
+    assert!(pairs_1.contains_key("nature"));
+    assert!(pairs_1.contains_key("froid"));
+
+    assert!(!pairs_2.contains_key("rouges"));
+    assert!(!pairs_2.contains_key("nature"));
+
+    assert!(pairs_3.contains_key("tranquille"));
+    assert!(pairs_3.contains_key("rouges"));
+    assert!(!pairs_3.contains_key("nature"));
+    assert!(pairs_3.contains_key("froid"));
 }

@@ -15,54 +15,54 @@ mod sbbst {
     #[tokio::test]
     async fn degenerated() {
         let (t, s) = sbbst_in_memory(0, 1);
-        assert_eq!(t.parent(1, &s).await, None);
+        assert_eq!(t.parent(1, &s).await.unwrap(), None);
     }
 
     #[tokio::test]
     async fn tiny() {
         let (t, s) = sbbst_in_memory(0, 2);
-        assert_eq!(t.parent(1, &s).await, Some(2));
-        assert_eq!(t.parent(2, &s).await, None);
+        assert_eq!(t.parent(1, &s).await.unwrap(), Some(2));
+        assert_eq!(t.parent(2, &s).await.unwrap(), None);
     }
 
     #[tokio::test]
     async fn triangular() {
         let (t, s) = sbbst_in_memory(0, 3);
-        assert_eq!(t.parent(1, &s).await, Some(2));
-        assert_eq!(t.parent(2, &s).await, None);
-        assert_eq!(t.parent(3, &s).await, Some(2));
+        assert_eq!(t.parent(1, &s).await.unwrap(), Some(2));
+        assert_eq!(t.parent(2, &s).await.unwrap(), None);
+        assert_eq!(t.parent(3, &s).await.unwrap(), Some(2));
     }
 
     #[tokio::test]
     async fn medium() {
         let (t, s) = sbbst_in_memory(0, 6);
-        assert_eq!(t.parent(5, &s).await, Some(6));
-        assert_eq!(t.parent(6, &s).await, Some(4));
-        assert_eq!(t.parent(2, &s).await, Some(4));
-        assert_eq!(t.parent(4, &s).await, None);
+        assert_eq!(t.parent(5, &s).await.unwrap(), Some(6));
+        assert_eq!(t.parent(6, &s).await.unwrap(), Some(4));
+        assert_eq!(t.parent(2, &s).await.unwrap(), Some(4));
+        assert_eq!(t.parent(4, &s).await.unwrap(), None);
     }
 
     #[tokio::test]
     async fn shift() {
         let (mut t, mut s) = sbbst_in_memory(1000, 6);
-        assert_eq!(t.size(&s).await, 6);
+        assert_eq!(t.size(&s).await.unwrap(), 6);
 
         s.start_transaction().unwrap();
         t.insert(1007, &mut s).await.unwrap();
         s.commit_transaction().await.unwrap();
-        assert_eq!(t.size(&s).await, 7);
+        assert_eq!(t.size(&s).await.unwrap(), 7);
     }
 
     #[tokio::test]
     async fn children() {
         let (t, s) = sbbst_in_memory(0, 4);
-        assert_eq!(t.children(&4, &s).await, Some((Some(2), None)));
+        assert_eq!(t.children(&4, &s).await.unwrap(), Some((Some(2), None)));
 
         let (t, s) = sbbst_in_memory(0, 5);
-        assert_eq!(t.children(&4, &s).await, Some((Some(2), Some(5))));
+        assert_eq!(t.children(&4, &s).await.unwrap(), Some((Some(2), Some(5))));
 
         let (t, s) = sbbst_in_memory(0, 9);
-        assert_eq!(t.children(&8, &s).await, Some((Some(4), Some(9))));
+        assert_eq!(t.children(&8, &s).await.unwrap(), Some((Some(4), Some(9))));
     }
 }
 
@@ -99,17 +99,17 @@ mod scapegoat {
 
         let (mut t, mut s) = scapegaot_in_memory::<K>(Alpha::new(0.8));
 
-        assert_eq!(t.size(&s).await, 0);
+        assert_eq!(t.size(&s).await.unwrap(), 0);
 
         s.start_transaction()?;
         t.insert("adsfda".into(), &mut s).await?;
-        assert_eq!(t.size(&s).await, 1);
+        assert_eq!(t.size(&s).await.unwrap(), 1);
 
         t.insert("asdf".into(), &mut s).await?;
         assert!(t.insert("asdf".into(), &mut s).await.is_err());
 
         t.insert("pipo".into(), &mut s).await.unwrap();
-        assert_eq!(t.size(&s).await, 3);
+        assert_eq!(t.size(&s).await.unwrap(), 3);
 
         t.unlink(&"adsfda".into(), &mut s).await.unwrap();
         assert!(t.unlink(&"adsfda".into(), &mut s).await.is_err());
@@ -117,7 +117,7 @@ mod scapegoat {
         t.unlink(&"asdf".into(), &mut s).await.unwrap();
         s.commit_transaction().await?;
 
-        assert_eq!(t.size(&s).await, 0);
+        assert_eq!(t.size(&s).await.unwrap(), 0);
 
         Ok(())
     }
@@ -138,8 +138,8 @@ mod scapegoat {
         bs.state_mut().commit_transaction().await.unwrap();
         ls.state_mut().commit_transaction().await.unwrap();
 
-        assert_eq!(bbst.depth(&mut bs).await, 7);
-        assert_eq!(list.depth(&mut ls).await, 127);
+        assert_eq!(bbst.depth(&bs).await.unwrap(), 7);
+        assert_eq!(list.depth(&ls).await.unwrap(), 127);
         Ok(())
     }
 

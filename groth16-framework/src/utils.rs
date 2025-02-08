@@ -20,7 +20,7 @@ use std::{
 pub const CIRCUIT_DATA_FILENAME: &str = "circuit.bin";
 
 /// The filename of the exported Solidity verifier contract.
-pub const SOLIDITY_VERIFIER_FILENAME: &str = "verifier.sol";
+pub const SOLIDITY_VERIFIER_FILENAME: &str = "Verifier.sol";
 
 /// Convert a string with `0x` prefix to an U256.
 pub fn hex_to_u256(s: &str) -> Result<U256> {

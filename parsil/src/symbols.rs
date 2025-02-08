@@ -106,6 +106,13 @@ impl std::fmt::Display for Handle {
 /// data from the contraact, and available in the JSON payload exposed by
 /// Ryhope.
 pub trait ContextProvider {
+    // query bounds to validate queries
+    const MAX_NUM_COLUMNS: usize;
+    const MAX_NUM_PREDICATE_OPS: usize;
+    const MAX_NUM_RESULT_OPS: usize;
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize;
+    const MAX_NUM_OUTPUTS: usize;
+
     /// Return, if it exists, the structure of the given virtual table.
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable>;
 }
@@ -115,12 +122,42 @@ impl ContextProvider for EmptyProvider {
     fn fetch_table(&self, _table_name: &str) -> Result<ZkTable> {
         bail!("empty provider")
     }
+
+    const MAX_NUM_COLUMNS: usize = 0;
+
+    const MAX_NUM_PREDICATE_OPS: usize = 0;
+
+    const MAX_NUM_RESULT_OPS: usize = 0;
+
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize = 0;
+
+    const MAX_NUM_OUTPUTS: usize = 0;
 }
 
-pub struct FileContextProvider {
+pub struct FileContextProvider<
+    const MAX_NUM_COLUMNS: usize,
+    const MAX_NUM_PREDICATE_OPS: usize,
+    const MAX_NUM_RESULT_OPS: usize,
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize,
+    const MAX_NUM_OUTPUTS: usize,
+> {
     tables: HashMap<String, ZkTable>,
 }
-impl FileContextProvider {
+impl<
+        const MAX_NUM_COLUMNS: usize,
+        const MAX_NUM_PREDICATE_OPS: usize,
+        const MAX_NUM_RESULT_OPS: usize,
+        const MAX_NUM_ITEMS_PER_OUTPUT: usize,
+        const MAX_NUM_OUTPUTS: usize,
+    >
+    FileContextProvider<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_ITEMS_PER_OUTPUT,
+        MAX_NUM_OUTPUTS,
+    >
+{
     pub fn from_file(filename: &str) -> Result<Self> {
         let tables: Vec<ZkTable> = serde_json::from_reader(std::fs::File::open(filename)?)?;
         Ok(FileContextProvider {
@@ -131,7 +168,21 @@ impl FileContextProvider {
         })
     }
 }
-impl ContextProvider for FileContextProvider {
+impl<
+        const MAX_NUM_COLUMNS: usize,
+        const MAX_NUM_PREDICATE_OPS: usize,
+        const MAX_NUM_RESULT_OPS: usize,
+        const MAX_NUM_ITEMS_PER_OUTPUT: usize,
+        const MAX_NUM_OUTPUTS: usize,
+    > ContextProvider
+    for FileContextProvider<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_ITEMS_PER_OUTPUT,
+        MAX_NUM_OUTPUTS,
+    >
+{
     fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
         self.tables.get(table_name).cloned().ok_or_else(|| {
             anyhow!(
@@ -141,6 +192,16 @@ impl ContextProvider for FileContextProvider {
             )
         })
     }
+
+    const MAX_NUM_COLUMNS: usize = MAX_NUM_COLUMNS;
+
+    const MAX_NUM_PREDICATE_OPS: usize = MAX_NUM_PREDICATE_OPS;
+
+    const MAX_NUM_RESULT_OPS: usize = MAX_NUM_RESULT_OPS;
+
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize = MAX_NUM_ITEMS_PER_OUTPUT;
+
+    const MAX_NUM_OUTPUTS: usize = MAX_NUM_OUTPUTS;
 }
 
 /// The [`Kind`] of a [`Scope`] defines how it behaves when being traversed.
@@ -265,7 +326,7 @@ pub enum Symbol<Payload: Debug + Clone> {
 impl<P: Debug + Clone> Symbol<P> {
     /// Return, if any, the [`Handle`] under which a symbol is known in the
     /// current scope.
-    fn handle(&self) -> Option<&Handle> {
+    pub(crate) fn handle(&self) -> Option<&Handle> {
         match self {
             Symbol::Column { handle, .. } => Some(handle),
             Symbol::Alias { from, .. } => Some(from),
@@ -306,6 +367,12 @@ pub struct ScopeTable<ScopeMetadata: Debug + Default, SymbolMetadata: Debug + Cl
     /// pointers are pushed when entering a new context, and popped when exiting
     /// it.
     pointer: Vec<usize>,
+}
+
+impl<M: Debug + Default, P: Debug + Clone> Default for ScopeTable<M, P> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<M: Debug + Default, P: Debug + Clone> ScopeTable<M, P> {

@@ -45,6 +45,8 @@ pub struct PublicInputs<'a, T> {
 
 const NUM_PUBLIC_INPUTS: usize = ResultsBindingPublicInputs::Overflow as usize + 1;
 
+// CHORE: Remove this when relevant PR is merged
+#[allow(dead_code)]
 impl<'a, T: Clone> PublicInputs<'a, T> {
     const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
         Self::to_range(ResultsBindingPublicInputs::ResultsTreeHash),
@@ -156,7 +158,7 @@ impl<'a, T: Clone> PublicInputs<'a, T> {
     }
 }
 
-impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
+impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
     fn register_args(&self, cb: &mut CBuilder) {
@@ -169,7 +171,9 @@ impl<'a> PublicInputCommon for PublicInputs<'a, Target> {
     }
 }
 
-impl<'a> PublicInputs<'a, Target> {
+// CHORE: Remove this when relevant PR is merged
+#[allow(dead_code)]
+impl PublicInputs<'_, Target> {
     pub fn results_tree_hash_target(&self) -> HashOutTarget {
         HashOutTarget::try_from(self.to_results_tree_hash_raw()).unwrap()
     }
@@ -195,7 +199,9 @@ impl<'a> PublicInputs<'a, Target> {
     }
 }
 
-impl<'a> PublicInputs<'a, F> {
+// CHORE: Remove this when relevant PR is merged
+#[allow(dead_code)]
+impl PublicInputs<'_, F> {
     pub fn results_tree_hash(&self) -> HashOut<F> {
         HashOut::try_from(self.to_results_tree_hash_raw()).unwrap()
     }
@@ -245,7 +251,7 @@ mod tests {
         pis: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPublicInputs<'a> {
+    impl UserCircuit<F, D> for TestPublicInputs<'_> {
         type Wires = Vec<Target>;
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {

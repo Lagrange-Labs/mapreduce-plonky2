@@ -7,7 +7,7 @@ use plonky2::{
             CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget,
             VerifierOnlyCircuitData,
         },
-        config::{AlgebraicHasher, GenericConfig, Hasher},
+        config::{AlgebraicHasher, GenericConfig},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -45,7 +45,6 @@ pub(crate) struct WrapCircuit<
 impl<F: SerializableRichField<D>, C: GenericConfig<D, F = F>, const D: usize> WrapCircuit<F, C, D>
 where
     C::Hasher: AlgebraicHasher<F>,
-    [(); C::Hasher::HASH_SIZE]:,
 {
     /// build the wrap circuit for a proof enforcing the circuit with verifier data `inner_vd`
     /// and `inner_cd`
@@ -109,6 +108,7 @@ where
                 wrap_step + 1,
                 cd.degree_bits()
             );
+
             if circuit_data.common.degree_bits() == RECURSION_THRESHOLD {
                 break;
             }
@@ -205,7 +205,6 @@ pub(crate) mod test {
         > TestCircuit<F, C, D, INPUT_SIZE>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         fn build_circuit(
             config: CircuitConfig,
@@ -258,7 +257,7 @@ pub(crate) mod test {
         }
 
         fn get_circuit_data(&self) -> &CircuitData<F, C, D> {
-            &self.wrap_circuit.final_proof_circuit_data()
+            self.wrap_circuit.final_proof_circuit_data()
         }
     }
 

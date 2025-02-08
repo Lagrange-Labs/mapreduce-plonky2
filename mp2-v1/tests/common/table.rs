@@ -1,5 +1,4 @@
-use alloy::primitives::U256;
-use anyhow::{ensure, Context, Result};
+use anyhow::{ensure, Context};
 use bb8::Pool;
 use bb8_postgres::{tokio_postgres::NoTls, PostgresConnectionManager};
 use futures::{
@@ -9,8 +8,8 @@ use futures::{
 use itertools::Itertools;
 use log::debug;
 use mp2_v1::indexing::{
-    block::BlockPrimaryIndex,
-    cell::{self, Cell, CellTreeKey, MerkleCellTree},
+    block::{BlockPrimaryIndex, BlockTreeKey},
+    cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},
     index::IndexNode,
     row::{CellCollection, Row, RowTreeKey},
     ColumnID,
@@ -27,9 +26,17 @@ use ryhope::{
 };
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, iter::once};
-use tokio_postgres::{row::Row as PsqlRow, types::ToSql};
+use verifiable_db::query::computational_hash_ids::ColumnIDs;
 
-use super::{index_tree::MerkleIndexTree, rowtree::MerkleRowTree, ColumnIdentifier};
+use super::{
+    cases::query::{
+        MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+    },
+    index_tree::MerkleIndexTree,
+    rowtree::MerkleRowTree,
+    ColumnIdentifier,
+};
 
 pub type TableID = String;
 
@@ -51,6 +58,9 @@ pub struct TableColumn {
     pub name: String,
     pub identifier: ColumnID,
     pub index: IndexType,
+    /// multiplier means if this columns come from a "merged" table, then it either come from a
+    /// table a or table b. One of these table is the "multiplier" table, the other is not.
+    pub multiplier: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -71,6 +81,21 @@ impl TableColumns {
     }
     pub fn column_id_of_cells_index(&self, key: CellTreeKey) -> Option<ColumnID> {
         self.rest.get(key - 1).map(|tc| tc.identifier)
+    }
+    pub fn column_info(&self, identifier: ColumnIdentifier) -> TableColumn {
+        self.rest
+            .iter()
+            .chain(once(&self.secondary))
+            .find(|c| c.identifier == identifier)
+            .unwrap_or_else(|| panic!("can't find cell from identifier {}", identifier))
+            .clone()
+    }
+    pub fn ordered_cells(
+        &self,
+        mut rest_cells: Vec<MerkleCell<BlockPrimaryIndex>>,
+    ) -> Vec<MerkleCell<BlockPrimaryIndex>> {
+        rest_cells.sort_by_key(|c| self.cells_tree_index_of(c.identifier()));
+        rest_cells
     }
     // Returns the index of the column identifier in the index tree, ie. the order of columns  in
     // the cells tree
@@ -103,8 +128,22 @@ impl TableColumns {
     }
 }
 
+impl From<&TableColumns> for ColumnIDs {
+    fn from(columns: &TableColumns) -> Self {
+        ColumnIDs::new(
+            columns.primary.identifier,
+            columns.secondary.identifier,
+            columns
+                .non_indexed_columns()
+                .into_iter()
+                .map(|column| column.identifier)
+                .collect_vec(),
+        )
+    }
+}
+
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
-async fn new_db_pool(db_url: &str) -> Result<DBPool> {
+async fn new_db_pool(db_url: &str) -> anyhow::Result<DBPool> {
     let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
         .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url))?;
 
@@ -136,7 +175,7 @@ fn index_table_name(name: &str) -> String {
 }
 
 impl Table {
-    pub async fn load(public_name: String, columns: TableColumns) -> Result<Self> {
+    pub async fn load(public_name: String, columns: TableColumns) -> anyhow::Result<Self> {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
         let row_tree = MerkleRowTree::new(
             InitSettings::MustExist,
@@ -156,7 +195,7 @@ impl Table {
         )
         .await
         .unwrap();
-        let genesis = index_tree.storage_state().await.shift;
+        let genesis = index_tree.storage_state().await?.shift;
         columns.self_assert();
 
         Ok(Self {
@@ -228,6 +267,7 @@ impl Table {
             .collect::<Vec<_>>();
         // because of lifetime issues in async
         let columns = self.columns.clone();
+        let rest_cells = columns.ordered_cells(rest_cells);
         // the first time we actually create the cells tree, there is nothing
         if !rest_cells.is_empty() {
             let _ = cell_tree
@@ -257,12 +297,12 @@ impl Table {
         &mut self,
         update: CellsUpdate<BlockPrimaryIndex>,
         update_type: TreeUpdateType,
-    ) -> Result<CellsUpdateResult<BlockPrimaryIndex>> {
+    ) -> anyhow::Result<CellsUpdateResult<BlockPrimaryIndex>> {
         // fetch previous row or return 0 cells in case of init
         let previous_cells = self
             .row
             .try_fetch(&update.previous_row_key)
-            .await
+            .await?
             .map(|row_node| row_node.cells)
             // if it happens, it must be because of init time
             .or_else(|| Some(CellCollection::default()))
@@ -282,21 +322,22 @@ impl Table {
         // apply updates and save the update plan for the new values
         // clone for lifetime issues with async
         let columns = self.columns.clone();
+        let merkle_cells = update
+            .updated_cells
+            .iter()
+            .map(|c| cell::MerkleCell::new(c.identifier(), c.value(), update.primary))
+            .collect_vec();
+        let merkle_cells = self.columns.ordered_cells(merkle_cells);
         let cell_update = cell_tree
             .in_transaction(|t| {
                 async move {
-                    for new_cell in update.updated_cells.iter() {
-                        let merkle_cell = cell::MerkleCell::new(
-                            new_cell.identifier(),
-                            new_cell.value(),
-                            update.primary,
-                        );
+                    for merkle_cell in merkle_cells {
                         println!(
                             " --- TREE: inserting rest-cell: (index {}) : {:?}",
-                            columns.cells_tree_index_of(new_cell.identifier()),
+                            columns.cells_tree_index_of(merkle_cell.identifier()),
                             merkle_cell
                         );
-                        let cell_key = columns.cells_tree_index_of(new_cell.identifier());
+                        let cell_key = columns.cells_tree_index_of(merkle_cell.identifier());
                         match update_type {
                             TreeUpdateType::Update => t.update(cell_key, merkle_cell).await?,
                             // This should only happen at init time or at creation of a new row
@@ -310,9 +351,9 @@ impl Table {
             .await
             .expect("can't apply cells update");
         println!(
-            "Cell trees root hash after updates (impacted key {:?}): {:?}",
-            cell_update.impacted_keys(),
-            hex::encode(&cell_tree.root_data().await.unwrap().hash[..])
+            "Cell trees root hash after updates (impacted keys {:?}): {:?}",
+            cell_update.nodes().collect_vec(),
+            hex::encode(&cell_tree.root_data().await?.unwrap().hash[..])
         );
         Ok(CellsUpdateResult {
             previous_row_key: update.previous_row_key,
@@ -327,7 +368,7 @@ impl Table {
         &mut self,
         new_primary: BlockPrimaryIndex,
         updates: Vec<TreeRowUpdate>,
-    ) -> Result<RowUpdateResult> {
+    ) -> anyhow::Result<RowUpdateResult> {
         let current_epoch = self.row.current_epoch();
         let out = self
             .row
@@ -341,13 +382,15 @@ impl Table {
                             TreeRowUpdate::Update(row) => {
                                 t.update(row.k.clone(), row.payload.clone()).await?;
                             }
-                            TreeRowUpdate::Deletion(row_key) => match t.try_fetch(&row_key).await {
-                                // sanity check
-                                Some(_) => {
-                                    t.remove(row_key.clone()).await?;
+                            TreeRowUpdate::Deletion(row_key) => {
+                                match t.try_fetch(&row_key).await? {
+                                    // sanity check
+                                    Some(_) => {
+                                        t.remove(row_key.clone()).await?;
+                                    }
+                                    None => panic!("can't delete a row key that does not exist"),
                                 }
-                                None => panic!("can't delete a row key that does not exist"),
-                            },
+                            }
                             TreeRowUpdate::Insertion(row) => {
                                 t.store(row.k.clone(), row.payload.clone()).await?;
                             }
@@ -360,7 +403,7 @@ impl Table {
                     // update.
                     let filtered_rows = stream::iter(dirties.into_iter())
                         .then(|row_key| async {
-                            let mut row_payload = t.fetch(&row_key).await;
+                            let mut row_payload = t.try_fetch(&row_key).await.unwrap().unwrap();
                             let mut cell_info = row_payload
                                 .cells
                                 .find_by_column(row_payload.secondary_index_column)
@@ -390,7 +433,7 @@ impl Table {
         {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
-            let root = self.row.root_data().await.unwrap();
+            let root = self.row.root_data().await?.unwrap();
             let new_epoch = self.row.current_epoch();
             assert!(
                 current_epoch != new_epoch,
@@ -405,7 +448,7 @@ impl Table {
             self.row.print_tree().await;
             println!("\n+++++++++++++++++++++++++++++++++\n");
         }
-        out
+        Ok(out?)
     }
 
     // apply the transformation on the index tree and returns the new nodes to prove
@@ -413,7 +456,7 @@ impl Table {
     pub async fn apply_index_update(
         &mut self,
         updates: IndexUpdate<BlockPrimaryIndex>,
-    ) -> Result<IndexUpdateResult<BlockPrimaryIndex>> {
+    ) -> anyhow::Result<IndexUpdateResult<BlockTreeKey>> {
         let plan = self
             .index
             .in_transaction(|t| {
@@ -426,27 +469,6 @@ impl Table {
             })
             .await?;
         Ok(IndexUpdateResult { plan })
-    }
-
-    pub async fn execute_row_query(&self, query: &str, params: &[U256]) -> Result<Vec<PsqlRow>> {
-        // introduce this closure to coerce each param to have type `dyn ToSql + Sync` (required by pgSQL APIs)
-        let prepare_param = |param: U256| -> Box<dyn ToSql + Sync> { Box::new(param) };
-        let query_params = params
-            .into_iter()
-            .map(|param| prepare_param(*param))
-            .collect_vec();
-        let connection = self.db_pool.get().await.unwrap();
-        let res = connection
-            .query(
-                query,
-                &query_params
-                    .iter()
-                    .map(|param| param.as_ref())
-                    .collect_vec(),
-            )
-            .await
-            .context("while fetching current epoch")?;
-        Ok(res)
     }
 }
 
@@ -557,7 +579,7 @@ pub enum TreeUpdateType {
 }
 
 impl Table {
-    fn to_zktable(&self) -> Result<ZkTable> {
+    fn to_zktable(&self) -> anyhow::Result<ZkTable> {
         let zk_columns = self.columns.to_zkcolumns();
         Ok(ZkTable {
             // NOTE : we always look data in the row table
@@ -593,12 +615,23 @@ impl TableColumn {
 }
 
 impl ContextProvider for Table {
-    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+    fn fetch_table(&self, table_name: &str) -> anyhow::Result<ZkTable> {
         <&Self as ContextProvider>::fetch_table(&self, table_name)
     }
+
+    const MAX_NUM_COLUMNS: usize = <&Self as ContextProvider>::MAX_NUM_COLUMNS;
+
+    const MAX_NUM_PREDICATE_OPS: usize = <&Self as ContextProvider>::MAX_NUM_PREDICATE_OPS;
+
+    const MAX_NUM_RESULT_OPS: usize = <&Self as ContextProvider>::MAX_NUM_RESULT_OPS;
+
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize = <&Self as ContextProvider>::MAX_NUM_ITEMS_PER_OUTPUT;
+
+    const MAX_NUM_OUTPUTS: usize = <&Self as ContextProvider>::MAX_NUM_OUTPUTS;
 }
+
 impl ContextProvider for &Table {
-    fn fetch_table(&self, table_name: &str) -> Result<ZkTable> {
+    fn fetch_table(&self, table_name: &str) -> anyhow::Result<ZkTable> {
         ensure!(
             self.public_name == table_name,
             "names differ table {} vs requested {}",
@@ -607,4 +640,14 @@ impl ContextProvider for &Table {
         );
         self.to_zktable()
     }
+
+    const MAX_NUM_COLUMNS: usize = MAX_NUM_COLUMNS;
+
+    const MAX_NUM_PREDICATE_OPS: usize = MAX_NUM_PREDICATE_OPS;
+
+    const MAX_NUM_RESULT_OPS: usize = MAX_NUM_RESULT_OPS;
+
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize = MAX_NUM_ITEMS_PER_OUTPUT;
+
+    const MAX_NUM_OUTPUTS: usize = MAX_NUM_OUTPUTS;
 }

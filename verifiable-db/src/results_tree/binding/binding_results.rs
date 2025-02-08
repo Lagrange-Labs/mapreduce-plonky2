@@ -3,11 +3,12 @@
 use crate::{
     query::{
         computational_hash_ids::{AggregationOperation, ResultIdentifier},
-        public_inputs::PublicInputs as QueryProofPI,
+        universal_circuit::ComputationalHashTarget,
     },
     results_tree::{
         binding::public_inputs::PublicInputs,
         construction::public_inputs::PublicInputs as ResultsConstructionProofPI,
+        old_public_inputs::PublicInputs as QueryProofPI,
     },
 };
 use mp2_common::{
@@ -16,7 +17,7 @@ use mp2_common::{
 };
 use plonky2::iop::target::Target;
 use serde::{Deserialize, Serialize};
-use std::{iter::once, slice};
+use std::slice;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BindingResultsWires<const S: usize>;
@@ -25,6 +26,8 @@ pub struct BindingResultsWires<const S: usize>;
 pub struct BindingResultsCircuit<const S: usize>;
 
 impl<const S: usize> BindingResultsCircuit<S> {
+    // CHORE: Remove this when relevant PR is merged
+    #[allow(dead_code)]
     pub fn build(
         b: &mut CBuilder,
         query_proof: &QueryProofPI<Target, S>,
@@ -56,24 +59,11 @@ impl<const S: usize> BindingResultsCircuit<S> {
         //     res_id = "RESULT_DISTINCT"
         // else:
         //     res_id = "RESULT"
-        let [res_no_distinct, res_with_distinct] = [
-            ResultIdentifier::ResultNoDistinct,
-            ResultIdentifier::ResultWithDistinct,
-        ]
-        .map(|id| b.constant(id.to_field()));
-        let res_id = b.select(
-            results_construction_proof.no_duplicates_flag_target(),
-            res_with_distinct,
-            res_no_distinct,
+        let computational_hash = ResultIdentifier::result_id_hash_circuit(
+            b,
+            ComputationalHashTarget::from_vec(query_proof.to_computational_hash_raw().to_vec()),
+            &results_construction_proof.no_duplicates_flag_target(),
         );
-
-        // Compute the computational hash:
-        // H(res_id || pQ.C)
-        let inputs = once(&res_id)
-            .chain(query_proof.to_computational_hash_raw())
-            .cloned()
-            .collect();
-        let computational_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
 
         // Compute the placeholder hash:
         // H(pQ.H_p || pQ.MIN_I || pQ.MAX_I)
@@ -109,11 +99,14 @@ impl<const S: usize> BindingResultsCircuit<S> {
 mod tests {
     use super::*;
     use crate::{
-        results_tree::construction::{
-            public_inputs::ResultsConstructionPublicInputs,
-            tests::random_results_construction_public_inputs,
+        results_tree::{
+            construction::{
+                public_inputs::ResultsConstructionPublicInputs,
+                tests::{pi_len, random_results_construction_public_inputs},
+            },
+            tests::random_aggregation_public_inputs,
         },
-        test_utils::{random_aggregation_operations, random_aggregation_public_inputs},
+        test_utils::random_aggregation_operations,
     };
     use itertools::Itertools;
     use mp2_common::{poseidon::H, utils::ToFields, C, D, F};
@@ -126,8 +119,8 @@ mod tests {
 
     const S: usize = 20;
 
-    const QUERY_PI_LEN: usize = crate::query::PI_LEN::<S>;
-    const RESULTS_CONSTRUCTION_PI_LEN: usize = crate::results_tree::construction::PI_LEN::<S>;
+    const QUERY_PI_LEN: usize = QueryProofPI::<F, S>::total_len();
+    const RESULTS_CONSTRUCTION_PI_LEN: usize = pi_len::<S>();
 
     #[derive(Clone, Debug)]
     struct TestBindingResultsCircuit<'a> {
@@ -135,7 +128,7 @@ mod tests {
         results_construction_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestBindingResultsCircuit<'a> {
+    impl UserCircuit<F, D> for TestBindingResultsCircuit<'_> {
         // Query proof + results construction proof
         type Wires = (Vec<Target>, Vec<Target>);
 
@@ -211,7 +204,7 @@ mod tests {
             };
 
             // H(res_id || pQ.C)
-            let inputs = once(&res_id.to_field())
+            let inputs = std::iter::once(&res_id.to_field())
                 .chain(query_pi.to_computational_hash_raw())
                 .cloned()
                 .collect_vec();

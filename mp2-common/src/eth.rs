@@ -93,7 +93,7 @@ pub async fn query_latest_block<T: Transport + Clone>(provider: &RootProvider<T>
     // Query the MPT proof with retries.
     for i in 0..RETRY_NUM {
         if let Ok(response) = provider
-            .get_block_by_number(BlockNumberOrTag::Latest, true)
+            .get_block_by_number(BlockNumberOrTag::Latest, true.into())
             .await
         {
             // Has one block at least.
@@ -198,7 +198,7 @@ impl ProofQuery {
     pub fn verify_storage_proof(proof: &EIP1186AccountProofResponse) -> Result<Vec<u8>> {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
-        let proof_key_bytes = proof.storage_proof[0].key.0;
+        let proof_key_bytes = proof.storage_proof[0].key.as_b256();
         let mpt_key = keccak256(&proof_key_bytes[..]);
         let storage_hash = H256(proof.storage_hash.0);
         let is_valid = tx_trie.verify_proof(
@@ -252,48 +252,15 @@ impl ProofQuery {
     }
 }
 
-// since alloy exports two header structs, and from RPC we only receive the rpc-defined one that
-// does not contain the methods to get the RLP encoding and the hash, we have to pass from one to
-// another manually.
-fn from_rpc_header_to_consensus(h: &alloy::rpc::types::Header) -> alloy::consensus::Header {
-    alloy::consensus::Header {
-        parent_hash: h.parent_hash,
-        ommers_hash: h.uncles_hash,
-        beneficiary: h.miner,
-        state_root: h.state_root,
-        transactions_root: h.transactions_root,
-        receipts_root: h.receipts_root,
-        withdrawals_root: h.withdrawals_root,
-        logs_bloom: h.logs_bloom,
-        difficulty: h.difficulty,
-        number: h.number.unwrap(),
-        gas_limit: h.gas_limit,
-        gas_used: h.gas_used,
-        timestamp: h.timestamp,
-        mix_hash: h.mix_hash.unwrap(),
-        nonce: h.nonce.unwrap(),
-        base_fee_per_gas: h.base_fee_per_gas,
-        blob_gas_used: h.blob_gas_used,
-        excess_blob_gas: h.excess_blob_gas,
-        parent_beacon_block_root: h.parent_beacon_block_root,
-        requests_root: h.requests_root,
-        extra_data: h.extra_data.clone(),
-    }
-}
-
 impl BlockUtil for alloy::rpc::types::Block {
     fn rlp(&self) -> Vec<u8> {
-        self.header.rlp()
+        let mut out = Vec::new();
+        self.header.encode(&mut out);
+        out
     }
 }
 
 impl BlockUtil for alloy::rpc::types::Header {
-    fn rlp(&self) -> Vec<u8> {
-        from_rpc_header_to_consensus(self).rlp()
-    }
-}
-
-impl BlockUtil for alloy::consensus::Header {
     fn rlp(&self) -> Vec<u8> {
         let mut out = Vec::new();
         self.encode(&mut out);
@@ -307,7 +274,7 @@ mod test {
     use std::env;
     use std::str::FromStr;
 
-    use alloy::{primitives::Bytes, providers::ProviderBuilder, rpc::types::BlockTransactionsKind};
+    use alloy::{primitives::Bytes, providers::ProviderBuilder};
     use ethereum_types::U64;
     use ethers::{
         providers::{Http, Middleware},
@@ -319,7 +286,7 @@ mod test {
         types::MAX_BLOCK_LEN,
         utils::{Endianness, Packer},
     };
-    use mp2_test::eth::{get_mainnet_url, get_sepolia_url};
+    use mp2_test::eth::get_sepolia_url;
 
     #[tokio::test]
     #[ignore]
@@ -329,18 +296,12 @@ mod test {
         let block_number2 = block_number1 + 1;
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
         let block = provider
-            .get_block(
-                BlockNumberOrTag::Number(block_number1).into(),
-                BlockTransactionsKind::Hashes,
-            )
+            .get_block(BlockNumberOrTag::Number(block_number1).into(), false.into())
             .await?
             .unwrap();
         let comp_hash = keccak256(&block.rlp());
         let block_next = provider
-            .get_block(
-                BlockNumberOrTag::from(block_number2).into(),
-                BlockTransactionsKind::Hashes,
-            )
+            .get_block(BlockNumberOrTag::from(block_number2).into(), false.into())
             .await?
             .unwrap();
         let exp_hash = block_next.header.parent_hash;
@@ -466,39 +427,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_pidgy_pinguin_mapping_slot() -> Result<()> {
-        // first pinguin holder https://dune.com/queries/2450476/4027653
-        // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
-        // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
-        let mapping_value =
-            Address::from_str("0x188B264AA1456B869C3a92eeeD32117EbB835f47").unwrap();
-        let nft_id: u32 = 1116;
-        let mapping_key = left_pad32(&nft_id.to_be_bytes());
-        let url = get_mainnet_url();
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
-
-        // extracting from
-        // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol
-        // assuming it's using ERC731Enumerable that inherits ERC721
-        let mapping_slot = 2;
-        // pudgy pinguins
-        let pudgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
-        let query = ProofQuery::new_mapping_slot(pudgy_address, mapping_slot, mapping_key.to_vec());
-        let res = query
-            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
-            .await?;
-        let raw_address = ProofQuery::verify_storage_proof(&res)?;
-        // the value is actually RLP encoded !
-        let decoded_address: Vec<u8> = rlp::decode(&raw_address).unwrap();
-        let leaf_node: Vec<Vec<u8>> = rlp::decode_list(res.storage_proof[0].proof.last().unwrap());
-        println!("leaf_node[1].len() = {}", leaf_node[1].len());
-        // this is read in the same order
-        let found_address = Address::from_slice(&decoded_address.into_iter().collect::<Vec<u8>>());
-        assert_eq!(found_address, mapping_value);
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_kashish_contract_proof_query() -> Result<()> {
         // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
         // uint256 public n_registered; // storage slot 0
@@ -537,37 +465,34 @@ mod test {
         println!("URL given = {}", url);
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
         let block = provider
-            .get_block_by_number(BlockNumberOrTag::Latest, true)
+            .get_block_by_number(BlockNumberOrTag::Latest, true.into())
             .await?
             .unwrap();
         let previous_block = provider
             .get_block_by_number(
-                BlockNumberOrTag::Number(block.header.number.unwrap() - 1),
-                true,
+                BlockNumberOrTag::Number(block.header.number - 1),
+                true.into(),
             )
             .await?
             .unwrap();
 
         let mp2_computed = block.block_hash();
-        let alloy_computed = from_rpc_header_to_consensus(&block.header).hash_slow();
+        let alloy_computed = block.header.hash_slow();
         assert_eq!(mp2_computed.as_slice(), alloy_computed.as_slice());
 
         // CHECK RLP ENCODING FROM ETHERS MMODIF AND ALLOY
         let ethers_provider = ethers::providers::Provider::<Http>::try_from(url)
             .expect("could not instantiate HTTP Provider");
         let ethers_block = ethers_provider
-            .get_block_with_txs(BlockNumber::Number(U64::from(block.header.number.unwrap())))
+            .get_block_with_txs(BlockNumber::Number(U64::from(block.header.number)))
             .await?
             .unwrap();
         // sanity check that ethers manual rlp implementation works
-        assert_eq!(
-            block.header.hash.unwrap().as_slice(),
-            ethers_block.block_hash()
-        );
+        assert_eq!(block.header.hash.as_slice(), ethers_block.block_hash());
         let ethers_rlp = ethers_block.rlp();
-        let alloy_rlp = from_rpc_header_to_consensus(&block.header).rlp();
+        let alloy_rlp = block.header.rlp();
         assert_eq!(ethers_rlp, alloy_rlp);
-        let manual_alloy_rlp = from_rpc_header_to_consensus(&block.header).rlp();
+        let manual_alloy_rlp = block.header.rlp();
         let ethers_stream = rlp::Rlp::new(&ethers_rlp);
         let manual_stream = rlp::Rlp::new(&manual_alloy_rlp);
         compare_rlp(ethers_stream, manual_stream);
@@ -575,7 +500,7 @@ mod test {
 
         let previous_computed = previous_block.block_hash();
         assert_eq!(&previous_computed, block.header.parent_hash.as_slice());
-        let alloy_given = block.header.hash.unwrap();
+        let alloy_given = block.header.hash;
         assert_eq!(alloy_given, alloy_computed);
         Ok(())
     }
@@ -615,7 +540,7 @@ mod test {
             rlp::encode(&rlp).to_vec()
         }
     }
-    impl<'a, X> rlp::Encodable for RLPBlock<'a, X> {
+    impl<X> rlp::Encodable for RLPBlock<'_, X> {
         fn rlp_append(&self, s: &mut rlp::RlpStream) {
             s.begin_unbounded_list();
             s.append(&self.0.parent_hash);

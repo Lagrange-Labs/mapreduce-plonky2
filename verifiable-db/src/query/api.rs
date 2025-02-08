@@ -1,62 +1,15 @@
-use std::iter::repeat;
+use std::iter::{repeat, repeat_with};
 
-use crate::query::aggregation::full_node_index_leaf::FullNodeIndexLeafCircuit;
+use anyhow::{bail, ensure, Result};
 
-use super::{
-    aggregation::{
-        child_proven_single_path_node::{
-            ChildProvenSinglePathNodeCircuit, ChildProvenSinglePathNodeWires,
-            NUM_VERIFIED_PROOFS as NUM_PROOFS_CHILD,
-        },
-        embedded_tree_proven_single_path_node::{
-            EmbeddedTreeProvenSinglePathNodeCircuit, EmbeddedTreeProvenSinglePathNodeWires,
-            NUM_VERIFIED_PROOFS as NUM_PROOFS_EMBEDDED,
-        },
-        full_node_index_leaf::{FullNodeIndexLeafWires, NUM_VERIFIED_PROOFS as NUM_PROOFS_LEAF},
-        full_node_with_one_child::{
-            FullNodeWithOneChildCircuit, FullNodeWithOneChildWires,
-            NUM_VERIFIED_PROOFS as NUM_PROOFS_FN1,
-        },
-        full_node_with_two_children::{
-            FullNodeWithTwoChildrenCircuit, FullNodeWithTwoChildrenWires,
-            NUM_VERIFIED_PROOFS as NUM_PROOFS_FN2,
-        },
-        non_existence_inter::{
-            NonExistenceInterNodeCircuit, NonExistenceInterNodeWires,
-            NUM_VERIFIED_PROOFS as NUM_PROOFS_NE_INTER,
-        },
-        partial_node::{
-            PartialNodeCircuit, PartialNodeWires, NUM_VERIFIED_PROOFS as NUM_PROOFS_PN,
-        },
-        ChildPosition, ChildProof, CommonInputs, NodeInfo, NonExistenceInput,
-        OneProvenChildNodeInput, QueryBounds, QueryHashNonExistenceCircuits, SinglePathInput,
-        SubProof, TwoProvenChildNodeInput,
-    },
-    computational_hash_ids::{AggregationOperation, HashPermutation, Output},
-    universal_circuit::{
-        output_no_aggregation::Circuit as NoAggOutputCircuit,
-        output_with_aggregation::Circuit as AggOutputCircuit,
-        universal_circuit_inputs::{
-            BasicOperation, PlaceholderId, Placeholders, ResultStructure, RowCells,
-        },
-        universal_query_circuit::{
-            placeholder_hash, QueryBound, UniversalCircuitInput, UniversalQueryCircuitInputs,
-            UniversalQueryCircuitWires,
-        },
-    },
-    PI_LEN,
-};
-use alloy::primitives::U256;
-use anyhow::{ensure, Result};
 use itertools::Itertools;
-use log::info;
 use mp2_common::{
     array::ToField,
     default_config,
-    poseidon::H,
-    proof::ProofWithVK,
+    poseidon::{HashPermutation, H},
+    proof::{serialize_proof, ProofWithVK},
     types::HashOutput,
-    utils::{Fieldable, ToFields},
+    utils::ToFields,
     C, D, F,
 };
 use plonky2::{
@@ -65,20 +18,152 @@ use plonky2::{
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
-    framework::{
-        prepare_recursive_circuit_for_circuit_set, RecursiveCircuitInfo, RecursiveCircuits,
-    },
+    framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
-#[allow(clippy::large_enum_variant)] // we need to clone data if we fix by put variants inside a `Box`
+use crate::query::{
+    circuits::{
+        chunk_aggregation::{
+            ChunkAggregationCircuit, ChunkAggregationInputs, ChunkAggregationWires,
+        },
+        non_existence::{NonExistenceCircuit, NonExistenceWires},
+        row_chunk_processing::{RowChunkProcessingCircuit, RowChunkProcessingWires},
+    },
+    computational_hash_ids::{AggregationOperation, ColumnIDs, Identifiers},
+    row_chunk_gadgets::row_process_gadget::RowProcessingGadgetInputs,
+    universal_circuit::{
+        output_no_aggregation::Circuit as OutputNoAggCircuit,
+        output_with_aggregation::Circuit as OutputAggCircuit,
+        universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure, RowCells},
+    },
+    utils::{ChildPosition, NodeInfo, QueryBounds, QueryHashNonExistenceCircuits},
+};
+
+use super::{
+    computational_hash_ids::{Output, PlaceholderIdentifier},
+    pi_len,
+    universal_circuit::universal_query_circuit::{
+        placeholder_hash, UniversalCircuitInput, UniversalQueryCircuitParams,
+    },
+};
+
+/// Data structure containing all the information needed to verify the membership of
+/// a node in a tree and to compute info about its predecessor/successor
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct TreePathInputs {
+    /// Info about the node
+    pub(crate) node_info: NodeInfo,
+    /// Info about the nodes in the path from the node up to the root of the tree; The `ChildPosition` refers to
+    /// the position of the previous node in the path as a child of the current node
+    pub(crate) path: Vec<(NodeInfo, ChildPosition)>,
+    /// Hash of the siblings of the nodes in path (except for the root)
+    pub(crate) siblings: Vec<Option<HashOutput>>,
+    /// Info about the children of the node
+    pub(crate) children: [Option<NodeInfo>; 2],
+}
+
+impl TreePathInputs {
+    /// Instantiate a new instance of `TreePathInputs` for a given node from the following input data:
+    /// - `node_info`: data about the given node
+    /// - `path`: data about the nodes in the path from the node up to the root of the tree;
+    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
+    /// - `siblings`: hash of the siblings of the nodes in the path (except for the root)
+    /// - `children`: data about the children of the given node
+    pub fn new(
+        node_info: NodeInfo,
+        path: Vec<(NodeInfo, ChildPosition)>,
+        children: [Option<NodeInfo>; 2],
+    ) -> Self {
+        let siblings = path
+            .iter()
+            .map(|(node, child_pos)| {
+                let sibling_index = match *child_pos {
+                    ChildPosition::Left => 1,
+                    ChildPosition::Right => 0,
+                };
+                Some(HashOutput::from(node.child_hashes[sibling_index]))
+            })
+            .collect_vec();
+        Self {
+            node_info,
+            path,
+            siblings,
+            children,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+/// Data structure containing the information about the paths in both the rows tree
+/// and the index tree for a node in a rows tree
+pub struct NodePath {
+    pub(crate) row_tree_path: TreePathInputs,
+    /// Info about the node of the index tree storing the rows tree containing the row
+    pub(crate) index_tree_path: TreePathInputs,
+}
+
+impl NodePath {
+    /// Instantiate a new instance of `NodePath` for a given proven row from the following input data:
+    /// - `row_path`: path from the node to the root of the rows tree storing the node
+    /// - `index_path` : path from the index tree node storing the rows tree containing the node, up to the
+    ///     root of the index tree
+    pub fn new(row_path: TreePathInputs, index_path: TreePathInputs) -> Self {
+        Self {
+            row_tree_path: row_path,
+            index_tree_path: index_path,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+/// Data structure containing the inputs necessary to prove a query for a row
+/// of the DB table.
+pub struct RowInput {
+    pub(crate) cells: RowCells,
+    pub(crate) path: NodePath,
+}
+
+impl RowInput {
+    /// Initialize `RowInput` from the set of cells of the given row and the path
+    /// in the tree of the node of the rows tree associated to the given row
+    pub fn new(cells: &RowCells, path: &NodePath) -> Self {
+        Self {
+            cells: cells.clone(),
+            path: path.clone(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum CircuitInput<
+    const NUM_CHUNKS: usize,
+    const NUM_ROWS: usize,
+    const ROW_TREE_MAX_DEPTH: usize,
+    const INDEX_TREE_MAX_DEPTH: usize,
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
     const MAX_NUM_RESULT_OPS: usize,
     const MAX_NUM_RESULTS: usize,
-> {
+> where
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
+{
+    RowChunkWithAggregation(
+        RowChunkProcessingCircuit<
+            NUM_ROWS,
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+            OutputAggCircuit<MAX_NUM_RESULTS>,
+        >,
+    ),
+    ChunkAggregation(ChunkAggregationInputs<NUM_CHUNKS, MAX_NUM_RESULTS>),
+    NonExistence(NonExistenceCircuit<INDEX_TREE_MAX_DEPTH, MAX_NUM_RESULTS>),
     /// Inputs for the universal query circuit
     UniversalCircuit(
         UniversalCircuitInput<
@@ -88,39 +173,172 @@ pub enum CircuitInput<
             MAX_NUM_RESULTS,
         >,
     ),
-    /// Inputs for circuits with 2 proven children and a proven embedded tree
-    TwoProvenChildNode(TwoProvenChildNodeInput),
-    /// Inputs for circuits proving a node with one proven child and a proven embedded tree
-    OneProvenChildNode(OneProvenChildNodeInput),
-    /// Inputs for circuits proving a node with only one proven subtree (either a proven child or the embedded tree)
-    SinglePath(SinglePathInput),
-    /// Inputs for circuits to prove non-existence of results for the current query
-    NonExistence(NonExistenceInput<MAX_NUM_RESULTS>),
 }
 
 impl<
+        const NUM_CHUNKS: usize,
+        const NUM_ROWS: usize,
+        const ROW_TREE_MAX_DEPTH: usize,
+        const INDEX_TREE_MAX_DEPTH: usize,
         const MAX_NUM_COLUMNS: usize,
         const MAX_NUM_PREDICATE_OPS: usize,
         const MAX_NUM_RESULT_OPS: usize,
         const MAX_NUM_RESULTS: usize,
-    > CircuitInput<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS>
+    >
+    CircuitInput<
+        NUM_CHUNKS,
+        NUM_ROWS,
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+    >
 where
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_RESULTS - 1]:,
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
 {
+    /// Construct the input necessary to prove a query over a chunk of rows provided as input.
+    /// It requires to provide at least 1 row; in case there are no rows to be proven, then
+    /// `Self::new_non_existence_input` should be used instead
+    pub fn new_row_chunks_input(
+        rows: &[RowInput],
+        predicate_operations: &[BasicOperation],
+        placeholders: &Placeholders,
+        query_bounds: &QueryBounds,
+        results: &ResultStructure,
+    ) -> Result<Self> {
+        ensure!(
+            !rows.is_empty(),
+            "there must be at least 1 row to be proven"
+        );
+        ensure!(
+            rows.len() <= NUM_ROWS,
+            format!(
+                "Found {} rows provided as input, maximum allowed is {NUM_ROWS}",
+                rows.len()
+            )
+        );
+        let column_ids = &rows[0].cells.column_ids();
+        ensure!(
+            rows.iter()
+                .all(|row| row.cells.column_ids().to_vec() == column_ids.to_vec()),
+            "Rows provided as input don't have the same column ids",
+        );
+        let row_inputs = rows
+            .iter()
+            .map(RowProcessingGadgetInputs::try_from)
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Self::RowChunkWithAggregation(
+            RowChunkProcessingCircuit::new(
+                row_inputs,
+                column_ids,
+                predicate_operations,
+                placeholders,
+                query_bounds,
+                results,
+            )?,
+        ))
+    }
+
+    /// Construct the input necessary to aggregate 2 or more row chunks already proven.
+    /// It requires at least 2 chunks to be aggregated
+    pub fn new_chunk_aggregation_input(chunks_proofs: &[Vec<u8>]) -> Result<Self> {
+        ensure!(
+            chunks_proofs.len() >= 2,
+            "At least 2 chunk proofs must be provided"
+        );
+        // deserialize `chunk_proofs`` and pad to NUM_CHUNKS proofs by replicating the last proof in `chunk_proofs`
+        let last_proof = chunks_proofs.last().unwrap();
+        let proofs = chunks_proofs
+            .iter()
+            .map(|p| ProofWithVK::deserialize(p))
+            .chain(repeat_with(|| ProofWithVK::deserialize(last_proof)))
+            .take(NUM_CHUNKS)
+            .collect::<Result<Vec<_>>>()?;
+
+        let num_proofs = chunks_proofs.len();
+
+        ensure!(
+            num_proofs <= NUM_CHUNKS,
+            format!("Found {num_proofs} proofs provided as input, maximum allowed is {NUM_CHUNKS}")
+        );
+
+        Ok(Self::ChunkAggregation(ChunkAggregationInputs {
+            chunk_proofs: proofs.try_into().unwrap(),
+            circuit: ChunkAggregationCircuit {
+                num_non_dummy_chunks: num_proofs,
+            },
+        }))
+    }
+
+    /// Construct the input to prove a query in case there are no rows with a primary index value
+    /// in the primary query range. The circuit employed to prove the non-existence of such a row
+    /// requires to provide a specific node of the index tree, as described in the docs
+    /// https://www.notion.so/lagrangelabs/Batching-Query-10628d1c65a880b1b151d4ac017fa445?pvs=4#10e28d1c65a880498f41cd1cad0c61c3
+    pub fn new_non_existence_input(
+        index_node_path: TreePathInputs,
+        column_ids: &ColumnIDs,
+        predicate_operations: &[BasicOperation],
+        results: &ResultStructure,
+        placeholders: &Placeholders,
+        query_bounds: &QueryBounds,
+    ) -> Result<Self> {
+        let QueryHashNonExistenceCircuits {
+            computational_hash,
+            placeholder_hash,
+        } = QueryHashNonExistenceCircuits::new::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >(
+            column_ids,
+            predicate_operations,
+            results,
+            placeholders,
+            query_bounds,
+            false,
+        )?;
+
+        let aggregation_operations = results
+            .aggregation_operations()
+            .into_iter()
+            .chain(repeat(
+                Identifiers::AggregationOperations(AggregationOperation::default()).to_field(),
+            ))
+            .take(MAX_NUM_RESULTS)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+
+        Ok(Self::NonExistence(NonExistenceCircuit::new(
+            &index_node_path,
+            column_ids.primary,
+            aggregation_operations,
+            computational_hash,
+            placeholder_hash,
+            query_bounds,
+        )?))
+    }
+
     pub const fn num_placeholders_ids() -> usize {
         2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)
     }
     /// Initialize input for universal circuit to prove the execution of a query over a
     /// single row, from the following inputs:
-    /// - `column_cells`: set of columns (including primary and secondary indexes) of the row being proven
-    /// - `predicate_operations`: Set of operations employed to compute the filtering predicate of the query for the
+    ///     - `column_cells`: set of columns (including primary and secondary indexes) of the row being proven
+    ///     - `predicate_operations`: Set of operations employed to compute the filtering predicate of the query for the
     ///     row being proven
-    /// - `results`: Data structure specifying how the results for each row are computed according to the query
-    /// - `placeholders`: Set of placeholders employed in the query
-    /// - `is_leaf`: Flag specifying whether the row being proven is stored in a leaf node of the rows tree or not
-    /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
+    ///     - `results`: Data structure specifying how the results for each row are computed according to the query
+    ///     - `placeholders`: Set of placeholders employed in the query
+    ///     - `is_leaf`: Flag specifying whether the row being proven is stored in a leaf node of the rows tree or not
+    ///     - `query_bounds`: bounds on primary and secondary indexes specified in the query
     /// Note that the following assumption is expected on the structure of the inputs:
     /// The output of the last operation in `predicate_operations` is taken as the filtering predicate evaluation;
     /// this is an assumption exploited in the circuit for efficiency, and it is a simple assumption to be required for
@@ -135,14 +353,9 @@ where
     ) -> Result<Self> {
         Ok(CircuitInput::UniversalCircuit(
             match results.output_variant {
-                Output::Aggregation => UniversalCircuitInput::new_query_with_agg(
-                    column_cells,
-                    predicate_operations,
-                    placeholders,
-                    is_leaf,
-                    query_bounds,
-                    results,
-                )?,
+                Output::Aggregation => bail!(
+                    "Universal query circuit should only be used for queries with no aggregation"
+                ),
                 Output::NoAggregation => UniversalCircuitInput::new_query_no_agg(
                     column_cells,
                     predicate_operations,
@@ -155,145 +368,6 @@ where
         ))
     }
 
-    /// Initialize input to prove a full node from the following inputs:
-    /// - `left_child_proof`: proof for the left child of the node being proven
-    /// - `right_child_proof`: proof for the right child of the node being proven
-    /// - `embedded_tree_proof`: proof for the embedded tree stored in the full node: can be either the proof for a single
-    ///     row (if proving a rows tree node) of the proof for the root node of a rows tree (if proving an index tree node)
-    /// - `is_rows_tree_node`: flag specifying whether the full node belongs to the rows tree or to the index tree
-    /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
-    pub fn new_full_node(
-        left_child_proof: Vec<u8>,
-        right_child_proof: Vec<u8>,
-        embedded_tree_proof: Vec<u8>,
-        is_rows_tree_node: bool,
-        query_bounds: &QueryBounds,
-    ) -> Result<Self> {
-        Ok(CircuitInput::TwoProvenChildNode(TwoProvenChildNodeInput {
-            left_child_proof: ProofWithVK::deserialize(&left_child_proof)?,
-            right_child_proof: ProofWithVK::deserialize(&right_child_proof)?,
-            embedded_tree_proof: ProofWithVK::deserialize(&embedded_tree_proof)?,
-            common: CommonInputs::new(is_rows_tree_node, query_bounds),
-        }))
-    }
-
-    /// Initialize input to prove a partial node from the following inputs:
-    /// - `proven_child_proof`: Proof for the child being a proven node
-    /// - `embedded_tree_proof`: Proof for the embedded tree stored in the partial node: can be either the proof
-    ///     for a single row (if proving a rows tree node) of the proof for the root node of a rows
-    ///     tree (if proving an index tree node)
-    /// - `unproven_child`: Data about the child not being a proven node; if the node has only one child,
-    ///     then, this parameter must be `None`
-    /// - `proven_child_position`: Enum specifying whether the proven child is the left or right child
-    ///     of the partial node being proven
-    /// - `is_rows_tree_node`: flag specifying whether the full node belongs to the rows tree or to the index tree
-    /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
-    pub fn new_partial_node(
-        proven_child_proof: Vec<u8>,
-        embedded_tree_proof: Vec<u8>,
-        unproven_child: Option<NodeInfo>,
-        proven_child_position: ChildPosition,
-        is_rows_tree_node: bool,
-        query_bounds: &QueryBounds,
-    ) -> Result<Self> {
-        Ok(CircuitInput::OneProvenChildNode(OneProvenChildNodeInput {
-            unproven_child,
-            proven_child_proof: ChildProof {
-                proof: ProofWithVK::deserialize(&proven_child_proof)?,
-                child_position: proven_child_position,
-            },
-            embedded_tree_proof: ProofWithVK::deserialize(&embedded_tree_proof)?,
-            common: CommonInputs::new(is_rows_tree_node, query_bounds),
-        }))
-    }
-    /// Initialize input to prove a single path node from the following inputs:
-    /// - `subtree_proof`: Proof of either a child node or of the embedded tree stored in the current node
-    /// - `left_child`: Data about the left child of the current node, if any; must be `None` if the node has
-    ///     no left child
-    /// - `right_child`: Data about the right child of the current node, if any; must be `None` if the node has
-    ///     no right child
-    /// - `node_info`: Data about the current node being proven
-    /// - `is_rows_tree_node`: flag specifying whether the full node belongs to the rows tree or to the index tree
-    /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
-    pub fn new_single_path(
-        subtree_proof: SubProof,
-        left_child: Option<NodeInfo>,
-        right_child: Option<NodeInfo>,
-        node_info: NodeInfo,
-        is_rows_tree_node: bool,
-        query_bounds: &QueryBounds,
-    ) -> Result<Self> {
-        Ok(CircuitInput::SinglePath(SinglePathInput {
-            left_child,
-            right_child,
-            node_info,
-            subtree_proof,
-            common: CommonInputs::new(is_rows_tree_node, query_bounds),
-        }))
-    }
-    /// Initialize input to prove a node storing a value of the primary or secondary index which
-    /// is outside of the query bounds, from the following inputs:
-    /// - `node_info`: Data about the node being proven
-    /// - `left_child_info`: Data aboout the left child of the node being proven; must be `None` if
-    ///     the node being proven has no left child
-    /// - `right_child_info`: Data aboout the right child of the node being proven; must be `None` if
-    ///     the node being proven has no right child
-    /// - `primary_index_value`: Value of the primary index associated to the current node
-    /// - `index_ids`: Identifiers of the primary and secondary index columns
-    /// - `aggregation_ops`: Set of aggregation operations employed to aggregate the results of the query
-    /// - `query_hashes`: Computational hash and placeholder hash associated to the query; can be computed with the `new`
-    ///     method of `QueryHashNonExistenceCircuits` data structure
-    /// - `is_rows_tree_node`: flag specifying whether the full node belongs to the rows tree or to the index tree
-    /// - `query_bounds`: bounds on primary and secondary indexes specified in the query
-    #[allow(clippy::too_many_arguments)] // doesn't make sense to aggregate arguments
-    pub fn new_non_existence_input(
-        node_info: NodeInfo,
-        left_child_info: Option<NodeInfo>,
-        right_child_info: Option<NodeInfo>,
-        primary_index_value: U256,
-        index_ids: &[u64; 2],
-        aggregation_ops: &[AggregationOperation],
-        query_hashes: QueryHashNonExistenceCircuits,
-        is_rows_tree_node: bool,
-        query_bounds: &QueryBounds,
-        placeholders: &Placeholders,
-    ) -> Result<Self> {
-        let aggregation_ops = aggregation_ops
-            .iter()
-            .map(|op| op.to_field())
-            .chain(repeat(AggregationOperation::default().to_field()))
-            .take(MAX_NUM_RESULTS)
-            .collect_vec();
-        let min_query = if is_rows_tree_node {
-            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.min_query_secondary())
-        } else {
-            QueryBound::new_primary_index_bound(placeholders, true)
-        }?;
-        let max_query = if is_rows_tree_node {
-            QueryBound::new_secondary_index_bound(placeholders, &query_bounds.max_query_secondary())
-        } else {
-            QueryBound::new_primary_index_bound(placeholders, false)
-        }?;
-        Ok(CircuitInput::NonExistence(NonExistenceInput {
-            node_info,
-            left_child_info,
-            right_child_info,
-            primary_index_value,
-            index_ids: index_ids
-                .iter()
-                .map(|id| id.to_field())
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-            computational_hash: query_hashes.computational_hash(),
-            placeholder_hash: query_hashes.placeholder_hash(),
-            aggregation_ops: aggregation_ops.try_into().unwrap(),
-            is_rows_tree_node,
-            min_query,
-            max_query,
-        }))
-    }
-
     /// This method returns the ids of the placeholders employed to compute the placeholder hash,
     /// in the same order, so that those ids can be provided as input to other circuits that need
     /// to recompute this hash
@@ -302,46 +376,15 @@ where
         results: &ResultStructure,
         placeholders: &Placeholders,
         query_bounds: &QueryBounds,
-    ) -> Result<[PlaceholderId; 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]> {
-        let row_cells = &RowCells::default();
-        Ok(match results.output_variant {
-            Output::Aggregation => {
-                let circuit = UniversalQueryCircuitInputs::<
-                    MAX_NUM_COLUMNS,
-                    MAX_NUM_PREDICATE_OPS,
-                    MAX_NUM_RESULT_OPS,
-                    MAX_NUM_RESULTS,
-                    AggOutputCircuit<MAX_NUM_RESULTS>,
-                >::new(
-                    row_cells,
-                    predicate_operations,
-                    placeholders,
-                    false, // doesn't matter for placeholder hash computation
-                    query_bounds,
-                    results,
-                )?;
-                circuit.ids_for_placeholder_hash()
-            }
-            Output::NoAggregation => {
-                let circuit = UniversalQueryCircuitInputs::<
-                    MAX_NUM_COLUMNS,
-                    MAX_NUM_PREDICATE_OPS,
-                    MAX_NUM_RESULT_OPS,
-                    MAX_NUM_RESULTS,
-                    NoAggOutputCircuit<MAX_NUM_RESULTS>,
-                >::new(
-                    row_cells,
-                    predicate_operations,
-                    placeholders,
-                    false, // doesn't matter for placeholder hash computation
-                    query_bounds,
-                    results,
-                )?;
-                circuit.ids_for_placeholder_hash()
-            }
-        }
-        .try_into()
-        .unwrap())
+    ) -> Result<[PlaceholderIdentifier; 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]> {
+        UniversalCircuitInput::<
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
+            MAX_NUM_RESULTS,
+        >::ids_for_placeholder_hash(
+            predicate_operations, results, placeholders, query_bounds
+        )
     }
 
     /// Compute the `placeholder_hash` associated to a query
@@ -372,1386 +415,218 @@ where
         )
     }
 }
-#[derive(Serialize, Deserialize)]
-pub struct Parameters<
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct Parameters<
+    const NUM_CHUNKS: usize,
+    const NUM_ROWS: usize,
+    const ROW_TREE_MAX_DEPTH: usize,
+    const INDEX_TREE_MAX_DEPTH: usize,
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
     const MAX_NUM_RESULT_OPS: usize,
     const MAX_NUM_RESULTS: usize,
 > where
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_RESULTS - 1]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
 {
-    circuit_with_agg: CircuitWithUniversalVerifier<
+    row_chunk_agg_circuit: CircuitWithUniversalVerifier<
         F,
         C,
         D,
         0,
-        UniversalQueryCircuitWires<
+        RowChunkProcessingWires<
+            NUM_ROWS,
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
-            AggOutputCircuit<MAX_NUM_RESULTS>,
+            OutputAggCircuit<MAX_NUM_RESULTS>,
         >,
     >,
-    circuit_no_agg: CircuitWithUniversalVerifier<
+    //ToDo: add row_chunk_circuit for queries without aggregation, once we integrate results tree
+    aggregation_circuit: CircuitWithUniversalVerifier<
+        F,
+        C,
+        D,
+        NUM_CHUNKS,
+        ChunkAggregationWires<NUM_CHUNKS, MAX_NUM_RESULTS>,
+    >,
+    non_existence_circuit: CircuitWithUniversalVerifier<
         F,
         C,
         D,
         0,
-        UniversalQueryCircuitWires<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-            NoAggOutputCircuit<MAX_NUM_RESULTS>,
-        >,
+        NonExistenceWires<INDEX_TREE_MAX_DEPTH, MAX_NUM_RESULTS>,
     >,
-    full_node_two_children: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        NUM_PROOFS_FN2,
-        FullNodeWithTwoChildrenWires<MAX_NUM_RESULTS>,
-    >,
-    full_node_one_child: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        NUM_PROOFS_FN1,
-        FullNodeWithOneChildWires<MAX_NUM_RESULTS>,
-    >,
-    full_node_leaf: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        NUM_PROOFS_LEAF,
-        FullNodeIndexLeafWires<MAX_NUM_RESULTS>,
-    >,
-    partial_node:
-        CircuitWithUniversalVerifier<F, C, D, NUM_PROOFS_PN, PartialNodeWires<MAX_NUM_RESULTS>>,
-    single_path_proven_child: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        NUM_PROOFS_CHILD,
-        ChildProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
-    >,
-    single_path_embedded_tree: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        NUM_PROOFS_EMBEDDED,
-        EmbeddedTreeProvenSinglePathNodeWires<MAX_NUM_RESULTS>,
-    >,
-    non_existence_intermediate: CircuitWithUniversalVerifier<
-        F,
-        C,
-        D,
-        NUM_PROOFS_NE_INTER,
-        NonExistenceInterNodeWires<MAX_NUM_RESULTS>,
+    universal_circuit: UniversalQueryCircuitParams<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+        OutputNoAggCircuit<MAX_NUM_RESULTS>,
     >,
     circuit_set: RecursiveCircuits<F, C, D>,
 }
 
-const QUERY_CIRCUIT_SET_SIZE: usize = 10;
 impl<
+        const NUM_CHUNKS: usize,
+        const NUM_ROWS: usize,
+        const ROW_TREE_MAX_DEPTH: usize,
+        const INDEX_TREE_MAX_DEPTH: usize,
         const MAX_NUM_COLUMNS: usize,
         const MAX_NUM_PREDICATE_OPS: usize,
         const MAX_NUM_RESULT_OPS: usize,
         const MAX_NUM_RESULTS: usize,
-    > Parameters<MAX_NUM_COLUMNS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, MAX_NUM_RESULTS>
+    >
+    Parameters<
+        NUM_CHUNKS,
+        NUM_ROWS,
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+    >
 where
-    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
     [(); MAX_NUM_RESULTS - 1]:,
-    [(); PI_LEN::<MAX_NUM_RESULTS>]:,
+    [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
+    [(); pi_len::<MAX_NUM_RESULTS>()]:,
 {
-    /// Build `Parameters` for query circuits
-    pub fn build() -> Self {
+    const CIRCUIT_SET_SIZE: usize = 3;
+
+    pub(crate) fn build() -> Self {
         let builder =
-            CircuitWithUniversalVerifierBuilder::<F, D, { PI_LEN::<MAX_NUM_RESULTS> }>::new::<C>(
+            CircuitWithUniversalVerifierBuilder::<F, D, { pi_len::<MAX_NUM_RESULTS>() }>::new::<C>(
                 default_config(),
-                QUERY_CIRCUIT_SET_SIZE,
+                Self::CIRCUIT_SET_SIZE,
             );
-        info!("Building the query circuits parameters...");
-        info!("Building universal circuits...");
-        let circuit_with_agg = builder.build_circuit(());
-        let circuit_no_agg = builder.build_circuit(());
-        info!("Building aggregation circuits..");
-        let full_node_two_children = builder.build_circuit(());
-        let full_node_one_child = builder.build_circuit(());
-        let full_node_leaf = builder.build_circuit(());
-        let partial_node = builder.build_circuit(());
-        let single_path_proven_child = builder.build_circuit(());
-        let single_path_embedded_tree = builder.build_circuit(());
-        info!("Building non-existence circuits..");
-        let non_existence_intermediate = builder.build_circuit(());
+        let row_chunk_agg_circuit = builder.build_circuit(());
+        let aggregation_circuit = builder.build_circuit(());
+        let non_existence_circuit = builder.build_circuit(());
 
         let circuits = vec![
-            prepare_recursive_circuit_for_circuit_set(&circuit_with_agg),
-            prepare_recursive_circuit_for_circuit_set(&circuit_no_agg),
-            prepare_recursive_circuit_for_circuit_set(&full_node_two_children),
-            prepare_recursive_circuit_for_circuit_set(&full_node_one_child),
-            prepare_recursive_circuit_for_circuit_set(&full_node_leaf),
-            prepare_recursive_circuit_for_circuit_set(&partial_node),
-            prepare_recursive_circuit_for_circuit_set(&single_path_proven_child),
-            prepare_recursive_circuit_for_circuit_set(&single_path_embedded_tree),
-            prepare_recursive_circuit_for_circuit_set(&non_existence_intermediate),
+            prepare_recursive_circuit_for_circuit_set(&row_chunk_agg_circuit),
+            prepare_recursive_circuit_for_circuit_set(&aggregation_circuit),
+            prepare_recursive_circuit_for_circuit_set(&non_existence_circuit),
         ];
-
         let circuit_set = RecursiveCircuits::new(circuits);
 
+        let universal_circuit = UniversalQueryCircuitParams::build(default_config());
+
         Self {
-            circuit_with_agg,
-            circuit_no_agg,
+            row_chunk_agg_circuit,
+            aggregation_circuit,
+            non_existence_circuit,
+            universal_circuit,
             circuit_set,
-            full_node_two_children,
-            full_node_one_child,
-            full_node_leaf,
-            partial_node,
-            single_path_proven_child,
-            single_path_embedded_tree,
-            non_existence_intermediate,
         }
     }
 
-    pub fn generate_proof(
+    pub(crate) fn generate_proof(
         &self,
         input: CircuitInput<
+            NUM_CHUNKS,
+            NUM_ROWS,
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
             MAX_NUM_RESULTS,
         >,
     ) -> Result<Vec<u8>> {
-        let proof = ProofWithVK::from(match input {
-            CircuitInput::UniversalCircuit(input) => match input {
-                UniversalCircuitInput::QueryWithAgg(input) => (
-                    self.circuit_set
-                        .generate_proof(&self.circuit_with_agg, [], [], input)?,
-                    self.circuit_with_agg.circuit_data().verifier_only.clone(),
-                ),
-                UniversalCircuitInput::QueryNoAgg(input) => (
-                    self.circuit_set
-                        .generate_proof(&self.circuit_no_agg, [], [], input)?,
-                    self.circuit_no_agg.circuit_data().verifier_only.clone(),
-                ),
-            },
-            CircuitInput::TwoProvenChildNode(TwoProvenChildNodeInput {
-                left_child_proof,
-                right_child_proof,
-                embedded_tree_proof,
-                common,
-            }) => {
-                let (left_proof, left_vk) = left_child_proof.into();
-                let (right_proof, right_vk) = right_child_proof.into();
-                let (embedded_proof, embedded_vk) = embedded_tree_proof.into();
-                let input = FullNodeWithTwoChildrenCircuit {
-                    is_rows_tree_node: common.is_rows_tree_node,
-                    min_query: common.min_query,
-                    max_query: common.max_query,
-                };
-                (
+        match input {
+            CircuitInput::RowChunkWithAggregation(row_chunk_processing_circuit) => {
+                ProofWithVK::serialize(
+                    &(
+                        self.circuit_set.generate_proof(
+                            &self.row_chunk_agg_circuit,
+                            [],
+                            [],
+                            row_chunk_processing_circuit,
+                        )?,
+                        self.row_chunk_agg_circuit
+                            .circuit_data()
+                            .verifier_only
+                            .clone(),
+                    )
+                        .into(),
+                )
+            }
+            CircuitInput::ChunkAggregation(chunk_aggregation_inputs) => {
+                let ChunkAggregationInputs {
+                    chunk_proofs,
+                    circuit,
+                } = chunk_aggregation_inputs;
+                let input_vd = chunk_proofs
+                    .iter()
+                    .map(|p| p.verifier_data())
+                    .cloned()
+                    .collect_vec();
+                let input_proofs = chunk_proofs.map(|p| p.proof);
+                ProofWithVK::serialize(
+                    &(
+                        self.circuit_set.generate_proof(
+                            &self.aggregation_circuit,
+                            input_proofs,
+                            input_vd.iter().collect_vec().try_into().unwrap(),
+                            circuit,
+                        )?,
+                        self.aggregation_circuit
+                            .circuit_data()
+                            .verifier_only
+                            .clone(),
+                    )
+                        .into(),
+                )
+            }
+            CircuitInput::NonExistence(non_existence_circuit) => ProofWithVK::serialize(
+                &(
                     self.circuit_set.generate_proof(
-                        &self.full_node_two_children,
-                        [embedded_proof, left_proof, right_proof],
-                        [&embedded_vk, &left_vk, &right_vk],
-                        input,
+                        &self.non_existence_circuit,
+                        [],
+                        [],
+                        non_existence_circuit,
                     )?,
-                    self.full_node_two_children
+                    self.non_existence_circuit
                         .circuit_data()
                         .verifier_only
                         .clone(),
                 )
-            }
-            CircuitInput::OneProvenChildNode(OneProvenChildNodeInput {
-                unproven_child,
-                proven_child_proof,
-                embedded_tree_proof,
-                common,
-            }) => {
-                let ChildProof {
-                    proof,
-                    child_position,
-                } = proven_child_proof;
-                let (child_proof, child_vk) = proof.into();
-                let (embedded_proof, embedded_vk) = embedded_tree_proof.into();
-                match unproven_child {
-                    Some(child_node) => {
-                        // the node has 2 children, so we use the partial node circuit
-                        let input = PartialNodeCircuit {
-                            is_rows_tree_node: common.is_rows_tree_node,
-                            is_left_child: child_position.to_flag(),
-                            sibling_tree_hash: child_node.embedded_tree_hash,
-                            sibling_child_hashes: child_node.child_hashes,
-                            sibling_value: child_node.value,
-                            sibling_min: child_node.min,
-                            sibling_max: child_node.max,
-                            min_query: common.min_query,
-                            max_query: common.max_query,
-                        };
-                        (
-                            self.circuit_set.generate_proof(
-                                &self.partial_node,
-                                [embedded_proof, child_proof],
-                                [&embedded_vk, &child_vk],
-                                input,
-                            )?,
-                            self.partial_node.get_verifier_data().clone(),
-                        )
-                    }
-                    None => {
-                        // the node has 1 child, so use the circuit for full node with 1 child
-                        let input = FullNodeWithOneChildCircuit {
-                            is_rows_tree_node: common.is_rows_tree_node,
-                            is_left_child: child_position.to_flag(),
-                            min_query: common.min_query,
-                            max_query: common.max_query,
-                        };
-                        (
-                            self.circuit_set.generate_proof(
-                                &self.full_node_one_child,
-                                [embedded_proof, child_proof],
-                                [&embedded_vk, &child_vk],
-                                input,
-                            )?,
-                            self.full_node_one_child.get_verifier_data().clone(),
-                        )
-                    }
+                    .into(),
+            ),
+            CircuitInput::UniversalCircuit(universal_circuit_input) => {
+                if let UniversalCircuitInput::QueryNoAgg(input) = universal_circuit_input {
+                    serialize_proof(&self.universal_circuit.generate_proof(&input)?)
+                } else {
+                    unreachable!("Universal circuit should only be used for queries with no aggregation operations")
                 }
             }
-            CircuitInput::SinglePath(SinglePathInput {
-                left_child,
-                right_child,
-                node_info,
-                subtree_proof,
-                common,
-            }) => {
-                let left_child_exists = left_child.is_some();
-                let right_child_exists = right_child.is_some();
-                let left_child_data = left_child.unwrap_or_default();
-                let right_child_data = right_child.unwrap_or_default();
-
-                match subtree_proof {
-                    SubProof::Embedded(input_proof) => {
-                        let (proof, vk) = input_proof.into();
-                        if !(left_child_exists || right_child_exists) {
-                            // leaf node, so call full node circuit for leaf node
-                            ensure!(!common.is_rows_tree_node, "providing single-path input for a rows tree node leaf, call universal circuit instead");
-                            let input = FullNodeIndexLeafCircuit {
-                                min_query: common.min_query,
-                                max_query: common.max_query,
-                            };
-                            (
-                                self.circuit_set.generate_proof(
-                                    &self.full_node_leaf,
-                                    [proof],
-                                    [&vk],
-                                    input,
-                                )?,
-                                self.full_node_leaf.get_verifier_data().clone(),
-                            )
-                        } else {
-                            // the input proof refers to the embedded tree stored in the node
-                            let input = EmbeddedTreeProvenSinglePathNodeCircuit {
-                                left_child_min: left_child_data.min,
-                                left_child_max: left_child_data.max,
-                                left_child_value: left_child_data.value,
-                                left_tree_hash: left_child_data.embedded_tree_hash,
-                                left_grand_children: left_child_data.child_hashes,
-                                right_child_min: right_child_data.min,
-                                right_child_max: right_child_data.max,
-                                right_child_value: right_child_data.value,
-                                right_tree_hash: right_child_data.embedded_tree_hash,
-                                right_grand_children: right_child_data.child_hashes,
-                                left_child_exists,
-                                right_child_exists,
-                                is_rows_tree_node: common.is_rows_tree_node,
-                                min_query: common.min_query,
-                                max_query: common.max_query,
-                            };
-                            (
-                                self.circuit_set.generate_proof(
-                                    &self.single_path_embedded_tree,
-                                    [proof],
-                                    [&vk],
-                                    input,
-                                )?,
-                                self.single_path_embedded_tree.get_verifier_data().clone(),
-                            )
-                        }
-                    }
-                    SubProof::Child(ChildProof {
-                        proof,
-                        child_position,
-                    }) => {
-                        // the input proof refers to a child of the node
-                        let (proof, vk) = proof.into();
-                        let is_left_child = child_position.to_flag();
-                        let input = ChildProvenSinglePathNodeCircuit {
-                            value: node_info.value,
-                            subtree_hash: node_info.embedded_tree_hash,
-                            sibling_hash: if is_left_child {
-                                node_info.child_hashes[1] // set the hash of the right child, since proven child is left
-                            } else {
-                                node_info.child_hashes[0] // set the hash of the left child, since proven child is right
-                            },
-                            is_left_child,
-                            unproven_min: node_info.min,
-                            unproven_max: node_info.max,
-                            is_rows_tree_node: common.is_rows_tree_node,
-                        };
-                        (
-                            self.circuit_set.generate_proof(
-                                &self.single_path_proven_child,
-                                [proof],
-                                [&vk],
-                                input,
-                            )?,
-                            self.single_path_proven_child.get_verifier_data().clone(),
-                        )
-                    }
-                }
-            }
-            CircuitInput::NonExistence(NonExistenceInput {
-                node_info,
-                left_child_info,
-                right_child_info,
-                primary_index_value,
-                index_ids,
-                computational_hash,
-                placeholder_hash,
-                aggregation_ops,
-                is_rows_tree_node,
-                min_query,
-                max_query,
-            }) => {
-                // intermediate node
-                let left_child_exists = left_child_info.is_some();
-                let right_child_exists = right_child_info.is_some();
-                let left_child_data = left_child_info.unwrap_or_default();
-                let right_child_data = right_child_info.unwrap_or_default();
-                let input = NonExistenceInterNodeCircuit {
-                    is_rows_tree_node,
-                    left_child_exists,
-                    right_child_exists,
-                    min_query,
-                    max_query,
-                    value: node_info.value,
-                    index_value: primary_index_value,
-                    left_child_value: left_child_data.value,
-                    left_child_min: left_child_data.min,
-                    left_child_max: left_child_data.max,
-                    right_child_value: right_child_data.value,
-                    right_child_min: right_child_data.min,
-                    right_child_max: right_child_data.max,
-                    index_ids,
-                    ops: aggregation_ops,
-                    subtree_hash: node_info.embedded_tree_hash,
-                    computational_hash,
-                    placeholder_hash,
-                    left_tree_hash: left_child_data.embedded_tree_hash,
-                    left_grand_children: left_child_data.child_hashes,
-                    right_tree_hash: right_child_data.embedded_tree_hash,
-                    right_grand_children: right_child_data.child_hashes,
-                };
-                (
-                    self.circuit_set.generate_proof(
-                        &self.non_existence_intermediate,
-                        [],
-                        [],
-                        input,
-                    )?,
-                    self.non_existence_intermediate.get_verifier_data().clone(),
-                )
-            }
-        });
-
-        proof.serialize()
+        }
     }
 
     pub(crate) fn get_circuit_set(&self) -> &RecursiveCircuits<F, C, D> {
         &self.circuit_set
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use std::{cmp::Ordering, iter::once};
-
-    use alloy::primitives::U256;
-    use itertools::Itertools;
-    use mp2_common::{
-        proof::ProofWithVK,
-        types::HashOutput,
-        utils::{Fieldable, ToFields},
-        F,
-    };
-    use mp2_test::utils::{gen_random_field_hash, gen_random_u256};
-    use plonky2::{
-        field::types::{PrimeField64, Sample},
-        hash::{hash_types::HashOut, hashing::hash_n_to_hash_no_pad},
-        plonk::config::GenericHashOut,
-    };
-    use rand::{thread_rng, Rng};
-
-    use crate::query::{
-        aggregation::{
-            ChildPosition, NodeInfo, QueryBoundSource, QueryBounds, QueryHashNonExistenceCircuits,
-            SubProof,
-        },
-        api::{CircuitInput, Parameters},
-        computational_hash_ids::{
-            AggregationOperation, ColumnIDs, HashPermutation, Operation, PlaceholderIdentifier,
-        },
-        public_inputs::PublicInputs,
-        universal_circuit::universal_circuit_inputs::{
-            BasicOperation, ColumnCell, InputOperand, OutputItem, Placeholders, ResultStructure,
-            RowCells,
-        },
-    };
-
-    impl NodeInfo {
-        pub(crate) fn compute_node_hash(&self, index_id: F) -> HashOut<F> {
-            hash_n_to_hash_no_pad::<F, HashPermutation>(
-                &self
-                    .child_hashes
-                    .into_iter()
-                    .flat_map(|h| h.to_vec())
-                    .chain(self.min.to_fields())
-                    .chain(self.max.to_fields())
-                    .chain(once(index_id))
-                    .chain(self.value.to_fields())
-                    .chain(self.embedded_tree_hash.to_vec())
-                    .collect_vec(),
-            )
-        }
-    }
-
-    #[test]
-    fn test_api() {
-        // Simple query for testing SELECT SUM(C1 + C3) FROM T WHERE C3 >= 5 AND C1 > 56 AND C1 <= 67 AND C2 > 34 AND C2 <= $1
-        let rng = &mut thread_rng();
-        const NUM_COLUMNS: usize = 3;
-        const MAX_NUM_COLUMNS: usize = 20;
-        const MAX_NUM_PREDICATE_OPS: usize = 20;
-        const MAX_NUM_RESULT_OPS: usize = 20;
-        const MAX_NUM_RESULTS: usize = 10;
-        let column_ids = (0..NUM_COLUMNS)
-            .map(|_| {
-                let id: u32 = rng.gen();
-                id as u64
-            })
-            .collect_vec();
-        let column_ids = ColumnIDs::new(
-            F::rand().to_canonical_u64(),
-            F::rand().to_canonical_u64(),
-            (0..NUM_COLUMNS - 2)
-                .map(|_| F::rand().to_canonical_u64())
-                .collect_vec(),
-        );
-
-        let primary_index_id: F = column_ids.primary;
-        let secondary_index_id: F = column_ids.secondary;
-
-        let min_query_primary = 57;
-        let max_query_primary = 67;
-        let min_query_secondary = 35;
-        let max_query_secondary = 78;
-        // define Enum to specify whether to generate index values in range or not
-        enum IndexValueBounds {
-            InRange, // generate index value within query bounds
-            Smaller, // generate index value smaller than minimum query bound
-            Bigger,  // generate inde value bigger than maximum query bound
-        }
-        // generate a new row with `NUM_COLUMNS` where value of secondary index is within the query bounds
-        let mut gen_row = |primary_index: usize, secondary_index: IndexValueBounds| {
-            (0..NUM_COLUMNS)
-                .map(|i| match i {
-                    0 => U256::from(primary_index),
-                    1 => match secondary_index {
-                        IndexValueBounds::InRange => {
-                            U256::from(rng.gen_range(min_query_secondary..max_query_secondary))
-                        }
-                        IndexValueBounds::Smaller => {
-                            U256::from(rng.gen_range(0..min_query_secondary))
-                        }
-                        IndexValueBounds::Bigger => {
-                            U256::from(rng.gen_range(0..min_query_secondary))
-                        }
-                    },
-                    _ => gen_random_u256(rng),
-                })
-                .collect_vec()
-        };
-
-        let predicate_operations = vec![BasicOperation {
-            first_operand: InputOperand::Column(2),
-            second_operand: Some(InputOperand::Constant(U256::from(5))),
-            op: Operation::GreaterThanOrEqOp,
-        }];
-        let result_operations = vec![BasicOperation {
-            first_operand: InputOperand::Column(0),
-            second_operand: Some(InputOperand::Column(2)),
-            op: Operation::AddOp,
-        }];
-        let aggregation_op_ids = vec![AggregationOperation::SumOp.to_id() as u64];
-        let output_items = vec![OutputItem::ComputedValue(0)];
-        let results = ResultStructure::new_for_query_with_aggregation(
-            result_operations,
-            output_items,
-            aggregation_op_ids.clone(),
-        );
-        let first_placeholder_id = PlaceholderIdentifier::Generic(0);
-        let placeholders = Placeholders::from((
-            vec![(first_placeholder_id, U256::from(max_query_secondary))],
-            U256::from(min_query_primary),
-            U256::from(max_query_primary),
-        ));
-        let query_bounds = QueryBounds::new(
-            &placeholders,
-            Some(QueryBoundSource::Constant(U256::from(min_query_secondary))),
-            Some(QueryBoundSource::Placeholder(first_placeholder_id)),
-        )
-        .unwrap();
-
-        let mut params = Parameters::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-        >::build();
-
-        // Test serialization of params
-        let serialized_params = bincode::serialize(&params).unwrap();
-        // use deserialized params to generate proofs
-        params = bincode::deserialize(&serialized_params).unwrap();
-
-        type Input = CircuitInput<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-        >;
-
-        // test an index tree with all proven nodes: we assume to have index tree built as follows
-        // (node identified according to their sorting order):
-        //              4
-        //          0
-        //              2
-        //          1       3
-
-        // build a vector of 5 rows with values of index columns within the query bounds. The entries in the
-        // vector are sorted according to primary index value
-        let column_values = (min_query_primary..max_query_primary)
-            .step_by((max_query_primary - min_query_primary) / 5)
-            .take(5)
-            .map(|index| gen_row(index, IndexValueBounds::InRange))
-            .collect_vec();
-
-        // generate proof with universal for a row with the `values` provided as input.
-        // The flag `is_leaf` specifies whether the row is stored in a leaf node of a rows tree
-        // or not
-        let gen_universal_circuit_proofs = |values: &[U256], is_leaf: bool| {
-            let column_cells = values
-                .iter()
-                .zip(column_ids.to_vec().iter())
-                .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
-                .collect_vec();
-            let row_cells = RowCells::new(
-                column_cells[0].clone(),
-                column_cells[1].clone(),
-                column_cells[2..].to_vec(),
-            );
-            let input = Input::new_universal_circuit(
-                &row_cells,
-                &predicate_operations,
-                &results,
-                &placeholders,
-                is_leaf,
-                &query_bounds,
-            )
-            .unwrap();
-            params.generate_proof(input).unwrap()
-        };
-
-        // generate base proofs with universal circuits for each node
-        let base_proofs = column_values
-            .iter()
-            .map(|values| gen_universal_circuit_proofs(values, true))
-            .collect_vec();
-
-        // closure to extract the tree hash from a proof
-        let get_tree_hash_from_proof = |proof: &[u8]| {
-            let (proof, _) = ProofWithVK::deserialize(proof).unwrap().into();
-            let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&proof.public_inputs);
-            pis.tree_hash()
-        };
-
-        // closure to generate the proof for a leaf node of the index tree, corresponding to the node_index-th row
-        let gen_leaf_proof_for_node = |node_index: usize| {
-            let embedded_tree_hash = get_tree_hash_from_proof(&base_proofs[node_index]);
-            let node_info = NodeInfo::new(
-                &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
-                None,
-                None,
-                column_values[node_index][0], // primary index value for this row
-                column_values[node_index][0],
-                column_values[node_index][0],
-            );
-            let tree_hash = node_info.compute_node_hash(primary_index_id);
-            let subtree_proof =
-                SubProof::new_embedded_tree_proof(base_proofs[node_index].clone()).unwrap();
-            let input = Input::new_single_path(
-                subtree_proof,
-                None,
-                None,
-                node_info,
-                false, // index tree node
-                &query_bounds,
-            )
-            .unwrap();
-            let proof = params.generate_proof(input).unwrap();
-            // check tree hash is correct
-            assert_eq!(tree_hash, get_tree_hash_from_proof(&proof));
-            proof
-        };
-
-        // generate proof for node 1 of index tree above
-        let leaf_proof_left = gen_leaf_proof_for_node(1);
-
-        // generate proof for node 3 of index tree above
-        let leaf_proof_right = gen_leaf_proof_for_node(3);
-
-        // generate proof for node 2 of index tree above
-        let left_child_hash = get_tree_hash_from_proof(&leaf_proof_left);
-        let right_child_hash = get_tree_hash_from_proof(&leaf_proof_right);
-        let input = Input::new_full_node(
-            leaf_proof_left,
-            leaf_proof_right,
-            base_proofs[2].clone(),
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let full_node_proof = params.generate_proof(input).unwrap();
-
-        // verify hash is correct
-        let full_node_info = NodeInfo::new(
-            &HashOutput::try_from(get_tree_hash_from_proof(&base_proofs[2]).to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(left_child_hash.to_bytes()).unwrap()),
-            Some(&HashOutput::try_from(right_child_hash.to_bytes()).unwrap()),
-            column_values[2][0], // primary index value for that row
-            column_values[1][0], // primary index value for the min node in the left subtree
-            column_values[3][0], // primary index value for the max node in the right subtree
-        );
-        let full_node_hash = get_tree_hash_from_proof(&full_node_proof);
-        assert_eq!(
-            full_node_hash,
-            full_node_info.compute_node_hash(primary_index_id),
-        );
-
-        // generate proof for node 0 of the index tree above
-        let input = Input::new_partial_node(
-            full_node_proof,
-            base_proofs[0].clone(),
-            None,                 // there is no left child
-            ChildPosition::Right, // proven child is the right child of node 0
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let one_child_node_proof = params.generate_proof(input).unwrap();
-        // verify hash is correct
-        let one_child_node_info = NodeInfo::new(
-            &HashOutput::try_from(get_tree_hash_from_proof(&base_proofs[0]).to_bytes()).unwrap(),
-            None,
-            Some(&HashOutput::try_from(full_node_hash.to_bytes()).unwrap()),
-            column_values[0][0],
-            column_values[0][0],
-            column_values[3][0],
-        );
-        let one_child_node_hash = get_tree_hash_from_proof(&one_child_node_proof);
-        assert_eq!(
-            one_child_node_hash,
-            one_child_node_info.compute_node_hash(primary_index_id)
-        );
-
-        // generate proof for root node
-        let input = Input::new_partial_node(
-            one_child_node_proof,
-            base_proofs[4].clone(),
-            None,                // there is no right child
-            ChildPosition::Left, // proven child is the left child of root node
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
-            .unwrap()
-            .into();
-        // check some public inputs for root proof
-        let check_pis = |root_proof_pis: &[F], node_info: NodeInfo, column_values: &[Vec<U256>]| {
-            let pis = PublicInputs::<F, MAX_NUM_RESULTS>::from_slice(&root_proof_pis);
-            assert_eq!(
-                pis.tree_hash(),
-                node_info.compute_node_hash(primary_index_id),
-            );
-            assert_eq!(pis.min_value(), node_info.min,);
-            assert_eq!(pis.max_value(), node_info.max,);
-            assert_eq!(pis.min_query_value(), query_bounds.min_query_primary());
-            assert_eq!(pis.max_query_value(), query_bounds.max_query_primary());
-            assert_eq!(
-                pis.index_ids().to_vec(),
-                vec![column_ids.primary, column_ids.secondary,],
-            );
-            // compute output value: SUM(C1 + C3) for all the rows where C3 >= 5
-            let (output, overflow, count) =
-                column_values
-                    .iter()
-                    .fold((U256::ZERO, false, 0u64), |acc, value| {
-                        if value[2] >= U256::from(5)
-                            && value[0] >= query_bounds.min_query_primary()
-                            && value[0] <= query_bounds.max_query_primary()
-                            && value[1] >= query_bounds.min_query_secondary().value
-                            && value[1] <= query_bounds.max_query_secondary().value
-                        {
-                            let (sum, overflow) = value[0].overflowing_add(value[2]);
-                            let new_overflow = acc.1 || overflow;
-                            let (new_sum, overflow) = sum.overflowing_add(acc.0);
-                            (new_sum, new_overflow || overflow, acc.2 + 1)
-                        } else {
-                            acc
-                        }
-                    });
-            assert_eq!(pis.first_value_as_u256(), output,);
-            assert_eq!(pis.overflow_flag(), overflow,);
-            assert_eq!(pis.num_matching_rows(), count.to_field(),);
-        };
-
-        let root_node_info = NodeInfo::new(
-            &HashOutput::try_from(get_tree_hash_from_proof(&base_proofs[4]).to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(one_child_node_hash.to_bytes()).unwrap()),
-            None,
-            column_values[4][0],
-            column_values[0][0],
-            column_values[4][0],
-        );
-
-        check_pis(&root_proof.public_inputs, root_node_info, &column_values);
-
-        // build an index tree with a mix of proven and unproven nodes. The tree is built as follows:
-        //          0
-        //              8
-        //          3       9
-        //      2       5
-        //   1        4   6
-        //                   7
-        // nodes 3,4,5,6 are in the range specified by the query for the primary index, while the other nodes
-        // are not
-        let column_values = [0, min_query_primary / 3, min_query_primary * 2 / 3]
-            .into_iter() // primary index values for nodes 0,1,2
-            .chain(
-                (min_query_primary..max_query_primary)
-                    .step_by((max_query_primary - min_query_primary) / 4)
-                    .take(4),
-            ) // primary index values for nodes in the range
-            .chain([
-                max_query_primary * 2,
-                max_query_primary * 3,
-                max_query_primary * 4,
-            ]) // primary index values for nodes 7,8, 9
-            .map(|index| gen_row(index, IndexValueBounds::InRange))
-            .collect_vec();
-
-        // generate base proofs with universal circuits for each node in the range
-        const START_NODE_IN_RANGE: usize = 3;
-        const LAST_NODE_IN_RANGE: usize = 6;
-        let base_proofs = column_values[START_NODE_IN_RANGE..=LAST_NODE_IN_RANGE]
-            .iter()
-            .map(|values| gen_universal_circuit_proofs(values, true))
-            .collect_vec();
-
-        // generate proof for node 4
-        let embedded_tree_hash = get_tree_hash_from_proof(&base_proofs[4 - START_NODE_IN_RANGE]);
-        let node_info = NodeInfo::new(
-            &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
-            None,
-            None,
-            column_values[4][0],
-            column_values[4][0],
-            column_values[4][0],
-        );
-        let subtree_proof =
-            SubProof::new_embedded_tree_proof(base_proofs[4 - START_NODE_IN_RANGE].clone())
-                .unwrap();
-        let hash_4 = node_info.compute_node_hash(primary_index_id);
-        let input =
-            Input::new_single_path(subtree_proof, None, None, node_info, false, &query_bounds)
-                .unwrap();
-        let proof_4 = params.generate_proof(input).unwrap();
-        // check hash
-        assert_eq!(hash_4, get_tree_hash_from_proof(&proof_4),);
-
-        // generate proof for node 6
-        // compute node data for node 7, which is needed as input to generate the proof
-        let node_info_7 = NodeInfo::new(
-            // for the sake of this test, we can use random hash for the embedded tree stored in node 7, since it's not proven;
-            // in a non-test scenario, we would need to get the actual embedded hash of the node, otherwise the root hash of the
-            // tree computed in the proofs will be incorrect
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            None,
-            None,
-            column_values[7][0],
-            column_values[7][0],
-            column_values[7][0],
-        );
-        let hash_7 = node_info_7.compute_node_hash(primary_index_id);
-        let embedded_tree_hash = get_tree_hash_from_proof(&base_proofs[6 - START_NODE_IN_RANGE]);
-        let node_info_6 = NodeInfo::new(
-            &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
-            None,
-            Some(&HashOutput::try_from(hash_7.to_bytes()).unwrap()),
-            column_values[6][0],
-            column_values[6][0],
-            column_values[7][0],
-        );
-        let subtree_proof =
-            SubProof::new_embedded_tree_proof(base_proofs[6 - START_NODE_IN_RANGE].clone())
-                .unwrap();
-        let hash_6 = node_info_6.compute_node_hash(primary_index_id);
-        let input = Input::new_single_path(
-            subtree_proof,
-            None,
-            Some(node_info_7),
-            node_info_6,
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let proof_6 = params.generate_proof(input).unwrap();
-        // check hash
-        assert_eq!(hash_6, get_tree_hash_from_proof(&proof_6));
-
-        // generate proof for node 5
-        let input = Input::new_full_node(
-            proof_4,
-            proof_6,
-            base_proofs[5 - START_NODE_IN_RANGE].clone(),
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let proof_5 = params.generate_proof(input).unwrap();
-        // check hash
-        let embedded_tree_hash = get_tree_hash_from_proof(&base_proofs[5 - START_NODE_IN_RANGE]);
-        let node_info_5 = NodeInfo::new(
-            &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(hash_4.to_bytes()).unwrap()),
-            Some(&HashOutput::try_from(hash_6.to_bytes()).unwrap()),
-            column_values[5][0],
-            column_values[4][0],
-            column_values[7][0],
-        );
-        let hash_5 = node_info_5.compute_node_hash(primary_index_id);
-        assert_eq!(hash_5, get_tree_hash_from_proof(&proof_5),);
-
-        // generate proof for node 3
-        // compute node data for node 2, which is needed as input to generate the proof
-        let node_info_2 = NodeInfo::new(
-            // same as for node_info_7, we can use random hashes for the sake of this test
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap()),
-            None,
-            column_values[2][0],
-            column_values[1][0],
-            column_values[2][0],
-        );
-        let hash_2 = node_info_2.compute_node_hash(primary_index_id);
-        let input = Input::new_partial_node(
-            proof_5,
-            base_proofs[3 - START_NODE_IN_RANGE].clone(),
-            Some(node_info_2),
-            ChildPosition::Right, // proven child is right child
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let proof_3 = params.generate_proof(input).unwrap();
-        // check hash
-        let embedded_tree_hash = get_tree_hash_from_proof(&base_proofs[3 - START_NODE_IN_RANGE]);
-        let node_info_3 = NodeInfo::new(
-            &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(hash_2.to_bytes()).unwrap()),
-            Some(&HashOutput::try_from(hash_5.to_bytes()).unwrap()),
-            column_values[3][0],
-            column_values[1][0],
-            column_values[7][0],
-        );
-        let hash_3 = node_info_3.compute_node_hash(primary_index_id);
-        assert_eq!(hash_3, get_tree_hash_from_proof(&proof_3),);
-
-        // generate proof for node 8
-        // compute node_info_9, which is needed as input for the proof
-        let node_info_9 = NodeInfo::new(
-            // same as for node_info_2, we can use random hashes for the sake of this test
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            None,
-            None,
-            column_values[9][0],
-            column_values[9][0],
-            column_values[9][0],
-        );
-        let hash_9 = node_info_9.compute_node_hash(primary_index_id);
-        let node_info_8 = NodeInfo::new(
-            // same as for node_info_2, we can use random hashes for the sake of this test
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(hash_3.to_bytes()).unwrap()),
-            Some(&HashOutput::try_from(hash_9.to_bytes()).unwrap()),
-            column_values[8][0],
-            column_values[1][0],
-            column_values[9][0],
-        );
-        let hash_8 = node_info_8.compute_node_hash(primary_index_id);
-        let subtree_proof = SubProof::new_child_proof(
-            proof_3,
-            ChildPosition::Left, // subtree proof refers to the left child of the node
-        )
-        .unwrap();
-        let input = Input::new_single_path(
-            subtree_proof,
-            Some(node_info_3),
-            Some(node_info_9),
-            node_info_8.clone(),
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let proof_8 = params.generate_proof(input).unwrap();
-        // check hash
-        assert_eq!(get_tree_hash_from_proof(&proof_8), hash_8);
-        println!("generate proof for node 0");
-
-        // generate proof for node 0 (root)
-        let node_info_0 = NodeInfo::new(
-            // same as for node_info_1, we can use random hashes for the sake of this test
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            None,
-            Some(&HashOutput::try_from(hash_8.to_bytes()).unwrap()),
-            column_values[0][0],
-            column_values[0][0],
-            column_values[9][0],
-        );
-        let subtree_proof = SubProof::new_child_proof(
-            proof_8,
-            ChildPosition::Right, // subtree proof refers to the right child of the node
-        )
-        .unwrap();
-        let input = Input::new_single_path(
-            subtree_proof,
-            None,
-            Some(node_info_8),
-            node_info_0.clone(),
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
-            .unwrap()
-            .into();
-
-        // check some public inputs
-        check_pis(&root_proof.public_inputs, node_info_0, &column_values);
-
-        // build an index tree with all nodes outside of the primary index range. The tree is built as follows:
-        //          2
-        //      1       3
-        //  0
-        // where nodes 0 stores an index value smaller than `min_query_primary`, while nodes 1, 2, 3 store index values
-        // bigger than `max_query_primary`
-        let column_values = [min_query_primary / 2]
-            .into_iter()
-            .chain(
-                [
-                    max_query_primary * 2,
-                    max_query_primary * 3,
-                    max_query_primary * 4,
-                ]
-                .into_iter(),
-            )
-            .map(|index| gen_row(index, IndexValueBounds::InRange))
-            .collect_vec();
-
-        // generate proof for node 0 with non-existence circuit, since it is outside of the query bounds
-        let node_info_0 = NodeInfo::new(
-            // we can use a randomly generated hash for the subtree, for the sake of the test
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            None,
-            None,
-            column_values[0][0],
-            column_values[0][0],
-            column_values[0][0],
-        );
-        let hash_0 = node_info_0.compute_node_hash(primary_index_id);
-        let column_cells = column_values[0]
-            .iter()
-            .zip(column_ids.to_vec().iter())
-            .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
-            .collect_vec();
-        // compute hashes associated to query, which are needed as inputs
-        let query_hashes = QueryHashNonExistenceCircuits::new::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-        >(
-            &column_ids,
-            &predicate_operations,
-            &results,
-            &placeholders,
-            &query_bounds,
-            false,
-        )
-        .unwrap();
-        let input = Input::new_non_existence_input(
-            node_info_0.clone(),
-            None,
-            None,
-            node_info_0.value,
-            &[
-                column_ids.primary.to_canonical_u64(),
-                column_ids.secondary.to_canonical_u64(),
-            ]
-            .try_into()
-            .unwrap(),
-            &[AggregationOperation::SumOp],
-            query_hashes,
-            false,
-            &query_bounds,
-            &placeholders,
-        )
-        .unwrap();
-        let proof_0 = params.generate_proof(input).unwrap();
-        // check hash
-        assert_eq!(hash_0, get_tree_hash_from_proof(&proof_0),);
-
-        // get up to the root of the tree with proofs
-        // generate proof for node 1
-        let node_info_1 = NodeInfo::new(
-            // we can use a random hash for the embedded tree
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(hash_0.to_bytes()).unwrap()),
-            None,
-            column_values[1][0],
-            column_values[0][0],
-            column_values[1][0],
-        );
-        let hash_1 = node_info_1.compute_node_hash(primary_index_id);
-        let subtree_proof = SubProof::new_child_proof(proof_0, ChildPosition::Left).unwrap();
-        let input = Input::new_single_path(
-            subtree_proof,
-            Some(node_info_0.clone()),
-            None,
-            node_info_1.clone(),
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let proof_1 = params.generate_proof(input).unwrap();
-        // check hash
-        assert_eq!(hash_1, get_tree_hash_from_proof(&proof_1),);
-
-        // generate proof for root node
-        let node_info_2 = NodeInfo::new(
-            // we can use a random hash for the embedded tree
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(hash_1.to_bytes()).unwrap()),
-            None,
-            column_values[2][0],
-            column_values[0][0],
-            column_values[2][0],
-        );
-        let node_info_3 = NodeInfo::new(
-            // we can use a random hash for the embedded tree
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            None,
-            None,
-            column_values[3][0],
-            column_values[3][0],
-            column_values[3][0],
-        );
-        let subtree_proof = SubProof::new_child_proof(proof_1, ChildPosition::Left).unwrap();
-        let input = Input::new_single_path(
-            subtree_proof,
-            Some(node_info_1.clone()),
-            Some(node_info_3.clone()),
-            node_info_2.clone(),
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
-            .unwrap()
-            .into();
-
-        check_pis(
-            &root_proof.public_inputs,
-            node_info_2.clone(),
-            &column_values,
-        );
-
-        // generate non-existence proof starting from intermediate node (i.e., node 1) rather than a leaf node
-        // generate proof with non-existence circuit for node 1
-        let column_cells = column_values[1]
-            .iter()
-            .zip(column_ids.to_vec().iter())
-            .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
-            .collect_vec();
-        // compute hashes associated to query, which are needed as inputs
-        let query_hashes = QueryHashNonExistenceCircuits::new::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-        >(
-            &column_ids,
-            &predicate_operations,
-            &results,
-            &placeholders,
-            &query_bounds,
-            false,
-        )
-        .unwrap();
-        let input = Input::new_non_existence_input(
-            node_info_1.clone(),
-            Some(node_info_0), // node 0 is the left child
-            None,
-            node_info_1.value,
-            &[
-                column_ids.primary.to_canonical_u64(),
-                column_ids.secondary.to_canonical_u64(),
-            ]
-            .try_into()
-            .unwrap(),
-            &[AggregationOperation::SumOp],
-            query_hashes,
-            false,
-            &query_bounds,
-            &placeholders,
-        )
-        .unwrap();
-        let proof_1 = params.generate_proof(input).unwrap();
-        // check hash
-        assert_eq!(hash_1, get_tree_hash_from_proof(&proof_1),);
-
-        // generate proof for root node
-        let subtree_proof = SubProof::new_child_proof(proof_1, ChildPosition::Left).unwrap();
-        let input = Input::new_single_path(
-            subtree_proof,
-            Some(node_info_1.clone()),
-            Some(node_info_3.clone()),
-            node_info_2.clone(),
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
-            .unwrap()
-            .into();
-
-        check_pis(&root_proof.public_inputs, node_info_2, &column_values);
-
-        // generate a tree with rows tree with more than one node. We generate an index tree with 2 nodes A and B,
-        // both storing a primary index value within the query bounds.
-        // Node A stores a rows tree with all entries outside of query bounds for secondary index, while
-        // node B stores a rows tree with all entries within query bounds for secondary index.
-        // The tree is structured as follows:
-        //                      B
-        //                      4
-        //                  3       5
-        //          A
-        //          1
-        //      0       2
-        let mut column_values = vec![
-            gen_row(min_query_primary, IndexValueBounds::Smaller),
-            gen_row(min_query_primary, IndexValueBounds::Smaller),
-            gen_row(min_query_primary, IndexValueBounds::Bigger),
-            gen_row(max_query_primary, IndexValueBounds::InRange),
-            gen_row(max_query_primary, IndexValueBounds::InRange),
-            gen_row(max_query_primary, IndexValueBounds::InRange),
-        ];
-        // sort column values according to primary/secondary index values
-        column_values.sort_by(|a, b| {
-            if a[0] < b[0] {
-                Ordering::Less
-            } else if a[0] > b[0] {
-                Ordering::Greater
-            } else {
-                a[1].cmp(&b[1])
-            }
-        });
-
-        // generate proof for node A rows tree
-        // generate non-existence proof for node 2, which is the smallest node higher than the maximum query bound, since
-        // node 1, which is the highest node smaller than the minimum query bound, has 2 children
-        // (see non-existence circuit docs to see why we don't generate non-existence proofs for nodes with 2 children)
-        let node_info_2 = NodeInfo::new(
-            // we can use a random hash for the embedded tree
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            None,
-            None,
-            column_values[2][1],
-            column_values[2][1],
-            column_values[2][1],
-        );
-        let hash_2 = node_info_2.compute_node_hash(secondary_index_id);
-        let column_cells = column_values[2]
-            .iter()
-            .zip(column_ids.to_vec().iter())
-            .map(|(&value, &id)| ColumnCell::new(id.to_canonical_u64(), value))
-            .collect_vec();
-        // compute hashes associated to query, which are needed as inputs
-        let query_hashes = QueryHashNonExistenceCircuits::new::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_RESULTS,
-        >(
-            &column_ids,
-            &predicate_operations,
-            &results,
-            &placeholders,
-            &query_bounds,
-            true,
-        )
-        .unwrap();
-        let input = Input::new_non_existence_input(
-            node_info_2.clone(),
-            None,
-            None,
-            column_values[2][0], // we need to place the primary index value associated to this row
-            &[
-                column_ids.primary.to_canonical_u64(),
-                column_ids.secondary.to_canonical_u64(),
-            ]
-            .try_into()
-            .unwrap(),
-            &[AggregationOperation::SumOp],
-            query_hashes,
-            true,
-            &query_bounds,
-            &placeholders,
-        )
-        .unwrap();
-        let proof_2 = params.generate_proof(input).unwrap();
-        // check hash
-        assert_eq!(hash_2, get_tree_hash_from_proof(&proof_2),);
-
-        // generate proof for node 1 (root of rows tree for node A)
-        let node_info_1 = NodeInfo::new(
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            None,
-            Some(&HashOutput::try_from(hash_2.to_bytes()).unwrap()),
-            column_values[1][1],
-            column_values[0][1],
-            column_values[2][1],
-        );
-        let node_info_0 = NodeInfo::new(
-            &HashOutput::try_from(gen_random_field_hash::<F>().to_bytes()).unwrap(),
-            None,
-            None,
-            column_values[0][1],
-            column_values[0][1],
-            column_values[0][1],
-        );
-        let hash_1 = node_info_1.compute_node_hash(secondary_index_id);
-        let subtree_proof = SubProof::new_child_proof(proof_2, ChildPosition::Right).unwrap();
-        let input = Input::new_single_path(
-            subtree_proof,
-            Some(node_info_0),
-            Some(node_info_2),
-            node_info_1,
-            true,
-            &query_bounds,
-        )
-        .unwrap();
-        let proof_1 = params.generate_proof(input).unwrap();
-        // check hash
-        assert_eq!(hash_1, get_tree_hash_from_proof(&proof_1),);
-
-        // generate proof for node A (leaf of index tree)
-        let node_info_A = NodeInfo::new(
-            &HashOutput::try_from(hash_1.to_bytes()).unwrap(),
-            None,
-            None,
-            column_values[0][0],
-            column_values[0][0],
-            column_values[0][0],
-        );
-        let hash_A = node_info_A.compute_node_hash(primary_index_id);
-        let subtree_proof = SubProof::new_embedded_tree_proof(proof_1).unwrap();
-        let input = Input::new_single_path(
-            subtree_proof,
-            None,
-            None,
-            node_info_A.clone(),
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let proof_A = params.generate_proof(input).unwrap();
-        // check hash
-        assert_eq!(hash_A, get_tree_hash_from_proof(&proof_A),);
-
-        // generate proof for node B rows tree
-        // all the nodes are in the range, so we generate proofs for each of the nodes
-        // generate proof for nodes 3 and 5: they are leaf nodes in the rows tree, so we directly use the universal circuit
-        let [proof_3, proof_5] = [&column_values[3], &column_values[5]]
-            .map(|values| gen_universal_circuit_proofs(values, true));
-        // node 4 is not a leaf in the rows tree, so instead we need to first generate a proof for the row results using
-        // the universal circuit, and then we generate the proof for the rows tree node
-        let row_proof = gen_universal_circuit_proofs(&column_values[4], false);
-        let hash_3 = get_tree_hash_from_proof(&proof_3);
-        let hash_5 = get_tree_hash_from_proof(&proof_5);
-        let embedded_tree_hash = get_tree_hash_from_proof(&row_proof);
-        let input = Input::new_full_node(proof_3, proof_5, row_proof, true, &query_bounds).unwrap();
-        let proof_4 = params.generate_proof(input).unwrap();
-        // check hash
-        let node_info_4 = NodeInfo::new(
-            &HashOutput::try_from(embedded_tree_hash.to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(hash_3.to_bytes()).unwrap()),
-            Some(&HashOutput::try_from(hash_5.to_bytes()).unwrap()),
-            column_values[4][1],
-            column_values[3][1],
-            column_values[5][1],
-        );
-        let hash_4 = node_info_4.compute_node_hash(secondary_index_id);
-        assert_eq!(hash_4, get_tree_hash_from_proof(&proof_4),);
-
-        // generate proof for node B of the index tree (root node)
-        let node_info_root = NodeInfo::new(
-            &HashOutput::try_from(hash_4.to_bytes()).unwrap(),
-            Some(&HashOutput::try_from(hash_A.to_bytes()).unwrap()),
-            None,
-            column_values[4][0],
-            column_values[0][0],
-            column_values[5][0],
-        );
-        let input = Input::new_partial_node(
-            proof_A,
-            proof_4,
-            None,
-            ChildPosition::Left,
-            false,
-            &query_bounds,
-        )
-        .unwrap();
-        let (root_proof, _) = ProofWithVK::deserialize(&params.generate_proof(input).unwrap())
-            .unwrap()
-            .into();
-
-        check_pis(&root_proof.public_inputs, node_info_root, &column_values);
+    pub(crate) fn get_universal_circuit(
+        &self,
+    ) -> &UniversalQueryCircuitParams<
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULTS,
+        OutputNoAggCircuit<MAX_NUM_RESULTS>,
+    > {
+        &self.universal_circuit
     }
 }

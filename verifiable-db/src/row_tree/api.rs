@@ -8,11 +8,13 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::cells_tree::Cell;
+
 use super::{
     full_node::{self, FullNodeCircuit},
     leaf::{self, LeafCircuit},
     partial_node::{self, PartialNodeCircuit},
-    IndexTuple, PublicInputs,
+    PublicInputs,
 };
 
 /// Parameters holding the circuits for the row tree creation
@@ -178,24 +180,30 @@ pub enum CircuitInput {
 }
 
 impl CircuitInput {
-    pub fn leaf(identifier: u64, value: U256, cells_proof: Vec<u8>) -> Result<Self> {
-        let circuit = LeafCircuit::new(IndexTuple::new(F::from_canonical_u64(identifier), value));
+    pub fn leaf(
+        identifier: u64,
+        value: U256,
+        is_multiplier: bool,
+        cells_proof: Vec<u8>,
+    ) -> Result<Self> {
+        let circuit = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         Ok(CircuitInput::Leaf {
-            witness: circuit,
+            witness: circuit.into(),
             cells_proof,
         })
     }
+
     pub fn full(
         identifier: u64,
         value: U256,
+        is_multiplier: bool,
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let circuit =
-            FullNodeCircuit::from(IndexTuple::new(F::from_canonical_u64(identifier), value));
+        let circuit = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         Ok(CircuitInput::Full {
-            witness: circuit,
+            witness: circuit.into(),
             left_proof,
             right_proof,
             cells_proof,
@@ -204,11 +212,12 @@ impl CircuitInput {
     pub fn partial(
         identifier: u64,
         value: U256,
+        is_multiplier: bool,
         is_child_left: bool,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let tuple = IndexTuple::new(F::from_canonical_u64(identifier), value);
+        let tuple = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
         let witness = PartialNodeCircuit::new(tuple, is_child_left);
         Ok(CircuitInput::Partial {
             witness,
@@ -229,7 +238,6 @@ mod test {
 
     use super::*;
     use mp2_common::{
-        group_hashing::map_to_curve_point,
         poseidon::{empty_poseidon_hash, H},
         utils::ToFields,
         F,
@@ -255,10 +263,10 @@ mod test {
         // to save on test time
         cells_proof: ProofWithPublicInputs<F, C, D>,
         cells_vk: VerifierOnlyCircuitData<C, D>,
-        leaf1: IndexTuple,
-        leaf2: IndexTuple,
-        full: IndexTuple,
-        partial: IndexTuple,
+        leaf1: Cell,
+        leaf2: Cell,
+        full: Cell,
+        partial: Cell,
     }
 
     impl TestParams {
@@ -287,10 +295,10 @@ mod test {
                 params,
                 cells_proof: cells_proof[0].clone(),
                 cells_vk,
-                leaf1: IndexTuple::new(identifier, v1),
-                leaf2: IndexTuple::new(identifier, v2),
-                full: IndexTuple::new(identifier, v_full),
-                partial: IndexTuple::new(identifier, v_partial),
+                leaf1: Cell::new(identifier, v1, false),
+                leaf2: Cell::new(identifier, v2, false),
+                full: Cell::new(identifier, v_full, false),
+                partial: Cell::new(identifier, v_partial, false),
             })
         }
 
@@ -305,7 +313,12 @@ mod test {
             // generate cells tree input and fake proof
             let cells_hash = HashOut::rand().to_fields();
             let cells_digest = Point::rand().to_weierstrass().to_fields();
-            let cells_pi = cells_tree::PublicInputs::new(&cells_hash, &cells_digest).to_vec();
+            let cells_pi = cells_tree::PublicInputs::new(
+                &cells_hash,
+                &cells_digest,
+                &Point::NEUTRAL.to_fields(),
+            )
+            .to_vec();
             cells_pi
         }
     }
@@ -330,7 +343,7 @@ mod test {
 
     fn generate_partial_proof(
         p: &TestParams,
-        tuple: IndexTuple,
+        tuple: Cell,
         is_left: bool,
         child_proof_buff: Vec<u8>,
     ) -> Result<Vec<u8>> {
@@ -339,11 +352,12 @@ mod test {
         let child_min = child_pi.min_value_u256();
         let child_max = child_pi.max_value_u256();
 
-        partial_safety_check(child_min, child_max, tuple.index_value, is_left);
+        partial_safety_check(child_min, child_max, tuple.value, is_left);
 
         let input = CircuitInput::partial(
-            tuple.index_identifier.to_canonical_u64(),
-            tuple.index_value,
+            tuple.identifier.to_canonical_u64(),
+            tuple.value,
+            false,
             is_left,
             child_proof_buff.clone(),
             p.cells_proof_vk().serialize()?,
@@ -357,8 +371,8 @@ mod test {
             // node_min = left ? child_proof.min : index_value
             // node_max = left ? index_value : child_proof.max
             let (node_min, node_max) = match is_left {
-                true => (pi.min_value_u256(), tuple.index_value),
-                false => (tuple.index_value, pi.max_value_u256()),
+                true => (pi.min_value_u256(), tuple.value),
+                false => (tuple.value, pi.max_value_u256()),
             };
 
             let child_hash = child_pi.root_hash_hashout();
@@ -377,13 +391,12 @@ mod test {
                 .collect::<Vec<_>>();
             let hash = H::hash_no_pad(&inputs);
             assert_eq!(hash, pi.root_hash_hashout());
-            // child_proof.DR + D(cells_proof.DC + D(index_id || index_value)) as DR
-            let inner = map_to_curve_point(&tuple.to_fields());
-            let cells_point = weierstrass_to_point(&p.cells_pi().digest_point());
-            let inner2 = inner + cells_point;
-            let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
-            let child_d = weierstrass_to_point(&child_pi.rows_digest_field());
-            let res = child_d + outer;
+
+            // final_digest = HashToInt(mul_digest) * D(ind_digest) + row_proof.digest()
+            let split_digest = tuple.split_and_accumulate_digest(p.cells_pi().split_digest_point());
+            let res = split_digest.cond_combine_to_row_digest();
+            // then adding with the rest of the rows digest, the other nodes
+            let res = res + weierstrass_to_point(&child_pi.rows_digest_field());
             assert_eq!(res.to_weierstrass(), pi.rows_digest_field());
         }
         Ok(vec![])
@@ -392,8 +405,9 @@ mod test {
     fn generate_full_proof(p: &TestParams, child_proof: [Vec<u8>; 2]) -> Result<Vec<u8>> {
         let tuple = p.full.clone();
         let input = CircuitInput::full(
-            tuple.index_identifier.to_canonical_u64(),
-            tuple.index_value,
+            tuple.identifier.to_canonical_u64(),
+            tuple.value,
+            false,
             child_proof[0].to_vec(),
             child_proof[1].to_vec(),
             p.cells_proof_vk().serialize()?,
@@ -402,8 +416,8 @@ mod test {
         let left_pi = PublicInputs::from_slice(&left_proof.proof.public_inputs);
         let right_proof = ProofWithVK::deserialize(&child_proof[1])?;
         let right_pi = PublicInputs::from_slice(&right_proof.proof.public_inputs);
-        assert!(left_pi.max_value_u256() < tuple.index_value);
-        assert!(tuple.index_value < right_pi.min_value_u256());
+        assert!(left_pi.max_value_u256() < tuple.value);
+        assert!(tuple.value < right_pi.min_value_u256());
         let proof = p
             .params
             .generate_proof(input, p.cells_test.get_recursive_circuit_set().clone())?;
@@ -428,26 +442,27 @@ mod test {
             assert_eq!(pi.root_hash_hashout(), exp_hash);
 
             {
-                // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
-                let inner = map_to_curve_point(&tuple.to_fields());
-                let cells_point = weierstrass_to_point(&p.cells_pi().digest_point());
-                let inner2 = inner + cells_point;
-                let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
-                let left_d = weierstrass_to_point(&left_pi.rows_digest_field());
-                let right_d = weierstrass_to_point(&right_pi.rows_digest_field());
-                let result = left_d + right_d + outer;
-                assert_eq!(pi.rows_digest_field(), result.to_weierstrass());
+                // final_digest = HashToInt(mul_digest) * D(ind_digest) + p1.digest() + p2.digest()
+                let split_digest =
+                    tuple.split_and_accumulate_digest(p.cells_pi().split_digest_point());
+                let row_digest = split_digest.cond_combine_to_row_digest();
+
+                let p1dr = weierstrass_to_point(&left_pi.rows_digest_field());
+                let p2dr = weierstrass_to_point(&right_pi.rows_digest_field());
+                let result_digest = p1dr + p2dr + row_digest;
+                assert_eq!(result_digest.to_weierstrass(), pi.rows_digest_field());
             }
         }
         Ok(proof)
     }
 
-    fn generate_leaf_proof(p: &TestParams, tuple: &IndexTuple) -> Result<Vec<u8>> {
+    fn generate_leaf_proof(p: &TestParams, tuple: &Cell) -> Result<Vec<u8>> {
         let cells_pi = p.cells_pi();
         //  generate row leaf proof
         let input = CircuitInput::leaf(
-            tuple.index_identifier.to_canonical_u64(),
-            tuple.index_value,
+            tuple.identifier.to_canonical_u64(),
+            tuple.value,
+            false,
             p.cells_proof_vk().serialize()?,
         )?;
 
@@ -467,8 +482,8 @@ mod test {
                 .to_fields()
                 .iter()
                 .chain(empty_hash.to_fields().iter())
-                .chain(tuple.index_value.to_fields().iter())
-                .chain(tuple.index_value.to_fields().iter())
+                .chain(tuple.value.to_fields().iter())
+                .chain(tuple.value.to_fields().iter())
                 .chain(tuple.to_fields().iter())
                 .chain(cells_pi.h_raw().iter())
                 .cloned()
@@ -477,12 +492,10 @@ mod test {
             assert_eq!(pi.root_hash_hashout(), exp_hash);
         }
         {
-            // expose p1.DR + p2.DR + D(p.DC + D(index_id || index_value)) as DR
-            let cells_point = weierstrass_to_point(&cells_pi.digest_point());
-            let inner = map_to_curve_point(&tuple.to_fields());
-            let inner2 = inner + cells_point;
-            let outer = map_to_curve_point(&inner2.to_weierstrass().to_fields());
-            assert_eq!(outer.to_weierstrass(), pi.rows_digest_field());
+            // final_digest = HashToInt(mul_digest) * D(ind_digest)
+            let split_digest = tuple.split_and_accumulate_digest(cells_pi.split_digest_point());
+            let result = split_digest.cond_combine_to_row_digest();
+            assert_eq!(result.to_weierstrass(), pi.rows_digest_field());
         }
         Ok(proof)
     }

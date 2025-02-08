@@ -1,6 +1,4 @@
-use std::io::Write;
-
-use anyhow::*;
+use anyhow::{anyhow, bail};
 use colored::Colorize;
 use dialoguer::{console, theme::ColorfulTheme, FuzzySelect, Input};
 use itertools::Itertools;
@@ -12,6 +10,7 @@ use ryhope::{
     tree::{MutableTree, PrintableTree, TreeTopology},
     Epoch, MerkleTreeKvDb, NodePayload,
 };
+use std::io::Write;
 use tabled::{builder::Builder, settings::Style};
 
 pub(crate) trait PayloadFormatter<V: std::fmt::Debug> {
@@ -19,7 +18,7 @@ pub(crate) trait PayloadFormatter<V: std::fmt::Debug> {
         format!("{payload:?}")
     }
 
-    fn settings(&mut self, tty: &mut console::Term) -> Result<()> {
+    fn settings(&mut self, tty: &mut console::Term) -> anyhow::Result<()> {
         write!(tty, "no settings for payload formatter").unwrap();
         Ok(())
     }
@@ -76,8 +75,8 @@ impl<
         F: PayloadFormatter<V>,
     > Repl<T, V, S, F>
 {
-    pub async fn new(db: MerkleTreeKvDb<T, V, S>, payload_fmt: F) -> Result<Self> {
-        let current_key = db.root().await.ok_or(anyhow!("tree is empty"))?;
+    pub async fn new(db: MerkleTreeKvDb<T, V, S>, payload_fmt: F) -> anyhow::Result<Self> {
+        let current_key = db.root().await?.ok_or(anyhow!("tree is empty"))?;
         let current_epoch = db.current_epoch();
 
         Ok(Self {
@@ -106,7 +105,7 @@ impl<
         .unwrap();
     }
 
-    pub fn set_epoch(&mut self, epoch: Epoch) -> Result<()> {
+    pub fn set_epoch(&mut self, epoch: Epoch) -> anyhow::Result<()> {
         if epoch < self.db.initial_epoch() {
             bail!(
                 "epoch `{}` is older than initial epoch `{}`",
@@ -123,7 +122,7 @@ impl<
         }
 
         self.current_epoch = epoch;
-        return Ok(());
+        Ok(())
     }
 
     async fn select_key(&self) -> Option<T::Key> {
@@ -139,14 +138,14 @@ impl<
             .map(|i| keys[i].clone())
     }
 
-    async fn goto(&mut self) -> Result<()> {
+    async fn goto(&mut self) -> anyhow::Result<()> {
         if let Some(new_key) = self.select_key().await {
             self.current_key = new_key;
         }
         Ok(())
     }
 
-    async fn travel(&mut self) -> Result<()> {
+    async fn travel(&mut self) -> anyhow::Result<()> {
         loop {
             let epoch: Epoch = Input::new().with_prompt("target epoch:").interact_text()?;
 
@@ -154,11 +153,11 @@ impl<
         }
     }
 
-    async fn goto_parent(&mut self) -> Result<()> {
+    async fn goto_parent(&mut self) -> anyhow::Result<()> {
         if let Some(parent) = self
             .db
             .node_context_at(&self.current_key, self.current_epoch)
-            .await
+            .await?
             .and_then(|ctx| ctx.parent)
         {
             self.current_key = parent.to_owned();
@@ -168,11 +167,11 @@ impl<
         Ok(())
     }
 
-    async fn goto_left(&mut self) -> Result<()> {
+    async fn goto_left(&mut self) -> anyhow::Result<()> {
         if let Some(left) = self
             .db
             .node_context_at(&self.current_key, self.current_epoch)
-            .await
+            .await?
             .and_then(|ctx| ctx.left)
         {
             self.current_key = left.to_owned();
@@ -182,11 +181,11 @@ impl<
         Ok(())
     }
 
-    async fn goto_right(&mut self) -> Result<()> {
+    async fn goto_right(&mut self) -> anyhow::Result<()> {
         if let Some(right) = self
             .db
             .node_context_at(&self.current_key, self.current_epoch)
-            .await
+            .await?
             .and_then(|ctx| ctx.right)
         {
             self.current_key = right.to_owned();
@@ -196,11 +195,11 @@ impl<
         Ok(())
     }
 
-    async fn context(&mut self) -> Result<()> {
+    async fn context(&mut self) -> anyhow::Result<()> {
         if let Some(context) = self
             .db
             .node_context_at(&self.current_key, self.current_epoch)
-            .await
+            .await?
         {
             writeln!(self.tty, "{}", "=== Current Node ===".magenta().bold()).unwrap();
             writeln!(self.tty, "{}{:?}", "Key: ".white().bold(), self.current_key).unwrap();
@@ -211,8 +210,9 @@ impl<
                 self.payload_fmt.pretty_payload(
                     &self
                         .db
-                        .fetch_at(&self.current_key, self.current_epoch)
-                        .await
+                        .try_fetch_at(&self.current_key, self.current_epoch)
+                        .await?
+                        .unwrap()
                 )
             )
             .unwrap();
@@ -224,8 +224,13 @@ impl<
                     self.tty,
                     "{}\n{}",
                     "Payload:".white().bold(),
-                    self.payload_fmt
-                        .pretty_payload(&self.db.fetch_at(left, self.current_epoch).await)
+                    self.payload_fmt.pretty_payload(
+                        &self
+                            .db
+                            .try_fetch_at(left, self.current_epoch)
+                            .await?
+                            .unwrap()
+                    )
                 )
                 .unwrap();
             }
@@ -237,8 +242,13 @@ impl<
                     self.tty,
                     "{}\n{}",
                     "Payload:".white().bold(),
-                    self.payload_fmt
-                        .pretty_payload(&self.db.fetch_at(right, self.current_epoch).await)
+                    self.payload_fmt.pretty_payload(
+                        &self
+                            .db
+                            .try_fetch_at(right, self.current_epoch)
+                            .await?
+                            .unwrap()
+                    )
                 )
                 .unwrap();
             }
@@ -252,14 +262,14 @@ impl<
         Ok(())
     }
 
-    async fn view_table(&mut self) -> Result<()> {
+    async fn view_table(&mut self) -> anyhow::Result<()> {
         let mut builder = Builder::default();
         builder.push_record(vec![
             "key".magenta().bold().to_string(),
             "payload".magenta().bold().to_string(),
         ]);
         for k in self.db.keys_at(self.current_epoch).await {
-            let payload = self.db.fetch_at(&k, self.current_epoch).await;
+            let payload = self.db.try_fetch_at(&k, self.current_epoch).await?.unwrap();
             builder.push_record(vec![
                 format!("{:?}", k),
                 self.payload_fmt.pretty_payload(&payload),
@@ -271,7 +281,7 @@ impl<
         Ok(())
     }
 
-    async fn view_tree(&mut self) -> Result<()> {
+    async fn view_tree(&mut self) -> anyhow::Result<()> {
         if let Some(choice) = menu(
             &mut self.tty,
             "from",
@@ -279,7 +289,7 @@ impl<
         ) {
             if let Some(root) = match choice {
                 'c' => Some(self.current_key.clone()),
-                'r' => self.db.root_at(self.current_epoch).await,
+                'r' => self.db.root_at(self.current_epoch).await?,
                 'k' => self.select_key().await,
                 _ => unreachable!(),
             } {
@@ -300,7 +310,7 @@ impl<
         Ok(())
     }
 
-    async fn tree_operations(&mut self) -> Result<()> {
+    async fn tree_operations(&mut self) -> anyhow::Result<()> {
         if let Some(choice) = menu(&mut self.tty, "from", &[('l', "ineage")]) {
             match choice {
                 'l' => {
@@ -322,7 +332,7 @@ impl<
         Ok(())
     }
 
-    fn settings(&mut self) -> Result<()> {
+    fn settings(&mut self) -> anyhow::Result<()> {
         if let Some(choice) = menu(&mut self.tty, "settings", &[('p', "ayload view")]) {
             if let Err(e) = match choice {
                 'p' => self.payload_fmt.settings(&mut self.tty),
@@ -335,7 +345,7 @@ impl<
         Ok(())
     }
 
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> anyhow::Result<()> {
         loop {
             self.headline().await;
             writeln!(

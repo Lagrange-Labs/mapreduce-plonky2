@@ -11,4 +11,4 @@ pub(crate) use context::TestContext;
 pub(crate) use io::{TestQueryInput, TestQueryOutput};
 
 pub(crate) const NUM_PREPROCESSING_IO: usize = verifiable_db::ivc::NUM_IO;
-pub(crate) const NUM_QUERY_IO: usize = verifiable_db::query::PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>;
+pub(crate) const NUM_QUERY_IO: usize = verifiable_db::query::pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>();

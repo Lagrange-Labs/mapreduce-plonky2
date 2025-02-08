@@ -8,42 +8,47 @@ on:
 name: Check, Test, and Format
 
 jobs:
-  fmt:
-    name: Rustfmt
-    runs-on: ['memory:128GB']
+  base:
+    name: build base
+    runs-on: ['hostname:hetzner-dedicated-6']
+    outputs:
+     RUNNER: ${{ steps.get-label.outputs.runner_name }}
     steps:
-      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v3
-        with:
-          go-version: ~1.20
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2024-05-17
-          override: true
-      - run: rustup component add rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+      - name: Get Runner Label
+        id: get-label
+        run: |
+          if [[ "${{ runner.name }}" == *"@hetzner-dedicated-6" ]]; then
+            echo "runner_name=hostname:hetzner-dedicated-6" >> $GITHUB_OUTPUT
+          else
+            echo "runner_name=nix-128g" >> $GITHUB_OUTPUT
+          fi
+      - name: Cleanup docker build cache
+        run: |
+          docker system prune --force
+          docker builder prune --all --force
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-  check:
-    name: Check
-    runs-on: ['memory:128GB']
+      - name: Build base
+        env:
+          DOCKER_BUILDKIT: 1
+        run: |
+          docker build --tag base --file docker/base/Dockerfile . --platform linux/amd64 --build-arg INSTRUCTION_SET="x86-64-v3"
+  clippy-fmt-check:
+    needs: base
+    runs-on: ${{needs.base.outputs.RUNNER}}
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ~1.20
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2024-05-17
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
+
+      - name: clippy
+        run: |
+            docker run --rm base cargo clippy --all-targets --all -- -D warnings -A incomplete-features -A clippy::needless_return -A clippy::too_long_first_doc_paragraph  -A  clippy::await_holding_lock
+      - name: fmt
+        run: |
+            docker run --rm base cargo fmt --all -- --check
+      - name: check
+        run: |
+                docker run --rm base cargo check --tests
+
 
   test:
     name: Test Suite

@@ -11,13 +11,10 @@ use mp2_common::{
     F,
 };
 use plonky2::field::types::PrimeField64;
-use rand::thread_rng;
 use verifiable_db::{
-    query::api::CircuitInput as QueryInput,
     revelation::{api::CircuitInput, PublicInputs as RevelationPI},
     test_utils::{
-        TestRevelationData, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
-        MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
+        TestRevelationData, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
     },
 };
 
@@ -29,19 +26,6 @@ impl TestContext {
         let min_block_number = 42;
         let max_block_number = 76;
         let test_data = TestRevelationData::sample(min_block_number, max_block_number);
-
-        let placeholder_hash_ids = QueryInput::<
-            MAX_NUM_COLUMNS,
-            MAX_NUM_PREDICATE_OPS,
-            MAX_NUM_RESULT_OPS,
-            MAX_NUM_ITEMS_PER_OUTPUT,
-        >::ids_for_placeholder_hash(
-            test_data.predicate_operations(),
-            test_data.results(),
-            test_data.placeholders(),
-            test_data.query_bounds(),
-        )
-        .unwrap();
 
         // Generate the query proof.
         let [query_proof] = self
@@ -61,17 +45,18 @@ impl TestContext {
         let preprocessing_proof = serialize_proof(&preprocessing_proof).unwrap();
 
         // Generate the revelation proof.
-        let input = CircuitInput::new_revelation_no_results_tree(
+        let input = CircuitInput::new_revelation_aggregated(
             query_proof,
             preprocessing_proof,
             test_data.query_bounds(),
             test_data.placeholders(),
-            placeholder_hash_ids,
+            test_data.predicate_operations(),
+            test_data.results(),
         )
         .unwrap();
         let revelation_proof = self
             .revelation_params
-            .generate_proof(input, self.query_circuits.get_recursive_circuit_set())
+            .generate_proof(input, self.query_circuits.get_recursive_circuit_set(), None)
             .unwrap();
         let revelation_proof = ProofWithVK::deserialize(&revelation_proof).unwrap();
         let (revelation_proof_with_pi, _) = revelation_proof.clone().into();

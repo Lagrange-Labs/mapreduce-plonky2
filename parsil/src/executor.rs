@@ -5,14 +5,14 @@ use alloy::primitives::U256;
 use anyhow::*;
 use ryhope::{EPOCH, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL};
 use sqlparser::ast::{
-    BinaryOperator, CastKind, DataType, ExactNumberInfo, Expr, Function, FunctionArg,
+    BinaryOperator, CastKind, DataType, Distinct, ExactNumberInfo, Expr, Function, FunctionArg,
     FunctionArgExpr, FunctionArgumentList, FunctionArguments, GroupByExpr, Ident, ObjectName,
     Query, Select, SelectItem, SetExpr, TableAlias, TableFactor, TableWithJoins, Value,
 };
 use std::collections::HashMap;
 use verifiable_db::query::{
     computational_hash_ids::PlaceholderIdentifier,
-    universal_circuit::universal_circuit_inputs::{PlaceholderId, Placeholders},
+    universal_circuit::universal_circuit_inputs::Placeholders,
 };
 
 use crate::{
@@ -25,7 +25,7 @@ use crate::{
 
 /// Safely wraps a [`Query`], ensuring its meaning and the status of its
 /// placeholders.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SafeQuery {
     /// A query featuring placeholders as defined in a [`PlaceholderRegister`]
     ZkQuery(Query),
@@ -87,13 +87,13 @@ impl AsMut<Query> for SafeQuery {
 
 /// A data structure wrapping a zkSQL query converted into a pgSQL able to be
 /// executed on zkTables and its accompanying metadata.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TranslatedQuery {
     /// The translated query, should be converted to string
     pub query: SafeQuery,
     /// Where each placeholder from the zkSQL query should be put in the array
     /// of PgSQL placeholder.
-    pub placeholder_mapping: HashMap<PlaceholderId, usize>,
+    pub placeholder_mapping: HashMap<PlaceholderIdentifier, usize>,
     /// A mapping from the named placeholders as defined in the settings to the
     /// string representation of numeric placeholders (e.g. from `$MIN_BLOCK` to
     /// `$4`).
@@ -105,9 +105,13 @@ impl TranslatedQuery {
         settings: &ParsilSettings<C>,
     ) -> Result<Self> {
         let used_placeholders = placeholders::gather_placeholders(settings, query.as_mut())?;
-        let placeholder_mapping = std::iter::once(PlaceholderId::MinQueryOnIdx1)
+        let placeholder_mapping = std::iter::once(PlaceholderIdentifier::MinQueryOnIdx1)
             .chain(std::iter::once(PlaceholderIdentifier::MaxQueryOnIdx1))
-            .chain(used_placeholders.iter().map(|i| PlaceholderId::Generic(*i)))
+            .chain(
+                used_placeholders
+                    .iter()
+                    .map(|i| PlaceholderIdentifier::Generic(*i)),
+            )
             .enumerate()
             .map(|(i, p)| (p, i))
             .collect();
@@ -186,7 +190,7 @@ struct PlaceholderInterpolator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
     placeholders: &'a Placeholders,
 }
-impl<'a, C: ContextProvider> AstMutator for PlaceholderInterpolator<'a, C> {
+impl<C: ContextProvider> AstMutator for PlaceholderInterpolator<'_, C> {
     type Error = anyhow::Error;
 
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
@@ -388,7 +392,7 @@ impl<'a, C: ContextProvider> KeyFetcher<'a, C> {
         Ok(())
     }
 }
-impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
+impl<C: ContextProvider> AstMutator for KeyFetcher<'_, C> {
     type Error = anyhow::Error;
 
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
@@ -414,7 +418,7 @@ impl<'a, C: ContextProvider> AstMutator for KeyFetcher<'a, C> {
                 let user_facing_name = &name.0[0].value;
 
                 // Fetch all the column declared in this table
-                let table = self.settings.context.fetch_table(&user_facing_name)?;
+                let table = self.settings.context.fetch_table(user_facing_name)?;
                 let table_columns = &table.columns;
 
                 // Extract the apparent table name (either the concrete one
@@ -537,7 +541,7 @@ impl<'a, C: ContextProvider> Executor<'a, C> {
     }
 }
 
-impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
+impl<C: ContextProvider> AstMutator for Executor<'_, C> {
     type Error = anyhow::Error;
 
     fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
@@ -564,7 +568,7 @@ impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
                     let concrete_table_name = &name.0[0].value;
 
                     // Fetch all the column declared in this table
-                    let table = self.settings.context.fetch_table(&concrete_table_name)?;
+                    let table = self.settings.context.fetch_table(concrete_table_name)?;
                     let table_columns = &table.columns;
 
                     // Extract the apparent table name (either the concrete one
@@ -680,11 +684,135 @@ impl<'a, C: ContextProvider> AstMutator for Executor<'a, C> {
     }
 }
 
+/// Executor to prepare a query that returns both the results of a user query
+/// and the matching rows, each identified by the pair (row_key, epoch)
+struct ExecutorWithKey<'a, C: ContextProvider> {
+    settings: &'a ParsilSettings<C>,
+}
+
+impl<'a, C: ContextProvider> ExecutorWithKey<'a, C> {
+    fn new(settings: &'a ParsilSettings<C>) -> Self {
+        Self { settings }
+    }
+}
+
+impl<C: ContextProvider> AstMutator for ExecutorWithKey<'_, C> {
+    type Error = anyhow::Error;
+
+    fn post_expr(&mut self, expr: &mut Expr) -> Result<()> {
+        let mut executor = Executor {
+            settings: self.settings,
+        };
+        executor.post_expr(expr)
+    }
+
+    fn post_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
+        let mut key_fetcher = KeyFetcher {
+            settings: self.settings,
+        };
+        key_fetcher.post_table_factor(table_factor)
+    }
+
+    fn post_select(&mut self, select: &mut Select) -> Result<()> {
+        let replace_wildcard = || {
+            // we expand the Wildcard by replacing it will all the columns of the original table
+            assert_eq!(select.from.len(), 1); // single table queries
+            let table = &select.from.first().unwrap().relation;
+            match table {
+                TableFactor::Derived { subquery, .. } => {
+                    subquery
+                        .as_ref()
+                        .body
+                        .as_ref()
+                        .as_select()
+                        .unwrap()
+                        .projection
+                        .iter()
+                        .filter_map(|item| {
+                            let expr = match item {
+                                SelectItem::ExprWithAlias { alias, .. } => {
+                                    Expr::Identifier(alias.clone())
+                                }
+                                SelectItem::UnnamedExpr(expr) => expr.clone(),
+                                _ => unreachable!(),
+                            };
+                            // we need to filter out KEY and EPOCH from the columns expanded by the Wildcard,
+                            // as these ones are the columns over which we need to apply DISTINCT
+                            match &expr {
+                                Expr::Identifier(ident)
+                                    if ident.value == EPOCH || ident.value == KEY =>
+                                {
+                                    None
+                                }
+                                _ => Some(expr),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                }
+                _ => unreachable!(), // post_table_factor makes `TableFactor::Derived`
+            }
+        };
+        // need to:
+        // 1. add KEY and EPOCH to existing `SelectItem`s
+        // 2. Ensure that, if there is DISTINCT keyword in the original query,
+        //    the original `SelectItem`s are wrapped in `DISTINCT ON`, to
+        //    ensure that we return only DISTINCT results
+        // first, turn existing `SelectItem`s in a vector of Expressions
+        if let Some(distinct) = select.distinct.as_mut() {
+            let items = select
+                .projection
+                .iter()
+                .flat_map(|item| {
+                    match item {
+                        SelectItem::UnnamedExpr(expr) => vec![expr.clone()],
+                        SelectItem::ExprWithAlias { expr, .. } => vec![expr.clone()], // we don't care about alias here
+                        SelectItem::QualifiedWildcard(_, _) => unreachable!(),
+                        SelectItem::Wildcard(_) => replace_wildcard(),
+                    }
+                })
+                .collect::<Vec<_>>();
+            *distinct = Distinct::On(items)
+        }
+        // we add KEY and EPOCH to existing `SelectItem`s
+        select.projection = vec![
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(KEY))),
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new(EPOCH))),
+        ]
+        .into_iter()
+        .chain(select.projection.iter().flat_map(|item| {
+            match item {
+                SelectItem::Wildcard(_) => replace_wildcard()
+                    .into_iter()
+                    .map(SelectItem::UnnamedExpr)
+                    .collect(),
+                _ => vec![item.clone()],
+            }
+        }))
+        .collect();
+
+        Ok(())
+    }
+}
+
 pub fn generate_query_execution<C: ContextProvider>(
     query: &mut Query,
     settings: &ParsilSettings<C>,
 ) -> Result<TranslatedQuery> {
     let mut executor = Executor::new(settings)?;
+    let mut query_execution = query.clone();
+    query_execution.visit_mut(&mut executor)?;
+
+    TranslatedQuery::make(SafeQuery::ZkQuery(query_execution), settings)
+}
+
+/// Build a statement to be executed in order to fetch the matching rows for
+/// a query, each identified by a pair (row_key, epoch), altogether with the
+/// results of the query corresponding to each matching row
+pub fn generate_query_execution_with_keys<C: ContextProvider>(
+    query: &mut Query,
+    settings: &ParsilSettings<C>,
+) -> Result<TranslatedQuery> {
+    let mut executor = ExecutorWithKey::new(settings);
     let mut query_execution = query.clone();
     query_execution.visit_mut(&mut executor)?;
 

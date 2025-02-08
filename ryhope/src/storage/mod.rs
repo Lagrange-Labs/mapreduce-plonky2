@@ -1,4 +1,4 @@
-use anyhow::*;
+#![allow(clippy::await_holding_lock)]
 use futures::future::BoxFuture;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,7 @@ use view::TreeStorageView;
 
 use self::updatetree::UpdateTree;
 use crate::{
+    error::RyhopeError,
     tree::{NodeContext, TreeTopology},
     Epoch, InitSettings,
 };
@@ -45,7 +46,7 @@ where
     fn from_settings(
         init_settings: InitSettings<T>,
         storage_settings: Self::Settings,
-    ) -> impl Future<Output = Result<Self>>;
+    ) -> impl Future<Output = Result<Self, RyhopeError>>;
 }
 
 pub struct WideLineage<K, V>
@@ -55,15 +56,13 @@ where
     /// The keys touched by the query itself
     pub core_keys: Vec<(Epoch, K)>,
     /// An epoch -> (K -> NodeContext, K -> Payload) mapping
+    #[allow(clippy::type_complexity)]
     epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
 }
 
 impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
     pub fn is_touched_key(&self, to_search: &K) -> bool {
-        self.core_keys
-            .iter()
-            .find(|(_, k)| k == to_search)
-            .is_some()
+        self.core_keys.iter().any(|(_, k)| k == to_search)
     }
     pub fn num_touched_rows(&self) -> usize {
         self.core_keys.len()
@@ -161,12 +160,12 @@ pub trait TreeStorage<T: TreeTopology>: Sized + Send + Sync {
     fn born_at(&self, epoch: Epoch) -> impl Future<Output = Vec<T::Key>>;
 
     /// Rollback this tree one epoch in the past
-    fn rollback<F>(&mut self) -> impl Future<Output = Result<()>> {
+    fn rollback<F>(&mut self) -> impl Future<Output = Result<(), RyhopeError>> {
         self.rollback_to(self.nodes().current_epoch() - 1)
     }
 
     /// Rollback this tree to the given epoch
-    fn rollback_to(&mut self, epoch: Epoch) -> impl Future<Output = Result<()>>;
+    fn rollback_to(&mut self, epoch: Epoch) -> impl Future<Output = Result<(), RyhopeError>>;
 
     /// Return an epoch-locked, read-only, [`TreeStorage`] offering a view on
     /// this Merkle tree as it was at the given epoch.
@@ -197,31 +196,35 @@ where
     fn current_epoch(&self) -> Epoch;
 
     /// Return the value stored at the current epoch.
-    fn fetch(&self) -> impl Future<Output = T> + Send {
+    fn fetch(&self) -> impl Future<Output = Result<T, RyhopeError>> + Send {
         async { self.fetch_at(self.current_epoch()).await }
     }
 
     /// Return the value stored at the given epoch.
-    fn fetch_at(&self, epoch: Epoch) -> impl Future<Output = T> + Send;
+    fn fetch_at(&self, epoch: Epoch) -> impl Future<Output = Result<T, RyhopeError>> + Send;
 
     /// Set the stored value at the current epoch.
-    fn store(&mut self, t: T) -> impl Future<Output = ()> + Send;
+    fn store(&mut self, t: T) -> impl Future<Output = Result<(), RyhopeError>> + Send;
 
-    fn update<F: FnMut(&mut T) + Send>(&mut self, mut f: F) -> impl Future<Output = ()> + Send {
+    fn update<F: FnMut(&mut T) + Send>(
+        &mut self,
+        mut f: F,
+    ) -> impl Future<Output = Result<(), RyhopeError>> + Send {
         async move {
-            let mut t = self.fetch().await;
+            let mut t = self.fetch().await?;
             f(&mut t);
-            self.store(t).await;
+            self.store(t).await?;
+            Ok(())
         }
     }
 
     /// Roll back this storage one epoch in the past.
-    fn rollback(&mut self) -> impl Future<Output = Result<()>> {
+    fn rollback(&mut self) -> impl Future<Output = Result<(), RyhopeError>> {
         self.rollback_to(self.current_epoch() - 1)
     }
 
     /// Roll back this storage to the given epoch
-    fn rollback_to(&mut self, epoch: Epoch) -> impl Future<Output = Result<()>>;
+    fn rollback_to(&mut self, epoch: Epoch) -> impl Future<Output = Result<(), RyhopeError>>;
 }
 
 /// A read-only, versioned, KV storage. Intended to be implemented in
@@ -239,46 +242,28 @@ where
     /// Return the current time stamp of the storage
     fn current_epoch(&self) -> Epoch;
 
-    /// Return the value associated to `k` in the current epoch.
-    ///
-    /// Panic if `k` is not associated to any value at the current epoch.
-    fn fetch(&self, k: &K) -> impl Future<Output = V> + Send {
-        async { self.fetch_at(k, self.current_epoch()).await }
-    }
-
     /// Return the value associated to `k` at the current epoch if it exists,
     /// `None` otherwise.
-    fn try_fetch(&self, k: &K) -> impl Future<Output = Option<V>> + Send {
+    fn try_fetch(&self, k: &K) -> impl Future<Output = Result<Option<V>, RyhopeError>> + Send {
         async { self.try_fetch_at(k, self.current_epoch()).await }
-    }
-
-    /// Return the value associated to `k` at the given `epoch`.
-    ///
-    /// Panic if `k` is not associated to any value at `epoch`.
-    fn fetch_at(&self, k: &K, epoch: Epoch) -> impl Future<Output = V> + Send {
-        async move { self.try_fetch_at(k, epoch).await.unwrap() }
     }
 
     /// Return the value associated to `k` at the given `epoch` if it exists,
     /// `None` otherwise.
-    fn try_fetch_at(&self, k: &K, epoch: Epoch) -> impl Future<Output = Option<V>> + Send;
-
-    /// Return the value associated to a list `(Epoch, Key)` pairs, if they exist.
-    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, K)> + Send>(
+    fn try_fetch_at(
         &self,
-        data: I,
-    ) -> impl Future<Output = Result<Vec<Option<(Epoch, K, V)>>>> + Send
-    where
-        <I as IntoIterator>::IntoIter: Send;
+        k: &K,
+        epoch: Epoch,
+    ) -> impl Future<Output = Result<Option<V>, RyhopeError>> + Send;
 
     /// Return whether the given key is present at the current epoch.
-    fn contains(&self, k: &K) -> impl Future<Output = bool> {
-        async { self.try_fetch(k).await.is_some() }
+    fn contains(&self, k: &K) -> impl Future<Output = Result<bool, RyhopeError>> {
+        async { self.try_fetch(k).await.map(|v| v.is_some()) }
     }
 
     /// Return whether the given key is present at the given epoch.
-    fn contains_at(&self, k: &K, epoch: Epoch) -> impl Future<Output = bool> {
-        async move { self.try_fetch_at(k, epoch).await.is_some() }
+    fn contains_at(&self, k: &K, epoch: Epoch) -> impl Future<Output = Result<bool, RyhopeError>> {
+        async move { self.try_fetch_at(k, epoch).await.map(|x| x.is_some()) }
     }
 
     /// Return the number of stored K/V pairs at the current epoch.
@@ -286,10 +271,19 @@ where
         self.size_at(self.current_epoch())
     }
 
-    /// Return the number of stored K/V pairs at the gievm epoch
+    /// Return the number of stored K/V pairs at the given epoch.
     fn size_at(&self, epoch: Epoch) -> impl Future<Output = usize>;
 
+    /// Return all the keys existing at the given epoch.
     fn keys_at(&self, epoch: Epoch) -> impl Future<Output = Vec<K>>;
+
+    /// Return a key alive at epoch, if any.
+    fn random_key_at(&self, epoch: Epoch) -> impl Future<Output = Option<K>>;
+
+    /// Return all the valid key/value pairs at the given `epoch`.
+    ///
+    /// NOTE: be careful when using this function, it is not lazy.
+    fn pairs_at(&self, epoch: Epoch) -> impl Future<Output = Result<HashMap<K, V>, RyhopeError>>;
 }
 
 /// A versioned KV storage only allowed to mutate entries only in the current
@@ -300,13 +294,17 @@ pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>:
     /// Within a transaction, delete the existing storage entry at `k`.
     ///
     /// Fail if `k` does not exist.
-    fn remove(&mut self, k: K) -> impl Future<Output = Result<()>> + Send;
+    fn remove(&mut self, k: K) -> impl Future<Output = Result<(), RyhopeError>> + Send;
 
     /// Within a transaction, update the existing storage entry at `k` with
     /// value `new_value`.
     ///
     /// Fail if `k` does not exist.
-    fn update(&mut self, k: K, new_value: V) -> impl Future<Output = Result<()>> + Send;
+    fn update(
+        &mut self,
+        k: K,
+        new_value: V,
+    ) -> impl Future<Output = Result<(), RyhopeError>> + Send;
 
     /// Apply the given function `updater` onto the value associated to `k` and
     /// persist the updated value.
@@ -316,40 +314,43 @@ pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>:
         &mut self,
         k: K,
         updater: F,
-    ) -> impl Future<Output = ()> + Send
+    ) -> impl Future<Output = Result<(), RyhopeError>> + Send
     where
         Self: Sync + Send,
     {
         async move {
-            let mut v = self.fetch(&k).await;
-            updater(&mut v);
-            self.update(k, v).await.unwrap();
+            if let Some(mut v) = self.try_fetch(&k).await? {
+                updater(&mut v);
+                self.update(k, v).await
+            } else {
+                Result::Ok(())
+            }
         }
     }
 
     /// Associate `value` to `k`.
-    fn store(&mut self, k: K, value: V) -> impl Future<Output = Result<()>> + Send;
+    fn store(&mut self, k: K, value: V) -> impl Future<Output = Result<(), RyhopeError>> + Send;
 
     /// Rollback this storage one epoch back. Please note that this is a
     /// destructive and irreversible operation.
-    fn rollback(&mut self) -> impl Future<Output = Result<()>> {
+    fn rollback(&mut self) -> impl Future<Output = Result<(), RyhopeError>> {
         self.rollback_to(self.current_epoch() - 1)
     }
 
     /// Rollback this storage to the given epoch. Please note that this is a
     /// destructive and irreversible operation.
-    fn rollback_to(&mut self, epoch: Epoch) -> impl Future<Output = Result<()>>;
+    fn rollback_to(&mut self, epoch: Epoch) -> impl Future<Output = Result<(), RyhopeError>>;
 }
 
 /// Characterizes a trait allowing for epoch-based atomic updates.
 pub trait TransactionalStorage {
     /// Start a new transaction, defining a transition between the storage at
     /// two epochs.
-    fn start_transaction(&mut self) -> Result<()>;
+    fn start_transaction(&mut self) -> Result<(), RyhopeError>;
 
     /// Closes the current transaction and commit to the new state at the new
     /// epoch.
-    fn commit_transaction(&mut self) -> impl Future<Output = Result<()>>;
+    fn commit_transaction(&mut self) -> impl Future<Output = Result<(), RyhopeError>>;
 
     /// Execute the given function acting on `Self` within a transaction.
     ///
@@ -357,9 +358,9 @@ pub trait TransactionalStorage {
     fn in_transaction<Fut, F: FnOnce(&mut Self) -> Fut>(
         &mut self,
         f: F,
-    ) -> impl Future<Output = Result<()>>
+    ) -> impl Future<Output = Result<(), RyhopeError>>
     where
-        Fut: Future<Output = Result<()>>,
+        Fut: Future<Output = Result<(), RyhopeError>>,
     {
         async {
             self.start_transaction()?;
@@ -375,7 +376,10 @@ pub trait TransactionalStorage {
 pub trait SqlTransactionStorage: TransactionalStorage {
     /// Similar to the [`commit`] method of [`TransactionalStorage`], but
     /// re-using a given transaction.
-    fn commit_in(&mut self, tx: &mut Transaction<'_>) -> impl Future<Output = Result<()>>;
+    fn commit_in(
+        &mut self,
+        tx: &mut Transaction<'_>,
+    ) -> impl Future<Output = Result<(), RyhopeError>>;
 
     /// Types implementing this trait may implement this method if there is code
     /// they want to have run after the transaction successful execution, _e.g._
@@ -399,23 +403,22 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
 {
     /// Start a new transaction, defining a transition between the storage at
     /// two epochs.
-    fn start_transaction(&mut self) -> impl Future<Output = Result<()>>;
+    fn start_transaction(&mut self) -> impl Future<Output = Result<(), RyhopeError>>;
 
     /// Closes the current transaction and commit to the new state at the new
     /// epoch.
     ///
     /// Return the hierarchy of `Key` affected by the transaction and requiring
     /// a re-proof.
-    fn commit_transaction(&mut self) -> impl Future<Output = Result<UpdateTree<K>>>;
+    fn commit_transaction(&mut self) -> impl Future<Output = Result<UpdateTree<K>, RyhopeError>>;
 
     /// Execute the given function acting on `Self` within a transaction.
     ///
     /// Will fail if the transaction failed.
-
-    fn in_transaction<F: FnOnce(&mut Self) -> BoxFuture<'_, Result<()>> + Sync>(
+    fn in_transaction<F: FnOnce(&mut Self) -> BoxFuture<'_, Result<(), RyhopeError>> + Sync>(
         &mut self,
         f: F,
-    ) -> impl Future<Output = Result<UpdateTree<K>>> {
+    ) -> impl Future<Output = Result<UpdateTree<K>, RyhopeError>> {
         async {
             self.start_transaction().await?;
             f(self).await?;
@@ -433,7 +436,7 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
     fn transaction_from_batch<I: IntoIterator<Item = Operation<K, V>>>(
         &mut self,
         ops: I,
-    ) -> impl Future<Output = Result<UpdateTree<K>>> {
+    ) -> impl Future<Output = Result<UpdateTree<K>, RyhopeError>> {
         async {
             self.start_transaction().await?;
             for op in ops.into_iter() {
@@ -457,7 +460,7 @@ pub trait TreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send +
 ///   * a **single** transaction in a **single** connection must be used;
 ///
 ///   * the `post_commit` hook **must** be called after, and only after, a
-///   successful SQL transaction execution.
+///     successful SQL transaction execution.
 pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Send + Sync>:
     TreeTransactionalStorage<K, V>
 {
@@ -466,7 +469,7 @@ pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Sen
     fn commit_in(
         &mut self,
         tx: &mut Transaction<'_>,
-    ) -> impl Future<Output = Result<UpdateTree<K>>>;
+    ) -> impl Future<Output = Result<UpdateTree<K>, RyhopeError>>;
 
     /// Types implementing this trait may implement this method if there is code
     /// they want to have run after the transaction successful execution, _e.g._
@@ -500,7 +503,7 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
         t: &T,
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
-    ) -> impl Future<Output = Result<WideLineage<T::Key, V>>>;
+    ) -> impl Future<Output = Result<WideLineage<T::Key, V>, RyhopeError>>;
 
     fn wide_update_trees(
         &self,
@@ -508,16 +511,24 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
         t: &T,
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
-    ) -> impl Future<Output = Result<Vec<UpdateTree<T::Key>>>> {
+    ) -> impl Future<Output = Result<Vec<UpdateTree<T::Key>>, RyhopeError>> {
         async move {
             let wide_lineage = self.wide_lineage_between(at, t, keys, bounds).await?;
             let mut r = Vec::new();
             for (epoch, nodes) in wide_lineage.epoch_lineages.iter() {
-                if let Some(root) = t.root(&self.view_at(*epoch)).await {
+                if let Some(root) = t.root(&self.view_at(*epoch)).await? {
                     r.push(UpdateTree::from_map(*epoch, &root, &nodes.0));
                 }
             }
             Ok(r)
         }
     }
+    #[allow(clippy::type_complexity)]
+    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
+        &self,
+        t: &T,
+        data: I,
+    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<T::Key>, V)>, RyhopeError>> + Send
+    where
+        <I as IntoIterator>::IntoIter: Send;
 }

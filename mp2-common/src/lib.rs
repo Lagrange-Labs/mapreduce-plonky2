@@ -1,5 +1,5 @@
 //! Utility functions and gadgets
-
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(generic_arg_infer)]
 #![feature(const_for)]
@@ -16,7 +16,9 @@ use poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
 use serde::{Deserialize, Serialize};
 
 pub mod array;
+pub mod digest;
 pub mod eth;
+pub mod git;
 pub mod group_hashing;
 pub mod hash;
 pub mod keccak;

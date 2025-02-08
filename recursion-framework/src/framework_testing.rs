@@ -7,7 +7,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, VerifierOnlyCircuitData},
-        config::{AlgebraicHasher, GenericConfig, Hasher},
+        config::{AlgebraicHasher, GenericConfig},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -96,7 +96,6 @@ pub fn new_universal_circuit_builder_for_testing<
 ) -> CircuitWithUniversalVerifierBuilder<F, D, NUM_PUBLIC_INPUTS>
 where
     C::Hasher: AlgebraicHasher<F>,
-    [(); C::Hasher::HASH_SIZE]:,
 {
     CircuitWithUniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::new::<C>(
         config,
@@ -112,7 +111,6 @@ impl<
     > Default for TestingRecursiveCircuits<F, C, D, NUM_PUBLIC_INPUTS>
 where
     C::Hasher: AlgebraicHasher<F>,
-    [(); C::Hasher::HASH_SIZE]:,
 {
     /// Build a `TestingRecursiveCircuits` for an empty set of circuits and employing
     /// `standard_recursion_config` as the circuit configuration
@@ -132,7 +130,6 @@ impl<
     > TestingRecursiveCircuits<F, C, D, NUM_PUBLIC_INPUTS>
 where
     C::Hasher: AlgebraicHasher<F>,
-    [(); C::Hasher::HASH_SIZE]:,
 {
     /// Instantiate a `TestingRecursiveCircuits` for the set of circuits given by `circuits`; `builder` must be instantiated
     /// by employing the `new_universal_circuit_builder_for_testing` utility function
@@ -266,7 +263,6 @@ mod tests {
     >()
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         const INPUT_SIZE: usize = 8;
         let config = CircuitConfig::standard_recursion_config();
@@ -338,14 +334,14 @@ mod tests {
 
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::new(
             config.clone(),
-            &testing_framework.get_recursive_circuit_set(),
+            testing_framework.get_recursive_circuit_set(),
         );
         let verifier_circuit = circuit_builder
             .build_circuit::<C, 0, VerifierCircuitWires<C, D, NUM_PUBLIC_INPUTS>>(verifier_gadget);
 
         let verifier_gadget = RecursiveCircuitsVerifierGagdet::new(
             config.clone(),
-            &testing_framework.get_recursive_circuit_set(),
+            testing_framework.get_recursive_circuit_set(),
         );
         let verifier_circuit_fixed = circuit_builder
             .build_circuit::<C, 0, VerifierCircuitFixedWires<C, D, NUM_PUBLIC_INPUTS>>((

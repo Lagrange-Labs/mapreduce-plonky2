@@ -1,14 +1,16 @@
 [package]
 name = "mp2_common"
-version = "0.1.0"
+version = "1.2.1"
 edition = "2021"
 
 [dependencies]
-anyhow.workspace = true
 alloy.workspace = true
+anyhow.workspace = true
 bincode.workspace = true
-derive_more = "0.99.18"
+derive_more.workspace = true
 eth_trie.workspace = true
+ethereum-types.workspace = true
+git-version.workspace = true
 hashbrown.workspace = true
 hex.workspace = true
 itertools.workspace = true
@@ -23,20 +25,15 @@ rand.workspace = true
 rlp.workspace = true
 serde.workspace = true
 sha3.workspace = true
-ethereum-types = "0.14.1"
 
 [dev-dependencies]
-csv.workspace = true
+ethers.workspace = true
 hex.workspace = true
 rand.workspace = true
-rmp-serde.workspace = true
-serde_json.workspace = true
-serial_test.workspace = true
-tokio.workspace = true
-ethers.workspace = true
-
-mp2_test = { path = "../mp2-test" }
 rstest.workspace = true
+tokio.workspace = true
+
+mp2_test = { path = "../mp2-test" , version = "1.2.1" }
 
 [features]
 ci = ["mp2_test/ci"]

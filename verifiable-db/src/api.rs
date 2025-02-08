@@ -4,13 +4,10 @@ use crate::{
     block_tree, cells_tree,
     extraction::{ExtractionPI, ExtractionPIWrap},
     ivc,
-    query::{self, api::Parameters as QueryParams, PI_LEN as QUERY_PI_LEN},
-    revelation::{
-        self, api::Parameters as RevelationParams, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
-    },
-    row_tree,
+    query::{self, api::Parameters as QueryParams, pi_len as query_pi_len},
+    revelation::{self, api::Parameters as RevelationParams, pi_len as revelation_pi_len},
+    row_tree::{self},
 };
-use alloy::primitives::U256;
 use anyhow::Result;
 use log::info;
 use mp2_common::{
@@ -32,13 +29,6 @@ use recursion_framework::framework::{
     RecursiveCircuits, RecursiveCircuitsVerifierGagdet, RecursiveCircuitsVerifierTarget,
 };
 use serde::{Deserialize, Serialize};
-
-/// Struct containing the expected input of the Cell Tree node
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CellNode {
-    pub identifier: F,
-    pub value: U256,
-}
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the verifiable DB stage of LPN
 pub enum CircuitInput {
@@ -72,6 +62,31 @@ where
             preprocessing_vk: self.ivc.get_ivc_circuit_data().verifier_only.clone(),
         };
         Ok(bincode::serialize(&params_info)?)
+    }
+
+    /// Get the proof of an empty node.
+    pub fn empty_cell_tree_proof(&self) -> Result<Vec<u8>> {
+        self.cells_tree.empty_cell_tree_proof()
+    }
+
+    /// Get the cell tree params
+    pub fn get_cells_params(&self) -> &cells_tree::PublicParameters {
+        &self.cells_tree
+    }
+
+    /// Get the rows tree params
+    pub fn get_row_params(&self) -> &row_tree::PublicParameters {
+        &self.rows_tree
+    }
+
+    /// Get the block tree params
+    pub fn get_block_params(&self) -> &block_tree::PublicParameters<E> {
+        &self.block_tree
+    }
+
+    /// Get the IVC params
+    pub fn get_ivc_params(&self) -> &ivc::PublicParameters {
+        &self.ivc
     }
 }
 
@@ -153,7 +168,7 @@ impl<
         const MAX_NUM_PLACEHOLDERS: usize,
     > WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
 where
-    [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
+    [(); revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     pub fn build(revelation_circuit_set: &RecursiveCircuits<F, C, D>) -> Self {
@@ -163,13 +178,14 @@ where
             C,
             D,
             {
-                REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
+                revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>(
+                )
             },
         >::new(default_config(), revelation_circuit_set);
         let query_verifier_wires = verifier_gadget.verify_proof_in_circuit_set(&mut builder);
         // expose public inputs of verifier proof as public inputs
         let verified_proof_pi = query_verifier_wires.get_public_input_targets::<F, {
-            REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>
+            revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()
         }>();
         builder.register_public_inputs(verified_proof_pi);
         let circuit_data = builder.build();
@@ -200,36 +216,61 @@ where
 
 #[derive(Serialize, Deserialize)]
 pub struct QueryParameters<
-    const MAX_NUM_COLUMNS: usize,
-    const MAX_NUM_PREDICATE_OPS: usize,
-    const MAX_NUM_RESULT_OPS: usize,
-    const MAX_NUM_OUTPUTS: usize,
-    const MAX_NUM_ITEMS_PER_OUTPUT: usize,
-    const MAX_NUM_PLACEHOLDERS: usize,
+    const NUM_CHUNKS: usize, // Maximum number of chunks that can be aggregated in a single proof
+    const NUM_ROWS: usize,   // Maximum number of rows that can be proven in a single proof
+    const ROW_TREE_MAX_DEPTH: usize, // Maximum depth of rows tree supported in circuits
+    const INDEX_TREE_MAX_DEPTH: usize, // Maximum depth of index tree supported in circuits
+    const MAX_NUM_COLUMNS: usize, // Maximum number of columns for a table supported in circuits
+    const MAX_NUM_PREDICATE_OPS: usize, // Maximum number of operations that can be employed in a query
+    // to evaluate the filtering predicate (i.e, the operations in `WHERE` clause of the query)
+    const MAX_NUM_RESULT_OPS: usize, // Maximum number of operations that can be employed in a query
+    // to compute the results of the query in each row (i.e, the operations in the `SELECT` clause of the query)
+    const MAX_NUM_OUTPUTS: usize, // Maximum number of outputs that can be returned for a query with a single
+    // proof. It basically corresponds to the maximum value that can be used for `LIMIT` keyword
+    const MAX_NUM_ITEMS_PER_OUTPUT: usize, // Maximum number of items that can be returned for each output row of the
+    // query (i.e., the maximum number of items that can be specified in the `SELECT` clause of the query)
+    const MAX_NUM_PLACEHOLDERS: usize, // Maximum number of placeholders (including the special block range
+                                       // placeholders) that can be employed in a query
 > where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
+    [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
+    [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
 {
     query_params: QueryParams<
+        NUM_CHUNKS,
+        NUM_ROWS,
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
         MAX_NUM_COLUMNS,
         MAX_NUM_PREDICATE_OPS,
         MAX_NUM_RESULT_OPS,
         MAX_NUM_ITEMS_PER_OUTPUT,
     >,
     revelation_params: RevelationParams<
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
+        MAX_NUM_COLUMNS,
+        MAX_NUM_PREDICATE_OPS,
+        MAX_NUM_RESULT_OPS,
         MAX_NUM_OUTPUTS,
         MAX_NUM_ITEMS_PER_OUTPUT,
         MAX_NUM_PLACEHOLDERS,
-        { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
     >,
     wrap_circuit:
         WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>,
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum QueryCircuitInput<
+    const NUM_CHUNKS: usize,
+    const NUM_ROWS: usize,
+    const ROW_TREE_MAX_DEPTH: usize,
+    const INDEX_TREE_MAX_DEPTH: usize,
     const MAX_NUM_COLUMNS: usize,
     const MAX_NUM_PREDICATE_OPS: usize,
     const MAX_NUM_RESULT_OPS: usize,
@@ -238,9 +279,16 @@ pub enum QueryCircuitInput<
     const MAX_NUM_PLACEHOLDERS: usize,
 > where
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
+    [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
 {
     Query(
         query::api::CircuitInput<
+            NUM_CHUNKS,
+            NUM_ROWS,
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
@@ -249,15 +297,23 @@ pub enum QueryCircuitInput<
     ),
     Revelation(
         revelation::api::CircuitInput<
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
+            MAX_NUM_COLUMNS,
+            MAX_NUM_PREDICATE_OPS,
+            MAX_NUM_RESULT_OPS,
             MAX_NUM_OUTPUTS,
             MAX_NUM_ITEMS_PER_OUTPUT,
             MAX_NUM_PLACEHOLDERS,
-            { 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS) },
         >,
     ),
 }
 
 impl<
+        const NUM_CHUNKS: usize,
+        const NUM_ROWS: usize,
+        const ROW_TREE_MAX_DEPTH: usize,
+        const INDEX_TREE_MAX_DEPTH: usize,
         const MAX_NUM_COLUMNS: usize,
         const MAX_NUM_PREDICATE_OPS: usize,
         const MAX_NUM_RESULT_OPS: usize,
@@ -266,6 +322,10 @@ impl<
         const MAX_NUM_PLACEHOLDERS: usize,
     >
     QueryParameters<
+        NUM_CHUNKS,
+        NUM_ROWS,
+        ROW_TREE_MAX_DEPTH,
+        INDEX_TREE_MAX_DEPTH,
         MAX_NUM_COLUMNS,
         MAX_NUM_PREDICATE_OPS,
         MAX_NUM_RESULT_OPS,
@@ -276,10 +336,12 @@ impl<
 where
     [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
     [(); MAX_NUM_ITEMS_PER_OUTPUT - 1]:,
-    [(); NUM_QUERY_IO::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
     [(); 2 * (MAX_NUM_PREDICATE_OPS + MAX_NUM_RESULT_OPS)]:,
-    [(); QUERY_PI_LEN::<MAX_NUM_ITEMS_PER_OUTPUT>]:,
-    [(); REVELATION_PI_LEN::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>]:,
+    [(); ROW_TREE_MAX_DEPTH - 1]:,
+    [(); INDEX_TREE_MAX_DEPTH - 1]:,
+    [(); MAX_NUM_ITEMS_PER_OUTPUT * MAX_NUM_OUTPUTS]:,
+    [(); query_pi_len::<MAX_NUM_ITEMS_PER_OUTPUT>()]:,
+    [(); revelation_pi_len::<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>()]:,
 {
     /// Build `QueryParameters` from serialized `ParamsInfo` of `PublicParamaters`
     pub fn build_params(preprocessing_params_info: &[u8]) -> Result<Self> {
@@ -287,7 +349,8 @@ where
         let query_params = QueryParams::build();
         info!("Building the revelation circuit parameters...");
         let revelation_params = RevelationParams::build(
-            query_params.get_circuit_set(),
+            query_params.get_circuit_set(), // unused, so we provide same query params
+            query_params.get_universal_circuit().data.verifier_data(),
             &params_info.preprocessing_circuit_set,
             &params_info.preprocessing_vk,
         );
@@ -304,6 +367,10 @@ where
     pub fn generate_proof(
         &self,
         input: QueryCircuitInput<
+            NUM_CHUNKS,
+            NUM_ROWS,
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
@@ -315,9 +382,11 @@ where
         match input {
             QueryCircuitInput::Query(input) => self.query_params.generate_proof(input),
             QueryCircuitInput::Revelation(input) => {
-                let proof = self
-                    .revelation_params
-                    .generate_proof(input, self.query_params.get_circuit_set())?;
+                let proof = self.revelation_params.generate_proof(
+                    input,
+                    self.query_params.get_circuit_set(),
+                    Some(self.query_params.get_universal_circuit()),
+                )?;
                 self.wrap_circuit.generate_proof(
                     self.revelation_params.get_circuit_set(),
                     &ProofWithVK::deserialize(&proof)?,
@@ -338,12 +407,16 @@ mod tests {
     use std::{fs::File, io::BufReader};
 
     // Constants associating with test data.
+    const NUM_CHUNKS: usize = 5;
+    const NUM_ROWS: usize = 5;
     const MAX_NUM_COLUMNS: usize = 20;
     const MAX_NUM_PREDICATE_OPS: usize = 20;
     const MAX_NUM_RESULT_OPS: usize = 20;
     const MAX_NUM_OUTPUTS: usize = 3;
     const MAX_NUM_ITEMS_PER_OUTPUT: usize = 5;
     const MAX_NUM_PLACEHOLDERS: usize = 10;
+    const ROW_TREE_MAX_DEPTH: usize = 10;
+    const INDEX_TREE_MAX_DEPTH: usize = 15;
 
     // This is only used for testing on local.
     #[ignore]
@@ -356,6 +429,10 @@ mod tests {
         let file = File::open(QUERY_PARAMS_FILE_PATH).unwrap();
         let reader = BufReader::new(file);
         let query_params: QueryParameters<
+            NUM_CHUNKS,
+            NUM_ROWS,
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,

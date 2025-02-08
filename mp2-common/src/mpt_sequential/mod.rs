@@ -332,7 +332,7 @@ where
     /// * The key where to lookup the next nibble and thus the hash stored at
     ///   nibble position in the branch node.
     /// * RLP headers of the current node.
-    /// And it returns:
+    ///   And it returns:
     /// * New key with the pointer moved.
     /// * The child hash / value of the node.
     /// * A boolean that must be true if the given node is a leaf or an extension.

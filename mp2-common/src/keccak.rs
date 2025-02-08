@@ -59,6 +59,8 @@ pub type OutputHash = Array<U32Target, PACKED_HASH_LEN>;
 pub type OutputByteHash = Array<Target, HASH_LEN>;
 
 impl FromTargets for OutputHash {
+    const NUM_TARGETS: usize = PACKED_HASH_LEN;
+
     fn from_targets(t: &[Target]) -> Self {
         OutputHash::from_array(array::from_fn(|i| U32Target(t[i])))
     }
@@ -74,6 +76,7 @@ impl ToTargets for OutputHash {
 /// padded version length is less than N. In other words, N is the maximal size
 /// of the array + padding to hash.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct KeccakCircuit<const N: usize> {
     data: Vec<u8>,
 }
@@ -284,7 +287,7 @@ pub enum InputData<'a, F, const N: usize> {
     NonAssigned(&'a Vector<F, N>),
 }
 
-impl<'a, F, const N: usize> InputData<'a, F, N> {
+impl<F, const N: usize> InputData<'_, F, N> {
     pub fn real_len(&self) -> usize {
         match self {
             InputData::Assigned(v) => v.real_len,

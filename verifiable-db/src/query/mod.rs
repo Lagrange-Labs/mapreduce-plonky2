@@ -1,12 +1,16 @@
-use mp2_common::F;
-use public_inputs::PublicInputs;
+use plonky2::iop::target::Target;
+use public_inputs::PublicInputsQueryCircuits;
 
-pub mod aggregation;
 pub mod api;
+pub(crate) mod circuits;
 pub mod computational_hash_ids;
+pub mod merkle_path;
+pub(crate) mod output_computation;
 pub mod public_inputs;
+pub(crate) mod row_chunk_gadgets;
 pub mod universal_circuit;
+pub mod utils;
 
-// Without this skipping config, the generic parameter was deleted when `cargo fmt`.
-#[rustfmt::skip]
-pub const PI_LEN<const MAX_NUM_RESULTS: usize>: usize = PublicInputs::<F, MAX_NUM_RESULTS>::total_len();
+pub const fn pi_len<const MAX_NUM_RESULTS: usize>() -> usize {
+    PublicInputsQueryCircuits::<Target, MAX_NUM_RESULTS>::total_len()
+}

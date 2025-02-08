@@ -1,17 +1,14 @@
 use anyhow::Result;
 use mp2_common::{C, D, F};
-use plonky2::iop::target::BoolTarget;
 use plonky2::plonk::circuit_data::CircuitConfig;
-use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
+use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::{
     field::extension::Extendable,
     hash::hash_types::RichField,
     iop::witness::PartialWitness,
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{
-            CircuitData, CommonCircuitData, VerifierCircuitData, VerifierOnlyCircuitData,
-        },
+        circuit_data::{CircuitData, VerifierCircuitData},
         config::GenericConfig,
     },
 };
@@ -127,6 +124,10 @@ pub fn run_circuit<
     u: U,
 ) -> ProofWithPublicInputs<F, C, D> {
     let setup = setup_circuit::<F, D, C, U>();
+    println!(
+        "setup.verifierdata hash {:?}",
+        setup.2.verifier_only.circuit_digest
+    );
 
     prove_circuit(&setup, &u)
 }

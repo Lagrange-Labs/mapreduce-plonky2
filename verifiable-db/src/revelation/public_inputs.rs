@@ -183,7 +183,7 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
             query_offset: &input[Self::PI_RANGES[9].clone()][0],
         }
     }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         original_block_hash: &'a [T],
         flat_computational_hash: &'a [T],
@@ -227,8 +227,8 @@ impl<'a, T: Clone, const L: usize, const S: usize, const PH: usize> PublicInputs
     }
 }
 
-impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputCommon
-    for PublicInputs<'a, Target, L, S, PH>
+impl<const L: usize, const S: usize, const PH: usize> PublicInputCommon
+    for PublicInputs<'_, Target, L, S, PH>
 {
     const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
@@ -246,7 +246,7 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputCommon
     }
 }
 
-impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, Target, L, S, PH> {
+impl<const L: usize, const S: usize, const PH: usize> PublicInputs<'_, Target, L, S, PH> {
     pub fn original_block_hash_target(&self) -> [Target; PACKED_HASH_LEN] {
         self.to_original_block_hash_raw().try_into().unwrap()
     }
@@ -305,7 +305,7 @@ impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, Targe
     }
 }
 
-impl<'a, const L: usize, const S: usize, const PH: usize> PublicInputs<'a, F, L, S, PH> {
+impl<const L: usize, const S: usize, const PH: usize> PublicInputs<'_, F, L, S, PH> {
     pub fn original_block_hash(&self) -> [F; PACKED_HASH_LEN] {
         self.to_original_block_hash_raw().try_into().unwrap()
     }
@@ -398,14 +398,14 @@ mod tests {
     type PI<'a> = PublicInputs<'a, F, L, S, PH>;
     type PITargets<'a> = PublicInputs<'a, Target, L, S, PH>;
 
-    const PI_LEN: usize = crate::revelation::PI_LEN::<L, S, PH>;
+    const PI_LEN: usize = crate::revelation::pi_len::<L, S, PH>();
 
     #[derive(Clone, Debug)]
     struct TestPublicInputs<'a> {
         pis: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestPublicInputs<'a> {
+    impl UserCircuit<F, D> for TestPublicInputs<'_> {
         type Wires = Vec<Target>;
 
         fn build(c: &mut CircuitBuilder<F, D>) -> Self::Wires {

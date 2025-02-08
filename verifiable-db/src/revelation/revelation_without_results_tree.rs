@@ -3,12 +3,11 @@
 use crate::{
     ivc::PublicInputs as OriginalTreePublicInputs,
     query::{
-        computational_hash_ids::AggregationOperation,
-        public_inputs::PublicInputs as QueryProofPublicInputs,
+        computational_hash_ids::AggregationOperation, pi_len as query_pi_len,
+        public_inputs::PublicInputsQueryCircuits as QueryProofPublicInputs,
     },
-    revelation::{placeholders_check::check_placeholders, PublicInputs},
+    revelation::PublicInputs,
 };
-use alloy::primitives::U256;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
@@ -17,18 +16,15 @@ use mp2_common::{
     poseidon::{flatten_poseidon_hash_target, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
-    serialization::{
-        deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
-        serialize_long_array,
-    },
+    serialization::{deserialize, serialize},
     types::CBuilder,
-    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
+    u256::{CircuitBuilderU256, UInt256Target},
     utils::ToTargets,
     C, D, F,
 };
 use plonky2::{
     iop::{
-        target::{BoolTarget, Target},
+        target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
     plonk::{
@@ -45,13 +41,11 @@ use recursion_framework::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::array;
 
 use super::{
-    placeholders_check::{
-        CheckedPlaceholder, CheckedPlaceholderTarget, NUM_SECONDARY_INDEX_PLACEHOLDERS,
-    },
-    NUM_PREPROCESSING_IO, NUM_QUERY_IO, PI_LEN as REVELATION_PI_LEN,
+    pi_len as revelation_pi_len,
+    placeholders_check::{CheckPlaceholderGadget, CheckPlaceholderInputWires},
+    NUM_PREPROCESSING_IO,
 };
 
 // L: maximum number of results
@@ -65,28 +59,7 @@ pub struct RevelationWithoutResultsTreeWires<
     const PH: usize,
     const PP: usize,
 > {
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    is_placeholder_valid: [BoolTarget; PH],
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    placeholder_ids: [Target; PH],
-    #[serde(
-        serialize_with = "serialize_array",
-        deserialize_with = "deserialize_array"
-    )]
-    placeholder_values: [UInt256Target; PH],
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    to_be_checked_placeholders: [CheckedPlaceholderTarget; PP],
-    secondary_query_bound_placeholders:
-        [CheckedPlaceholderTarget; NUM_SECONDARY_INDEX_PLACEHOLDERS],
+    check_placeholder: CheckPlaceholderInputWires<PH, PP>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -96,47 +69,7 @@ pub struct RevelationWithoutResultsTreeCircuit<
     const PH: usize,
     const PP: usize,
 > {
-    /// Real number of the valid placeholders
-    pub(crate) num_placeholders: usize,
-    /// Array of the placeholder identifiers that can be employed in the query:
-    /// - The first 4 items are expected to be constant identifiers of the query
-    ///   bounds `MIN_I1, MAX_I1` and  `MIN_I2, MAX_I2`
-    /// - The following `num_placeholders - 4` values are expected to be the
-    ///   identifiers of the placeholders employed in the query
-    /// - The remaining `PH - num_placeholders` items are expected to be the
-    ///   same as `placeholders_ids[0]`
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) placeholder_ids: [F; PH],
-    /// Array of the placeholder values that can be employed in the query:
-    /// - The first 4 values are expected to be the bounds `MIN_I1, MAX_I1` and
-    ///   `MIN_I2, MAX_I2` found in the query for the primary and secondary
-    ///   indexed columns
-    /// - The following `num_placeholders - 4` values are expected to be the
-    ///   values for the placeholders employed in the query
-    /// - The remaining `PH - num_placeholders` values are expected to be the
-    ///   same as `placeholder_values[0]`
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) placeholder_values: [U256; PH],
-    /// Placeholders data to be provided to `check_placeholder` gadget to
-    /// check that placeholders employed in universal query circuit matches
-    /// with the `placeholder_values` exposed as public input by this proof
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub(crate) to_be_checked_placeholders: [CheckedPlaceholder; PP],
-    /// Placeholders data related to the placeholders employed in the
-    /// universal query circuit to hash the query bounds for the secondary
-    /// index; they are provided as well to `check_placeholder` gadget to
-    /// check the correctness of the placeholders employed for query bounds
-    pub(crate) secondary_query_bound_placeholders:
-        [CheckedPlaceholder; NUM_SECONDARY_INDEX_PLACEHOLDERS],
+    pub(crate) check_placeholder: CheckPlaceholderGadget<PH, PP>,
 }
 
 impl<const L: usize, const S: usize, const PH: usize, const PP: usize>
@@ -154,44 +87,36 @@ where
         let zero = b.zero();
         let u256_zero = b.zero_u256();
 
-        let is_placeholder_valid = array::from_fn(|_| b.add_virtual_bool_target_safe());
-        let placeholder_ids = b.add_virtual_target_arr();
-        // `placeholder_values` are exposed as public inputs to the Solidity contract
-        // which will not do range-check.
-        let placeholder_values = array::from_fn(|_| b.add_virtual_u256());
-        let to_be_checked_placeholders = array::from_fn(|_| CheckedPlaceholderTarget::new(b));
-        let secondary_query_bound_placeholders =
-            array::from_fn(|_| CheckedPlaceholderTarget::new(b));
-
         // The operation cannot be ID for aggregation.
         let [op_avg, op_count] = [AggregationOperation::AvgOp, AggregationOperation::CountOp]
             .map(|op| b.constant(op.to_field()));
 
         // Convert the entry count to an Uint256.
-        let entry_count = query_proof.num_matching_rows_target();
-        let entry_count = UInt256Target::new_from_target(b, entry_count);
+        let entry_count = UInt256Target::new_from_target(b, query_proof.num_matching_rows_target());
 
         // Compute the output results array, and deal with AVG and COUNT operations if any.
-        let ops = query_proof.operation_ids_target();
-        assert_eq!(ops.len(), S);
         let mut results = Vec::with_capacity(L * S);
         // flag to determine whether entry count is zero
         let is_entry_count_zero = b.add_virtual_bool_target_unsafe();
-        ops.into_iter().enumerate().for_each(|(i, op)| {
-            let is_op_avg = b.is_equal(op, op_avg);
-            let is_op_count = b.is_equal(op, op_count);
-            let result = query_proof.value_target_at_index(i);
+        query_proof
+            .operation_ids_target()
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, op)| {
+                let is_op_avg = b.is_equal(op, op_avg);
+                let is_op_count = b.is_equal(op, op_count);
+                let result = query_proof.value_target_at_index(i);
 
-            // Compute the AVG result (and it's set to zero if the divisor is zero).
-            let (avg_result, _, is_divisor_zero) = b.div_u256(&result, &entry_count);
+                // Compute the AVG result (and it's set to zero if the divisor is zero).
+                let (avg_result, _, is_divisor_zero) = b.div_u256(&result, &entry_count);
 
-            let result = b.select_u256(is_op_avg, &avg_result, &result);
-            let result = b.select_u256(is_op_count, &entry_count, &result);
+                let result = b.select_u256(is_op_avg, &avg_result, &result);
+                let result = b.select_u256(is_op_count, &entry_count, &result);
 
-            b.connect(is_divisor_zero.target, is_entry_count_zero.target);
+                b.connect(is_divisor_zero.target, is_entry_count_zero.target);
 
-            results.push(result);
-        });
+                results.push(result);
+            });
         results.resize(L * S, u256_zero);
 
         // Pre-compute the final placeholder hash then check it in the
@@ -201,21 +126,14 @@ where
             .placeholder_hash_target()
             .to_targets()
             .into_iter()
-            .chain(query_proof.min_query_target().to_targets())
-            .chain(query_proof.max_query_target().to_targets())
+            .chain(query_proof.min_primary_target().to_targets())
+            .chain(query_proof.max_primary_target().to_targets())
             .collect();
         let final_placeholder_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
         // Check the placeholder data.
-        let (num_placeholders, placeholder_ids_hash) = check_placeholders(
-            b,
-            &is_placeholder_valid,
-            &placeholder_ids,
-            &placeholder_values,
-            &to_be_checked_placeholders,
-            &secondary_query_bound_placeholders,
-            &final_placeholder_hash,
-        );
+        let check_placeholder_wires =
+            CheckPlaceholderGadget::<PH, PP>::build(b, &final_placeholder_hash);
 
         // Check that the tree employed to build the queries is the same as the
         // tree constructed in pre-processing.
@@ -228,15 +146,18 @@ where
         // hash to the computational hash:
         // H(pQ.C || placeholder_ids_hash || pQ.M)
         let inputs = query_proof
-            .to_computational_hash_raw()
+            .computational_hash_target()
+            .to_targets()
             .iter()
-            .chain(&placeholder_ids_hash.to_targets())
+            .chain(&check_placeholder_wires.placeholder_id_hash.to_targets())
             .chain(original_tree_proof.metadata_hash())
             .cloned()
             .collect();
         let computational_hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
-        let placeholder_values_slice = placeholder_values
+        let placeholder_values_slice = check_placeholder_wires
+            .input_wires
+            .placeholder_values
             .iter()
             .flat_map(ToTargets::to_targets)
             .collect_vec();
@@ -246,13 +167,104 @@ where
 
         let flat_computational_hash = flatten_poseidon_hash_target(b, computational_hash);
 
+        // additional constraints on boundary rows to ensure completeness of proven rows
+        // (i.e., that we look at all the rows with primary and secondary index values in the query range)
+
+        let left_boundary_row = query_proof.left_boundary_row_target();
+
+        // 1. Either the index tree node of left boundary row has no predecessor, or
+        //    the value of the predecessor is smaller than MIN_primary
+        let smaller_than_min_primary = b.is_less_than_u256(
+            &left_boundary_row.index_node_info.predecessor_info.value,
+            &query_proof.min_primary_target(),
+        );
+        // assert not pQ.left_boundary_row.index_node_data.predecessor_info.is_found or
+        // pQ.left_boundary_row.index_node_data.predecessor_value < pQ.MIN_primary
+        let constraint = b.and(
+            left_boundary_row.index_node_info.predecessor_info.is_found,
+            smaller_than_min_primary,
+        );
+        b.connect(
+            left_boundary_row
+                .index_node_info
+                .predecessor_info
+                .is_found
+                .target,
+            constraint.target,
+        );
+
+        // 2. Either the rows tree node storing left boundary row has no predecessor, or
+        //    the value of the predecessor is smaller than MIN_secondary
+        let smaller_than_min_secondary = b.is_less_than_u256(
+            &left_boundary_row.row_node_info.predecessor_info.value,
+            &query_proof.min_secondary_target(),
+        );
+        // assert not pQ.left_boundary_row.row_node_data.predecessor_info.is_found or
+        // pQ.left_boundary_row.row_node_data.predecessor_value < pQ.MIN_secondary
+        let constraint = b.and(
+            left_boundary_row.row_node_info.predecessor_info.is_found,
+            smaller_than_min_secondary,
+        );
+        b.connect(
+            left_boundary_row
+                .row_node_info
+                .predecessor_info
+                .is_found
+                .target,
+            constraint.target,
+        );
+
+        let right_boundary_row = query_proof.right_boundary_row_target();
+
+        // 3. Either the index tree node of right boundary row has no successor, or
+        //    the value of the successor is greater than MAX_primary
+        let greater_than_max_primary = b.is_greater_than_u256(
+            &right_boundary_row.index_node_info.successor_info.value,
+            &query_proof.max_primary_target(),
+        );
+        // assert not pQ.right_boundary_row.index_node_data.successor_info.is_found or
+        // pQ.right_boundary_row.index_node_data.successor_value > pQ.MAX_primary
+        let constraint = b.and(
+            right_boundary_row.index_node_info.successor_info.is_found,
+            greater_than_max_primary,
+        );
+        b.connect(
+            right_boundary_row
+                .index_node_info
+                .successor_info
+                .is_found
+                .target,
+            constraint.target,
+        );
+
+        // 4. Either the rows tree node storing right boundary row has no successor, or
+        //    the value of the successor is greater than MAX_secondary
+        let greater_than_max_secondary = b.is_greater_than_u256(
+            &right_boundary_row.row_node_info.successor_info.value,
+            &query_proof.max_secondary_target(),
+        );
+        // assert not pQ.right_boundary_row.row_node_data.successor_info.is_found or
+        // pQ.right_boundary_row.row_node_data.successor_value > pQ.MAX_secondary
+        let constraint = b.and(
+            right_boundary_row.row_node_info.successor_info.is_found,
+            greater_than_max_secondary,
+        );
+        b.connect(
+            right_boundary_row
+                .row_node_info
+                .successor_info
+                .is_found
+                .target,
+            constraint.target,
+        );
+
         // Register the public innputs.
         PublicInputs::<_, L, S, PH>::new(
             &original_tree_proof.block_hash(),
             &flat_computational_hash,
             &placeholder_values_slice,
             &results_slice,
-            &[num_placeholders],
+            &[check_placeholder_wires.num_placeholders],
             // The aggregation query proof only has one result.
             &[num_results.target],
             &[query_proof.num_matching_rows_target()],
@@ -265,43 +277,19 @@ where
         .register(b);
 
         RevelationWithoutResultsTreeWires {
-            is_placeholder_valid,
-            placeholder_ids,
-            placeholder_values,
-            to_be_checked_placeholders,
-            secondary_query_bound_placeholders,
+            check_placeholder: check_placeholder_wires.input_wires,
         }
     }
 
-    fn assign(
+    pub(crate) fn assign(
         &self,
         pw: &mut PartialWitness<F>,
         wires: &RevelationWithoutResultsTreeWires<L, S, PH, PP>,
     ) {
-        wires
-            .is_placeholder_valid
-            .iter()
-            .enumerate()
-            .for_each(|(i, t)| pw.set_bool_target(*t, i < self.num_placeholders));
-        pw.set_target_arr(&wires.placeholder_ids, &self.placeholder_ids);
-        wires
-            .placeholder_values
-            .iter()
-            .zip(self.placeholder_values)
-            .for_each(|(t, v)| pw.set_u256_target(t, v));
-        wires
-            .to_be_checked_placeholders
-            .iter()
-            .zip(&self.to_be_checked_placeholders)
-            .for_each(|(t, v)| v.assign(pw, t));
-        wires
-            .secondary_query_bound_placeholders
-            .iter()
-            .zip(&self.secondary_query_bound_placeholders)
-            .for_each(|(t, v)| v.assign(pw, t));
+        self.check_placeholder.assign(pw, &wires.check_placeholder);
     }
 }
-
+#[derive(Clone, Debug)]
 pub struct CircuitBuilderParams {
     pub(crate) query_circuit_set: RecursiveCircuits<F, C, D>,
     pub(crate) preprocessing_circuit_set: RecursiveCircuits<F, C, D>,
@@ -329,24 +317,25 @@ impl<const L: usize, const S: usize, const PH: usize, const PP: usize> CircuitLo
     for RecursiveCircuitWires<L, S, PH, PP>
 where
     [(); S - 1]:,
-    [(); NUM_QUERY_IO::<S>]:,
+    [(); query_pi_len::<S>()]:,
     [(); <H as Hasher<F>>::HASH_SIZE]:,
 {
     type CircuitBuilderParams = CircuitBuilderParams;
 
     type Inputs = RecursiveCircuitInputs<L, S, PH, PP>;
 
-    const NUM_PUBLIC_INPUTS: usize = REVELATION_PI_LEN::<L, S, PH>;
+    const NUM_PUBLIC_INPUTS: usize = revelation_pi_len::<L, S, PH>();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        let query_verifier = RecursiveCircuitsVerifierGagdet::<F, C, D, { NUM_QUERY_IO::<S> }>::new(
-            default_config(),
-            &builder_parameters.query_circuit_set,
-        );
+        let query_verifier =
+            RecursiveCircuitsVerifierGagdet::<F, C, D, { query_pi_len::<S>() }>::new(
+                default_config(),
+                &builder_parameters.query_circuit_set,
+            );
         let query_verifier = query_verifier.verify_proof_in_circuit_set(builder);
         let preprocessing_verifier =
             RecursiveCircuitsVerifierGagdet::<F, C, D, NUM_PREPROCESSING_IO>::new(
@@ -357,13 +346,14 @@ where
             builder,
             &builder_parameters.preprocessing_vk,
         );
-        let query_pi = QueryProofPublicInputs::from_slice(
-            query_verifier.get_public_input_targets::<F, { NUM_QUERY_IO::<S> }>(),
-        );
         let preprocessing_pi =
             OriginalTreePublicInputs::from_slice(&preprocessing_proof.public_inputs);
-        let revelation_circuit =
-            RevelationWithoutResultsTreeCircuit::build(builder, &query_pi, &preprocessing_pi);
+        let revelation_circuit = {
+            let query_pi = QueryProofPublicInputs::from_slice(
+                query_verifier.get_public_input_targets::<F, { query_pi_len::<S>() }>(),
+            );
+            RevelationWithoutResultsTreeCircuit::build(builder, &query_pi, &preprocessing_pi)
+        };
 
         Self {
             revelation_circuit,
@@ -384,19 +374,52 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::array;
+
+    use alloy::primitives::U256;
+    use itertools::Itertools;
+    use mp2_common::{
+        array::ToField,
+        poseidon::{flatten_poseidon_hash_value, H},
+        types::CBuilder,
+        utils::{FromFields, ToFields},
+        C, D, F,
+    };
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::{
+        field::types::Field,
+        iop::{
+            target::Target,
+            witness::{PartialWitness, WitnessWrite},
+        },
+        plonk::config::Hasher,
+    };
+    use rand::{seq::SliceRandom, thread_rng, Rng};
+
     use crate::{
-        query::public_inputs::QueryPublicInputs,
-        revelation::tests::{compute_results_from_query_proof, TestPlaceholders},
+        ivc::PublicInputs as OriginalTreePublicInputs,
+        query::{
+            computational_hash_ids::AggregationOperation,
+            public_inputs::{
+                PublicInputsQueryCircuits as QueryProofPublicInputs, QueryPublicInputs,
+            },
+            universal_circuit::{
+                universal_circuit_inputs::Placeholders, universal_query_gadget::OutputValues,
+            },
+            utils::{QueryBoundSource, QueryBounds},
+        },
+        revelation::{
+            revelation_without_results_tree::{
+                RevelationWithoutResultsTreeCircuit, RevelationWithoutResultsTreeWires,
+            },
+            tests::{compute_results_from_query_proof_outputs, TestPlaceholders},
+            PublicInputs, NUM_PREPROCESSING_IO,
+        },
         test_utils::{
-            random_aggregation_operations, random_aggregation_public_inputs,
-            random_original_tree_proof,
+            random_aggregation_operations, random_original_tree_proof,
+            sample_boundary_rows_for_revelation,
         },
     };
-    use mp2_common::{poseidon::flatten_poseidon_hash_value, utils::ToFields, C, D};
-    use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{field::types::Field, plonk::config::Hasher};
-    use rand::{prelude::SliceRandom, thread_rng, Rng};
 
     // L: maximum number of results
     // S: maximum number of items in each result
@@ -408,31 +431,26 @@ mod tests {
     const PP: usize = 20;
 
     // Real number of the placeholders
-    const NUM_PLACEHOLDERS: usize = 5;
+    const NUM_PLACEHOLDERS: usize = 6;
 
-    const QUERY_PI_LEN: usize = crate::query::PI_LEN::<S>;
+    const QUERY_PI_LEN: usize = QueryProofPublicInputs::<F, S>::total_len();
 
     impl From<&TestPlaceholders<PH, PP>> for RevelationWithoutResultsTreeCircuit<L, S, PH, PP> {
         fn from(test_placeholders: &TestPlaceholders<PH, PP>) -> Self {
             Self {
-                num_placeholders: test_placeholders.num_placeholders,
-                placeholder_ids: test_placeholders.placeholder_ids,
-                placeholder_values: test_placeholders.placeholder_values,
-                to_be_checked_placeholders: test_placeholders.to_be_checked_placeholders,
-                secondary_query_bound_placeholders: test_placeholders
-                    .secondary_query_bound_placeholders,
+                check_placeholder: test_placeholders.check_placeholder_inputs.clone(),
             }
         }
     }
 
     #[derive(Clone, Debug)]
-    struct TestRevelationWithoutResultsTreeCircuit<'a> {
+    struct TestRevelationCircuit<'a> {
         c: RevelationWithoutResultsTreeCircuit<L, S, PH, PP>,
         query_proof: &'a [F],
         original_tree_proof: &'a [F],
     }
 
-    impl<'a> UserCircuit<F, D> for TestRevelationWithoutResultsTreeCircuit<'a> {
+    impl UserCircuit<F, D> for TestRevelationCircuit<'_> {
         // Circuit wires + query proof + original tree proof (IVC proof)
         type Wires = (
             RevelationWithoutResultsTreeWires<L, S, PH, PP>,
@@ -465,21 +483,26 @@ mod tests {
         ops: &[F; S],
         test_placeholders: &TestPlaceholders<PH, PP>,
     ) -> Vec<F> {
-        let [mut proof] = random_aggregation_public_inputs(ops);
+        let [mut proof] = QueryProofPublicInputs::sample_from_ops(ops);
 
-        let [count_range, min_query_range, max_query_range, p_hash_range] = [
-            QueryPublicInputs::NumMatching,
-            QueryPublicInputs::MinQuery,
-            QueryPublicInputs::MaxQuery,
-            QueryPublicInputs::PlaceholderHash,
-        ]
-        .map(QueryProofPublicInputs::<F, S>::to_range);
+        let [count_range, min_query_primary, max_query_primary, min_query_secondary, max_query_secondary, p_hash_range, left_row_range, right_row_range] =
+            [
+                QueryPublicInputs::NumMatching,
+                QueryPublicInputs::MinPrimary,
+                QueryPublicInputs::MaxPrimary,
+                QueryPublicInputs::MinSecondary,
+                QueryPublicInputs::MaxSecondary,
+                QueryPublicInputs::PlaceholderHash,
+                QueryPublicInputs::LeftBoundaryRow,
+                QueryPublicInputs::RightBoundaryRow,
+            ]
+            .map(QueryProofPublicInputs::<F, S>::to_range);
 
         // Set the count, minimum, maximum query and the placeholder hash.
         [
             (count_range, vec![entry_count.to_field()]),
-            (min_query_range, test_placeholders.min_query.to_fields()),
-            (max_query_range, test_placeholders.max_query.to_fields()),
+            (min_query_primary, test_placeholders.min_query.to_fields()),
+            (max_query_primary, test_placeholders.max_query.to_fields()),
             (
                 p_hash_range,
                 test_placeholders.query_placeholder_hash.to_fields(),
@@ -488,11 +511,29 @@ mod tests {
         .into_iter()
         .for_each(|(range, fields)| proof[range].copy_from_slice(&fields));
 
+        // Set boundary rows to satisfy constraints for completeness
+        let rng = &mut thread_rng();
+        let min_secondary = U256::from_fields(&proof[min_query_secondary]);
+        let max_secondary = U256::from_fields(&proof[max_query_secondary]);
+        let placeholders =
+            Placeholders::new_empty(test_placeholders.min_query, test_placeholders.max_query);
+        let query_bounds = QueryBounds::new(
+            &placeholders,
+            Some(QueryBoundSource::Constant(min_secondary)),
+            Some(QueryBoundSource::Constant(max_secondary)),
+        )
+        .unwrap();
+        let (left_boundary_row, right_boundary_row) =
+            sample_boundary_rows_for_revelation(&query_bounds, rng);
+
+        proof[left_row_range].copy_from_slice(&left_boundary_row.to_fields());
+        proof[right_row_range].copy_from_slice(&right_boundary_row.to_fields());
+
         proof
     }
 
     /// Utility function for testing the revelation circuit with results tree
-    fn test_revelation_without_results_tree_circuit(ops: &[F; S], entry_count: Option<u32>) {
+    fn test_revelation_batching_circuit(ops: &[F; S], entry_count: Option<u32>) {
         let rng = &mut thread_rng();
 
         // Generate the testing placeholder data.
@@ -504,11 +545,11 @@ mod tests {
         let query_pi = QueryProofPublicInputs::<_, S>::from_slice(&query_proof);
 
         // Generate the original tree proof (IVC proof).
-        let original_tree_proof = random_original_tree_proof(&query_pi);
+        let original_tree_proof = random_original_tree_proof(query_pi.tree_hash());
         let original_tree_pi = OriginalTreePublicInputs::from_slice(&original_tree_proof);
 
         // Construct the test circuit.
-        let test_circuit = TestRevelationWithoutResultsTreeCircuit {
+        let test_circuit = TestRevelationCircuit {
             c: (&test_placeholders).into(),
             query_proof: &query_proof,
             original_tree_proof: &original_tree_proof,
@@ -518,7 +559,6 @@ mod tests {
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::<_, L, S, PH>::from_slice(&proof.public_inputs);
 
-        // Initialize the overflow flag to false.
         let entry_count = query_pi.num_matching_rows();
 
         // Check the public inputs.
@@ -547,22 +587,31 @@ mod tests {
         // Number of placeholders
         assert_eq!(
             pi.num_placeholders(),
-            test_placeholders.num_placeholders.to_field()
+            test_placeholders
+                .check_placeholder_inputs
+                .num_placeholders
+                .to_field()
         );
         // Placeholder values
         assert_eq!(
             pi.placeholder_values(),
-            test_placeholders.placeholder_values
+            test_placeholders
+                .check_placeholder_inputs
+                .placeholder_values
         );
         // Entry count
         assert_eq!(pi.entry_count(), entry_count);
         // check results
-        let (result, overflow) = compute_results_from_query_proof(&query_pi);
+        let result = compute_results_from_query_proof_outputs(
+            query_pi.num_matching_rows(),
+            OutputValues::<S>::from_fields(query_pi.to_values_raw()),
+            &query_pi.operation_ids(),
+        );
         let mut exp_results = [[U256::ZERO; S]; L];
         exp_results[0] = result;
         assert_eq!(pi.result_values(), exp_results);
         // overflow flag
-        assert_eq!(pi.overflow_flag(), overflow);
+        assert_eq!(pi.overflow_flag(), query_pi.overflow_flag());
         // Query limit
         assert_eq!(pi.query_limit(), F::ZERO);
         // Query offset
@@ -570,48 +619,48 @@ mod tests {
     }
 
     #[test]
-    fn test_revelation_without_results_tree_simple() {
+    fn test_revelation_batching_simple() {
         // Generate the random operations and set the first operation to SUM
         // (not ID which should not be present in the aggregation).
         let mut ops: [_; S] = random_aggregation_operations();
         ops[0] = AggregationOperation::SumOp.to_field();
 
-        test_revelation_without_results_tree_circuit(&ops, None);
+        test_revelation_batching_circuit(&ops, None);
     }
 
     // Test for COUNT operation.
     #[test]
-    fn test_revelation_without_results_tree_for_op_count() {
+    fn test_revelation_batching_for_op_count() {
         // Set the first operation to COUNT.
         let mut ops: [_; S] = random_aggregation_operations();
         ops[0] = AggregationOperation::CountOp.to_field();
 
-        test_revelation_without_results_tree_circuit(&ops, None);
+        test_revelation_batching_circuit(&ops, None);
     }
 
     // Test for AVG operation.
     #[test]
-    fn test_revelation_without_results_tree_for_op_avg() {
+    fn test_revelation_batching_for_op_avg() {
         // Set the first operation to AVG.
         let mut ops: [_; S] = random_aggregation_operations();
         ops[0] = AggregationOperation::AvgOp.to_field();
 
-        test_revelation_without_results_tree_circuit(&ops, None);
+        test_revelation_batching_circuit(&ops, None);
     }
 
     // Test for AVG operation with zero entry count.
     #[test]
-    fn test_revelation_without_results_tree_for_op_avg_with_no_entries() {
+    fn test_revelation_batching_for_op_avg_with_no_entries() {
         // Set the first operation to AVG.
         let mut ops: [_; S] = random_aggregation_operations();
         ops[0] = AggregationOperation::AvgOp.to_field();
 
-        test_revelation_without_results_tree_circuit(&ops, Some(0));
+        test_revelation_batching_circuit(&ops, Some(0));
     }
 
     // Test for no AVG operation with zero entry count.
     #[test]
-    fn test_revelation_without_results_tree_for_no_op_avg_with_no_entries() {
+    fn test_revelation_batching_for_no_op_avg_with_no_entries() {
         // Initialize the all operations to SUM or COUNT (not AVG).
         let mut rng = thread_rng();
         let ops = array::from_fn(|_| {
@@ -621,6 +670,6 @@ mod tests {
                 .to_field()
         });
 
-        test_revelation_without_results_tree_circuit(&ops, Some(0));
+        test_revelation_batching_circuit(&ops, Some(0));
     }
 }

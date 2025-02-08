@@ -5,7 +5,7 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{CircuitConfig, VerifierCircuitTarget, VerifierOnlyCircuitData},
-        config::{AlgebraicHasher, GenericConfig, Hasher},
+        config::{AlgebraicHasher, GenericConfig},
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
 };
@@ -42,7 +42,7 @@ where
     F: SerializableRichField<D>,
     C: GenericConfig<D, F = F>,
     C::Hasher: AlgebraicHasher<F>,
-    [(); C::Hasher::HASH_SIZE]:,
+
     CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
 {
     fn get_verifier_data(&self) -> &VerifierOnlyCircuitData<C, D> {
@@ -77,7 +77,6 @@ impl<F: SerializableRichField<D>, C: GenericConfig<D, F = F> + 'static, const D:
     RecursiveCircuits<F, C, D>
 where
     C::Hasher: AlgebraicHasher<F>,
-    [(); C::Hasher::HASH_SIZE]:,
 {
     /// Instantiate a `RecursiveCircuits` data structure employing the list of circuits provided as input
     pub fn new(circuits: Vec<Box<dyn RecursiveCircuitInfo<F, C, D> + '_>>) -> Self {
@@ -101,8 +100,8 @@ where
     ///   and `input_verifier_data` contains the corrisponding verifier data
     /// - `custom_inputs` contains the input necessary to fill the witness data related to the additional logic being
     ///   enforced in the circuit besides verifying the `NUM_VERIFIERS` proofs with the universal verifier
-    /// Note that this function will already output a proof that can be directly recursively verified with the
-    /// universal verifier
+    ///   Note that this function will already output a proof that can be directly recursively verified with the
+    ///   universal verifier
     pub fn generate_proof<
         const NUM_VERIFIERS: usize,
         CLW: CircuitLogicWires<F, D, NUM_VERIFIERS>,
@@ -163,7 +162,6 @@ impl<const D: usize> RecursiveCircuitsVerifierTarget<D> {
     ) -> Result<()>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         self.0.set_target(
             pw,
@@ -209,11 +207,10 @@ impl<
     pub fn new(config: CircuitConfig, recursive_circuits_set: &RecursiveCircuits<F, C, D>) -> Self
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         let circuit_set_size = recursive_circuits_set.circuit_set.circuit_set_size();
         let gadget_builder =
-            UniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::new(config, circuit_set_size);
+            UniversalVerifierBuilder::<F, D, NUM_PUBLIC_INPUTS>::new::<C>(config, circuit_set_size);
         Self {
             gadget_builder,
             recursive_circuits: recursive_circuits_set.clone(),
@@ -228,7 +225,6 @@ impl<
     ) -> RecursiveCircuitsVerifierTarget<D>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         let circuit_set_target = CircuitSetTarget::from_circuit_set_digest(
             builder,
@@ -236,7 +232,7 @@ impl<
         );
         RecursiveCircuitsVerifierTarget(
             self.gadget_builder
-                .universal_verifier_circuit(builder, &circuit_set_target),
+                .universal_verifier_circuit::<C>(builder, &circuit_set_target),
         )
     }
 
@@ -249,7 +245,6 @@ impl<
     ) -> ProofWithPublicInputsTarget<D>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         let circuit_set_target = CircuitSetTarget::from_circuit_set_digest(
             builder,
@@ -328,7 +323,6 @@ pub(crate) mod tests {
         > CircuitLogicWires<F, D, 0> for VerifierCircuitWires<C, D, NUM_PUBLIC_INPUTS>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         type CircuitBuilderParams = RecursiveCircuitsVerifierGagdet<F, C, D, NUM_PUBLIC_INPUTS>;
 
@@ -347,7 +341,7 @@ pub(crate) mod tests {
         ) -> Self {
             Self {
                 targets: builder_parameters.verify_proof_in_circuit_set(builder),
-                c: PhantomData::<C>::default(),
+                c: PhantomData::<C>,
             }
         }
 
@@ -377,7 +371,6 @@ pub(crate) mod tests {
         > CircuitLogicWires<F, D, 0> for VerifierCircuitFixedWires<C, D, NUM_PUBLIC_INPUTS>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         type CircuitBuilderParams = (
             RecursiveCircuitsVerifierGagdet<F, C, D, NUM_PUBLIC_INPUTS>,
@@ -397,7 +390,7 @@ pub(crate) mod tests {
                 targets: builder_parameters
                     .0
                     .verify_proof_fixed_circuit_in_circuit_set(builder, &builder_parameters.1),
-                c: PhantomData::<C>::default(),
+                c: PhantomData::<C>,
             }
         }
 
@@ -440,7 +433,6 @@ pub(crate) mod tests {
         > TestRecursiveCircuits<F, C, D, INPUT_SIZE>
     where
         C::Hasher: AlgebraicHasher<F>,
-        [(); C::Hasher::HASH_SIZE]:,
     {
         fn new() -> Self {
             const CIRCUIT_SET_SIZE: usize = 5;

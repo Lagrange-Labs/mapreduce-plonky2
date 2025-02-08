@@ -1,32 +1,33 @@
 [package]
 name = "verifiable-db"
-version = "0.1.0"
+version = "1.2.1"
 edition = "2021"
 
 [dependencies]
-mp2_common = { path = "../mp2-common" }
-plonky2_crypto.workspace = true
-recursion_framework = { path = "../recursion-framework" }
-ryhope = { path = "../ryhope" }
+alloy.workspace = true
 anyhow.workspace = true
 bincode.workspace = true
-alloy.workspace = true
+derive_more.workspace = true
+itertools.workspace = true
 log.workspace = true
 plonky2.workspace = true
+plonky2_crypto.workspace = true
 plonky2_ecdsa.workspace = true
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
 serde.workspace = true
-derive_more = "0.99.18"
-itertools.workspace = true
+
+mp2_common = { path = "../mp2-common" , version = "1.2.1" }
+recursion_framework = { path = "../recursion-framework" , version = "1.2.1" }
+ryhope = { path = "../ryhope" , version = "1.2.1" }
+mp2_test = { path = "../mp2-test" , version = "1.2.1" }
 
 [dev-dependencies]
-env_logger.workspace = true
-futures = "0.3.30"
-mp2_test = { path = "../mp2-test" }
+futures.workspace = true
 rand.workspace = true
 serial_test.workspace = true
 tokio.workspace = true
 
 [features]
 original_poseidon = ["mp2_common/original_poseidon"]
+results_tree = [] # temporary features to disable compiling results_tree code by default, as it is still WiP

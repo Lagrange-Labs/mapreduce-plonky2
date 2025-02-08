@@ -1,0 +1,60 @@
+name: Open a release PR
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Release Level
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  make-release-pr:
+    permissions:
+      id-token: write
+      pull-requests: write
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: chainguard-dev/actions/setup-gitsign@main
+      - name: Install tooling
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-release,git-cliff
+      - uses: cargo-bins/release-pr@v2
+        with:
+          version: ${{ inputs.bump }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Keep all the crates versions in sync
+          crate-release-all: true
+          pr-meta-comment: false
+          pr-merge-strategy: "squash"
+  public-params:
+    if: inputs.bump == "major"
+    name: Generate & Upload PPs
+    runs-on: ['memory:32GB']
+    environment: CI
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2024-11-09
+      - name: Check aws is installed
+        run: aws --version
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.20' # The Go version to download (if necessary) and use.
+      - name: Generate PPs
+        run: |
+          ulimit -s unlimited
+          cargo run --release --bin gen-params
+      - name: Upload PPs
+        run: aws s3 cp --no-progress --recursive zkmr_params s3://lagrange-public-parameters --endpoint-url=https://428e47101872e479a0c311b576430fac.r2.cloudflarestorage.com
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: eeur

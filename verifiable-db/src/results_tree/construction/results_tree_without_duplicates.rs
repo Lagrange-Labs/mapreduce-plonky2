@@ -11,7 +11,7 @@ use mp2_common::{
     },
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    utils::{SelectHashBuilder, ToTargets},
+    utils::{HashBuilder, ToTargets},
     D, F,
 };
 use plonky2::{
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(pi.index_ids(), ids[..2]);
 
         // No duplicates
-        assert_eq!(pi.no_duplicates_flag(), true);
+        assert!(pi.no_duplicates_flag());
 
         // Accumulator
         let accumulator_inputs: Vec<_> = iter::once(ids[0])

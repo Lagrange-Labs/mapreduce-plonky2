@@ -1,11 +1,24 @@
 //! Expand high-level operations (e.g. IN or BETWEEN) into combination of
 //! operations supported by the circuits.
 
-use crate::visitor::{AstMutator, VisitMut};
-use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
+use crate::{
+    errors::ValidationError,
+    symbols::ContextProvider,
+    utils::int_to_expr,
+    validate::is_query_with_no_aggregation,
+    visitor::{AstMutator, VisitMut},
+    ParsilSettings,
+};
+use anyhow::ensure;
+use sqlparser::ast::{
+    BinaryOperator, Expr, Offset, OffsetRows, Query, SetExpr, UnaryOperator, Value,
+};
 
-struct Expander;
-impl AstMutator for Expander {
+struct Expander<'a, C: ContextProvider> {
+    settings: &'a ParsilSettings<C>,
+}
+
+impl<C: ContextProvider> AstMutator for Expander<'_, C> {
     type Error = anyhow::Error;
 
     fn pre_expr(&mut self, e: &mut Expr) -> anyhow::Result<()> {
@@ -120,19 +133,50 @@ impl AstMutator for Expander {
                     }))
                 }
             }
-            Expr::UnaryOp { op, expr } => {
+            Expr::UnaryOp {
+                op: UnaryOperator::Plus,
+                expr,
+            } => {
                 // +E := E
-                if let UnaryOperator::Plus = op {
-                    *e = *expr.clone();
-                }
+                *e = *expr.clone();
             }
             _ => {}
         }
 
         Ok(())
     }
+
+    fn pre_query(&mut self, query: &mut Query) -> anyhow::Result<()> {
+        ensure!(
+            query.limit.is_none(),
+            ValidationError::UseInvocationParameter("LIMIT".into())
+        );
+        ensure!(
+            query.offset.is_none(),
+            ValidationError::UseInvocationParameter("OFFSET".into())
+        );
+
+        if let SetExpr::Select(ref select) = *query.body {
+            if is_query_with_no_aggregation(select) {
+                query.limit = Some(int_to_expr(self.settings.limit()));
+                if let Some(offset) = self.settings.offset {
+                    if offset != 0 {
+                        query.offset = Some(Offset {
+                            value: int_to_expr(self.settings.offset()),
+                            rows: OffsetRows::None,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
-pub fn expand(q: &mut Query) {
-    q.visit_mut(&mut Expander).expect("can not fail");
+pub fn expand<C: ContextProvider>(
+    settings: &ParsilSettings<C>,
+    q: &mut Query,
+) -> anyhow::Result<()> {
+    let mut expander = Expander { settings };
+    q.visit_mut(&mut expander)
 }

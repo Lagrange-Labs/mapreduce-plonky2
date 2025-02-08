@@ -4,7 +4,7 @@ use alloy::{
     network::EthereumWallet,
     node_bindings::{Anvil, AnvilInstance},
     providers::{Provider, ProviderBuilder, RootProvider},
-    rpc::types::{Block, BlockTransactionsKind, EIP1186AccountProofResponse},
+    rpc::types::{Block, EIP1186AccountProofResponse},
     signers::local::PrivateKeySigner,
     transports::http::{Client, Http},
 };
@@ -27,8 +27,9 @@ use super::{
     cases::{
         self,
         query::{
-            MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
-            MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULTS, MAX_NUM_RESULT_OPS,
+            INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
+            MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, NUM_CHUNKS, NUM_ROWS,
+            ROW_TREE_MAX_DEPTH,
         },
     },
     proof_storage::ProofKV,
@@ -56,6 +57,10 @@ pub(crate) struct TestContext {
     pub(crate) params: Option<PublicParameters>,
     pub(crate) query_params: Option<
         verifiable_db::api::QueryParameters<
+            NUM_CHUNKS,
+            NUM_ROWS,
+            ROW_TREE_MAX_DEPTH,
+            INDEX_TREE_MAX_DEPTH,
             MAX_NUM_COLUMNS,
             MAX_NUM_PREDICATE_OPS,
             MAX_NUM_RESULT_OPS,
@@ -126,7 +131,6 @@ impl ParamsType {
     pub fn build(&self, ctx: &mut TestContext, path: PathBuf) -> Result<()>
     where
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
-        [(); MAX_NUM_RESULTS - 1]:,
     {
         match self {
             ParamsType::Query => {
@@ -157,7 +161,6 @@ impl ParamsType {
     pub fn build_and_save(&self, path: PathBuf, ctx: &mut TestContext) -> Result<()>
     where
         [(); MAX_NUM_COLUMNS + MAX_NUM_RESULT_OPS]:,
-        [(); MAX_NUM_RESULTS - 1]:,
     {
         self.build(ctx, path.clone())?;
         match self {
@@ -244,7 +247,7 @@ impl TestContext {
         // assume there is always a block so None.unwrap() should not occur
         // and it's still a test...
         self.rpc
-            .get_block(BlockId::Number(bn), BlockTransactionsKind::Hashes)
+            .get_block(BlockId::Number(bn), false.into())
             .await
             .unwrap()
             .unwrap()
@@ -260,12 +263,6 @@ impl TestContext {
             .query_mpt_proof(&self.rpc, block_number)
             .await
             .unwrap()
-    }
-
-    /// Reset the RPC provider. It could be used to query data from the
-    /// different RPCs during testing.
-    pub(crate) fn set_rpc(&mut self, rpc_url: &str) {
-        self.rpc = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
     }
 
     pub fn run_query_proof(

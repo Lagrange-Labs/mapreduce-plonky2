@@ -1,65 +1,38 @@
-//! This module prunes a query from all its WHERE clauses that are not related
-//! to either the primary index, or a well-defined bound on the secondary index.
+//! This module replaces the WHERE clause of a query with another one that contains
+//! only predicates to apply the query bounds on primary and secondary index columns.
+use alloy::primitives::U256;
 use anyhow::*;
 use log::warn;
-use sqlparser::ast::{BinaryOperator, Expr, Query, Select, SelectItem, TableAlias, TableFactor};
-use verifiable_db::query::aggregation::QueryBounds;
+use sqlparser::ast::{
+    BinaryOperator, Expr, Ident, Query, Select, SelectItem, TableAlias, TableFactor, Value,
+};
+use verifiable_db::query::utils::QueryBounds;
 
 use crate::{
     errors::ValidationError,
     symbols::{ColumnKind, ContextProvider, Handle, Kind, ScopeTable, Symbol},
-    utils::ParsilSettings,
+    utils::{u256_to_expr, ParsilSettings},
     visitor::{AstMutator, VisitMut},
 };
 
 /// Define on which side(s) the secondary index is known to be bounded within a query.
 #[derive(Clone, Copy)]
 enum SecondaryIndexBounds {
-    BothSides,
-    Low,
-    High,
+    BothSides((U256, U256)),
+    Low(U256),
+    High(U256),
     None,
 }
+
 impl SecondaryIndexBounds {
-    /// Instiantiate a [`SecondaryIndexBounds`] from a pair of booleans indicating whether
-    /// the secondary index is bounded on the lower and higher ends.
-    fn from_lo_hi(lo_sec: bool, hi_sec: bool) -> Self {
-        match (lo_sec, hi_sec) {
-            (true, true) => Self::BothSides,
-            (true, false) => Self::Low,
-            (false, true) => Self::High,
-            (false, false) => Self::None,
+    fn from_secondary_bounds(low: Option<U256>, high: Option<U256>) -> Self {
+        match (low, high) {
+            (None, None) => SecondaryIndexBounds::None,
+            (None, Some(high)) => SecondaryIndexBounds::High(high),
+            (Some(low), None) => SecondaryIndexBounds::Low(low),
+            (Some(low), Some(high)) => SecondaryIndexBounds::BothSides((low, high)),
         }
     }
-
-    /// Generate a list of index and operator pattern to detect for a
-    /// [`SecondaryIndexBounds`] instance.
-    fn to_kinds(&self) -> &[(ColumnKind, RelevantFor)] {
-        match self {
-            SecondaryIndexBounds::BothSides => &[
-                (ColumnKind::PrimaryIndex, RelevantFor::Either),
-                (ColumnKind::SecondaryIndex, RelevantFor::Either),
-            ],
-            SecondaryIndexBounds::Low => &[
-                (ColumnKind::PrimaryIndex, RelevantFor::Either),
-                (ColumnKind::SecondaryIndex, RelevantFor::Gt),
-            ],
-            SecondaryIndexBounds::High => &[
-                (ColumnKind::PrimaryIndex, RelevantFor::Either),
-                (ColumnKind::SecondaryIndex, RelevantFor::Lt),
-            ],
-            SecondaryIndexBounds::None => &[(ColumnKind::PrimaryIndex, RelevantFor::Either)],
-        }
-    }
-}
-
-/// Describe whether an index is relevant when found on the left of a =, < or >
-/// comparison.
-#[derive(Clone, Copy)]
-enum RelevantFor {
-    Lt,
-    Gt,
-    Either,
 }
 
 /// An `Isolator` recursively browse the `WHERE` clauses of a query and prune
@@ -86,125 +59,114 @@ impl<'a, C: ContextProvider> Isolator<'a, C> {
     }
 
     /// Return whether the given `Symbol` encodes the secondary index column.
-    fn is_symbol_idx(&self, s: &Symbol<Expr>, idx: ColumnKind) -> bool {
+    fn is_symbol_idx(s: &Symbol<Expr>, idx: ColumnKind) -> bool {
         match s {
             Symbol::Column { kind, .. } => *kind == idx,
-            Symbol::Alias { to, .. } => self.is_symbol_idx(to, idx),
+            Symbol::Alias { to, .. } => Self::is_symbol_idx(to, idx),
             _ => false,
         }
     }
 
-    /// Return whether, in the current scope, the given expression refers to the
-    /// secondary index.
-    fn contains_index(&self, expr: &Expr, idx: ColumnKind, side: RelevantFor) -> Result<bool> {
-        fn is_relevant_left(op: &BinaryOperator, side: RelevantFor) -> bool {
-            match side {
-                RelevantFor::Either => true,
-                RelevantFor::Gt => {
-                    matches!(op, BinaryOperator::Gt | BinaryOperator::GtEq)
-                }
-                RelevantFor::Lt => {
-                    matches!(op, BinaryOperator::Lt | BinaryOperator::LtEq)
-                }
-            }
-        }
+    fn isolate(&mut self) -> Result<Expr> {
+        // first, get the identifiers of primary and secondary index columns
+        let (primary, secondary) = self.scopes.currently_reachable()?.into_iter().fold(
+            Ok((None, None)),
+            |acc, symbol| {
+                let (primary, secondary) = acc?;
+                Ok((
+                    if Self::is_symbol_idx(&symbol, ColumnKind::PrimaryIndex) {
+                        ensure!(primary.is_none(), "Multiple primary index columns found");
+                        let handle = symbol
+                            .handle()
+                            .ok_or(anyhow!("Cannot convert symbol {symbol} to handle"))?;
+                        Some(format!("{}", handle))
+                    } else {
+                        primary
+                    },
+                    if Self::is_symbol_idx(&symbol, ColumnKind::SecondaryIndex) {
+                        ensure!(
+                            secondary.is_none(),
+                            "Multiple secondary index columns found"
+                        );
+                        let handle = symbol
+                            .handle()
+                            .ok_or(anyhow!("Cannot convert symbol {symbol} to handle"))?;
+                        Some(format!("{}", handle))
+                    } else {
+                        secondary
+                    },
+                ))
+            },
+        )?;
 
-        fn is_relevant_right(op: &BinaryOperator, side: RelevantFor) -> bool {
-            match side {
-                RelevantFor::Either => true,
-                RelevantFor::Gt => {
-                    matches!(op, BinaryOperator::Lt | BinaryOperator::LtEq)
-                }
-                RelevantFor::Lt => {
-                    matches!(op, BinaryOperator::Gt | BinaryOperator::GtEq)
-                }
-            }
-        }
+        let primary = primary.ok_or(anyhow!("No primary index column found in current scope"))?;
+        let secondary =
+            secondary.ok_or(anyhow!("No secondary index column found in current scope"))?;
 
-        Ok(match expr {
-            Expr::Identifier(s) => self.is_symbol_idx(&self.scopes.resolve_freestanding(s)?, idx),
-            Expr::CompoundIdentifier(c) => {
-                self.is_symbol_idx(&self.scopes.resolve_compound(c)?, idx)
-            }
-            Expr::UnaryOp { expr, .. } => self.contains_index(expr, idx, side)?,
-            Expr::BinaryOp { left, right, op } => {
-                (self.contains_index(left, idx, side)? && is_relevant_left(op, side))
-                    || (self.contains_index(right, idx, side)? && is_relevant_right(op, side))
-            }
-            Expr::Nested(e) => self.contains_index(e, idx, side)?,
-            _ => false,
-        })
-    }
-
-    /// Depending on the secondary index predicates, determine whether this
-    /// expression is relevant to index bounds or if it should be pruned.
-    fn should_keep(&self, expr: &Expr) -> Result<bool> {
-        let mut keep = false;
-        for (idx, side) in self.isolation.to_kinds() {
-            keep |= self.contains_index(expr, *idx, *side)?;
-        }
-        Ok(keep)
-    }
-
-    /// Recursively traverse an [`Expr`], pruning all sub-expresssions not
-    /// related to index bounds.
-    fn isolate(&mut self, expr: &mut Expr) -> Result<()> {
-        if let Some(replacement) = match expr {
-            Expr::Nested(e) => {
-                self.isolate(e)?;
-                None
-            }
-            Expr::BinaryOp { left, right, op } => {
-                match op {
-                    BinaryOperator::And | BinaryOperator::Or | BinaryOperator::Xor => {
-                        match (self.should_keep(&left)?, self.should_keep(&right)?) {
-                            (true, true) => {
-                                self.isolate(left)?;
-                                self.isolate(right)?;
-                                None
-                            }
-                            (true, false) => {
-                                self.isolate(left)?;
-                                Some(*left.to_owned())
-                            }
-                            (false, true) => {
-                                self.isolate(right)?;
-                                Some(*right.to_owned())
-                            }
-                            // NOTE: this cannot be reached, as then the expr
-                            // would never have been explored in the first
-                            // place.
-                            (false, false) => unreachable!(),
-                        }
-                    }
-                    _ => None,
-                }
-            }
-            Expr::UnaryOp { expr, .. } => {
-                self.isolate(expr)?;
-                None
-            }
-            _ => None,
-        } {
-            *expr = replacement;
-        }
-
-        // Only recursively go down if we are within an `AND`
-        if let Expr::BinaryOp {
-            left,
+        // now, add the predicate `primary >= $MIN_BLOCK AND primary <= $MAX_BLOCK`
+        let expr_primary_index = Expr::BinaryOp {
+            left: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Identifier(Ident::new(&primary))),
+                op: BinaryOperator::GtEq,
+                right: Box::new(Expr::Value(Value::Placeholder(
+                    self.settings.placeholders.min_block_placeholder.to_owned(),
+                ))),
+            }),
             op: BinaryOperator::And,
-            right,
-        } = expr
-        {
-            self.isolate(left)?;
-            self.isolate(right)?;
-        }
+            right: Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Identifier(Ident::new(primary))),
+                op: BinaryOperator::LtEq,
+                right: Box::new(Expr::Value(Value::Placeholder(
+                    self.settings.placeholders.max_block_placeholder.to_owned(),
+                ))),
+            }),
+        };
 
-        Ok(())
+        // Closure to build the predicate secondary >= value
+        let build_secondary_index_lower_expr = |value| Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new(&secondary))),
+            op: BinaryOperator::GtEq,
+            right: Box::new(u256_to_expr(value)),
+        };
+
+        // Closure to build the predicate secondary <= value
+        let build_secondary_index_upper_expr = |value| Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new(&secondary))),
+            op: BinaryOperator::LtEq,
+            right: Box::new(u256_to_expr(value)),
+        };
+
+        // Build the predicate to filter rows by secondary index values, depending on
+        // the secondary index bounds specified in the query
+        let secondary_index_expr = match self.isolation {
+            SecondaryIndexBounds::BothSides((lower_value, upper_value)) => Some(Expr::BinaryOp {
+                left: Box::new(build_secondary_index_lower_expr(lower_value)),
+                op: BinaryOperator::And,
+                right: Box::new(build_secondary_index_upper_expr(upper_value)),
+            }),
+            SecondaryIndexBounds::Low(lower_value) => {
+                Some(build_secondary_index_lower_expr(lower_value))
+            }
+            SecondaryIndexBounds::High(upper_value) => {
+                Some(build_secondary_index_upper_expr(upper_value))
+            }
+            SecondaryIndexBounds::None => None,
+        };
+
+        // Build an expression with both range predicates for primary and secondary index, if any
+        Ok(if let Some(expr) = secondary_index_expr {
+            Expr::BinaryOp {
+                left: Box::new(expr_primary_index),
+                op: BinaryOperator::And,
+                right: Box::new(expr),
+            }
+        } else {
+            expr_primary_index
+        })
     }
 }
 
-impl<'a, C: ContextProvider> AstMutator for Isolator<'a, C> {
+impl<C: ContextProvider> AstMutator for Isolator<'_, C> {
     type Error = anyhow::Error;
 
     fn pre_table_factor(&mut self, table_factor: &mut TableFactor) -> Result<()> {
@@ -234,7 +196,7 @@ impl<'a, C: ContextProvider> AstMutator for Isolator<'a, C> {
                     let table_columns = self
                         .settings
                         .context
-                        .fetch_table(&concrete_table_name)?
+                        .fetch_table(concrete_table_name)?
                         .columns;
 
                     // Extract the apparent table name (either the concrete one
@@ -336,12 +298,9 @@ impl<'a, C: ContextProvider> AstMutator for Isolator<'a, C> {
     }
 
     fn post_select(&mut self, select: &mut Select) -> Result<()> {
-        if let Some(where_clause) = select.selection.as_mut() {
-            // As the expression are traversed depth-first, the top level
-            // expression will mechnically find itself at the last position, as
-            // required by the universal query circuit API.
-            self.isolate(where_clause)?;
-        }
+        // Replace WHERE clause with the predicates filtering over primary and
+        // secondary index query bounds
+        select.selection = Some(self.isolate()?);
         self.exit_scope()
     }
 
@@ -379,22 +338,29 @@ pub fn isolate<C: ContextProvider>(
     settings: &ParsilSettings<C>,
     bounds: &QueryBounds,
 ) -> Result<Query> {
+    let lower_bound = bounds.min_query_secondary();
+    let upper_bound = bounds.max_query_secondary();
     isolate_with(
         query,
         settings,
-        bounds.min_query_secondary().is_bounded_low(),
-        bounds.max_query_secondary().is_bounded_high(),
+        lower_bound.is_bounded_low().then_some(*lower_bound.value()),
+        upper_bound
+            .is_bounded_high()
+            .then_some(*upper_bound.value()),
     )
 }
 
-pub fn isolate_with<C: ContextProvider>(
+pub(crate) fn isolate_with<C: ContextProvider>(
     query: &Query,
     settings: &ParsilSettings<C>,
-    lo_sec: bool,
-    hi_sec: bool,
+    lower_bound: Option<U256>,
+    upper_bound: Option<U256>,
 ) -> Result<Query> {
     let mut converted_query = query.clone();
-    let mut insulator = Isolator::new(settings, SecondaryIndexBounds::from_lo_hi(lo_sec, hi_sec));
+    let mut insulator = Isolator::new(
+        settings,
+        SecondaryIndexBounds::from_secondary_bounds(lower_bound, upper_bound),
+    );
     converted_query.visit_mut(&mut insulator)?;
     Ok(converted_query)
 }

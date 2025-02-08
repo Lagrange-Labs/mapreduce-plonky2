@@ -4,16 +4,19 @@ use super::{
     TransactionalStorage, TreeStorage, WideLineage,
 };
 use crate::{
-    storage::pgsql::storages::DBPool, tree::TreeTopology, Epoch, InitSettings, KEY, PAYLOAD,
-    VALID_FROM, VALID_UNTIL,
+    error::{ensure, RyhopeError},
+    storage::pgsql::storages::DBPool,
+    tree::{NodeContext, TreeTopology},
+    Epoch, InitSettings, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL,
 };
-use anyhow::*;
 use bb8_postgres::PostgresConnectionManager;
+use futures::TryFutureExt;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     fmt::Debug,
+    future::Future,
     sync::{Arc, Mutex},
 };
 use storages::{NodeProjection, PayloadProjection};
@@ -21,6 +24,8 @@ use tokio_postgres::{NoTls, Transaction};
 use tracing::*;
 
 mod storages;
+
+const MAX_PGSQL_BIGINT: i64 = i64::MAX;
 
 /// A trait that must be implemented by a custom node key. This allows to
 /// (de)serialize any custom key to and fro a PgSQL BYTEA.
@@ -97,17 +102,17 @@ pub trait PayloadInDb: Clone + Send + Sync + Debug + Serialize + for<'a> Deseria
 impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb for T {}
 
 /// If it exists, remove the given table from the current database.
-async fn delete_storage_table(db: DBPool, table: &str) -> Result<()> {
+async fn delete_storage_table(db: DBPool, table: &str) -> Result<(), RyhopeError> {
     let connection = db.get().await.unwrap();
     connection
         .execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
         .await
-        .with_context(|| format!("unable to delete table `{table}`"))
+        .map_err(|err| RyhopeError::from_db(format!("unable to delete table `{table}`"), err))
         .map(|_| ())?;
     connection
         .execute(&format!("DROP TABLE IF EXISTS {}_meta", table), &[])
         .await
-        .with_context(|| format!("unable to delete table `{table}`"))
+        .map_err(|err| RyhopeError::from_db(format!("unable to delete table `{table}`"), err))
         .map(|_| ())
 }
 
@@ -192,7 +197,7 @@ where
     async fn from_settings(
         init_settings: InitSettings<T::State>,
         storage_settings: Self::Settings,
-    ) -> Result<Self> {
+    ) -> Result<Self, RyhopeError> {
         match init_settings {
             InitSettings::MustExist => {
                 Self::load_existing(&storage_settings.source, storage_settings.table).await
@@ -242,7 +247,7 @@ where
 /// initial state to the database, even if the tree is left empty.
 ///
 /// Fail if the DB query fails.
-async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
+async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64), RyhopeError> {
     trace!("fetching epoch data for `{table}`");
     let connection = db.get().await.unwrap();
     connection
@@ -252,7 +257,7 @@ async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64)> {
         )
         .await
         .map(|r| (r.get(0), r.get(1)))
-        .context("while fetching current epoch data")
+        .map_err(|err| RyhopeError::from_db("fetching current epoch data", err))
 }
 
 impl<T, V> std::fmt::Display for PgsqlStorage<T, V>
@@ -284,14 +289,14 @@ where
         table: String,
         tree_state: T::State,
         epoch: Epoch,
-    ) -> Result<Self> {
+    ) -> Result<Self, RyhopeError> {
         debug!("creating new table for `{table}` at epoch {epoch}");
         let db_pool = Self::init_db_pool(db_src).await?;
 
-        ensure!(
+        ensure(
             fetch_epoch_data(db_pool.clone(), &table).await.is_err(),
-            "table `{table}` already exists"
-        );
+            format!("table `{table}` already exists"),
+        )?;
         Self::create_tables(db_pool.clone(), &table).await?;
 
         let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
@@ -316,8 +321,7 @@ where
             nodes,
             payloads,
             state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
-                .await
-                .context("failed to store initial state")?,
+                .await?,
         };
         Ok(r)
     }
@@ -325,12 +329,13 @@ where
     /// Initialize the storage backend from an existing table in database.
     ///
     /// Fails if the specified table does not exist.
-    pub async fn load_existing(db_src: &SqlServerConnection, table: String) -> Result<Self> {
+    pub async fn load_existing(
+        db_src: &SqlServerConnection,
+        table: String,
+    ) -> Result<Self, RyhopeError> {
         let db_pool = Self::init_db_pool(db_src).await?;
 
-        let (initial_epoch, latest_epoch) = fetch_epoch_data(db_pool.clone(), &table)
-            .await
-            .with_context(|| format!("table `{table}` does not exist"))?;
+        let (initial_epoch, latest_epoch) = fetch_epoch_data(db_pool.clone(), &table).await?;
         debug!("loading `{table}`; latest epoch is {latest_epoch}");
         let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
             initial_epoch,
@@ -366,7 +371,7 @@ where
         table: String,
         tree_state: T::State,
         initial_epoch: Epoch,
-    ) -> Result<Self> {
+    ) -> Result<Self, RyhopeError> {
         debug!("resetting table `{table}` at epoch {initial_epoch}");
         let db_pool = Self::init_db_pool(db_src).await?;
 
@@ -396,8 +401,7 @@ where
                 db_pool.clone(),
                 tree_state,
             )
-            .await
-            .context("failed to store initial state")?,
+            .await?,
             tree_store,
             nodes,
             payloads,
@@ -408,16 +412,21 @@ where
     }
 
     /// Initialize a DB pool.
-    pub async fn init_db_pool(db_src: &SqlServerConnection) -> Result<DBPool> {
+    pub async fn init_db_pool(db_src: &SqlServerConnection) -> Result<DBPool, RyhopeError> {
         match db_src {
             SqlServerConnection::NewConnection(db_url) => {
                 info!("Connecting to `{db_url}`");
                 let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
-                    .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url))?;
+                    .map_err(|err| {
+                        RyhopeError::from_db(
+                            format!("while connecting to postgreSQL with `{}`", db_url),
+                            err,
+                        )
+                    })?;
                 let db_pool = DBPool::builder()
                     .build(db_manager)
                     .await
-                    .context("while creating the db_pool")?;
+                    .map_err(|err| RyhopeError::from_db("creating DB pool", err))?;
                 debug!("connection successful.");
 
                 Ok(db_pool)
@@ -449,7 +458,7 @@ where
     ///     the tree at the given epoch range.
     ///
     /// Will fail if the CREATE is not valid (e.g. the table already exists)
-    async fn create_tables(db: DBPool, table: &str) -> Result<()> {
+    async fn create_tables(db: DBPool, table: &str) -> Result<(), RyhopeError> {
         let node_columns = <T as DbConnector<V>>::columns()
             .iter()
             .map(|(name, t)| format!("{name} {t},"))
@@ -471,7 +480,7 @@ where
             )
             .await
             .map(|_| ())
-            .with_context(|| format!("unable to create table `{table}`"))?;
+            .map_err(|err| RyhopeError::from_db(format!("creating table `{table}`"), err))?;
 
         // The meta table will store everything related to the tree itself.
         connection
@@ -486,39 +495,28 @@ where
             )
             .await
             .map(|_| ())
-            .with_context(|| format!("unable to create table `{table}_meta`"))
+            .map_err(|err| RyhopeError::from_db(format!("creating table `{table}_meta`"), err))?;
+
+        Ok(())
     }
 
-    async fn update_all(&self, db_tx: &tokio_postgres::Transaction<'_>) -> Result<()> {
-        let update_all = format!(
-            "UPDATE {} SET {VALID_UNTIL}=$1 WHERE {VALID_UNTIL}=$2",
-            self.table
-        );
-
-        db_tx
-            .query(&update_all, &[&(&self.epoch + 1), &self.epoch])
-            .await
-            .context("while updating timestamps")
-            .map(|_| ())
-    }
-
-    /// Roll-back to `self.epoch` the lifetime of a row having already been extended to `self.epoch + 1`.
-    async fn rollback_one_row(
+    /// Close the lifetim of a row to `self.epoch`.
+    async fn mark_dead(
         &self,
         db_tx: &tokio_postgres::Transaction<'_>,
         key: &T::Key,
-    ) -> Result<Option<(T::Node, V)>> {
-        trace!("[{self}] rolling back {key:?} one epoch");
+    ) -> Result<Option<(T::Node, V)>, RyhopeError> {
+        trace!("[{self}] marking {key:?} as dead @{}", self.epoch);
         let rows = db_tx
             .query(
                 &format!(
-                    "UPDATE {} SET {VALID_UNTIL}={} WHERE {KEY}=$1 AND {VALID_UNTIL}={} RETURNING *",
+                    "UPDATE {} SET {VALID_UNTIL}={} WHERE {KEY}=$1 AND {VALID_UNTIL}=$2 RETURNING *",
                     self.table,
                     self.epoch,
-                    self.epoch + 1
                 ),
-                &[&key.to_bytea()],
+                &[&key.to_bytea(), &MAX_PGSQL_BIGINT],
             )
+            .map_err(|err| RyhopeError::from_db("marking dead nodes", err))
             .await?;
 
         if rows.is_empty() {
@@ -526,16 +524,16 @@ where
             Ok(None)
         } else if rows.len() == 1 {
             Ok(Some((
-                T::node_from_row(&rows[0])?,
+                T::node_from_row(&rows[0]),
                 T::payload_from_row(&rows[0])?,
             )))
         } else {
-            bail!(
+            return Err(RyhopeError::fatal(format!(
                 "[{self}] failed to roll back {key:?} to {}: {} rows matched the roll back query (i.e. {KEY} = {key:?} AND {VALID_UNTIL} = {})",
                 self.epoch,
                 rows.len(),
                 self.epoch+1
-            )
+            )));
         }
     }
 
@@ -545,7 +543,7 @@ where
         db_tx: &tokio_postgres::Transaction<'_>,
         k: &T::Key,
         n: T::Node,
-    ) -> Result<()> {
+    ) -> Result<(), RyhopeError> {
         trace!(
             "[{self}] creating a new instance for {k:?}@{}",
             self.epoch + 1
@@ -553,17 +551,17 @@ where
         T::create_node_in_tx(db_tx, &self.table, k, self.epoch + 1, &n).await
     }
 
-    async fn commit_in_transaction(&mut self, db_tx: &mut Transaction<'_>) -> Result<()> {
-        ensure!(self.in_tx, "not in a transaction");
+    async fn commit_in_transaction(
+        &mut self,
+        db_tx: &mut Transaction<'_>,
+    ) -> Result<(), RyhopeError> {
+        if !self.in_tx {
+            return Err(RyhopeError::NotInATransaction);
+        }
         trace!("[{self}] commiting in a transaction...");
 
         // The putative new stamps if everything goes well
         let new_epoch = self.epoch + 1;
-
-        // Pre-emptively extend by 1 the lifetime of the currently alive rows;
-        // those that should not be alive in the next epoch will be rolled back
-        // later.
-        self.update_all(db_tx).await?;
 
         // Collect all the keys found in the caches
         let mut cached_keys = HashSet::new();
@@ -574,7 +572,9 @@ where
             cached_keys.extend(
                 self.tree_store
                     .lock()
-                    .map_err(|e| anyhow!("failed to lock tree store mutex: {e}"))?
+                    .map_err(|e| {
+                        RyhopeError::fatal(format!("failed to lock tree store mutex: {e:?}"))
+                    })?
                     .payload_cache
                     .keys()
                     .cloned(),
@@ -586,7 +586,9 @@ where
             let data_value = {
                 self.tree_store
                     .lock()
-                    .map_err(|e| anyhow!("failed to lock tree store mutex: {e}"))?
+                    .map_err(|e| {
+                        RyhopeError::fatal(format!("failed to lock tree store mutex: {e:?}"))
+                    })?
                     .payload_cache
                     .get(&k)
                     .cloned()
@@ -602,7 +604,7 @@ where
                     // The node has been removed
                     (Some(None), _) => {
                         // k has been deleted; simply roll-back the lifetime of its row.
-                        self.rollback_one_row(db_tx, &k).await?;
+                        self.mark_dead(db_tx, &k).await?;
                     }
 
                     // The payload alone has been updated
@@ -612,7 +614,7 @@ where
                     )
                     | (None, Some(Some(CachedValue::Written(new_payload)))) => {
                         // rollback the old value if any
-                        let previous_node = self.rollback_one_row(db_tx, &k).await?.unwrap().0;
+                        let previous_node = self.mark_dead(db_tx, &k).await?.unwrap().0;
                         // write the new value
                         self.new_node(db_tx, &k, previous_node).await?;
                         T::set_at_in_tx(
@@ -629,7 +631,7 @@ where
                     (Some(Some(CachedValue::Written(new_node))), maybe_new_payload) => {
                         // insertion or displacement in the tree; the row has to be
                         // duplicated/updated and rolled-back
-                        let previous_state = self.rollback_one_row(db_tx, &k).await?;
+                        let previous_state = self.mark_dead(db_tx, &k).await?;
 
                         // insert the new row representing the new state of the key...
                         self.new_node(db_tx, &k, new_node.to_owned()).await?;
@@ -690,15 +692,20 @@ where
     T::Node: Send + Sync + Clone,
     T::State: Send + Sync + Clone,
 {
-    fn start_transaction(&mut self) -> Result<()> {
+    fn start_transaction(&mut self) -> Result<(), RyhopeError> {
+        if self.in_tx {
+            return Err(RyhopeError::AlreadyInTransaction);
+        }
         trace!("[{self}] starting a new transaction");
-        ensure!(!self.in_tx, "already in a transaction");
         self.in_tx = true;
         self.state.start_transaction()?;
         Ok(())
     }
 
-    async fn commit_transaction(&mut self) -> Result<()> {
+    async fn commit_transaction(&mut self) -> Result<(), RyhopeError> {
+        if !self.in_tx {
+            return Err(RyhopeError::NotInATransaction);
+        }
         trace!("[{self}] commiting transaction");
         let pool = self.db.clone();
         let mut connection = pool.get().await.unwrap();
@@ -707,48 +714,13 @@ where
             .await
             .expect("unable to create DB transaction");
 
-        self.commit_in_transaction(&mut db_tx)
-            .await
-            .with_context(|| {
-                let mut cached_keys = HashSet::new();
-                {
-                    cached_keys.extend(self.tree_store.lock().unwrap().nodes_cache.keys().cloned());
-                }
-                {
-                    cached_keys.extend(
-                        self.tree_store
-                            .lock()
-                            .unwrap()
-                            .payload_cache
-                            .keys()
-                            .cloned(),
-                    );
-
-                    let mut r = String::new();
-
-                    for k in cached_keys {
-                        let node_value =
-                            { self.tree_store.lock().unwrap().nodes_cache.get(&k).cloned() };
-                        let data_value = {
-                            self.tree_store
-                                .lock()
-                                .unwrap()
-                                .payload_cache
-                                .get(&k)
-                                .cloned()
-                        };
-                        r.push_str(&format!(
-                            "{:?}: node = {:?} data = {:?}  ",
-                            k, node_value, data_value
-                        ))
-                    }
-
-                    anyhow!("internal caches at failure time: {r}")
-                }
-            })?;
+        self.commit_in_transaction(&mut db_tx).await?;
 
         // Atomically execute the PgSQL transaction
-        let err = db_tx.commit().await.context("while committing transaction");
+        let err = db_tx
+            .commit()
+            .await
+            .map_err(|err| RyhopeError::from_db("committing transaction", err));
         if err.is_ok() {
             self.on_commit_success();
         } else {
@@ -766,45 +738,9 @@ where
     T::Node: Send + Sync + Clone,
     T::State: Send + Sync + Clone,
 {
-    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<()> {
+    async fn commit_in(&mut self, tx: &mut Transaction<'_>) -> Result<(), RyhopeError> {
         trace!("[{self}] API-facing commit_in called");
-        self.commit_in_transaction(tx).await.with_context(|| {
-            let mut cached_keys = HashSet::new();
-            {
-                cached_keys.extend(self.tree_store.lock().unwrap().nodes_cache.keys().cloned());
-            }
-            {
-                cached_keys.extend(
-                    self.tree_store
-                        .lock()
-                        .unwrap()
-                        .payload_cache
-                        .keys()
-                        .cloned(),
-                );
-
-                let mut r = String::new();
-
-                for k in cached_keys {
-                    let node_value =
-                        { self.tree_store.lock().unwrap().nodes_cache.get(&k).cloned() };
-                    let data_value = {
-                        self.tree_store
-                            .lock()
-                            .unwrap()
-                            .payload_cache
-                            .get(&k)
-                            .cloned()
-                    };
-                    r.push_str(&format!(
-                        "{:?}: node = {:?} data = {:?}  ",
-                        k, node_value, data_value
-                    ))
-                }
-
-                anyhow!("internal caches at failure time: {r}")
-            }
-        })
+        self.commit_in_transaction(tx).await
     }
 
     fn commit_success(&mut self) {
@@ -859,7 +795,7 @@ where
             .collect::<Vec<_>>()
     }
 
-    async fn rollback_to(&mut self, epoch: Epoch) -> Result<()> {
+    async fn rollback_to(&mut self, epoch: Epoch) -> Result<(), RyhopeError> {
         self.state.rollback_to(epoch).await?;
         self.tree_store.lock().unwrap().rollback_to(epoch).await?;
         self.epoch = epoch;
@@ -914,17 +850,30 @@ where
         t: &T,
         keys: &Self::KeySource,
         bounds: (Epoch, Epoch),
-    ) -> Result<WideLineage<T::Key, V>> {
-        let r = T::wide_lineage_between(
-            t,
-            &self.view_at(at),
-            self.db.clone(),
-            &self.table,
-            &keys,
-            bounds,
-        )
-        .await?;
+    ) -> Result<WideLineage<T::Key, V>, RyhopeError> {
+        let r = t
+            .wide_lineage_between(
+                &self.view_at(at),
+                self.db.clone(),
+                &self.table,
+                keys,
+                bounds,
+            )
+            .await?;
 
         Ok(r)
+    }
+
+    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, <T as TreeTopology>::Key)> + Send>(
+        &self,
+        t: &T,
+        data: I,
+    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<T::Key>, V)>, RyhopeError>> + Send
+    where
+        <I as IntoIterator>::IntoIter: Send,
+    {
+        trace!("[{self}] fetching many contexts & payloads",);
+        let table = self.table.to_owned();
+        async move { t.fetch_many_at(self, self.db.clone(), &table, data).await }
     }
 }

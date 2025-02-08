@@ -24,7 +24,7 @@ macro_rules! ensure {
 pub struct SqlValidator<'a, C: ContextProvider> {
     settings: &'a ParsilSettings<C>,
 }
-impl<'a, C: ContextProvider> AstVisitor for SqlValidator<'a, C> {
+impl<C: ContextProvider> AstVisitor for SqlValidator<'_, C> {
     type Error = ValidationError;
 
     fn pre_unary_operator(&mut self, unary_operator: &UnaryOperator) -> Result<(), Self::Error> {
@@ -385,9 +385,41 @@ impl<'a, C: ContextProvider> AstVisitor for SqlValidator<'a, C> {
             q.fetch.is_none(),
             ValidationError::NonStandardSql("FETCH".into())
         );
+        ensure!(
+            q.order_by.is_none(),
+            ValidationError::UnsupportedFeature("ORDER BY".into())
+        );
         Ok(())
     }
 }
+
+// Determine if the query does not aggregate values across different matching rows
+pub(crate) fn is_query_with_no_aggregation(select: &Select) -> bool {
+    select.projection.iter().all(|s| {
+        !matches!(
+            s,
+            SelectItem::UnnamedExpr(Expr::Function(_))
+                | SelectItem::ExprWithAlias {
+                    expr: Expr::Function(_),
+                    ..
+                }
+        )
+    })
+}
+// Determine if the query does aggregates values across different matching rows
+pub(crate) fn is_query_with_aggregation(select: &Select) -> bool {
+    select.projection.iter().all(|s| {
+        matches!(
+            s,
+            SelectItem::UnnamedExpr(Expr::Function(_))
+                | SelectItem::ExprWithAlias {
+                    expr: Expr::Function(_),
+                    ..
+                }
+        )
+    })
+}
+
 /// Instantiate a new [`Validator`] and validate this query with it.
 pub fn validate<C: ContextProvider>(
     settings: &ParsilSettings<C>,
@@ -395,15 +427,8 @@ pub fn validate<C: ContextProvider>(
 ) -> Result<(), ValidationError> {
     if let SetExpr::Select(ref select) = *query.body {
         ensure!(
-            select.projection.iter().all(|s| matches!(
-                s,
-                SelectItem::UnnamedExpr(Expr::Function(_))
-                    | SelectItem::ExprWithAlias {
-                        expr: Expr::Function(_),
-                        ..
-                    }
-            )),
-            ValidationError::TabularQuery
+            is_query_with_aggregation(select) || is_query_with_no_aggregation(select),
+            ValidationError::MixedQuery
         );
     } else {
         return Err(ValidationError::NotASelect);

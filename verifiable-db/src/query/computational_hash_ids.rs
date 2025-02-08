@@ -5,7 +5,7 @@ use std::{
 };
 
 use alloy::primitives::U256;
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use itertools::Itertools;
 
 use mp2_common::{
@@ -13,7 +13,7 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     types::{CBuilder, HashOutput},
     u256::UInt256Target,
-    utils::{Fieldable, FromFields, SelectHashBuilder, ToFields, ToTargets},
+    utils::{Fieldable, FromFields, HashBuilder, ToFields, ToTargets},
     CHasher, F,
 };
 use plonky2::{
@@ -31,14 +31,14 @@ use serde::{Deserialize, Serialize};
 use crate::revelation::placeholders_check::placeholder_ids_hash;
 
 use super::{
-    aggregation::QueryBoundSource,
     universal_circuit::{
         universal_circuit_inputs::{
             BasicOperation, InputOperand, OutputItem, PlaceholderIdsSet, ResultStructure,
         },
-        universal_query_circuit::QueryBound,
+        universal_query_gadget::QueryBound,
         ComputationalHash, ComputationalHashTarget,
     },
+    utils::QueryBoundSource,
 };
 
 pub enum Identifiers {
@@ -112,7 +112,9 @@ impl Identifiers {
         let mut cache = ComputationalHashCache::new(column_ids.len());
         let predicate_ops_hash =
             Operation::operation_hash(predicate_operations, &column_ids, &mut cache)?;
-        let predicate_hash = predicate_ops_hash.last().unwrap();
+        let predicate_hash = predicate_ops_hash
+            .last()
+            .context("missing predicate on query")?;
         let result_ops_hash =
             Operation::operation_hash(&results.result_operations, &column_ids, &mut cache)?;
         results.output_variant.output_hash(
@@ -183,14 +185,13 @@ impl Identifiers {
                         .into_iter()
                         .flat_map(|query_bound| {
                             query_bound
-                                .map(|bound| match bound {
+                                .and_then(|bound| match bound {
                                     QueryBoundSource::Placeholder(id) => Some(vec![id]),
                                     QueryBoundSource::Operation(op) => {
                                         Some(op.extract_placeholder_ids())
                                     }
                                     QueryBoundSource::Constant(_) => None,
                                 })
-                                .flatten()
                                 // If None, return a placeholder that is for sure already in the set
                                 .unwrap_or(vec![PlaceholderIdentifier::MinQueryOnIdx1])
                         }),
@@ -202,8 +203,15 @@ impl Identifiers {
 
         //ToDo: add ORDER BY info and DISTINCT info for queries without the results tree, when adding results tree
         // circuits APIs
+        let computational_hash = match results.output_variant {
+            Output::Aggregation => ComputationalHash::from_bytes((&hash).into()),
+            Output::NoAggregation => ResultIdentifier::result_id_hash(
+                ComputationalHash::from_bytes((&hash).into()),
+                results.distinct.unwrap_or(false),
+            ),
+        };
 
-        let inputs = ComputationalHash::from_bytes((&hash).into())
+        let inputs = computational_hash
             .to_vec()
             .into_iter()
             .chain(placeholder_id_hash.to_vec())
@@ -228,7 +236,7 @@ impl<F: RichField> ToField<F> for Identifiers {
     }
 }
 /// Data structure to provide identifiers of columns of a table to compute computational hash
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ColumnIDs {
     pub(crate) primary: F,
     pub(crate) secondary: F,
@@ -244,11 +252,30 @@ impl ColumnIDs {
         }
     }
 
+    pub fn primary_column(&self) -> u64 {
+        self.primary.to_canonical_u64()
+    }
+
+    pub fn secondary_column(&self) -> u64 {
+        self.secondary.to_canonical_u64()
+    }
+
+    pub fn non_indexed_columns(&self) -> Vec<u64> {
+        self.rest
+            .iter()
+            .map(|id| id.to_canonical_u64())
+            .collect_vec()
+    }
+
     pub(crate) fn to_vec(&self) -> Vec<F> {
         [self.primary, self.secondary]
             .into_iter()
             .chain(self.rest.clone())
             .collect_vec()
+    }
+
+    pub(crate) fn num_columns(&self) -> usize {
+        self.rest.len() + 2
     }
 }
 
@@ -633,7 +660,7 @@ impl<F: RichField> FromFields<F> for AggregationOperation {
 
 impl AggregationOperation {
     /// Return the identity value for `self` operation
-    pub(crate) fn identity_value(&self) -> Vec<F> {
+    pub fn identity_value(&self) -> Vec<F> {
         match self {
             AggregationOperation::SumOp => U256::ZERO.to_fields(),
             AggregationOperation::MinOp => U256::MAX.to_fields(),
@@ -711,5 +738,42 @@ pub enum ResultIdentifier {
 impl<F: RichField> ToField<F> for ResultIdentifier {
     fn to_field(&self) -> F {
         Identifiers::ResultIdentifiers(*self).to_field()
+    }
+}
+
+impl ResultIdentifier {
+    pub(crate) fn result_id_hash(
+        computational_hash: ComputationalHash,
+        distinct: bool,
+    ) -> ComputationalHash {
+        let res_id = if distinct {
+            ResultIdentifier::ResultWithDistinct
+        } else {
+            ResultIdentifier::ResultNoDistinct
+        };
+        let input = once(res_id.to_field())
+            .chain(computational_hash.to_fields())
+            .collect_vec();
+        hash_n_to_hash_no_pad::<_, HashPermutation>(&input)
+    }
+
+    pub(crate) fn result_id_hash_circuit(
+        b: &mut CBuilder,
+        computational_hash: ComputationalHashTarget,
+        distinct: &BoolTarget,
+    ) -> ComputationalHashTarget {
+        let [res_no_distinct, res_with_distinct] = [
+            ResultIdentifier::ResultNoDistinct,
+            ResultIdentifier::ResultWithDistinct,
+        ]
+        .map(|id| b.constant(id.to_field()));
+        let res_id = b.select(*distinct, res_with_distinct, res_no_distinct);
+
+        // Compute the computational hash:
+        // H(res_id || pQ.C)
+        let inputs = once(res_id)
+            .chain(computational_hash.to_targets())
+            .collect();
+        b.hash_n_to_hash_no_pad::<CHasher>(inputs)
     }
 }

@@ -1,5 +1,4 @@
 use alloy::primitives::U256;
-use anyhow::*;
 use log::debug;
 use mp2_common::proof::ProofWithVK;
 use mp2_v1::{
@@ -81,16 +80,19 @@ impl TestContext {
         primary: BlockPrimaryIndex,
         table: &Table,
         ut: UpdateTree<RowTreeKey>,
-    ) -> Result<RowProofIdentifier<BlockPrimaryIndex>> {
+    ) -> anyhow::Result<RowProofIdentifier<BlockPrimaryIndex>> {
         debug!("PROVE_ROW_TREE -- BEGIN for block {}", primary);
         let t = &table.row;
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(wk)) = workplan.next() {
-            let k = &wk.k;
-            let (context, row) = t.fetch_with_context(&k).await;
+            let k = wk.k();
+            let (context, row) = t.fetch_with_context(k).await?.unwrap();
             let id = row.secondary_index_column;
             // Sec. index value
             let value = row.secondary_index_value();
+            let multiplier = table.columns.column_info(id).multiplier;
+            // NOTE remove that when playing more with sec. index
+            assert!(!multiplier, "secondary index should be individual type");
             // find where the root cells proof has been stored. This comes from looking up the
             // column id, then searching for the cell info in the row payload about this
             // identifier. We now have the primary index for which the cells proof have been
@@ -115,7 +117,7 @@ impl TestContext {
             let cell_root_hash_from_proof = cells_tree::extract_hash_from_proof(&cell_tree_proof)
                 .unwrap()
                 .to_bytes();
-            let cell_root_hash_from_row = row.cell_root_hash.clone();
+            let cell_root_hash_from_row = row.cell_root_hash;
             assert_eq!(
                 hex::encode(cell_root_hash_from_proof.clone()),
                 hex::encode(cell_root_hash_from_row.unwrap().0),
@@ -123,6 +125,16 @@ impl TestContext {
                 row.fetch_cell_root_info(),
                 row.cells,
             );
+
+            {
+                let pvk = ProofWithVK::deserialize(&cell_tree_proof)?;
+                let pis = cells_tree::PublicInputs::from_slice(&pvk.proof().public_inputs);
+                debug!(
+                    " Cell Root SPLIT digest: multiplier {:?}, individual {:?}",
+                    pis.multiplier_digest_point(),
+                    pis.individual_digest_point()
+                );
+            }
 
             let proof = if context.is_leaf() {
                 // Prove a leaf
@@ -134,8 +146,13 @@ impl TestContext {
                     hex::encode(row.cell_root_hash.unwrap().0)
                 );
                 let inputs = CircuitInput::RowsTree(
-                    verifiable_db::row_tree::CircuitInput::leaf(id, value, cell_tree_proof)
-                        .unwrap(),
+                    verifiable_db::row_tree::CircuitInput::leaf(
+                        id,
+                        value,
+                        multiplier,
+                        cell_tree_proof,
+                    )
+                    .unwrap(),
                 );
                 debug!("Before proving leaf node row tree key {:?}", k);
                 self.b
@@ -150,7 +167,7 @@ impl TestContext {
                     .or(context.right.as_ref())
                     .cloned()
                     .unwrap();
-                let child_row = table.row.fetch(&child_key).await;
+                let child_row = table.row.try_fetch(&child_key).await?.unwrap();
 
                 let proof_key = RowProofIdentifier {
                     table: table.public_name.clone(),
@@ -167,6 +184,7 @@ impl TestContext {
                     verifiable_db::row_tree::CircuitInput::partial(
                         id,
                         value,
+                        multiplier,
                         context.left.is_some(),
                         child_proof,
                         cell_tree_proof,
@@ -182,14 +200,14 @@ impl TestContext {
                     .expect("while proving partial node")
             } else {
                 let left_key = context.left.unwrap();
-                let left_row = table.row.fetch(&left_key).await;
+                let left_row = table.row.try_fetch(&left_key).await?.unwrap();
                 let left_proof_key = RowProofIdentifier {
                     table: table.public_name.clone(),
                     primary: left_row.primary_index_value(),
                     tree_key: left_key,
                 };
                 let right_key = context.right.unwrap();
-                let right_row = table.row.fetch(&right_key).await;
+                let right_row = table.row.try_fetch(&right_key).await?.unwrap();
                 let right_proof_key = RowProofIdentifier {
                     table: table.public_name.clone(),
                     primary: right_row.primary_index_value(),
@@ -209,6 +227,7 @@ impl TestContext {
                     verifiable_db::row_tree::CircuitInput::full(
                         id,
                         value,
+                        multiplier,
                         left_proof,
                         right_proof,
                         cell_tree_proof,
@@ -240,8 +259,8 @@ impl TestContext {
             );
             workplan.done(&wk).unwrap();
         }
-        let root = t.root().await.unwrap();
-        let row = table.row.fetch(&root).await;
+        let root = t.root().await?.unwrap();
+        let row = table.row.try_fetch(&root).await?.unwrap();
         let root_proof_key = RowProofIdentifier {
             table: table.public_name.clone(),
             primary: row.primary_index_value(),
@@ -278,14 +297,14 @@ impl TestContext {
         primary: BlockPrimaryIndex,
         table: &Table,
         update: RowUpdateResult,
-    ) -> Result<IndexNode<BlockPrimaryIndex>> {
+    ) -> anyhow::Result<IndexNode<BlockPrimaryIndex>> {
         let root_proof_key = self.prove_row_tree(primary, table, update.updates).await?;
         let row_tree_proof = self
             .storage
             .get_proof_exact(&ProofKey::Row(root_proof_key.clone()))
             .unwrap();
-        let root_row = table.row.root_data().await.unwrap();
-        let tree_hash = root_row.hash.clone();
+        let root_row = table.row.root_data().await?.unwrap();
+        let tree_hash = root_row.hash;
         let proved_hash = row_tree_proof_to_hash(&row_tree_proof);
 
         assert_eq!(
@@ -298,7 +317,7 @@ impl TestContext {
             identifier: table.columns.primary_column().identifier,
             value: U256::from(primary).into(),
             row_tree_root_key: root_proof_key.tree_key,
-            row_tree_hash: table.row.root_data().await.unwrap().hash,
+            row_tree_hash: table.row.root_data().await?.unwrap().hash,
             row_tree_root_primary: root_proof_key.primary,
             ..Default::default()
         })

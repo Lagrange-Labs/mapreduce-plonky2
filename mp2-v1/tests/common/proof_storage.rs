@@ -3,21 +3,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{context::TestContextConfig, mkdir_all, table::TableID};
+use super::{cases::query::NUM_CHUNKS, context::TestContextConfig, mkdir_all, table::TableID};
 use alloy::primitives::{Address, U256};
 use anyhow::{bail, Context, Result};
 use envconfig::Envconfig;
 use mp2_test::cells_tree::CellTree;
-use mp2_v1::indexing::{
-    block::{BlockPrimaryIndex, BlockTree},
-    row::RowTreeKey,
-};
+use mp2_v1::indexing::{block::BlockPrimaryIndex, row::RowTreeKey};
 use ryhope::tree::TreeTopology;
 use serde::{Deserialize, Serialize};
 
 type CellTreeKey = <CellTree as TreeTopology>::Key;
-type IndexTreeKey = <BlockTree as TreeTopology>::Key;
-
 type ContractKey = (Address, BlockPrimaryIndex);
 
 /// This is the identifier we store cells tree proof under in storage. This identifier
@@ -73,8 +68,13 @@ pub enum ProofKey {
     #[allow(clippy::upper_case_acronyms)]
     IVC(BlockPrimaryIndex),
     QueryUniversal((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
-    QueryAggregateRow((QueryID, PlaceholderValues, BlockPrimaryIndex, RowTreeKey)),
-    QueryAggregateIndex((QueryID, PlaceholderValues, BlockPrimaryIndex)),
+    QueryAggregate(
+        (
+            QueryID,
+            PlaceholderValues,
+            mp2_v1::query::batching_planner::UTKey<NUM_CHUNKS>,
+        ),
+    ),
 }
 
 impl ProofKey {
@@ -128,12 +128,8 @@ impl Hash for ProofKey {
                 "query_universal".hash(state);
                 n.hash(state);
             }
-            ProofKey::QueryAggregateRow(n) => {
-                "query_aggregate_row".hash(state);
-                n.hash(state);
-            }
-            ProofKey::QueryAggregateIndex(n) => {
-                "query_aggregate_index".hash(state);
+            ProofKey::QueryAggregate(n) => {
+                "query_aggregate".hash(state);
                 n.hash(state);
             }
         }

@@ -1,6 +1,6 @@
 [package]
 name = "mp2_test"
-version = "0.1.0"
+version = "1.2.1"
 edition = "2021"
 
 [dependencies]
@@ -8,17 +8,15 @@ alloy.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
 eth_trie.workspace = true
-ethers.workspace = true
-hashbrown.workspace = true
 log.workspace = true
 plonky2.workspace = true
 plonky2_ecgfp5.workspace = true
 rand.workspace = true
 serde.workspace = true
 
-mp2_common = { path = "../mp2-common" }
-recursion_framework = { path = "../recursion-framework" }
-ryhope = { path = "../ryhope" }
+mp2_common = { path = "../mp2-common" , version = "1.2.1" }
+recursion_framework = { path = "../recursion-framework" , version = "1.2.1" }
+ryhope = { path = "../ryhope" , version = "1.2.1" }
 
 [features]
 ci = []

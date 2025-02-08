@@ -8,7 +8,7 @@ use super::{
     public_inputs::PublicInputs,
 };
 use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Result};
 use log::debug;
 use mp2_common::{
     default_config,
@@ -34,7 +34,6 @@ type LeafSingleWire = LeafSingleWires<MAX_LEAF_NODE_LEN>;
 type LeafMappingWire = LeafMappingWires<MAX_LEAF_NODE_LEN>;
 type ExtensionInput = ProofInputSerialized<InputNode>;
 type BranchInput = ProofInputSerialized<InputNode>;
-
 const NUM_IO: usize = PublicInputs::<F>::TOTAL_LEN;
 
 /// CircuitInput is a wrapper around the different specialized circuits that can
@@ -134,6 +133,20 @@ pub fn generate_proof(
     circuit_params.generate_proof(circuit_type)?.serialize()
 }
 
+pub trait BranchMacroTrait {
+    fn new(builder: &CircuitWithUniversalVerifierBuilder<F, D, NUM_IO>) -> Self;
+
+    fn circuit_set(&self) -> Vec<HashOut<F>>;
+
+    fn generate_proof(
+        &self,
+        set: &RecursiveCircuits<F, C, D>,
+        branch_node: InputNode,
+        child_proofs: Vec<ProofWithVK>,
+        is_simple_aggregation: bool,
+    ) -> Result<ProofWithVK>;
+}
+
 /// generate a macro filling the BranchCircuit structs manually
 macro_rules! impl_branch_circuits {
     ($struct_name:ty, $($i:expr),*) => {
@@ -153,7 +166,7 @@ macro_rules! impl_branch_circuits {
         in combination with the node input length."]
         pub type $struct_name =  [< $struct_name GenericNodeLen>]<MAX_BRANCH_NODE_LEN>;
 
-        impl $struct_name {
+        impl BranchMacroTrait for $struct_name {
             fn new(builder: &CircuitWithUniversalVerifierBuilder<F, D, NUM_IO>) -> Self {
                 $struct_name {
                     $(
@@ -164,11 +177,11 @@ macro_rules! impl_branch_circuits {
             }
             /// Returns the set of circuits to be fed to the recursive framework
             fn circuit_set(&self) -> Vec<HashOut<F>> {
-                let mut arr = Vec::new();
-                $(
-                    arr.push(self.[< b $i >].circuit_data().verifier_only.circuit_digest);
-                )+
-                arr
+
+                vec![$(
+                    self.[< b $i >].circuit_data().verifier_only.circuit_digest,
+                )+]
+
             }
             /// generates a proof from the inputs stored in `branch`. Depending on the size of the node,
             /// and the number of children proofs, it selects the right specialized circuit to generate the proof.
@@ -183,30 +196,25 @@ macro_rules! impl_branch_circuits {
                 // from the public inputs of the children proofs.
                 // Note this is done outside circuits, more as a sanity check. The circuits is enforcing
                 // this condition.
-                let valid_inputs = child_proofs
-                    .windows(2)
-                    .all(|arr| {
-                        if arr.len() == 1 {
-                            true
-                        } else {
-                            let pi1 = PublicInputs::<F>::new(&arr[0].proof().public_inputs);
-                            let (k1, p1) = pi1.mpt_key_info();
-                            let pi2 = PublicInputs::<F>::new(&arr[1].proof().public_inputs);
-                            let (k2, p2) = pi2.mpt_key_info();
-                            let up1 = p1.to_canonical_u64() as usize;
-                            let up2 = p2.to_canonical_u64() as usize;
-                            up1 < k1.len() && up2 < k2.len() && p1 == p2 && k1[..up1] == k2[..up2]
-                        }
-                    });
-                if !valid_inputs {
-                    bail!("proofs don't match on the key and/or pointers");
+                for arr in child_proofs.windows(2) {
+                    if arr.len() > 1 {
+                        let pi1 = PublicInputs::<F>::new(&arr[0].proof().public_inputs);
+                        let (k1, p1) = pi1.mpt_key_info();
+                        let pi2 = PublicInputs::<F>::new(&arr[1].proof().public_inputs);
+                        let (k2, p2) = pi2.mpt_key_info();
+                        let up1 = p1.to_canonical_u64() as usize;
+                        let up2 = p2.to_canonical_u64() as usize;
+
+                        ensure!(up1 < k1.len(), "up1 ({}) >= |k1| ({})", up1, k1.len());
+                        ensure!(up2 < k2.len(), "up2 ({}) >= |k2| ({})", up2, k2.len());
+                        ensure!(p1 == p2, "p1 ({p1}) != p2 ({p2})");
+                        ensure!(k1[..up1] == k2[..up1], "k1[..up1] ({:?}) != k[2..up2] ({:?})", &k1[..up1], &k2[..up2]);
+                    }
+
                 }
-                if child_proofs.is_empty() || child_proofs.len() > 16 {
-                    bail!("No child proofs or too many child proofs");
-                }
-                if branch_node.node.len() > MAX_BRANCH_NODE_LEN {
-                    bail!("Branch node too long");
-                }
+                ensure!(!child_proofs.is_empty(), "empty child_proofs");
+                ensure!(child_proofs.len() <= 16, "too many child proofs found: {}", child_proofs.len());
+                ensure!(branch_node.node.len() <= MAX_BRANCH_NODE_LEN, "branch_node too long: {}", branch_node.node.len());
 
                 // We just take the first one, it doesn't matter which one we
                 // take as long as all prefixes and pointers are equal.
@@ -265,7 +273,7 @@ macro_rules! impl_branch_circuits {
                          ).map(|p| (p, self.[< b $i>].get_verifier_data().clone()).into())
                      }
                  )+
-                     _ => bail!("invalid child proof len"),
+                         _ => bail!("invalid child proof len: {}", child_proofs.len()),
                  }
             }
         }}
@@ -311,6 +319,7 @@ impl PublicParameters {
         let branches = BranchCircuits::new(&circuit_builder);
         #[cfg(test)]
         let branches = TestBranchCircuits::new(&circuit_builder);
+
         let mut circuits_set = vec![
             leaf_single.get_verifier_data().circuit_digest,
             leaf_mapping.get_verifier_data().circuit_digest,
@@ -340,6 +349,7 @@ impl PublicParameters {
             CircuitInput::LeafMapping(leaf) => set
                 .generate_proof(&self.leaf_mapping, [], [], leaf)
                 .map(|p| (p, self.leaf_mapping.get_verifier_data().clone()).into()),
+
             CircuitInput::Extension(ext) => {
                 let mut child_proofs = ext.get_child_proofs()?;
                 let (child_proof, child_vk) = child_proofs
@@ -415,12 +425,6 @@ mod tests {
         mpt_keys: Vec<Vec<u8>>,
         /// Key of mapping slot, or none for simple slot
         mapping_key: Option<Vec<u8>>,
-    }
-
-    impl TestData {
-        fn is_simple_slot(&self) -> bool {
-            self.mapping_key.is_none()
-        }
     }
 
     #[test]
@@ -551,7 +555,7 @@ mod tests {
         let v: Vec<u8> = rlp::encode(&random_vector(32)).to_vec();
         mpt_keys
             .iter()
-            .for_each(|mpt| trie.insert(&mpt, &v).unwrap());
+            .for_each(|mpt| trie.insert(mpt, &v).unwrap());
         trie.root_hash().unwrap();
 
         TestData {
@@ -696,8 +700,8 @@ mod tests {
         let trie = &mut test_data.trie;
         let mpt1 = test_data.mpt_keys[0].as_slice();
         let mpt2 = test_data.mpt_keys[1].as_slice();
-        let p1 = trie.get_proof(&mpt1).unwrap();
-        let p2 = trie.get_proof(&mpt2).unwrap();
+        let p1 = trie.get_proof(mpt1).unwrap();
+        let p2 = trie.get_proof(mpt2).unwrap();
 
         // They should share the same branch node.
         assert_eq!(p1.len(), p2.len());

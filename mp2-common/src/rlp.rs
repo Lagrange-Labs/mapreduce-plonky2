@@ -17,6 +17,7 @@ const MAX_LEN_BYTES: usize = 2;
 /// Maximum size a key can have inside a MPT node.
 /// 33 bytes because key is compacted encoded, so it can add up to 1 byte more.
 const MAX_ENC_KEY_LEN: usize = 33;
+
 /// Simply the maximum number of nibbles a key can have.
 pub const MAX_KEY_NIBBLE_LEN: usize = 64;
 
@@ -251,6 +252,7 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Decodes the header of the list, and then decodes the first N items of the list.
+///
 /// The offsets decoded in the returned list are starting from the 0-index of `data`
 /// not from the `offset` index.
 /// If N is less than the actual number of items, then the number of fields will be N.

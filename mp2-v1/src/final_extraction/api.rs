@@ -1,19 +1,26 @@
-use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
+use mp2_common::{self, default_config, digest::TableDimension, proof::ProofWithVK, C, D, F};
 use plonky2::{iop::target::Target, plonk::circuit_data::VerifierCircuitData};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
     framework::{prepare_recursive_circuit_for_circuit_set, RecursiveCircuits},
 };
+
 use serde::{Deserialize, Serialize};
 
 use super::{
-    base_circuit::BaseCircuitInput, lengthed_circuit::LengthedRecursiveWires,
-    simple_circuit::SimpleCircuitRecursiveWires, BaseCircuitProofInputs, LengthedCircuit,
-    PublicInputs, SimpleCircuit,
+    base_circuit::BaseCircuitInput,
+    lengthed_circuit::LengthedRecursiveWires,
+    merge_circuit::{MergeTable, MergeTableRecursiveWires},
+    simple_circuit::SimpleCircuitRecursiveWires,
+    BaseCircuitProofInputs, LengthedCircuit, MergeCircuit, PublicInputs, SimpleCircuit,
 };
 
 use anyhow::Result;
-
+pub enum CircuitInput {
+    Simple(SimpleCircuitInput),
+    Lengthed(LengthedCircuitInput),
+    MergeTable(MergeCircuitInput),
+}
 #[derive(Clone, Debug)]
 pub struct FinalExtractionBuilderParams {
     pub(crate) block_vk: VerifierCircuitData<F, C, D>,
@@ -43,6 +50,7 @@ impl FinalExtractionBuilderParams {
 pub struct PublicParameters {
     simple: CircuitWithUniversalVerifier<F, C, D, 0, SimpleCircuitRecursiveWires>,
     lengthed: CircuitWithUniversalVerifier<F, C, D, 0, LengthedRecursiveWires>,
+    merge: CircuitWithUniversalVerifier<F, C, D, 0, MergeTableRecursiveWires>,
     circuit_set: RecursiveCircuits<F, C, D>,
 }
 
@@ -67,11 +75,13 @@ impl PublicParameters {
             length_circuit_set,
         );
         let simple = builder.build_circuit(builder_params.clone());
-        let lengthed = builder.build_circuit(builder_params);
+        let lengthed = builder.build_circuit(builder_params.clone());
+        let merge = builder.build_circuit(builder_params);
 
         let circuits = vec![
             prepare_recursive_circuit_for_circuit_set(&simple),
             prepare_recursive_circuit_for_circuit_set(&lengthed),
+            prepare_recursive_circuit_for_circuit_set(&merge),
         ];
 
         let circuit_set = RecursiveCircuits::new(circuits);
@@ -79,8 +89,33 @@ impl PublicParameters {
         Self {
             simple,
             lengthed,
+            merge,
             circuit_set,
         }
+    }
+
+    pub(crate) fn generate_merge_proof(
+        &self,
+        input: MergeCircuitInput,
+        contract_circuit_set: &RecursiveCircuits<F, C, D>,
+        value_circuit_set: &RecursiveCircuits<F, C, D>,
+    ) -> Result<Vec<u8>> {
+        let base = BaseCircuitProofInputs::new_from_proofs(
+            input.base,
+            contract_circuit_set.clone(),
+            value_circuit_set.clone(),
+        );
+
+        let merge = MergeTable {
+            is_table_a_multiplier: input.is_table_a_multiplier,
+            dimension_a: input.table_a_dimension,
+            dimension_b: input.table_b_dimension,
+        };
+        let merge_inputs = MergeCircuit { base, merge };
+        let proof = self
+            .circuit_set
+            .generate_proof(&self.merge, [], [], merge_inputs)?;
+        ProofWithVK::serialize(&(proof, self.merge.circuit_data().verifier_only.clone()).into())
     }
 
     pub(crate) fn generate_simple_proof(
@@ -95,7 +130,7 @@ impl PublicParameters {
                 contract_circuit_set.clone(),
                 value_circuit_set.clone(),
             ),
-            input.compound,
+            input.dimension,
         );
         let proof = self
             .circuit_set
@@ -132,7 +167,7 @@ impl PublicParameters {
 
 pub struct SimpleCircuitInput {
     base: BaseCircuitInput,
-    compound: bool,
+    dimension: TableDimension,
 }
 
 pub struct LengthedCircuitInput {
@@ -140,12 +175,37 @@ pub struct LengthedCircuitInput {
     length_proof: ProofWithVK,
 }
 
-pub enum CircuitInput {
-    Simple(SimpleCircuitInput),
-    Lengthed(LengthedCircuitInput),
+pub struct MergeCircuitInput {
+    base: BaseCircuitInput,
+    is_table_a_multiplier: bool,
+    table_a_dimension: TableDimension,
+    table_b_dimension: TableDimension,
 }
 
 impl CircuitInput {
+    /// Create a circuit input for merging  single table and a mapping table together.
+    /// Both tables should belong to the same contract.
+    /// This is a specialized API that uses a more general API underneath. Allowing more types of
+    /// merging can be opened up on the API on a case by case basis.
+    /// Table A MUST be a single table and table B MUST be a mapping table.
+    pub fn new_merge_single_and_mapping(
+        block_proof: Vec<u8>,
+        contract_proof: Vec<u8>,
+        single_table_proof: Vec<u8>,
+        mapping_table_proof: Vec<u8>,
+    ) -> Result<Self> {
+        let base = BaseCircuitInput::new(
+            block_proof,
+            contract_proof,
+            vec![single_table_proof, mapping_table_proof],
+        )?;
+        Ok(Self::MergeTable(MergeCircuitInput {
+            base,
+            is_table_a_multiplier: true,
+            table_a_dimension: TableDimension::Single,
+            table_b_dimension: TableDimension::Compound,
+        }))
+    }
     /// Instantiate inputs for simple variables circuit. Coumpound must be set to true
     /// if the proof is for extracting values for a variable type with dynamic length (like a mapping)
     /// but that does not require a length_proof (maybe because there is no way to get the length
@@ -154,10 +214,10 @@ impl CircuitInput {
         block_proof: Vec<u8>,
         contract_proof: Vec<u8>,
         value_proof: Vec<u8>,
-        compound: bool,
+        dimension: TableDimension,
     ) -> Result<Self> {
-        let base = BaseCircuitInput::new(block_proof, contract_proof, value_proof)?;
-        Ok(Self::Simple(SimpleCircuitInput { base, compound }))
+        let base = BaseCircuitInput::new(block_proof, contract_proof, vec![value_proof])?;
+        Ok(Self::Simple(SimpleCircuitInput { base, dimension }))
     }
     /// Instantiate inputs for circuit dealing with compound types with a length slot
     pub fn new_lengthed_input(
@@ -166,7 +226,7 @@ impl CircuitInput {
         value_proof: Vec<u8>,
         length_proof: Vec<u8>,
     ) -> Result<Self> {
-        let base = BaseCircuitInput::new(block_proof, contract_proof, value_proof)?;
+        let base = BaseCircuitInput::new(block_proof, contract_proof, vec![value_proof])?;
         let length_proof = ProofWithVK::deserialize(&length_proof)?;
         Ok(Self::Lengthed(LengthedCircuitInput { base, length_proof }))
     }
@@ -175,6 +235,7 @@ impl CircuitInput {
 #[cfg(test)]
 mod tests {
     use mp2_common::{
+        digest::TableDimension,
         proof::{serialize_proof, ProofWithVK},
         C, D, F,
     };
@@ -184,15 +245,16 @@ mod tests {
 
     use crate::{
         final_extraction::{
-            base_circuit::{
-                test::ProofsPi, BLOCK_SET_NUM_IO, CONTRACT_SET_NUM_IO, VALUE_SET_NUM_IO,
-            },
+            base_circuit::{test::ProofsPi, CONTRACT_SET_NUM_IO, VALUE_SET_NUM_IO},
             lengthed_circuit::LENGTH_SET_NUM_IO,
         },
         length_extraction,
     };
 
     use super::{CircuitInput, PublicParameters};
+
+    pub(crate) const BLOCK_SET_NUM_IO: usize =
+        crate::block_extraction::public_inputs::PublicInputs::<F>::TOTAL_LEN;
 
     #[test]
     fn test_final_extraction_api() {
@@ -234,12 +296,12 @@ mod tests {
         )
             .into();
         // test generation of proof for simple circuit for both compound and simple types
-        for compound in [false, true] {
+        for dimension in [TableDimension::Single, TableDimension::Compound] {
             let circuit_input = CircuitInput::new_simple_input(
                 serialize_proof(&block_proof).unwrap(),
                 contract_proof.serialize().unwrap(),
                 value_proof.serialize().unwrap(),
-                compound,
+                dimension,
             )
             .unwrap();
 
@@ -256,7 +318,7 @@ mod tests {
                     .unwrap(),
             )
             .unwrap();
-            proof_pis.check_proof_public_inputs(proof.proof(), compound, None);
+            proof_pis.check_proof_public_inputs(proof.proof(), dimension, None);
         }
         // test proof generation for types with length circuit
         let length_proof: ProofWithVK = (
@@ -285,6 +347,6 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        proof_pis.check_proof_public_inputs(proof.proof(), true, Some(len_dm));
+        proof_pis.check_proof_public_inputs(proof.proof(), TableDimension::Compound, Some(len_dm));
     }
 }
