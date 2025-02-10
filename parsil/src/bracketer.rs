@@ -44,7 +44,7 @@ pub fn bracket_primary_index(
             "SELECT {KEY} FROM 
             {table_name} 
             WHERE {VALID_FROM} <= $1 AND {VALID_UNTIL} >= $1
-                AND {primary_index}:::NUMERIC < '{min_bound}'::DECIMAL
+                AND {primary_index} < '{min_bound}'::DECIMAL
                 ORDER BY {KEY} DESC LIMIT 1"
         ))
     };
