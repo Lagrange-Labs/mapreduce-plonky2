@@ -1,11 +1,13 @@
 use super::{
     context::TestContext,
-    index_tree::MerkleIndexTree,
     proof_storage::{IndexProofIdentifier, ProofKey, ProofStorage},
     table::TableID,
 };
 use mp2_common::{proof::ProofWithVK, types::HashOutput, F};
-use mp2_v1::{api, indexing::block::BlockPrimaryIndex};
+use mp2_v1::{
+    api,
+    indexing::block::{get_previous_epoch, BlockPrimaryIndex, MerkleIndexTree},
+};
 use plonky2::{hash::hash_types::HashOut, plonk::config::GenericHashOut};
 use verifiable_db::ivc::PublicInputs;
 
@@ -30,12 +32,13 @@ impl TestContext {
         // load the previous IVC proof if there is one
         // we simply can try to load from the storage at block -1
         // TODO: generalize that to a better more generic method for any index tree
-        let previous_ivc_key = ProofKey::IVC(bn - 1);
-        let input = match self.storage.get_proof_exact(&previous_ivc_key) {
-            Ok(previous_proof) => {
-                verifiable_db::ivc::CircuitInput::new_subsequent_input(root_proof, previous_proof)
-            }
-            Err(_) => verifiable_db::ivc::CircuitInput::new_first_input(root_proof),
+        let previous_block = get_previous_epoch(index_tree, bn).await?;
+        let input = if let Some(prev_bn) = previous_block {
+            let previous_ivc_key = ProofKey::IVC(prev_bn);
+            let previous_proof = self.storage.get_proof_exact(&previous_ivc_key)?;
+            verifiable_db::ivc::CircuitInput::new_subsequent_input(root_proof, previous_proof)
+        } else {
+            verifiable_db::ivc::CircuitInput::new_first_input(root_proof)
         }
         .expect("unable to create ivc circuit inputs");
         let ivc_proof = self

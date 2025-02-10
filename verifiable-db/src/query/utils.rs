@@ -321,7 +321,7 @@ impl NodeInfoTarget {
         .into_iter()
         .for_each(|(target, value)| pw.set_hash_target(target, value));
         pw.set_u256_target_arr(
-            &[self.min.clone(), self.max.clone(), self.value.clone()],
+            &[self.min, self.max, self.value],
             &[inputs.min, inputs.max, inputs.value],
         );
     }

@@ -1,35 +1,39 @@
 use crate::api::SlotInput;
-use alloy::primitives::Address;
+
 use gadgets::{
-    column_gadget::{filter_table_column_identifiers, ColumnGadgetData},
-    column_info::ColumnInfo,
-    metadata_gadget::ColumnsMetadata,
+    column_info::{ExtractedColumnInfo, InputColumnInfo},
+    metadata_gadget::TableMetadata,
 };
 use itertools::Itertools;
+
+use alloy::primitives::Address;
 use mp2_common::{
-    eth::{left_pad32, StorageSlot},
-    group_hashing::map_to_curve_point,
-    poseidon::{empty_poseidon_hash, hash_to_int_value, H},
+    digest::Digest,
+    eth::{left_pad32, EventLogInfo, StorageSlot},
+    keccak::HASH_LEN,
+    poseidon::{empty_poseidon_hash, H},
     types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
     F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
-    hash::hash_types::HashOut,
     plonk::config::Hasher,
 };
-use plonky2_ecgfp5::curve::{curve::Point as Digest, scalar_field::Scalar};
+
 use serde::{Deserialize, Serialize};
 use std::iter::once;
 
 pub mod api;
 mod branch;
+mod dummy;
 mod extension;
 pub mod gadgets;
 mod leaf_mapping;
 mod leaf_mapping_of_mappings;
+mod leaf_receipt;
 mod leaf_single;
+pub mod planner;
 pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
@@ -45,15 +49,20 @@ pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"\0OUT_KEY";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
 
+/// Type for mapping keys
+pub type MappingKey = Vec<u8>;
+/// Type for column ID
+pub type ColumnId = u64;
+
 /// Storage slot information for generating the extraction proof
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct StorageSlotInfo {
     slot: StorageSlot,
-    table_info: Vec<ColumnInfo>,
+    table_info: Vec<ExtractedColumnInfo>,
 }
 
 impl StorageSlotInfo {
-    pub fn new(slot: StorageSlot, table_info: Vec<ColumnInfo>) -> Self {
+    pub fn new(slot: StorageSlot, table_info: Vec<ExtractedColumnInfo>) -> Self {
         Self { slot, table_info }
     }
 
@@ -61,26 +70,12 @@ impl StorageSlotInfo {
         &self.slot
     }
 
-    pub fn table_info(&self) -> &[ColumnInfo] {
+    pub fn table_info(&self) -> &[ExtractedColumnInfo] {
         &self.table_info
     }
 
     pub fn evm_word(&self) -> u32 {
         self.slot.evm_offset()
-    }
-
-    pub fn metadata<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-        &self,
-    ) -> ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
-        let evm_word = self.evm_word();
-        let extracted_column_identifiers =
-            filter_table_column_identifiers(&self.table_info, self.slot.slot(), evm_word);
-
-        ColumnsMetadata::new(
-            self.table_info.clone(),
-            &extracted_column_identifiers,
-            evm_word,
-        )
     }
 
     pub fn outer_key_id(
@@ -133,11 +128,145 @@ impl StorageSlotInfo {
     pub fn slot_inputs<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
         &self,
     ) -> Vec<SlotInput> {
-        self.metadata::<MAX_COLUMNS, MAX_FIELD_PER_EVM>()
-            .extracted_table_info()
+        self.table_info().iter().map(SlotInput::from).collect()
+    }
+
+    pub fn table_columns(
+        &self,
+        contract_address: &Address,
+        chain_id: u64,
+        extra: Vec<u8>,
+    ) -> TableMetadata {
+        let slot = self.slot().slot();
+        let num_mapping_keys = self.slot().mapping_keys().len();
+
+        let input_columns = match num_mapping_keys {
+            0 => vec![],
+            1 => {
+                let identifier = compute_id_with_prefix(
+                    KEY_ID_PREFIX,
+                    slot,
+                    contract_address,
+                    chain_id,
+                    extra.clone(),
+                );
+                let input_column = InputColumnInfo::new(&[slot], identifier, KEY_ID_PREFIX);
+                vec![input_column]
+            }
+            2 => {
+                let outer_identifier = compute_id_with_prefix(
+                    OUTER_KEY_ID_PREFIX,
+                    slot,
+                    contract_address,
+                    chain_id,
+                    extra.clone(),
+                );
+                let inner_identifier = compute_id_with_prefix(
+                    INNER_KEY_ID_PREFIX,
+                    slot,
+                    contract_address,
+                    chain_id,
+                    extra.clone(),
+                );
+                vec![
+                    InputColumnInfo::new(&[slot], outer_identifier, OUTER_KEY_ID_PREFIX),
+                    InputColumnInfo::new(&[slot], inner_identifier, INNER_KEY_ID_PREFIX),
+                ]
+            }
+            _ => vec![],
+        };
+
+        TableMetadata::new(&input_columns, self.table_info())
+    }
+}
+
+/// Prefix used for making a topic column id.
+pub const TOPIC_PREFIX: &[u8] = b"topic";
+/// [`TOPIC_PREFIX`] as a [`str`]
+pub const TOPIC_NAME: &str = "topic";
+
+/// Prefix used for making a data column id.
+pub const DATA_PREFIX: &[u8] = b"data";
+/// [`DATA_PREFIX`] as a [`str`]
+pub const DATA_NAME: &str = "data";
+
+/// Prefix for transaction index
+pub const TX_INDEX_PREFIX: &[u8] = b"tx_index";
+/// [`TX_INDEX_PREFIX`] as a [`str`]
+pub const TX_INDEX_NAME: &str = "tx_index";
+
+/// Prefix for gas used
+pub const GAS_USED_PREFIX: &[u8] = b"gas_used";
+/// [`GAS_USED_PREFIX`] as a [`str`]
+pub const GAS_USED_NAME: &str = "gas_used";
+
+impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
+    From<EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>> for TableMetadata
+{
+    fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>) -> Self {
+        let extraction_id = event.event_signature;
+
+        let tx_index_column_id =
+            identifier_for_tx_index_column(&event.event_signature, &event.address, &[]);
+
+        let gas_used_column_id =
+            identifier_for_gas_used_column(&event.event_signature, &event.address, &[]);
+
+        let tx_index_input_column = InputColumnInfo::new(
+            extraction_id.as_slice(),
+            tx_index_column_id,
+            TX_INDEX_PREFIX,
+        );
+        let gas_used_index_column = InputColumnInfo::new(
+            extraction_id.as_slice(),
+            gas_used_column_id,
+            GAS_USED_PREFIX,
+        );
+
+        let topic_columns = event
+            .topics
             .iter()
-            .map(Into::into)
-            .collect_vec()
+            .enumerate()
+            .map(|(j, &offset)| {
+                ExtractedColumnInfo::new(
+                    extraction_id.as_slice(),
+                    identifier_for_topic_column(
+                        &event.event_signature,
+                        &event.address,
+                        &[j as u8 + 1],
+                    ),
+                    offset,
+                    32,
+                    0,
+                )
+            })
+            .collect::<Vec<ExtractedColumnInfo>>();
+
+        let data_columns = event
+            .data
+            .iter()
+            .enumerate()
+            .map(|(j, &offset)| {
+                ExtractedColumnInfo::new(
+                    extraction_id.as_slice(),
+                    identifier_for_data_column(
+                        &event.event_signature,
+                        &event.address,
+                        &[j as u8 + 1],
+                    ),
+                    offset,
+                    32,
+                    0,
+                )
+            })
+            .collect::<Vec<ExtractedColumnInfo>>();
+
+        let extracted_columns = [topic_columns, data_columns].concat();
+
+        TableMetadata::new(
+            &[tx_index_input_column, gas_used_index_column],
+            &extracted_columns,
+        )
     }
 }
 
@@ -243,8 +372,88 @@ pub fn identifier_for_inner_mapping_key_column_raw(slot: u8, extra: Vec<u8>) -> 
     compute_id_with_prefix_raw(INNER_KEY_ID_PREFIX, slot, extra)
 }
 
+/// Compute tx index identifier for tx index variable.
+/// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+pub fn identifier_for_tx_index_column(
+    event_signature: &[u8; HASH_LEN],
+    contract_address: &Address,
+    extra: &[u8],
+) -> ColumnId {
+    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+
+    let inputs: Vec<F> = TX_INDEX_PREFIX
+        .iter()
+        .copied()
+        .chain(*event_signature)
+        .chain(extra)
+        .collect_vec()
+        .to_fields();
+
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+}
+
+/// Compute gas used identifier for gas used variable.
+/// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+pub fn identifier_for_gas_used_column(
+    event_signature: &[u8; HASH_LEN],
+    contract_address: &Address,
+    extra: &[u8],
+) -> ColumnId {
+    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+
+    let inputs: Vec<F> = GAS_USED_PREFIX
+        .iter()
+        .copied()
+        .chain(*event_signature)
+        .chain(extra)
+        .collect_vec()
+        .to_fields();
+
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+}
+
+/// Compute topic identifier for topic variable.
+/// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+pub fn identifier_for_topic_column(
+    event_signature: &[u8; HASH_LEN],
+    contract_address: &Address,
+    extra: &[u8],
+) -> ColumnId {
+    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+
+    let inputs: Vec<F> = TOPIC_PREFIX
+        .iter()
+        .copied()
+        .chain(*event_signature)
+        .chain(extra)
+        .collect_vec()
+        .to_fields();
+
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+}
+
+/// Compute data identifier for data variable.
+/// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+pub fn identifier_for_data_column(
+    event_signature: &[u8; HASH_LEN],
+    contract_address: &Address,
+    extra: &[u8],
+) -> ColumnId {
+    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+
+    let inputs: Vec<F> = DATA_PREFIX
+        .iter()
+        .copied()
+        .chain(*event_signature)
+        .chain(extra)
+        .collect_vec()
+        .to_fields();
+
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+}
+
 /// Calculate ID with prefix.
-fn compute_id_with_prefix(
+pub(crate) fn compute_id_with_prefix(
     prefix: &[u8],
     slot: u8,
     contract_address: &Address,
@@ -315,211 +524,119 @@ pub fn row_unique_data_for_mapping_of_mappings_leaf(
     H::hash_no_pad(&inputs).into()
 }
 
-/// Compute the metadata digest for single variable leaf.
-pub fn compute_leaf_single_metadata_digest<
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
->(
-    table_info: Vec<ColumnInfo>,
+/// Function to compute a storage value digest
+fn storage_value_digest(
+    table_metadata: &TableMetadata,
+    keys: &[&[u8]],
+    value: &[u8; MAPPING_LEAF_VALUE_LEN],
+    slot: &StorageSlotInfo,
 ) -> Digest {
-    // We don't need `extracted_column_identifiers` and `evm_word` to compute the metadata digest.
-    ColumnsMetadata::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(table_info, &[], 0).digest()
+    let padded_keys = keys
+        .iter()
+        .map(|slice| left_pad32(slice))
+        .collect::<Vec<[u8; 32]>>();
+    // Panic if the number of keys provided is not equal to the number of input columns
+    assert_eq!(
+        keys.len(),
+        table_metadata.input_columns.len(),
+        "Number of keys: {}, does not equal the number of input columns: {}",
+        keys.len(),
+        table_metadata.input_columns.len()
+    );
+    table_metadata.storage_values_digest(padded_keys.as_slice(), value.as_slice(), slot.slot())
+}
+
+/// Compute the metadata digest for single variable leaf.
+pub fn compute_leaf_single_metadata_digest(slot_info: &StorageSlotInfo) -> Digest {
+    TableMetadata::new(&[], slot_info.table_info()).digest()
 }
 
 /// Compute the values digest for single variable leaf.
-pub fn compute_leaf_single_values_digest<const MAX_FIELD_PER_EVM: usize>(
-    table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[ColumnId],
+pub fn compute_leaf_single_values_digest(
+    slot_info: &StorageSlotInfo,
     value: [u8; MAPPING_LEAF_VALUE_LEN],
 ) -> Digest {
-    let num_actual_columns = F::from_canonical_usize(table_info.len());
-    let values_digest =
-        ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
-            .digest();
-
-    // row_id = H2int(H("") || num_actual_columns)
-    let inputs = HashOut::from(row_unique_data_for_single_leaf())
-        .to_fields()
-        .into_iter()
-        .chain(once(num_actual_columns))
-        .collect_vec();
-    let hash = H::hash_no_pad(&inputs);
-    let row_id = hash_to_int_value(hash);
-
-    // value_digest * row_id
-    let row_id = Scalar::from_noncanonical_biguint(row_id);
-    values_digest * row_id
+    let table_metadata = TableMetadata::new(&[], slot_info.table_info());
+    storage_value_digest(&table_metadata, &[], &value, slot_info)
 }
 
 /// Compute the metadata digest for mapping variable leaf.
-pub fn compute_leaf_mapping_metadata_digest<
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
->(
-    table_info: Vec<ColumnInfo>,
-    slot: u8,
+pub fn compute_leaf_mapping_metadata_digest(
+    slot_info: &StorageSlotInfo,
     key_id: ColumnId,
 ) -> Digest {
-    // We don't need `extracted_column_identifiers` and `evm_word` to compute the metadata digest.
-    let metadata_digest =
-        ColumnsMetadata::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(table_info, &[], 0).digest();
-
-    // key_column_md = H( "\0KEY" || slot)
-    let key_id_prefix = u32::from_be_bytes(KEY_ID_PREFIX.try_into().unwrap());
-    let inputs = vec![
-        F::from_canonical_u32(key_id_prefix),
-        F::from_canonical_u8(slot),
-    ];
-    let key_column_md = H::hash_no_pad(&inputs);
-    // metadata_digest += D(key_column_md || key_id)
-    let inputs = key_column_md
-        .to_fields()
-        .into_iter()
-        .chain(once(F::from_canonical_u64(key_id)))
-        .collect_vec();
-    let metadata_key_digest = map_to_curve_point(&inputs);
-
-    metadata_digest + metadata_key_digest
+    let input_column = InputColumnInfo::new(&[slot_info.slot().slot()], key_id, KEY_ID_PREFIX);
+    TableMetadata::new(&[input_column], slot_info.table_info()).digest()
 }
 
 /// Compute the values digest for mapping variable leaf.
-pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
-    table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[u64],
+pub fn compute_leaf_mapping_values_digest(
+    slot_info: &StorageSlotInfo,
     value: [u8; MAPPING_LEAF_VALUE_LEN],
     mapping_key: MappingKey,
-    evm_word: u32,
     key_id: ColumnId,
 ) -> Digest {
-    // We add key column to number of actual columns.
-    let num_actual_columns = F::from_canonical_usize(table_info.len() + 1);
-    let mut values_digest =
-        ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
-            .digest();
-
-    // values_digest += evm_word == 0 ? D(key_id || pack(left_pad32(key))) : CURVE_ZERO
-    let packed_mapping_key = left_pad32(&mapping_key)
-        .pack(Endianness::Big)
-        .into_iter()
-        .map(F::from_canonical_u32);
-    if evm_word == 0 {
-        let inputs = once(F::from_canonical_u64(key_id))
-            .chain(packed_mapping_key.clone())
-            .collect_vec();
-        let values_key_digest = map_to_curve_point(&inputs);
-        values_digest += values_key_digest;
-    }
-    let row_unique_data = HashOut::from(row_unique_data_for_mapping_leaf(&mapping_key));
-    // row_id = H2int(row_unique_data || num_actual_columns)
-    let inputs = row_unique_data
-        .to_fields()
-        .into_iter()
-        .chain(once(num_actual_columns))
-        .collect_vec();
-    let hash = H::hash_no_pad(&inputs);
-    let row_id = hash_to_int_value(hash);
-
-    // value_digest * row_id
-    let row_id = Scalar::from_noncanonical_biguint(row_id);
-    values_digest * row_id
+    let input_column = InputColumnInfo::new(&[slot_info.slot().slot()], key_id, KEY_ID_PREFIX);
+    let table_metadata = TableMetadata::new(&[input_column], slot_info.table_info());
+    storage_value_digest(
+        &table_metadata,
+        &[mapping_key.as_slice()],
+        &value,
+        slot_info,
+    )
 }
 
 /// Compute the metadata digest for mapping of mappings leaf.
-pub fn compute_leaf_mapping_of_mappings_metadata_digest<
-    const MAX_COLUMNS: usize,
-    const MAX_FIELD_PER_EVM: usize,
->(
-    table_info: Vec<ColumnInfo>,
-    slot: u8,
+pub fn compute_leaf_mapping_of_mappings_metadata_digest(
+    slot_info: &StorageSlotInfo,
     outer_key_id: ColumnId,
     inner_key_id: ColumnId,
 ) -> Digest {
-    // We don't need `extracted_column_identifiers` and `evm_word` to compute the metadata digest.
-    let metadata_digest =
-        ColumnsMetadata::<MAX_COLUMNS, MAX_FIELD_PER_EVM>::new(table_info, &[], 0).digest();
-
-    // Compute the outer and inner key metadata digests.
-    let [outer_key_digest, inner_key_digest] = [
-        (OUTER_KEY_ID_PREFIX, outer_key_id),
-        (INNER_KEY_ID_PREFIX, inner_key_id),
-    ]
-    .map(|(prefix, key_id)| {
-        // key_column_md = H(KEY_ID_PREFIX || slot)
-        let prefix = u64::from_be_bytes(prefix.try_into().unwrap());
-        let inputs = vec![F::from_canonical_u64(prefix), F::from_canonical_u8(slot)];
-        let key_column_md = H::hash_no_pad(&inputs);
-
-        // key_digest = D(key_column_md || key_id)
-        let inputs = key_column_md
-            .to_fields()
-            .into_iter()
-            .chain(once(F::from_canonical_u64(key_id)))
-            .collect_vec();
-        map_to_curve_point(&inputs)
-    });
-
-    // Add the outer and inner key digests into the metadata digest.
-    // metadata_digest + outer_key_digest + inner_key_digest
-    metadata_digest + inner_key_digest + outer_key_digest
+    let outer_key_column = InputColumnInfo::new(
+        &[slot_info.slot().slot()],
+        outer_key_id,
+        OUTER_KEY_ID_PREFIX,
+    );
+    let inner_key_column = InputColumnInfo::new(
+        &[slot_info.slot().slot()],
+        inner_key_id,
+        INNER_KEY_ID_PREFIX,
+    );
+    TableMetadata::new(
+        &[outer_key_column, inner_key_column],
+        slot_info.table_info(),
+    )
+    .digest()
 }
 
-pub type MappingKey = Vec<u8>;
-pub type ColumnId = u64;
-
 /// Compute the values digest for mapping of mappings leaf.
-#[allow(clippy::too_many_arguments)]
-pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: usize>(
-    table_info: Vec<ColumnInfo>,
-    extracted_column_identifiers: &[ColumnId],
+pub fn compute_leaf_mapping_of_mappings_values_digest(
+    slot_info: &StorageSlotInfo,
     value: [u8; MAPPING_LEAF_VALUE_LEN],
-    evm_word: u32,
     outer_mapping_data: (MappingKey, ColumnId),
     inner_mapping_data: (MappingKey, ColumnId),
 ) -> Digest {
-    // Add inner key and outer key columns to the number of actual columns.
-    let num_actual_columns = F::from_canonical_usize(table_info.len() + 2);
-    let mut values_digest =
-        ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
-            .digest();
+    let (outer_key, outer_key_id) = outer_mapping_data;
+    let (inner_key, inner_key_id) = inner_mapping_data;
+    let outer_key_column = InputColumnInfo::new(
+        &[slot_info.slot().slot()],
+        outer_key_id,
+        OUTER_KEY_ID_PREFIX,
+    );
+    let inner_key_column = InputColumnInfo::new(
+        &[slot_info.slot().slot()],
+        inner_key_id,
+        INNER_KEY_ID_PREFIX,
+    );
+    let table_metadata = TableMetadata::new(
+        &[outer_key_column, inner_key_column],
+        slot_info.table_info(),
+    );
 
-    // Compute the outer and inner key values digests.
-    let [packed_outer_key, packed_inner_key] =
-        [&outer_mapping_data.0, &inner_mapping_data.0].map(|key| {
-            left_pad32(key)
-                .pack(Endianness::Big)
-                .into_iter()
-                .map(F::from_canonical_u32)
-        });
-    if evm_word == 0 {
-        let [outer_key_digest, inner_key_digest] = [
-            (outer_mapping_data.1, packed_outer_key.clone()),
-            (inner_mapping_data.1, packed_inner_key.clone()),
-        ]
-        .map(|(key_id, packed_key)| {
-            // D(key_id || pack(key))
-            let inputs = once(F::from_canonical_u64(key_id))
-                .chain(packed_key)
-                .collect_vec();
-            map_to_curve_point(&inputs)
-        });
-        // values_digest += outer_key_digest + inner_key_digest
-        values_digest += inner_key_digest + outer_key_digest;
-    }
-
-    let row_unique_data = HashOut::from(row_unique_data_for_mapping_of_mappings_leaf(
-        &outer_mapping_data.0,
-        &inner_mapping_data.0,
-    ));
-    // row_id = H2int(row_unique_data || num_actual_columns)
-    let inputs = row_unique_data
-        .to_fields()
-        .into_iter()
-        .chain(once(num_actual_columns))
-        .collect_vec();
-    let hash = H::hash_no_pad(&inputs);
-    let row_id = hash_to_int_value(hash);
-
-    // values_digest = values_digest * row_id
-    let row_id = Scalar::from_noncanonical_biguint(row_id);
-    values_digest * row_id
+    storage_value_digest(
+        &table_metadata,
+        &[outer_key.as_slice(), inner_key.as_slice()],
+        &value,
+        slot_info,
+    )
 }

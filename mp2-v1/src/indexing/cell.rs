@@ -25,13 +25,13 @@ use super::ColumnID;
 
 /// By default the cells tree is a sbbst tree since it is fixed for a given table and this is the
 /// simplest/fastest tree.
-pub type CellTree = sbbst::Tree;
+pub type CellTree = sbbst::IncrementalTree;
 /// The key used to refer to a cell in the tree
 pub type CellTreeKey = <CellTree as TreeTopology>::Key;
 /// The storage of cell tree is "in memory" since it is never really saved on disk. Rather, it is
 /// always reconstructed on the fly given it is very small. Moreover, storing it on disk would
 /// require as many sql tables as there would be rows, making this solution highly unpracticable.
-pub type CellStorage<PrimaryIndex> = InMemory<CellTree, MerkleCell<PrimaryIndex>>;
+pub type CellStorage<PrimaryIndex> = InMemory<CellTree, MerkleCell<PrimaryIndex>, false>;
 /// The cells tree is a Merkle tree with cryptographically secure hash function committing to its
 /// content.
 pub type MerkleCellTree<PrimaryIndex> =
@@ -50,14 +50,16 @@ pub async fn new_tree<
         + Serialize
         + for<'a> Deserialize<'a>,
 >() -> MerkleCellTree<PrimaryIndex> {
-    MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ())
+    MerkleCellTree::new(InitSettings::Reset(sbbst::IncrementalTree::empty()), ())
         .await
         .unwrap()
 }
 
 /// Cell is the information stored in a specific cell of a specific row.
 /// A row node in the row tree contains a vector of such cells.
-#[derive(Clone, Default, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Default, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub struct Cell {
     /// The unique identifier of the cell, derived from the contract it comes
     /// from and its slot in its storage.

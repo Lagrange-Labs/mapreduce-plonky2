@@ -7,7 +7,10 @@ use std::{
     fmt::Debug,
     future::Future,
     hash::Hash,
+    ops::DerefMut,
+    sync::Arc,
 };
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tokio_postgres::Transaction;
 use view::TreeStorageView;
 
@@ -15,7 +18,7 @@ use self::updatetree::UpdateTree;
 use crate::{
     error::RyhopeError,
     tree::{NodeContext, TreeTopology},
-    Epoch, InitSettings,
+    IncrementalEpoch, InitSettings, UserEpoch,
 };
 
 pub mod memory;
@@ -54,10 +57,10 @@ where
     K: Debug + Hash + Eq + Clone + Sync + Send,
 {
     /// The keys touched by the query itself
-    pub core_keys: Vec<(Epoch, K)>,
+    pub core_keys: Vec<(UserEpoch, K)>,
     /// An epoch -> (K -> NodeContext, K -> Payload) mapping
     #[allow(clippy::type_complexity)]
-    epoch_lineages: HashMap<Epoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
+    epoch_lineages: HashMap<UserEpoch, (HashMap<K, NodeContext<K>>, HashMap<K, V>)>,
 }
 
 impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
@@ -68,7 +71,7 @@ impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
         self.core_keys.len()
     }
 
-    pub fn ctx_and_payload_at(&self, epoch: Epoch, key: &K) -> Option<(NodeContext<K>, V)> {
+    pub fn ctx_and_payload_at(&self, epoch: UserEpoch, key: &K) -> Option<(NodeContext<K>, V)> {
         match (
             self.node_context_at(epoch, key),
             self.payload_at(epoch, key),
@@ -77,13 +80,13 @@ impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
             _ => None,
         }
     }
-    pub fn node_context_at(&self, epoch: Epoch, key: &K) -> Option<NodeContext<K>> {
+    pub fn node_context_at(&self, epoch: UserEpoch, key: &K) -> Option<NodeContext<K>> {
         self.epoch_lineages
             .get(&epoch)
             .and_then(|h| h.0.get(key))
             .cloned()
     }
-    pub fn payload_at(&self, epoch: Epoch, key: &K) -> Option<V> {
+    pub fn payload_at(&self, epoch: UserEpoch, key: &K) -> Option<V> {
         self.epoch_lineages
             .get(&epoch)
             .and_then(|h| h.1.get(key))
@@ -91,7 +94,7 @@ impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
     }
 
     /// Returns the list of keys touching the query associated with each epoch
-    pub fn keys_by_epochs(&self) -> HashMap<Epoch, HashSet<K>> {
+    pub fn keys_by_epochs(&self) -> HashMap<UserEpoch, HashSet<K>> {
         self.core_keys
             .iter()
             .fold(HashMap::new(), |mut acc, (epoch, k)| {
@@ -99,7 +102,7 @@ impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
                 acc
             })
     }
-    pub fn update_tree_for(&self, epoch: Epoch) -> Option<UpdateTree<K>> {
+    pub fn update_tree_for(&self, epoch: UserEpoch) -> Option<UpdateTree<K>> {
         let epoch_data = self.epoch_lineages.get(&epoch)?;
         let all_paths = self
             .core_keys
@@ -135,6 +138,129 @@ impl<K: Debug + Hash + Eq + Clone + Sync + Send, V: Clone> WideLineage<K, V> {
     }
 }
 
+// An `EpochMapper` allows to map `UserEpoch` to `IncrementalEpoch` of
+// a `TreeStorage`, and vice versa
+pub trait EpochMapper: Sized + Send + Sync + Clone + Debug {
+    fn try_to_incremental_epoch(
+        &self,
+        epoch: UserEpoch,
+    ) -> impl Future<Output = Option<IncrementalEpoch>> + Send;
+
+    fn to_incremental_epoch(
+        &self,
+        epoch: UserEpoch,
+    ) -> impl Future<Output = IncrementalEpoch> + Send {
+        async move {
+            self.try_to_incremental_epoch(epoch)
+                .await
+                .unwrap_or_else(|| panic!("IncrementalEpoch corresponding to {epoch} not found"))
+        }
+    }
+
+    fn try_to_user_epoch(
+        &self,
+        epoch: IncrementalEpoch,
+    ) -> impl Future<Output = Option<UserEpoch>> + Send;
+
+    fn to_user_epoch(&self, epoch: IncrementalEpoch) -> impl Future<Output = UserEpoch> + Send {
+        async move {
+            self.try_to_user_epoch(epoch)
+                .await
+                .unwrap_or_else(|| panic!("UserEpoch corresponding to {epoch} not found"))
+        }
+    }
+
+    fn add_epoch_map(
+        &mut self,
+        user_epoch: UserEpoch,
+        incremental_epoch: IncrementalEpoch,
+    ) -> impl Future<Output = Result<(), RyhopeError>> + Send;
+}
+
+/// Wrapper data structure to safely use an instance of an `EpochMapper` shared among multiple
+/// threads. The `READ_ONLY` flag specifies whether the wrapped `EpochMapper` can be
+/// modified or not by callers of this wrapper, that is if `READ_ONLY` is `true`, then callers
+// this wrapper can only access the `EpochMapper` without modifying it
+#[derive(Clone, Debug)]
+pub struct SharedEpochMapper<T: EpochMapper, const READ_ONLY: bool>(Arc<RwLock<T>>);
+
+pub(crate) type RoSharedEpochMapper<T> = SharedEpochMapper<T, true>;
+
+impl<T: EpochMapper, const READ_ONLY: bool> From<&SharedEpochMapper<T, READ_ONLY>>
+    for RoSharedEpochMapper<T>
+{
+    fn from(value: &SharedEpochMapper<T, READ_ONLY>) -> Self {
+        Self(value.0.clone())
+    }
+}
+
+impl<T: EpochMapper, const READ_ONLY: bool> SharedEpochMapper<T, READ_ONLY> {
+    pub(crate) fn new(mapper: T) -> Self {
+        Self(Arc::new(RwLock::new(mapper)))
+    }
+
+    /// Get a writable access to the underlying `EpochMapper`, if `SharedEpochMapper`
+    /// is not READ_ONLY. Returns `None` if `SharedEpochMapper` is instead `READ_ONLY`.
+    pub(crate) async fn write_access_ref(&mut self) -> Option<RwLockWriteGuard<T>> {
+        if !READ_ONLY {
+            Some(self.0.write().await)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) async fn read_access_ref(&self) -> RwLockReadGuard<T> {
+        self.0.read().await
+    }
+
+    pub(crate) async fn apply_fn<Fn: FnMut(&'_ mut T) -> Result<(), RyhopeError>>(
+        &mut self,
+        mut f: Fn,
+    ) -> Result<(), RyhopeError>
+    where
+        T: 'static,
+    {
+        if let Some(mut mapper) = self.write_access_ref().await {
+            f(mapper.deref_mut())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl<T: EpochMapper, const READ_ONLY: bool> AsRef<RwLock<T>> for SharedEpochMapper<T, READ_ONLY> {
+    fn as_ref(&self) -> &RwLock<T> {
+        &self.0
+    }
+}
+
+impl<T: EpochMapper, const READ_ONLY: bool> EpochMapper for SharedEpochMapper<T, READ_ONLY> {
+    async fn try_to_incremental_epoch(&self, epoch: UserEpoch) -> Option<IncrementalEpoch> {
+        self.0.read().await.try_to_incremental_epoch(epoch).await
+    }
+
+    async fn try_to_user_epoch(&self, epoch: IncrementalEpoch) -> Option<UserEpoch> {
+        self.0.read().await.try_to_user_epoch(epoch).await
+    }
+
+    async fn add_epoch_map(
+        &mut self,
+        user_epoch: UserEpoch,
+        incremental_epoch: IncrementalEpoch,
+    ) -> Result<(), RyhopeError> {
+        // add new epoch mapping only if `self` is not READ_ONLY
+        if !READ_ONLY {
+            self.0
+                .write()
+                .await
+                .add_epoch_map(user_epoch, incremental_epoch)
+                .await
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// A `TreeStorage` stores all data related to the tree structure, i.e. (i) the
 /// state of the tree structure, (ii) the putative metadata associated to the
 /// tree nodes.
@@ -144,11 +270,19 @@ pub trait TreeStorage<T: TreeTopology>: Sized + Send + Sync {
     /// A storage backend for the underlying tree nodes
     type NodeStorage: EpochKvStorage<T::Key, T::Node> + Send + Sync;
 
+    type EpochMapper: EpochMapper;
+
     /// Return a handle to the state storage.
     fn state(&self) -> &Self::StateStorage;
 
     /// Return a mutable handle to the state storage.
     fn state_mut(&mut self) -> &mut Self::StateStorage;
+
+    /// Return a handle to the epoch mapper.
+    fn epoch_mapper(&self) -> &Self::EpochMapper;
+
+    /// Return a mutable handle to the epoch mapper.
+    fn epoch_mapper_mut(&mut self) -> &mut Self::EpochMapper;
 
     /// Return a handle to the nodes storage.
     fn nodes(&self) -> &Self::NodeStorage;
@@ -157,19 +291,22 @@ pub trait TreeStorage<T: TreeTopology>: Sized + Send + Sync {
     fn nodes_mut(&mut self) -> &mut Self::NodeStorage;
 
     /// Return a list of the nodes “born” (i.e. dirtied) at `epoch`.
-    fn born_at(&self, epoch: Epoch) -> impl Future<Output = Vec<T::Key>>;
+    fn born_at(&self, epoch: UserEpoch) -> impl Future<Output = Vec<T::Key>>;
 
     /// Rollback this tree one epoch in the past
-    fn rollback<F>(&mut self) -> impl Future<Output = Result<(), RyhopeError>> {
-        self.rollback_to(self.nodes().current_epoch() - 1)
+    fn rollback(&mut self) -> impl Future<Output = Result<(), RyhopeError>> {
+        async move {
+            self.rollback_to(self.nodes().current_epoch().await? - 1)
+                .await
+        }
     }
 
     /// Rollback this tree to the given epoch
-    fn rollback_to(&mut self, epoch: Epoch) -> impl Future<Output = Result<(), RyhopeError>>;
+    fn rollback_to(&mut self, epoch: UserEpoch) -> impl Future<Output = Result<(), RyhopeError>>;
 
     /// Return an epoch-locked, read-only, [`TreeStorage`] offering a view on
     /// this Merkle tree as it was at the given epoch.
-    fn view_at<'a>(&'a self, epoch: Epoch) -> TreeStorageView<'a, T, Self>
+    fn view_at<'a>(&'a self, epoch: UserEpoch) -> TreeStorageView<'a, T, Self>
     where
         T: 'a,
     {
@@ -192,16 +329,16 @@ pub trait EpochStorage<T: Debug + Send + Sync + Clone + Serialize + for<'a> Dese
 where
     Self: Send + Sync,
 {
-    /// Return the current epoch of the storage
-    fn current_epoch(&self) -> Epoch;
+    /// Return the current epoch of the storage. It returns an error
+    /// if the current epoch is undefined, which might happen when the epochs
+    /// are handled by another storage.
+    fn current_epoch(&self) -> impl Future<Output = Result<UserEpoch, RyhopeError>> + Send;
 
     /// Return the value stored at the current epoch.
-    fn fetch(&self) -> impl Future<Output = Result<T, RyhopeError>> + Send {
-        async { self.fetch_at(self.current_epoch()).await }
-    }
+    fn fetch(&self) -> impl Future<Output = Result<T, RyhopeError>> + Send;
 
     /// Return the value stored at the given epoch.
-    fn fetch_at(&self, epoch: Epoch) -> impl Future<Output = Result<T, RyhopeError>> + Send;
+    fn fetch_at(&self, epoch: UserEpoch) -> impl Future<Output = Result<T, RyhopeError>> + Send;
 
     /// Set the stored value at the current epoch.
     fn store(&mut self, t: T) -> impl Future<Output = Result<(), RyhopeError>> + Send;
@@ -219,12 +356,10 @@ where
     }
 
     /// Roll back this storage one epoch in the past.
-    fn rollback(&mut self) -> impl Future<Output = Result<(), RyhopeError>> {
-        self.rollback_to(self.current_epoch() - 1)
-    }
+    fn rollback(&mut self) -> impl Future<Output = Result<(), RyhopeError>>;
 
     /// Roll back this storage to the given epoch
-    fn rollback_to(&mut self, epoch: Epoch) -> impl Future<Output = Result<(), RyhopeError>>;
+    fn rollback_to(&mut self, epoch: UserEpoch) -> impl Future<Output = Result<(), RyhopeError>>;
 }
 
 /// A read-only, versioned, KV storage. Intended to be implemented in
@@ -237,23 +372,23 @@ where
     V: Send + Sync,
 {
     /// Return the first registered time stamp of the storage
-    fn initial_epoch(&self) -> Epoch;
+    fn initial_epoch(&self) -> impl Future<Output = UserEpoch> + Send;
 
-    /// Return the current time stamp of the storage
-    fn current_epoch(&self) -> Epoch;
+    /// Return the current time stamp of the storage. It returns an error
+    /// if the current epoch is undefined, which might happen when the epochs
+    /// are handled by another storage.
+    fn current_epoch(&self) -> impl Future<Output = Result<UserEpoch, RyhopeError>> + Send;
 
     /// Return the value associated to `k` at the current epoch if it exists,
     /// `None` otherwise.
-    fn try_fetch(&self, k: &K) -> impl Future<Output = Result<Option<V>, RyhopeError>> + Send {
-        async { self.try_fetch_at(k, self.current_epoch()).await }
-    }
+    fn try_fetch(&self, k: &K) -> impl Future<Output = Result<Option<V>, RyhopeError>> + Send;
 
     /// Return the value associated to `k` at the given `epoch` if it exists,
     /// `None` otherwise.
     fn try_fetch_at(
         &self,
         k: &K,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> impl Future<Output = Result<Option<V>, RyhopeError>> + Send;
 
     /// Return whether the given key is present at the current epoch.
@@ -262,28 +397,33 @@ where
     }
 
     /// Return whether the given key is present at the given epoch.
-    fn contains_at(&self, k: &K, epoch: Epoch) -> impl Future<Output = Result<bool, RyhopeError>> {
+    fn contains_at(
+        &self,
+        k: &K,
+        epoch: UserEpoch,
+    ) -> impl Future<Output = Result<bool, RyhopeError>> {
         async move { self.try_fetch_at(k, epoch).await.map(|x| x.is_some()) }
     }
 
     /// Return the number of stored K/V pairs at the current epoch.
-    fn size(&self) -> impl Future<Output = usize> {
-        self.size_at(self.current_epoch())
-    }
+    fn size(&self) -> impl Future<Output = usize>;
 
     /// Return the number of stored K/V pairs at the given epoch.
-    fn size_at(&self, epoch: Epoch) -> impl Future<Output = usize>;
+    fn size_at(&self, epoch: UserEpoch) -> impl Future<Output = usize>;
 
     /// Return all the keys existing at the given epoch.
-    fn keys_at(&self, epoch: Epoch) -> impl Future<Output = Vec<K>>;
+    fn keys_at(&self, epoch: UserEpoch) -> impl Future<Output = Vec<K>>;
 
     /// Return a key alive at epoch, if any.
-    fn random_key_at(&self, epoch: Epoch) -> impl Future<Output = Option<K>>;
+    fn random_key_at(&self, epoch: UserEpoch) -> impl Future<Output = Option<K>>;
 
     /// Return all the valid key/value pairs at the given `epoch`.
     ///
     /// NOTE: be careful when using this function, it is not lazy.
-    fn pairs_at(&self, epoch: Epoch) -> impl Future<Output = Result<HashMap<K, V>, RyhopeError>>;
+    fn pairs_at(
+        &self,
+        epoch: UserEpoch,
+    ) -> impl Future<Output = Result<HashMap<K, V>, RyhopeError>>;
 }
 
 /// A versioned KV storage only allowed to mutate entries only in the current
@@ -333,20 +473,18 @@ pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>:
 
     /// Rollback this storage one epoch back. Please note that this is a
     /// destructive and irreversible operation.
-    fn rollback(&mut self) -> impl Future<Output = Result<(), RyhopeError>> {
-        self.rollback_to(self.current_epoch() - 1)
-    }
+    fn rollback(&mut self) -> impl Future<Output = Result<(), RyhopeError>>;
 
     /// Rollback this storage to the given epoch. Please note that this is a
     /// destructive and irreversible operation.
-    fn rollback_to(&mut self, epoch: Epoch) -> impl Future<Output = Result<(), RyhopeError>>;
+    fn rollback_to(&mut self, epoch: UserEpoch) -> impl Future<Output = Result<(), RyhopeError>>;
 }
 
 /// Characterizes a trait allowing for epoch-based atomic updates.
 pub trait TransactionalStorage {
     /// Start a new transaction, defining a transition between the storage at
     /// two epochs.
-    fn start_transaction(&mut self) -> Result<(), RyhopeError>;
+    fn start_transaction(&mut self) -> impl Future<Output = Result<(), RyhopeError>>;
 
     /// Closes the current transaction and commit to the new state at the new
     /// epoch.
@@ -363,7 +501,7 @@ pub trait TransactionalStorage {
         Fut: Future<Output = Result<(), RyhopeError>>,
     {
         async {
-            self.start_transaction()?;
+            self.start_transaction().await?;
             f(self).await?;
             self.commit_transaction().await
         }
@@ -388,12 +526,12 @@ pub trait SqlTransactionStorage: TransactionalStorage {
     /// This hook **MUST** be called after the **SUCCESSFUL** execution of the
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution failed.
-    fn commit_success(&mut self);
+    fn commit_success(&mut self) -> impl Future<Output = ()>;
 
     /// This hook **MUST** be called after the **FAILED** execution of the
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution is successful.
-    fn commit_failed(&mut self);
+    fn commit_failed(&mut self) -> impl Future<Output = ()>;
 }
 
 /// Similar to [`TransactionalStorage`], but returns a [`Minitree`] of the
@@ -478,12 +616,12 @@ pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Sen
     /// This hook **MUST** be called after the **SUCCESSFUL** execution of the
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution failed.
-    fn commit_success(&mut self);
+    fn commit_success(&mut self) -> impl Future<Output = ()>;
 
     /// This hook **MUST** be called after the **FAILED** execution of the
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution is successful.
-    fn commit_failed(&mut self);
+    fn commit_failed(&mut self) -> impl Future<Output = ()>;
 }
 
 /// The meta-operations trait gathers high-level operations that may be
@@ -499,18 +637,18 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
     /// by the union of all the paths-to-the-root for the given keys.
     fn wide_lineage_between(
         &self,
-        at: Epoch,
+        at: UserEpoch,
         t: &T,
         keys: &Self::KeySource,
-        bounds: (Epoch, Epoch),
+        bounds: (UserEpoch, UserEpoch),
     ) -> impl Future<Output = Result<WideLineage<T::Key, V>, RyhopeError>>;
 
     fn wide_update_trees(
         &self,
-        at: Epoch,
+        at: UserEpoch,
         t: &T,
         keys: &Self::KeySource,
-        bounds: (Epoch, Epoch),
+        bounds: (UserEpoch, UserEpoch),
     ) -> impl Future<Output = Result<Vec<UpdateTree<T::Key>>, RyhopeError>> {
         async move {
             let wide_lineage = self.wide_lineage_between(at, t, keys, bounds).await?;
@@ -524,11 +662,11 @@ pub trait MetaOperations<T: TreeTopology, V: Send + Sync>:
         }
     }
     #[allow(clippy::type_complexity)]
-    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
+    fn try_fetch_many_at<I: IntoIterator<Item = (UserEpoch, T::Key)> + Send>(
         &self,
         t: &T,
         data: I,
-    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<T::Key>, V)>, RyhopeError>> + Send
+    ) -> impl Future<Output = Result<Vec<(UserEpoch, NodeContext<T::Key>, V)>, RyhopeError>> + Send
     where
         <I as IntoIterator>::IntoIter: Send;
 }

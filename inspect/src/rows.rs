@@ -17,7 +17,7 @@ use crate::repl::PayloadFormatter;
 pub(crate) type RowDb = MerkleTreeKvDb<
     RowTree,
     RowPayload<BlockPrimaryIndex>,
-    PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>,
+    PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>, true>,
 >;
 
 struct RowPayloadFormatterDisplay {

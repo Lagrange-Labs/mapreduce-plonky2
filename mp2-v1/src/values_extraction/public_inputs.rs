@@ -17,7 +17,7 @@ use plonky2_ecgfp5::{
     curve::curve::WeierstrassPoint,
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
-use std::array;
+use std::{array, fmt::Debug};
 
 // Leaf/Extension/Branch node Public Inputs:
 // - `H : [8]F` packed Keccak hash of the extension node

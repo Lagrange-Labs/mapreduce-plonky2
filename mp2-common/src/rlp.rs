@@ -1,6 +1,6 @@
-use crate::array::{Array, VectorWire};
+use crate::array::{extract_value, Array, VectorWire};
 
-use crate::utils::{greater_than_or_equal_to_unsafe, less_than, less_than_unsafe, num_to_bits};
+use crate::utils::{less_than, less_than_unsafe, num_to_bits};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
@@ -16,7 +16,7 @@ const MAX_LEN_BYTES: usize = 2;
 
 /// Maximum size a key can have inside a MPT node.
 /// 33 bytes because key is compacted encoded, so it can add up to 1 byte more.
-const MAX_ENC_KEY_LEN: usize = 33;
+pub const MAX_ENC_KEY_LEN: usize = 33;
 
 /// Simply the maximum number of nibbles a key can have.
 pub const MAX_KEY_NIBBLE_LEN: usize = 64;
@@ -58,11 +58,16 @@ impl<const N: usize> RlpList<N> {
         }
     }
 }
-pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, const N: usize>(
+pub fn decode_compact_encoding<
+    F: RichField + Extendable<D>,
+    const D: usize,
+    const N: usize,
+    const KEY_LEN: usize,
+>(
     b: &mut CircuitBuilder<F, D>,
     input: &Array<Target, N>,
     key_header: &RlpHeader,
-) -> (VectorWire<Target, MAX_KEY_NIBBLE_LEN>, BoolTarget) {
+) -> (VectorWire<Target, KEY_LEN>, BoolTarget) {
     let zero = b.zero();
     let two = b.two();
     let first_byte = input.value_at(b, key_header.offset);
@@ -71,7 +76,7 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     let mut prev_nibbles = (least_bits, most_bits);
 
     let mut cur_nibbles: (Target, Target);
-    let mut nibbles: [Target; MAX_KEY_NIBBLE_LEN] = [b.zero(); MAX_KEY_NIBBLE_LEN];
+    let mut nibbles: [Target; KEY_LEN] = [b.zero(); KEY_LEN];
 
     let first_nibble = prev_nibbles.0;
     let first_nibble_as_bits = num_to_bits(b, 4, first_nibble);
@@ -92,7 +97,10 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
     // during the first iteration of this loop.
     let one = b.one();
     let mut i_offset = key_header.offset;
-    for i in 0..MAX_ENC_KEY_LEN - 1 {
+
+    // We calculate how many times to run the foor loop, this is only depends on
+    // KEY_LEN, since we skip one byte it is just KEY_LEN / 2.
+    for i in 0..KEY_LEN / 2 {
         i_offset = b.add(i_offset, one);
         // look now at the encoded path
         let x = input.value_at(b, i_offset);
@@ -138,54 +146,29 @@ pub fn decode_compact_encoding<F: RichField + Extendable<D>, const D: usize, con
         cond,
     )
 }
+
 // Returns the length from the RLP prefix in case of long string or long list
 // data is the full data starting from the "type" byte of RLP encoding
 // data length needs to be a power of 2
 // non power of 2 lengths are padded leading zeros
 pub fn data_len<F: RichField + Extendable<D>, const D: usize>(
     b: &mut CircuitBuilder<F, D>,
-    data: &[Target],
+    data: &[Target; MAX_LEN_BYTES],
     len_of_len: Target,
-    offset: Target,
 ) -> Target {
-    let mut res = b.zero();
-    let one = b.one();
+    let zero = b.zero();
+    let mut last_byte_found = b._false();
     let const_256 = b.constant(F::from_canonical_u64(256));
+    data.iter().enumerate().fold(zero, |acc, (j, &byte)| {
+        let j_tgt = b.constant(F::from_canonical_usize(j));
 
-    for i in 0..MAX_LEN_BYTES {
-        let i_tgt = b.constant(F::from_canonical_u8(i as u8));
-        // make sure we don't read out more than the actual len
-        let len_of_len_pred = less_than_unsafe(b, i_tgt, len_of_len, 8);
-        // this part offset i to read from the array
-        let i_offset = b.add(i_tgt, offset);
-        // i+1 because first byte is the RLP type
-        let i_plus_1 = b.add(i_offset, one);
-        let item = quin_selector(b, data, i_plus_1);
-
-        // shift result by one byte
-        let multiplicand = b.mul(const_256, res);
-        // res += 2^i * arr[i+1] only if we're in right range
-        let sum = b.add(multiplicand, item);
-        let multiplicand_2 = b.mul(sum, len_of_len_pred.target);
-
-        let not_len_of_len_pred_target = b.not(len_of_len_pred);
-        let multiplicand_3 = b.mul(not_len_of_len_pred_target.target, res);
-        // res = (2^i * arr[i+1]) * (i < len_len) + res * (i >= len_len)
-        res = b.add(multiplicand_2, multiplicand_3);
-    }
-
-    res
+        let at_end = b.is_equal(j_tgt, len_of_len);
+        last_byte_found = b.or(last_byte_found, at_end);
+        let sum = b.mul_add(const_256, acc, byte);
+        b.select(last_byte_found, acc, sum)
+    })
 }
-// We read the RLP header but knowing it is a value that is always <55bytes long
-// we can hardcode the type of RLP header it is and directly get the real number len
-// in this case, the header marker is 0x80 that we can directly take out from first byte
-pub fn short_string_len<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    header: &Target,
-) -> Target {
-    let byte_80 = b.constant(F::from_canonical_usize(128));
-    b.sub(*header, byte_80)
-}
+
 /// It returns the RLP header information starting at data[offset]. The header.offset
 /// is absolute from the 0-index of data (not from the `offset` index)
 pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
@@ -196,7 +179,7 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     let one = b.one();
     let zero = b.zero();
 
-    let prefix = quin_selector(b, data, offset);
+    let prefix = extract_value(b, data, offset);
 
     let byte_80 = b.constant(F::from_canonical_usize(128));
     let byte_b7 = b.constant(F::from_canonical_usize(183));
@@ -205,10 +188,12 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     let byte_f7 = b.constant(F::from_canonical_usize(247));
     let byte_f8 = b.constant(F::from_canonical_usize(248));
 
+    // We check less than or equal to 128 because the single byte 0 is encoded as a string of length zero in RLP
     let prefix_less_0x80 = less_than(b, prefix, byte_80, 8);
-    let prefix_less_0xb8 = less_than(b, prefix, byte_b8, 8);
-    let prefix_less_0xc0 = less_than(b, prefix, byte_c0, 8);
-    let prefix_less_0xf8 = less_than(b, prefix, byte_f8, 8);
+    // Prefix has been range checked now so we can use unsafe variant
+    let prefix_less_0xb8 = less_than_unsafe(b, prefix, byte_b8, 8);
+    let prefix_less_0xc0 = less_than_unsafe(b, prefix, byte_c0, 8);
+    let prefix_less_0xf8 = less_than_unsafe(b, prefix, byte_f8, 8);
 
     // This part determines at which offset should we read the data
     let prefix_plus_one = b.add(prefix, one);
@@ -229,19 +214,27 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
     // i.e. if it's a single byte value, no offset we directly read value
     let offset_data = b._if(prefix_less_0x80, zero, select_3);
 
-    // read the lenght encoded depending on the type
+    // read the length encoded depending on the type
+    // To avoid repeatedly indexing into the data slice we extract MAX_LEN_BYTES from `offset` + 1
+    // as offset includes the type encoding
+    let poss_length_bytes: [Target; MAX_LEN_BYTES] = std::array::from_fn(|i| {
+        let index = b.add_const(offset, F::from_canonical_usize(i + 1));
+        extract_value(b, data, index)
+    });
     let prefix_minus_f7 = b.sub(prefix, byte_f7);
-    let long_list_len = data_len(b, data, prefix_minus_f7, offset);
+
+    let long_list_len = data_len(b, &poss_length_bytes, prefix_minus_f7);
+    // let long_list_len = data_len(b, data, prefix_minus_f7, offset);
     let short_list_len = b.sub(prefix, byte_c0);
     let select_1 = b._if(prefix_less_0xf8, short_list_len, long_list_len);
     let prefix_minus_b7 = b.sub(prefix, byte_b7);
-    let long_str_len = data_len(b, data, prefix_minus_b7, offset);
+    let long_str_len = data_len(b, &poss_length_bytes, prefix_minus_b7);
     let select_2 = b._if(prefix_less_0xc0, long_str_len, select_1);
     let short_str_len = b.sub(prefix, byte_80);
     let select_3 = b._if(prefix_less_0xb8, short_str_len, select_2);
     let len = b._if(prefix_less_0x80, one, select_3);
 
-    let data_type = greater_than_or_equal_to_unsafe(b, prefix, byte_c0, 8).target;
+    let data_type = b.not(prefix_less_0xc0).target;
 
     let final_offset = b.add(offset, offset_data);
     RlpHeader {
@@ -256,6 +249,7 @@ pub fn decode_header<F: RichField + Extendable<D>, const D: usize>(
 /// The offsets decoded in the returned list are starting from the 0-index of `data`
 /// not from the `offset` index.
 /// If N is less than the actual number of items, then the number of fields will be N.
+/// This is achieved by using the list header to pad the missing entries.
 /// Otherwise, the number of fields returned is determined by the header the RLP list.
 pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: usize>(
     b: &mut CircuitBuilder<F, D>,
@@ -279,13 +273,10 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
     for i in 0..N {
         // stop when you've looked at exactly the same number of  bytes than
         // the RLP list header indicates
-        let at_the_end = b.is_equal(offset, end_idx);
-        // offset always equals offset after we've reached end_idx so before_the_end
-        // is only true when we haven't reached the end yet
-        let before_the_end = b.not(at_the_end);
-
+        let before_the_end = b.is_not_equal(offset, end_idx);
+        let offset_to_use = b.select(before_the_end, offset, zero);
         // read the header starting from the offset
-        let header = decode_header(b, data, offset);
+        let header = decode_header(b, data, offset_to_use);
         let new_offset = b.add(header.offset, header.len);
 
         dec_off[i] = header.offset;
@@ -295,8 +286,7 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         // move offset to the next field in the list
         // updates offset such that is is either < end_idx or after that
         // always equals to end_idx
-        let diff = b.sub(new_offset, offset);
-        offset = b.mul_add(before_the_end.target, diff, offset);
+        offset = b.select(before_the_end, new_offset, offset);
         num_fields = b.add(num_fields, before_the_end.target);
     }
 
@@ -306,34 +296,6 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         data_type: Array { arr: dec_type },
         num_fields,
     }
-}
-
-/// Returns an element of the array at index n
-/// TODO: replace with random_access from plonky2 and compare constraints
-pub fn quin_selector<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    arr: &[Target],
-    n: Target,
-) -> Target {
-    let mut nums: Vec<Target> = vec![];
-
-    for (i, el) in arr.iter().enumerate() {
-        let i_target = b.constant(F::from_canonical_usize(i));
-        let is_eq = b.is_equal(i_target, n);
-        // (i == n (idx) ) * element
-        let product = b.mul(is_eq.target, *el);
-        nums.push(product);
-    }
-    // SUM_i (i == n (idx) ) * element
-    // -> sum = element
-    calculate_total(b, &nums)
-}
-
-fn calculate_total<F: RichField + Extendable<D>, const D: usize>(
-    b: &mut CircuitBuilder<F, D>,
-    arr: &[Target],
-) -> Target {
-    b.add_many(arr)
 }
 
 #[cfg(test)]
@@ -355,12 +317,10 @@ mod tests {
     use crate::array::Array;
     use crate::rlp::{
         decode_compact_encoding, decode_fixed_list, decode_header, RlpHeader, MAX_ENC_KEY_LEN,
-        MAX_LEN_BYTES,
+        MAX_KEY_NIBBLE_LEN, MAX_LEN_BYTES,
     };
     use crate::utils::{keccak256, less_than_or_equal_to, IntTargetWriter};
     use crate::{C, D, F};
-
-    use super::quin_selector;
 
     /// Returns an array of length `M` from the array `arr` starting at index `offset`
     pub fn extract_array<F: RichField + Extendable<D>, const D: usize, const M: usize>(
@@ -382,7 +342,7 @@ mod tests {
             let j = b.mul(lt.target, i_plus_n_target);
 
             // out_val = arr[((i+n)<=n+M) * (i+n)]
-            *out_val = quin_selector(b, arr, j);
+            *out_val = super::extract_value(b, arr, j);
         }
 
         out
@@ -548,7 +508,11 @@ mod tests {
 
         let len_of_len = builder.constant(F::from_canonical_u64(2));
         let zero = builder.zero();
-        let res = super::data_len(&mut builder, &data, len_of_len, zero);
+        let poss_length_bytes: [Target; MAX_LEN_BYTES] = std::array::from_fn(|i| {
+            let index = builder.add_const(zero, F::from_canonical_usize(i + 1));
+            super::extract_value(&mut builder, &data, index)
+        });
+        let res = super::data_len(&mut builder, &poss_length_bytes, len_of_len);
         builder.connect(res, ret_target);
 
         builder.register_public_inputs(&data);
@@ -792,7 +756,11 @@ mod tests {
                 len: builder.constant(F::from_canonical_usize(tc.key_len)),
                 data_type: builder.constant(F::from_canonical_usize(0)),
             };
-            let (nibbles, cond) = decode_compact_encoding(&mut builder, &wire1, &key_header);
+            let (nibbles, cond) = decode_compact_encoding::<_, _, _, MAX_KEY_NIBBLE_LEN>(
+                &mut builder,
+                &wire1,
+                &key_header,
+            );
             builder.assert_bool(cond);
             let exp_nib_len = builder.constant(F::from_canonical_usize(tc.expected.len()));
             builder.connect(nibbles.real_len, exp_nib_len);

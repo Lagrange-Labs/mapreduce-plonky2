@@ -5,9 +5,9 @@ use core::array;
 use mp2_common::{
     array::{Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, PACKED_HASH_LEN},
-    mpt_sequential::Circuit as MPTCircuit,
+    mpt_sequential::advance_key_branch,
     public_inputs::PublicInputCommon,
-    rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
+    rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST, MAX_KEY_NIBBLE_LEN},
     types::{CBuilder, GFp},
     utils::{Endianness, PackerTarget},
     D,
@@ -79,7 +79,9 @@ impl BranchLengthCircuit {
 
         let key = child_proof.mpt_key_wire();
         let (key, hash, is_branch, _) =
-            MPTCircuit::<1, MAX_BRANCH_NODE_LEN>::advance_key_branch(cb, &node.arr, &key, &headers);
+            advance_key_branch::<_, D, MAX_BRANCH_NODE_LEN, MAX_KEY_NIBBLE_LEN>(
+                cb, &node.arr, &key, &headers,
+            );
 
         // asserts this is a branch node
         cb.assert_one(is_branch.target);

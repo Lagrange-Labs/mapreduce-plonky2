@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 /// The generic type `T` allows to specify the
 /// specific inputs of each circuits besides the proofs that need to be
 /// recursively verified, while the proofs are serialized in byte format.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofInputSerialized<T> {
     pub input: T,
     pub serialized_child_proofs: Vec<Vec<u8>>,

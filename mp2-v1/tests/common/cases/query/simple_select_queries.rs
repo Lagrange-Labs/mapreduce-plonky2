@@ -19,7 +19,7 @@ use parsil::{
 };
 use ryhope::{
     storage::{pgsql::ToFromBytea, RoEpochKvStorage},
-    Epoch, NodePayload,
+    NodePayload, UserEpoch,
 };
 use sqlparser::ast::Query;
 use std::{fmt::Debug, hash::Hash};
@@ -34,17 +34,20 @@ use verifiable_db::{
     test_utils::MAX_NUM_OUTPUTS,
 };
 
-use crate::common::{
-    cases::{
-        indexing::BLOCK_COLUMN_NAME,
-        query::{
-            aggregated_queries::{check_final_outputs, find_longest_lived_key},
-            GlobalCircuitInput, QueryPlanner, RevelationCircuitInput, SqlReturn, SqlType,
+use crate::{
+    common::{
+        cases::{
+            indexing::BLOCK_COLUMN_NAME,
+            query::{
+                aggregated_queries::{check_final_outputs, find_longest_lived_key},
+                GlobalCircuitInput, QueryPlanner, RevelationCircuitInput, SqlReturn, SqlType,
+            },
         },
+        proof_storage::{ProofKey, ProofStorage},
+        table::{Table, TableColumns},
+        TableInfo,
     },
-    proof_storage::{ProofKey, ProofStorage},
-    table::{Table, TableColumns},
-    TableInfo,
+    TableSource,
 };
 
 use super::{QueryCircuitInput, QueryCooking, TestContext};
@@ -69,7 +72,7 @@ pub(crate) async fn prove_query(
         .iter()
         .map(|row| {
             let key = RowTreeKey::from_bytea(row.try_get::<_, &[u8]>(0)?.to_vec());
-            let epoch = row.try_get::<_, Epoch>(1)?;
+            let epoch = row.try_get::<_, UserEpoch>(1)?;
             // all the other items are query results
             let result = (2..row.len())
                 .filter_map(|i| {
@@ -82,7 +85,7 @@ pub(crate) async fn prove_query(
         })
         .collect::<Result<Vec<_>>>()?;
     // compute input for each matching row
-    let current_epoch = planner.table.index.current_epoch();
+    let current_epoch = planner.table.index.current_epoch().await?;
     let mut matching_rows_input = vec![];
     for (key, epoch, result) in matching_rows.into_iter() {
         let row_proof = prove_single_row(
@@ -157,7 +160,7 @@ pub(crate) async fn prove_query(
 async fn get_path_info<K, V, T: TreeFetcher<K, V>>(
     key: &K,
     tree_info: &T,
-    epoch: Epoch,
+    epoch: UserEpoch,
 ) -> Result<(Vec<(NodeInfo, ChildPosition)>, Vec<Option<HashOutput>>)>
 where
     K: Debug + Hash + Clone + Send + Sync + Eq,
@@ -253,7 +256,7 @@ pub(crate) async fn prove_single_row<T: TreeFetcher<RowTreeKey, RowPayload<Block
     // 1. Get the all the cells including primary and secondary index
     // Note we can use the primary as epoch since now epoch == primary in the storage
     let (row_ctx, row_payload) = tree
-        .fetch_ctx_and_payload_at(row_key, primary as Epoch)
+        .fetch_ctx_and_payload_at(row_key, primary as UserEpoch)
         .await
         .expect("cache not full");
 
@@ -308,9 +311,9 @@ pub(crate) async fn prove_single_row<T: TreeFetcher<RowTreeKey, RowPayload<Block
 
 /// Cook a query where the number of matching rows is the same as the maximum number of
 /// outputs allowed
-pub(crate) async fn cook_query_with_max_num_matching_rows(
+pub(crate) async fn cook_query_with_max_num_matching_rows<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -351,9 +354,9 @@ pub(crate) async fn cook_query_with_max_num_matching_rows(
     })
 }
 
-pub(crate) async fn cook_query_with_matching_rows(
+pub(crate) async fn cook_query_with_matching_rows<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -397,9 +400,9 @@ pub(crate) async fn cook_query_with_matching_rows(
 }
 
 /// Cook a query where the offset is big enough to have no matching rows
-pub(crate) async fn cook_query_too_big_offset(
+pub(crate) async fn cook_query_too_big_offset<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -440,12 +443,12 @@ pub(crate) async fn cook_query_too_big_offset(
     })
 }
 
-pub(crate) async fn cook_query_no_matching_rows(
+pub(crate) async fn cook_query_no_matching_rows<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
-    let initial_epoch = table.index.initial_epoch();
-    let current_epoch = table.index.current_epoch();
+    let initial_epoch = table.index.initial_epoch().await;
+    let current_epoch = table.index.current_epoch().await?;
     let min_block = initial_epoch as BlockPrimaryIndex;
     let max_block = current_epoch as BlockPrimaryIndex;
 
@@ -486,9 +489,9 @@ pub(crate) async fn cook_query_no_matching_rows(
     })
 }
 
-pub(crate) async fn cook_query_with_distinct(
+pub(crate) async fn cook_query_with_distinct<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -529,10 +532,10 @@ pub(crate) async fn cook_query_with_distinct(
     })
 }
 
-pub(crate) async fn cook_query_with_wildcard(
+pub(crate) async fn cook_query_with_wildcard<T: TableSource>(
     table: &Table,
     distinct: bool,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
@@ -583,16 +586,16 @@ pub(crate) async fn cook_query_with_wildcard(
     })
 }
 
-pub(crate) async fn cook_query_with_wildcard_no_distinct(
+pub(crate) async fn cook_query_with_wildcard_no_distinct<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     cook_query_with_wildcard(table, false, info).await
 }
 
-pub(crate) async fn cook_query_with_wildcard_and_distinct(
+pub(crate) async fn cook_query_with_wildcard_and_distinct<T: TableSource>(
     table: &Table,
-    info: &TableInfo,
+    info: &TableInfo<T>,
 ) -> Result<QueryCooking> {
     cook_query_with_wildcard(table, true, info).await
 }
