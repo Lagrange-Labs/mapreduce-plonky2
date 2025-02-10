@@ -1274,7 +1274,7 @@ pub(crate) struct MappingExtractionArgs<T: MappingInfo> {
     /// need to know an existing key
     ///     * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
     /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
-    mapping_keys: BTreeSet<T>,
+    mapping_keys: BTreeSet<T::Key>,
     /// The optional length extraction parameters
     length_args: Option<LengthExtractionArgs>,
 }
@@ -1282,15 +1282,15 @@ pub(crate) struct MappingExtractionArgs<T: MappingInfo> {
 impl<T> TableSource for MappingExtractionArgs<T>
 where
     T: MappingInfo,
-    Vec<MappingUpdate<T, T::Value>>: ContractController,
+    Vec<MappingUpdate<T>>: ContractController,
 {
     type Metadata = SlotInputs;
 
     fn get_data(&self) -> Self::Metadata {
         if let Some(l_args) = self.length_args.as_ref() {
-            T::slot_inputs(self.slot_inputs.clone(), Some(l_args.slot))
+            T::Key::slot_inputs(self.slot_inputs.clone(), Some(l_args.slot))
         } else {
-            T::slot_inputs(self.slot_inputs.clone(), None)
+            T::Key::slot_inputs(self.slot_inputs.clone(), None)
         }
     }
 
@@ -1510,7 +1510,7 @@ where
                     }
                     MappingUpdate::Insertion(key_to_insert, _) => {
                         info!("Inserting key {key_to_insert:?} to tracking mapping keys");
-                        self.mapping_keys.insert(key_to_insert.clone());
+                        self.mapping_keys.insert(Clone::clone(key_to_insert));
                     }
                     // the mapping key doesn't change here so no need to update the list
                     MappingUpdate::Update(_, _, _) => {}
@@ -1556,7 +1556,7 @@ impl<T: MappingInfo> MappingExtractionArgs<T> {
         &self,
         block_number: BlockPrimaryIndex,
         contract: &Contract,
-        updates: &[MappingUpdate<T, T::Value>],
+        updates: &[MappingUpdate<T>],
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         updates
             .iter()
@@ -1659,7 +1659,7 @@ impl<T: MappingInfo> MappingExtractionArgs<T> {
         &self,
         evm_word: u32,
         table_info: Vec<ExtractedColumnInfo>,
-        mapping_key: &T,
+        mapping_key: &T::Key,
     ) -> StorageSlotInfo {
         let storage_slot = mapping_key.storage_slot(self.slot, evm_word);
 
@@ -1684,7 +1684,7 @@ impl<T: MappingInfo> MappingExtractionArgs<T> {
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
-        mapping_key: &T,
+        mapping_key: &T::Key,
     ) -> T::Value {
         let mut extracted_values = vec![];
         let evm_word_cols = self.evm_word_column_info(contract);

@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use super::slot_info::{LargeStruct, MappingInfo, StorageSlotMappingKey, StorageSlotValue};
+use super::slot_info::{LargeStruct, MappingInfo};
 use crate::common::{
     bindings::{
         eventemitter::EventEmitter::{self, EventEmitterInstance},
@@ -166,21 +166,17 @@ impl ContractController for LargeStruct {
 }
 
 #[derive(Clone, Debug)]
-pub enum MappingUpdate<K, V> {
+pub(crate) enum MappingUpdate<T: MappingInfo> {
     // key and value
-    Insertion(K, V),
+    Insertion(T::Key, T::Value),
     // key and value
-    Deletion(K, V),
+    Deletion(T::Key, T::Value),
     // key, previous value and new value
-    Update(K, V, V),
+    Update(T::Key, T::Value, T::Value),
 }
 
-impl<K, V> MappingUpdate<K, V>
-where
-    K: StorageSlotMappingKey,
-    V: StorageSlotValue,
-{
-    pub fn to_tuple(&self) -> (K, V) {
+impl<T: MappingInfo> MappingUpdate<T> {
+    pub fn to_tuple(&self) -> (T::Key, T::Value) {
         match self {
             MappingUpdate::Insertion(key, value)
             | MappingUpdate::Deletion(key, value)
@@ -189,8 +185,8 @@ where
     }
 }
 
-impl<K, V> From<&MappingUpdate<K, V>> for MappingOperation {
-    fn from(update: &MappingUpdate<K, V>) -> Self {
+impl<T: MappingInfo> From<&MappingUpdate<T>> for MappingOperation {
+    fn from(update: &MappingUpdate<T>) -> Self {
         Self::from(match update {
             MappingUpdate::Deletion(_, _) => 0,
             MappingUpdate::Update(_, _, _) => 1,
@@ -199,7 +195,7 @@ impl<K, V> From<&MappingUpdate<K, V>> for MappingOperation {
     }
 }
 
-impl<T: MappingInfo> ContractController for Vec<MappingUpdate<T, T::Value>> {
+impl<T: MappingInfo> ContractController for Vec<MappingUpdate<T>> {
     async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
         unimplemented!("Unimplemented for fetching the all mapping values")
     }
