@@ -4,7 +4,7 @@ use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK};
 use mp2_v1::{
     api,
     indexing::{
-        block::{BlockPrimaryIndex, BlockTree, BlockTreeKey},
+        block::{get_previous_epoch, BlockPrimaryIndex, BlockTreeKey, MerkleIndexTree},
         index::IndexNode,
     },
     values_extraction::identifier_block_column,
@@ -12,11 +12,10 @@ use mp2_v1::{
 use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
-        pgsql::PgsqlStorage,
         updatetree::{Next, UpdateTree},
         RoEpochKvStorage,
     },
-    MerkleTreeKvDb,
+    UserEpoch,
 };
 use verifiable_db::block_tree::compute_final_digest;
 
@@ -27,9 +26,6 @@ use super::{
     table::{Table, TableID},
     TestContext,
 };
-
-pub type IndexStorage = PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>>;
-pub type MerkleIndexTree = MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>;
 
 impl TestContext {
     /// NOTE: we require the added_index information because we need to distinguish if a new node
@@ -170,7 +166,14 @@ impl TestContext {
                 // here we are simply proving the new updated nodes from the new node to
                 // the root. We fetch the same node but at the previous version of the
                 // tree to prove the update.
-                let previous_node = t.try_fetch_at(k, t.current_epoch() - 1).await?.unwrap();
+                let previous_epoch =
+                    get_previous_epoch(t, t.current_epoch().await? as BlockPrimaryIndex)
+                        .await?
+                        .expect("No previous epoch found, we shouldn't be in this case");
+                let previous_node = t
+                    .try_fetch_at(k, previous_epoch as UserEpoch)
+                    .await?
+                    .unwrap();
                 let left_key = context.left.expect("should always be a left child");
                 let left_node = t.try_fetch(&left_key).await?.unwrap();
                 // this should be one of the nodes we just proved in this loop before

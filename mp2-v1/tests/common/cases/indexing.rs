@@ -266,7 +266,7 @@ impl<T: TableSource> TableIndexing<T> {
             columns,
             row_unique_id,
         )
-        .await;
+        .await?;
         Ok((
             TableIndexing::<MergeSource> {
                 value_column,
@@ -355,7 +355,7 @@ impl<T: TableSource> TableIndexing<T> {
             columns,
             row_unique_id,
         )
-        .await;
+        .await?;
         Ok((
             TableIndexing::<SingleExtractionArgs> {
                 value_column: "".to_string(),
@@ -690,7 +690,7 @@ impl<T: TableSource> TableIndexing<T> {
             columns,
             row_unique_id,
         )
-        .await;
+        .await?;
         Ok((
             TableIndexing::<T> {
                 value_column: table.columns.rest[0].name.clone(),
@@ -734,7 +734,7 @@ impl<T: TableSource> TableIndexing<T> {
             let bn = ctx.block_number().await as BlockPrimaryIndex;
 
             let table_row_updates = if let ChangeType::Receipt(..) = ut {
-                let current_row_epoch = self.table.row.current_epoch();
+                let current_row_epoch = self.table.row.current_epoch().await?;
                 let current_row_keys = self
                     .table
                     .row
@@ -1139,6 +1139,7 @@ async fn build_mapping_table(
         row_unique_id,
     )
     .await
+    .unwrap()
 }
 
 /// Build the mapping of mappings table.
@@ -1235,6 +1236,7 @@ async fn build_mapping_of_mappings_table(
         row_unique_id,
     )
     .await
+    .unwrap()
 }
 
 #[derive(Debug, Clone, Copy)]
