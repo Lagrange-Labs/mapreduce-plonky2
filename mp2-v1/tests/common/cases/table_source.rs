@@ -43,7 +43,7 @@ use mp2_v1::{
         identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
         identifier_for_outer_mapping_key_column, identifier_for_topic_column,
         identifier_for_tx_index_column, identifier_for_value_column,
-        planner::Extractable,
+        planner::{receipts::ReceiptBlockData, Extractable},
         StorageSlotInfo,
     },
 };
@@ -61,6 +61,7 @@ use crate::common::{
     },
     final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
     proof_storage::{ProofKey, ProofStorage},
+    receipt_trie::prove_extractable,
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
     Deserialize, MetadataHash, Serialize, TestContext,
@@ -905,14 +906,14 @@ where
             .with_recommended_fillers()
             .wallet(ctx.wallet())
             .on_http(ctx.rpc_url.parse().unwrap());
+        let block_data =
+            ReceiptBlockData::get_block_data(&self.get_event(), bn as u64, provider.root()).await?;
+        let mut value_proof_plan =
+            EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>::create_update_plan(
+                &block_data,
+            )?;
 
-        let value_proof = event
-            .prove_value_extraction::<32, 512, _>(
-                bn as u64,
-                ctx.params().get_value_extraction_params(),
-                provider.root(),
-            )
-            .await?;
+        let value_proof = prove_extractable(&mut value_proof_plan, ctx.params(), &event)?;
         Ok((
             ExtractionProofInput::Receipt(value_proof),
             self.metadata_hash(contract.address(), contract.chain_id()),

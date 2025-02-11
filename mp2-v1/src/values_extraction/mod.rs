@@ -11,13 +11,14 @@ use mp2_common::{
     digest::Digest,
     eth::{left_pad32, EventLogInfo, StorageSlot},
     keccak::HASH_LEN,
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::{empty_poseidon_hash, HashPermutation, H},
     types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
     F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
+    hash::hashing::hash_n_to_hash_no_pad,
     plonk::config::Hasher,
 };
 
@@ -204,7 +205,19 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
     From<EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>> for TableMetadata
 {
     fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>) -> Self {
-        let extraction_id = event.event_signature;
+        let packed_sig = event.event_signature.pack(Endianness::Big);
+        let packed_address = event.address.0 .0.pack(Endianness::Big);
+        let input = packed_sig
+            .into_iter()
+            .chain(packed_address)
+            .map(F::from_canonical_u32)
+            .collect::<Vec<F>>();
+
+        let extraction_id = hash_n_to_hash_no_pad::<F, HashPermutation>(&input)
+            .elements
+            .into_iter()
+            .flat_map(|elem| elem.to_canonical_u64().to_be_bytes())
+            .collect::<Vec<u8>>();
 
         let tx_index_column_id = identifier_for_tx_index_column(
             &event.event_signature,
@@ -428,6 +441,7 @@ pub fn identifier_for_gas_used_column(
 
 /// Compute topic identifier for topic variable.
 /// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+/// Here the `topic_word` field refers to which topic this is (starting from 1 as we don't include the zeroth topic because its the event signature).
 pub fn identifier_for_topic_column(
     event_signature: &[u8; HASH_LEN],
     contract_address: &Address,
@@ -451,6 +465,7 @@ pub fn identifier_for_topic_column(
 
 /// Compute data identifier for data variable.
 /// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+/// /// Here the `data_word` field refers to which word of data (starting at 1) this is.
 pub fn identifier_for_data_column(
     event_signature: &[u8; HASH_LEN],
     contract_address: &Address,

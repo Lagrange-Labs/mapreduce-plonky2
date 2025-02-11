@@ -248,17 +248,8 @@ where
             .try_into()
             .expect("This should never fail");
 
-        let extraction_id_packed = event_wires.event_signature.pack(b, Endianness::Big);
-        let extraction_id = extraction_id_packed.downcast_to_targets();
-        // Extract input values
-        let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(
-            b,
-            &[tx_index_input.clone(), gas_used_input.clone()],
-            &[&tx_index_prefix, &gas_used_prefix],
-            &extraction_id.arr,
-        );
         // Now we verify extracted values
-        let (address_extract, extracted_metadata_digest, extracted_value_digest) = metadata
+        let (extraction_id, extracted_metadata_digest, extracted_value_digest) = metadata
             .extracted_receipt_digests(
                 b,
                 &node.arr,
@@ -267,7 +258,13 @@ where
                 event_wires.sig_rel_offset,
             );
 
-        address_extract.enforce_equal(b, &event_wires.address);
+        // Extract input values
+        let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(
+            b,
+            &[tx_index_input.clone(), gas_used_input.clone()],
+            &[&tx_index_prefix, &gas_used_prefix],
+            &extraction_id.arr,
+        );
 
         let dm = b.add_curve_point(&[input_metadata_digest, extracted_metadata_digest]);
 

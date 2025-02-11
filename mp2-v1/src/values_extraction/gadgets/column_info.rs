@@ -346,14 +346,10 @@ pub struct ExtractedColumnInfoTarget {
 
 impl ExtractedColumnInfoTarget {
     /// Compute the MPT metadata.
-    pub fn mpt_metadata(
-        &self,
-        b: &mut CBuilder,
-        extraction_id: &[Target; PACKED_HASH_LEN],
-    ) -> HashOutTarget {
+    pub fn mpt_metadata(&self, b: &mut CBuilder) -> HashOutTarget {
         // metadata = H(info.extraction_id || info.location_offset || info.byte_offset || info.length)
         let inputs = [
-            extraction_id.as_slice(),
+            self.extraction_id().as_slice(),
             &[self.location_offset(), self.byte_offset(), self.length()],
         ]
         .concat();
@@ -362,12 +358,8 @@ impl ExtractedColumnInfoTarget {
     }
 
     /// Compute the column information digest.
-    pub fn digest(
-        &self,
-        b: &mut CBuilder,
-        extraction_id: &[Target; PACKED_HASH_LEN],
-    ) -> CurveTarget {
-        let metadata = self.mpt_metadata(b, extraction_id);
+    pub fn digest(&self, b: &mut CBuilder) -> CurveTarget {
+        let metadata = self.mpt_metadata(b);
 
         // digest = D(mpt_metadata || info.identifier)
         let inputs = [metadata.elements.as_slice(), &[self.identifier()]].concat();

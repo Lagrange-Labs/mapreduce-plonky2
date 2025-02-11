@@ -726,9 +726,7 @@ where
     // We also check that `at` is smaller that the size of the array, if it is not the output defaults to zero.
     let array_size = b.constant(F::from_noncanonical_u64(slice.len() as u64));
     let less_than_check = less_than_unsafe(b, at, array_size, 12);
-
-    let lookup_index = b.select(less_than_check, at, zero);
-    let (low_bits, high_bits) = b.split_low_high(lookup_index, 6, 12);
+    let (low_bits, high_bits) = b.split_low_high(at, 6, 12);
     // Search each of the smaller arrays for the target at `low_bits`
     let mut first_search = arrays
         .into_iter()

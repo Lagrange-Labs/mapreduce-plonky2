@@ -11,13 +11,13 @@ use mp2_common::{
     eth::{left_pad32, EventLogInfo, StorageSlot},
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
-    poseidon::{empty_poseidon_hash, hash_to_int_value, H},
+    poseidon::{empty_poseidon_hash, flatten_poseidon_hash_target, hash_to_int_value, H},
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
     types::{CBuilder, HashOutput},
     utils::{Endianness, Packer, ToFields},
-    F,
+    CHasher, F,
 };
 use plonky2::{
     field::types::Field,
@@ -379,7 +379,7 @@ pub(crate) struct TableMetadataTarget<const MAX_EXTRACTED_COLUMNS: usize> {
     pub(crate) num_actual_columns: Target,
 }
 
-type ReceiptExtractedOutput = (Array<Target, 20>, CurveTarget, CurveTarget);
+type ReceiptExtractedOutput = (Array<Target, PACKED_HASH_LEN>, CurveTarget, CurveTarget);
 
 impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUMNS> {
     #[cfg(test)]
@@ -402,7 +402,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
             .iter()
             .zip(self.real_columns.iter())
             .map(|(column, &selector)| {
-                let poss_digest = column.digest(b, extraction_id);
+                let poss_digest = column.digest(b);
                 b.select_curve_point(selector, poss_digest, curve_zero)
             })
             .collect::<Vec<CurveTarget>>();
@@ -467,7 +467,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
             .zip(self.real_columns)
             .map(|(column, selector)| {
                 // Calculate the column digest
-                let column_digest = column.digest(b, &column.extraction_id());
+                let column_digest = column.digest(b);
 
                 // Now we work out if the column is to be extracted, if it is we will take the value we recover from `value[column.byte_offset..column.byte_offset + column.length]`
                 // left padded.
@@ -537,7 +537,22 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
         let signature_start = b.add(log_offset, signature_offset);
         let signature = value.extract_array_large::<_, _, 32>(b, signature_start);
 
-        let extraction_id = signature.pack(b, Endianness::Big).downcast_to_targets();
+        let event_sig_id_packed = signature.pack(b, Endianness::Big).downcast_to_targets();
+        let address_packed = address.pack(b, Endianness::Big).downcast_to_targets();
+
+        let inputs = event_sig_id_packed
+            .arr
+            .iter()
+            .chain(address_packed.arr.iter())
+            .copied()
+            .collect::<Vec<Target>>();
+
+        let extraction_id_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
+
+        let extraction_id_array: [Target; PACKED_HASH_LEN] =
+            flatten_poseidon_hash_target(b, extraction_id_hash);
+
+        let extraction_id = Array::from_array(extraction_id_array);
 
         let (metadata_points, value_points): (Vec<CurveTarget>, Vec<CurveTarget>) = self
             .extracted_columns
@@ -545,7 +560,9 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
             .zip(self.real_columns)
             .map(|(column, selector)| {
                 // Calculate the column digest
-                let column_digest = column.digest(b, &extraction_id.arr);
+                let column_digest = column.digest(b);
+                // Enforce that we have the correct extraction_id
+                extraction_id.enforce_equal(b, &Array::from_array(column.extraction_id()));
                 // If selector is true (from self.real_columns) we need it to be false when we feed it into `column.extract_value()` later.
                 let selector = b.not(selector);
 
@@ -574,7 +591,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
             .unzip();
 
         (
-            address,
+            extraction_id,
             b.add_curve_point(&metadata_points),
             b.add_curve_point(&value_points),
         )
