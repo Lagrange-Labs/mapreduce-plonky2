@@ -3,7 +3,7 @@ use std::future::Future;
 use super::slot_info::{LargeStruct, MappingInfo};
 use crate::common::{
     bindings::{
-        eventemitter::EventEmitter::{self, EventEmitterInstance},
+        eventemitter::EventEmitter::EventEmitterInstance,
         simple::{Simple, Simple::MappingOperation},
     },
     cases::indexing::ReceiptUpdate,
@@ -11,16 +11,12 @@ use crate::common::{
 };
 use alloy::{
     contract::private::Provider,
-    network::Ethereum,
     primitives::{Address, U256},
-    providers::{ProviderBuilder, RootProvider},
-    transports::Transport,
+    providers::ProviderBuilder,
 };
-use anyhow::Result;
+
 use itertools::Itertools;
 use log::info;
-
-use super::indexing::ContractUpdate;
 
 pub struct Contract {
     pub address: Address,
@@ -55,28 +51,6 @@ impl Contract {
     /// Getter for [`Address`]
     pub fn address(&self) -> Address {
         self.address
-    }
-}
-
-/// Trait implemented by any test contract.
-pub trait TestContract<T>
-where
-    T: Transport + Clone,
-{
-    /// How this implementor ingests updates.
-    type Update: ContractUpdate<T, Contract = Self::Contract>;
-    /// The actual contract instance.
-    type Contract;
-    /// Function that generates a new instance of self given a [`Provider`] and a `chain_id`
-    fn new(address: Address, provider: &RootProvider<T>) -> Self;
-    /// Get an instance of the contract.
-    fn get_instance(&self) -> &Self::Contract;
-    /// Apply an update to the contract.
-    async fn apply_update(&self, ctx: &TestContext, update: &Self::Update) -> Result<()> {
-        let contract = self.get_instance();
-        update.apply_to(ctx, contract).await;
-        info!("Updated contract with new values {:?}", update);
-        Ok(())
     }
 }
 
@@ -211,21 +185,19 @@ impl<T: MappingInfo> ContractController for Vec<MappingUpdate<T>> {
         T::call_contract(&contract, changes).await
     }
 }
-pub struct EventContract<T: Transport + Clone> {
-    pub instance: EventEmitterInstance<T, RootProvider<T, Ethereum>, Ethereum>,
-}
 
-impl<T: Transport + Clone> TestContract<T> for EventContract<T> {
-    type Update = ReceiptUpdate;
-    type Contract = EventEmitterInstance<T, RootProvider<T, Ethereum>>;
-
-    fn new(address: Address, provider: &RootProvider<T>) -> Self {
-        Self {
-            instance: EventEmitter::new(address, provider.clone()),
-        }
+impl ContractController for ReceiptUpdate {
+    async fn current_values(_ctx: &TestContext, _contract: &Contract) -> Self {
+        unimplemented!("Unimplemented for fetching the all emitted events")
     }
 
-    fn get_instance(&self) -> &Self::Contract {
-        &self.instance
+    async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(ctx.wallet())
+            .on_http(ctx.rpc_url.parse().unwrap());
+        let event_contract = EventEmitterInstance::new(contract.address, &provider);
+
+        self.apply_update(ctx, &event_contract).await
     }
 }

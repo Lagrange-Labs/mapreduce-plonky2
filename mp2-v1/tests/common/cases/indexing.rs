@@ -1,8 +1,6 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
-use std::future::Future;
-
 use anyhow::Result;
 use itertools::Itertools;
 use log::{debug, info};
@@ -53,7 +51,7 @@ use alloy::{
     contract::private::{Network, Provider, Transport},
     network::{Ethereum, TransactionBuilder},
     primitives::U256,
-    providers::{ext::AnvilApi, ProviderBuilder, RootProvider},
+    providers::{ext::AnvilApi, ProviderBuilder},
     sol_types::SolEvent,
 };
 use mp2_common::{
@@ -1370,25 +1368,6 @@ impl ReceiptUpdate {
     }
 }
 
-pub trait ContractUpdate<T>: std::fmt::Debug
-where
-    T: Transport + Clone,
-{
-    type Contract;
-
-    fn apply_to(&self, ctx: &TestContext, contract: &Self::Contract) -> impl Future<Output = ()>;
-}
-
-impl<T> ContractUpdate<T> for ReceiptUpdate
-where
-    T: Transport + Clone,
-{
-    type Contract = EventEmitterInstance<T, RootProvider<T, Ethereum>>;
-
-    async fn apply_to(&self, ctx: &TestContext, contract: &Self::Contract) {
-        self.apply_update(ctx, contract).await
-    }
-}
 #[derive(Clone, Debug, Copy)]
 pub enum ChangeType {
     Deletion,

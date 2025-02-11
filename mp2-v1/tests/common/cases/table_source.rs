@@ -55,10 +55,8 @@ use rand::{
 };
 
 use crate::common::{
-    cases::{
-        contract::EventContract,
-        indexing::{ReceiptUpdate, TableRowValues},
-    },
+    bindings::eventemitter::EventEmitter::EventEmitterInstance,
+    cases::indexing::{ReceiptUpdate, TableRowValues},
     final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
     proof_storage::{ProofKey, ProofStorage},
     receipt_trie::prove_extractable,
@@ -68,7 +66,7 @@ use crate::common::{
 };
 
 use super::{
-    contract::{Contract, ContractController, MappingUpdate, SimpleSingleValues, TestContract},
+    contract::{Contract, ContractController, MappingUpdate, SimpleSingleValues},
     indexing::{ChangeType, TableRowUpdate, UpdateType, SINGLE_SLOTS, SINGLE_STRUCT_SLOT},
     slot_info::{LargeStruct, MappingInfo, StorageSlotMappingKey, StorageSlotValue, StructMapping},
 };
@@ -882,11 +880,8 @@ where
                 .wallet(ctx.wallet())
                 .on_http(ctx.rpc_url.parse().unwrap());
 
-            let event_emitter = EventContract::new(contract.address(), provider.root());
-            event_emitter
-                .apply_update(ctx, &contract_update)
-                .await
-                .unwrap();
+            let event_emitter = EventEmitterInstance::new(contract.address(), provider.root());
+            contract_update.apply_update(ctx, &event_emitter).await;
 
             let block_number = ctx.block_number().await;
             let new_block_number = block_number as BlockPrimaryIndex;
@@ -953,11 +948,8 @@ where
                 .wallet(ctx.wallet())
                 .on_http(ctx.rpc_url.parse().unwrap());
 
-            let event_emitter = EventContract::new(contract.address(), provider.root());
-            event_emitter
-                .apply_update(ctx, &contract_update)
-                .await
-                .unwrap();
+            let event_emitter = EventEmitterInstance::new(contract.address(), provider.root());
+            contract_update.apply_update(ctx, &event_emitter).await;
 
             let block_number = ctx.block_number().await;
             let new_block_number = block_number as BlockPrimaryIndex;
