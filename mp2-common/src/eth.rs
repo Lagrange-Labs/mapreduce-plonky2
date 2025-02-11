@@ -43,7 +43,7 @@ const RETRY_NUM: usize = 3;
 /// The maximum size an additional piece of data can be in bytes.
 /// It should always be a multiple of 32 since Solidity event data encodes every object in 32 byte chunks
 /// regardless of its true size.
-const MAX_RECEIPT_DATA_SIZE: usize = 32;
+pub const MAX_RECEIPT_DATA_SIZE: usize = 32;
 
 /// The size of an event topic rlp encoded.
 const ENCODED_TOPIC_SIZE: usize = 33;

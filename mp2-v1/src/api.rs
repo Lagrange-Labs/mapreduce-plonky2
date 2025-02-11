@@ -28,6 +28,7 @@ use itertools::Itertools;
 use log::debug;
 use mp2_common::{
     digest::Digest,
+    eth::EventLogInfo,
     group_hashing::map_to_curve_point,
     poseidon::H,
     types::HashOutput,
@@ -450,4 +451,11 @@ pub fn metadata_hash(
     );
     // compute final hash
     combine_digest_and_block(contract_digest + md_digest + length_digest)
+}
+
+/// Compute metadata hash for a table related to the provided event.
+pub fn receipt_metadata_hash<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+) -> MetadataHash {
+    combine_digest_and_block(TableMetadata::from(*event).digest())
 }

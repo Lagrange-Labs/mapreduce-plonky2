@@ -211,8 +211,8 @@ impl TableMetadata {
         value: &[u8],
         event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
     ) -> Point {
-        let mut tx_index_input = [0u8; 32];
-        tx_index_input[31] = tx_index as u8;
+        let tx_index_bytes = tx_index.to_be_bytes();
+        let tx_index_input = left_pad32(tx_index_bytes.as_slice());
 
         // The actual receipt data is item 1 in the list
         let node_rlp = rlp::Rlp::new(value);

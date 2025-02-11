@@ -20,14 +20,17 @@ use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
-    eth::{EventLogInfo, ProofQuery, ReceiptProofInfo, StorageSlot, StorageSlotNode},
+    eth::{
+        left_pad32, EventLogInfo, ProofQuery, ReceiptProofInfo, StorageSlot, StorageSlotNode,
+        MAX_RECEIPT_DATA_SIZE,
+    },
     proof::ProofWithVK,
     types::HashOutput,
 };
 use mp2_v1::{
     api::{
-        combine_digest_and_block, compute_table_info, merge_metadata_hash,
-        metadata_hash as metadata_hash_function, SlotInput, SlotInputs,
+        compute_table_info, merge_metadata_hash, metadata_hash as metadata_hash_function,
+        receipt_metadata_hash, SlotInput, SlotInputs,
     },
     indexing::{
         block::BlockPrimaryIndex,
@@ -36,9 +39,10 @@ use mp2_v1::{
     },
     values_extraction::{
         gadgets::{column_info::ExtractedColumnInfo, metadata_gadget::TableMetadata},
+        identifier_for_data_column, identifier_for_gas_used_column,
         identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
-        identifier_for_outer_mapping_key_column, identifier_for_tx_index_column,
-        identifier_for_value_column,
+        identifier_for_outer_mapping_key_column, identifier_for_topic_column,
+        identifier_for_tx_index_column, identifier_for_value_column,
         planner::Extractable,
         StorageSlotInfo,
     },
@@ -690,28 +694,40 @@ pub trait ReceiptExtractionArgs:
     ) -> Vec<TableRowUpdate<PrimaryIndex>> {
         let metadata = TableMetadata::from(*event);
 
-        let (_, row_id) = metadata.input_value_digest(&[&[0u8; 32]; 2]);
-        let input_columns_ids = metadata
-            .input_columns()
-            .iter()
-            .map(|col| col.identifier().0)
-            .collect::<Vec<u64>>();
-        let extracted_column_ids = metadata
-            .extracted_columns()
-            .iter()
-            .map(|col| col.identifier().0)
-            .collect::<Vec<u64>>();
+        let tx_index_identifier = identifier_for_tx_index_column(
+            &event.event_signature,
+            &event.address,
+            event.chain_id,
+            &[],
+        );
+        let gas_used_identifier = identifier_for_gas_used_column(
+            &event.event_signature,
+            &event.address,
+            event.chain_id,
+            &[],
+        );
 
         std::iter::once(TableRowUpdate::DeleteAll)
             .chain(proof_infos.iter().flat_map(|info| {
                 let receipt_with_bloom = info.to_receipt().unwrap();
 
-                let tx_index_cell = Cell::new(input_columns_ids[0], U256::from(info.tx_index));
+                let tx_index_cell = Cell::new(tx_index_identifier, U256::from(info.tx_index));
 
                 let gas_used_cell = Cell::new(
-                    input_columns_ids[1],
+                    gas_used_identifier,
                     U256::from(receipt_with_bloom.receipt.cumulative_gas_used),
                 );
+
+                let tx_index_inputs = left_pad32(info.tx_index.to_be_bytes().as_slice());
+                let gas_used_inputs = left_pad32(
+                    receipt_with_bloom
+                        .receipt
+                        .cumulative_gas_used
+                        .to_be_bytes()
+                        .as_slice(),
+                );
+                let (_, row_id) =
+                    metadata.input_value_digest(&[&tx_index_inputs, &gas_used_inputs]);
 
                 receipt_with_bloom
                     .logs()
@@ -732,18 +748,30 @@ pub trait ReceiptExtractionArgs:
                             .into_iter()
                             .skip(1)
                             .enumerate()
-                            .map(|(j, topic)| Cell::new(extracted_column_ids[j], topic.into()))
+                            .map(|(j, topic)| {
+                                let topic_id = identifier_for_topic_column(
+                                    &event.event_signature,
+                                    &event.address,
+                                    event.chain_id,
+                                    j as u8 + 1,
+                                    &[],
+                                );
+                                Cell::new(topic_id, topic.into())
+                            })
                             .collect::<Vec<Cell>>();
 
-                        let data_start = topics_cells.len();
                         let data_cells = data
-                            .chunks(32)
+                            .chunks(MAX_RECEIPT_DATA_SIZE)
                             .enumerate()
                             .map(|(j, data_slice)| {
-                                Cell::new(
-                                    extracted_column_ids[data_start + j],
-                                    U256::from_be_slice(data_slice),
-                                )
+                                let data_id = identifier_for_data_column(
+                                    &event.event_signature,
+                                    &event.address,
+                                    event.chain_id,
+                                    j as u8 + 1,
+                                    &[],
+                                );
+                                Cell::new(data_id, U256::from_be_slice(data_slice))
                             })
                             .collect::<Vec<Cell>>();
 
@@ -933,9 +961,7 @@ where
     }
 
     fn metadata_hash(&self, _contract_address: Address, _chain_id: u64) -> MetadataHash {
-        let table_metadata = TableMetadata::from(self.get_event());
-        let digest = table_metadata.digest();
-        combine_digest_and_block(digest)
+        receipt_metadata_hash(&self.get_event())
     }
 }
 
