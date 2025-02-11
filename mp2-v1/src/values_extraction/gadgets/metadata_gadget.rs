@@ -562,10 +562,17 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
                 // Calculate the column digest
                 let column_digest = column.digest(b);
                 // Enforce that we have the correct extraction_id
-                extraction_id.enforce_equal(b, &Array::from_array(column.extraction_id()));
+                let slice_len = b.constant(F::from_canonical_usize(PACKED_HASH_LEN));
+                let slices_equal = extraction_id.is_slice_equals(
+                    b,
+                    &Array::from_array(column.extraction_id()),
+                    slice_len,
+                );
                 // If selector is true (from self.real_columns) we need it to be false when we feed it into `column.extract_value()` later.
                 let selector = b.not(selector);
-
+                // If selector is true here its not a real column so we just set it to one.
+                let to_enforce = b.select(selector, one, slices_equal.target);
+                b.connect(to_enforce, one);
                 let location = b.add(log_offset, column.byte_offset());
 
                 // We iterate over the result bytes in reverse order, the first element that we want to access

@@ -460,6 +460,7 @@ mod tests {
     #[test]
     fn test_leaf_circuit() {
         const NODE_LEN: usize = 512;
+        test_leaf_circuit_helper::<0, 0, NODE_LEN>();
         test_leaf_circuit_helper::<1, 0, NODE_LEN>();
         test_leaf_circuit_helper::<2, 0, NODE_LEN>();
         test_leaf_circuit_helper::<3, 0, NODE_LEN>();

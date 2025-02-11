@@ -5,7 +5,7 @@ use aggregated_queries::{
     cook_query_unique_secondary_index, prove_query as prove_aggregation_query,
 };
 use alloy::primitives::U256;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use itertools::Itertools;
 use log::info;
 use mp2_v1::{
@@ -108,11 +108,7 @@ pub async fn test_query<T: TableSource>(
     table: Table,
     t: TableInfo<T>,
 ) -> Result<()> {
-    if t.source.can_query() {
-        query_mapping(ctx, &table, &t).await?;
-    } else {
-        return Err(anyhow!("Can't query this type of table source yet"));
-    }
+    query_mapping(ctx, &table, &t).await?;
 
     Ok(())
 }

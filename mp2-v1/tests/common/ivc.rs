@@ -38,9 +38,10 @@ impl TestContext {
                     .storage
                     .get_proof_exact(&index_root_key)
                     .expect("index tree proof is not stored");
-                if previous_block.is_some() {
+                if let Some(previous_block_number) = previous_block {
                     // Here we check to see if the last block that was inserted is the index tree
-                    let previous_ivc_key = ProofKey::IVC(bn - 1);
+                    let previous_ivc_key =
+                        self.get_previous_ivc_proof_key(previous_block_number)?;
                     let previous_proof = self.storage.get_proof_exact(&previous_ivc_key)?;
                     verifiable_db::ivc::CircuitInput::new_subsequent_input(
                         root_proof,
@@ -63,13 +64,20 @@ impl TestContext {
                         .expect("index tree proof is not stored");
                     // The previous block number is the current epoch rather confusingly
                     let prev_bn = index_tree.current_epoch().await? as usize;
-                    let previous_ivc_key = ProofKey::IVC(prev_bn);
-                    let previous_proof = self.storage.get_proof_exact(&previous_ivc_key)?;
-                    verifiable_db::ivc::CircuitInput::new_subsequent_input(
-                        root_proof,
-                        previous_proof,
-                    )
-                    .expect("unable to create ivc circuit inputs")
+                    let initial_epoch = index_tree.initial_epoch().await as usize;
+
+                    if prev_bn != initial_epoch {
+                        let previous_ivc_key = self.get_previous_ivc_proof_key(prev_bn)?;
+                        let previous_proof = self.storage.get_proof_exact(&previous_ivc_key)?;
+                        verifiable_db::ivc::CircuitInput::new_subsequent_input(
+                            root_proof,
+                            previous_proof,
+                        )
+                        .expect("unable to create ivc circuit inputs")
+                    } else {
+                        verifiable_db::ivc::CircuitInput::new_first_input(root_proof)
+                            .expect("unable to create ivc circuit inputs")
+                    }
                 } else {
                     return Err(anyhow!(
                         "Got an error when fetching previous epoch: {:?}",
@@ -96,5 +104,32 @@ impl TestContext {
             .store_proof(ProofKey::IVC(bn), ivc_proof)
             .expect("unable to store new ivc proof");
         Ok(())
+    }
+
+    fn get_previous_ivc_proof_key(
+        &mut self,
+        previous_block_number: usize,
+    ) -> anyhow::Result<ProofKey> {
+        let mut previous_ivc_key = ProofKey::IVC(previous_block_number);
+
+        let previous_proof = self.storage.get_proof_exact(&previous_ivc_key)?;
+        let proof = ProofWithVK::deserialize(&previous_proof)?;
+        let ivc_pi = PublicInputs::from_slice(&proof.proof().public_inputs);
+
+        // The block number is a u64 and the U256 is big endian encoded so we need the last one.
+        let block_number = ivc_pi.zi_u256().as_limbs()[3] + 1;
+
+        previous_ivc_key = ProofKey::IVC(block_number as usize);
+        while let Ok(prev_proof) = self.storage.get_proof_exact(&previous_ivc_key) {
+            let proof = ProofWithVK::deserialize(&prev_proof)?;
+            let ivc_pi = PublicInputs::from_slice(&proof.proof().public_inputs);
+
+            // The block number is a u64 and the U256 is big endian encoded so we need the last one.
+            let block_number = ivc_pi.zi_u256().as_limbs()[3] + 1;
+
+            previous_ivc_key = ProofKey::IVC(block_number as usize);
+        }
+
+        Ok(previous_ivc_key)
     }
 }

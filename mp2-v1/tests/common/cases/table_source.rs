@@ -334,6 +334,16 @@ impl<K: StorageSlotMappingKey, V: StorageSlotValue> UniqueMappingEntry<K, V> {
     }
 }
 
+/// Enum used to identify where original data has come from, used by queries
+/// to work out whether they can be run on the table.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub(crate) enum TableType {
+    Simple,
+    Mapping,
+    Receipt,
+    Merge,
+}
+
 pub(crate) trait TableSource {
     type Metadata;
 
@@ -361,7 +371,8 @@ pub(crate) trait TableSource {
 
     fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash;
 
-    fn can_query(&self) -> bool;
+    #[allow(dead_code)]
+    fn table_type(&self) -> TableType;
 }
 
 impl TableSource for SingleExtractionArgs {
@@ -403,8 +414,8 @@ impl TableSource for SingleExtractionArgs {
         metadata_hash(slot, &contract_address, chain_id, vec![])
     }
 
-    fn can_query(&self) -> bool {
-        false
+    fn table_type(&self) -> TableType {
+        TableType::Simple
     }
 }
 
@@ -446,8 +457,8 @@ impl TableSource for MergeSource {
         merge_metadata_hash(contract_address, chain_id, vec![], single, mapping)
     }
 
-    fn can_query(&self) -> bool {
-        true
+    fn table_type(&self) -> TableType {
+        TableType::Merge
     }
 }
 
@@ -848,8 +859,8 @@ where
 {
     type Metadata = EventLogInfo<{ R::NO_TOPICS }, { R::MAX_DATA_WORDS }>;
 
-    fn can_query(&self) -> bool {
-        true
+    fn table_type(&self) -> TableType {
+        TableType::Receipt
     }
 
     fn get_data(&self) -> Self::Metadata {
@@ -907,7 +918,7 @@ where
             .wallet(ctx.wallet())
             .on_http(ctx.rpc_url.parse().unwrap());
         let block_data =
-            ReceiptBlockData::get_block_data(&self.get_event(), bn as u64, provider.root()).await?;
+            ReceiptBlockData::get_block_data(&event, bn as u64, provider.root()).await?;
         let mut value_proof_plan =
             EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>::create_update_plan(
                 &block_data,
@@ -1558,8 +1569,8 @@ where
         metadata_hash(self.get_data(), &contract_address, chain_id, vec![])
     }
 
-    fn can_query(&self) -> bool {
-        true
+    fn table_type(&self) -> TableType {
+        TableType::Mapping
     }
 }
 
