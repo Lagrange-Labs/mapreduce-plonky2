@@ -12,7 +12,7 @@ use mp2_common::{
     CHasher, F,
 };
 use plonky2::{
-    field::types::{Field, Sample},
+    field::types::{Field, PrimeField64, Sample},
     hash::hash_types::{HashOut, HashOutTarget},
     iop::{
         target::{BoolTarget, Target},
@@ -25,6 +25,8 @@ use plonky2_ecgfp5::{curve::curve::Point, gadgets::curve::CurveTarget};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::iter::once;
+
+use crate::values_extraction::ColumnId;
 
 /// Trait defining common functionality between [`InputColumnInfo`] and [`ExtractedColumnInfo`]
 pub trait ColumnInfo {
@@ -76,7 +78,7 @@ impl InputColumnInfo {
         // key_column_md = H( "\0KEY" || slot)
         let inputs = [
             self.metadata_prefix().as_slice(),
-            self.extraction_id().as_slice(),
+            self.extraction_identifier.as_slice(),
         ]
         .concat();
         H::hash_no_pad(&inputs)
@@ -87,17 +89,18 @@ impl InputColumnInfo {
         let metadata = self.mpt_metadata();
 
         // digest = D(mpt_metadata || info.identifier)
-        let inputs = [metadata.elements.as_slice(), &[self.identifier()]].concat();
+        let inputs = [metadata.elements.as_slice(), &[self.identifier]].concat();
 
         map_to_curve_point(&inputs)
     }
 
-    pub fn extraction_id(&self) -> [F; 8] {
+    pub fn extraction_id(&self) -> [u32; 8] {
         self.extraction_identifier
+            .map(|elem| elem.to_canonical_u64() as u32)
     }
 
-    pub fn identifier(&self) -> F {
-        self.identifier
+    pub fn identifier(&self) -> ColumnId {
+        self.identifier.to_canonical_u64()
     }
 
     pub fn metadata_prefix(&self) -> Vec<F> {
@@ -112,7 +115,7 @@ impl InputColumnInfo {
     pub fn value_digest(&self, value: &[u8]) -> Point {
         let bytes = left_pad32(value);
 
-        let inputs = once(self.identifier())
+        let inputs = once(self.identifier)
             .chain(
                 bytes
                     .pack(Endianness::Big)
@@ -231,8 +234,8 @@ impl ExtractedColumnInfo {
     pub fn mpt_metadata(&self) -> HashOut<F> {
         // metadata = H(info.extraction_id || info.location_offset || info.byte_offset || info.length)
         let inputs = [
-            self.extraction_id().as_slice(),
-            &[self.location_offset(), self.byte_offset(), self.length()],
+            self.extraction_identifier.as_slice(),
+            &[self.location_offset, self.byte_offset, self.length],
         ]
         .concat();
 
@@ -244,42 +247,43 @@ impl ExtractedColumnInfo {
         let metadata = self.mpt_metadata();
 
         // digest = D(mpt_metadata || info.identifier)
-        let inputs = [metadata.elements.as_slice(), &[self.identifier()]].concat();
+        let inputs = [metadata.elements.as_slice(), &[self.identifier]].concat();
 
         map_to_curve_point(&inputs)
     }
 
-    pub fn extraction_id(&self) -> [F; 8] {
+    pub fn extraction_id(&self) -> [u32; 8] {
         self.extraction_identifier
+            .map(|elem| elem.to_canonical_u64() as u32)
     }
 
-    pub fn identifier(&self) -> F {
-        self.identifier
+    pub fn identifier(&self) -> ColumnId {
+        self.identifier.to_canonical_u64()
     }
 
-    pub fn byte_offset(&self) -> F {
-        self.byte_offset
+    pub fn byte_offset(&self) -> u64 {
+        self.byte_offset.to_canonical_u64()
     }
 
-    pub fn length(&self) -> F {
-        self.length
+    pub fn length(&self) -> u64 {
+        self.length.to_canonical_u64()
     }
 
-    pub fn location_offset(&self) -> F {
-        self.location_offset
+    pub fn location_offset(&self) -> u64 {
+        self.location_offset.to_canonical_u64()
     }
 
     pub fn extract_value(&self, value: &[u8]) -> [u8; 32] {
         left_pad32(
-            &value[self.byte_offset().0 as usize
-                ..self.byte_offset().0 as usize + self.length.0 as usize],
+            &value
+                [self.byte_offset() as usize..self.byte_offset() as usize + self.length() as usize],
         )
     }
 
     pub fn value_digest(&self, value: &[u8]) -> Point {
         let bytes = self.extract_value(value);
 
-        let inputs = once(self.identifier())
+        let inputs = once(self.identifier)
             .chain(
                 bytes
                     .pack(Endianness::Big)
@@ -291,10 +295,10 @@ impl ExtractedColumnInfo {
     }
 
     pub fn receipt_value_digest(&self, value: &[u8], offset: usize) -> Point {
-        let start = offset + self.byte_offset().0 as usize;
+        let start = offset + self.byte_offset() as usize;
         let bytes = left_pad32(&value[start..start + self.length.0 as usize]);
 
-        let inputs = once(self.identifier())
+        let inputs = once(self.identifier)
             .chain(
                 bytes
                     .pack(Endianness::Big)
@@ -566,6 +570,6 @@ impl<T: WitnessWrite<F>> WitnessWriteColumnInfo for T {
         target: &InputColumnInfoTarget,
         value: &InputColumnInfo,
     ) {
-        self.set_target(target.identifier, value.identifier());
+        self.set_target(target.identifier, F::from_canonical_u64(value.identifier()));
     }
 }

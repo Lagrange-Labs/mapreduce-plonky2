@@ -104,7 +104,7 @@ impl TableColumns {
             .iter()
             .chain(once(&self.secondary))
             .find(|c| c.identifier() == identifier)
-            .expect("can't find cell from identifier")
+            .unwrap_or_else(|| panic!("can't find cell from identifier: {}", identifier))
             .clone()
     }
     pub fn ordered_cells(

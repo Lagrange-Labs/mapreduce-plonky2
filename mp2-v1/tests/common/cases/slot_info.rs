@@ -32,17 +32,22 @@ use std::{array, fmt::Debug, future::Future, hash::Hash};
 
 use super::contract::MappingUpdate;
 
+/// Trait that gives information about a solidity mapping
 pub(crate) trait MappingInfo: Sized {
+    /// The key to the mapping
     type Key: StorageSlotMappingKey;
+    /// The value stored in the mapping/final mapping if nested mappings
     type Value: StorageSlotValue;
+    /// The struct that is used as input to the contract method that updates this mapping
     type Call;
+    /// Converts a [`MappingUpdate`] to the struct defined by [`Self::Call`]
     fn to_call(update: &MappingUpdate<Self>) -> Self::Call;
-
+    /// Apply a list of updates to the contract
     fn call_contract<T: Transport + Clone, P: Provider<T, N>, N: Network>(
         contract: &SimpleInstance<T, P, N>,
         changes: Vec<Self::Call>,
     ) -> impl Future<Output = ()> + Send;
-
+    /// Sample a random key for a random update
     fn sample_key() -> Self::Key {
         Self::Key::sample_key()
     }

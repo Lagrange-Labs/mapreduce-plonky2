@@ -302,13 +302,13 @@ pub struct SlotInput {
 impl From<ExtractedColumnInfo> for SlotInput {
     fn from(value: ExtractedColumnInfo) -> Self {
         let extraction_id = value.extraction_id();
-        let slot = extraction_id[0].0 as u8;
+        let slot = extraction_id[7] as u8;
 
         SlotInput {
             slot,
-            byte_offset: value.byte_offset().0 as usize,
-            length: value.length().0 as usize,
-            evm_word: value.location_offset().0 as u32,
+            byte_offset: value.byte_offset() as usize,
+            length: value.length() as usize,
+            evm_word: value.location_offset() as u32,
         }
     }
 }
@@ -316,13 +316,13 @@ impl From<ExtractedColumnInfo> for SlotInput {
 impl From<&ExtractedColumnInfo> for SlotInput {
     fn from(value: &ExtractedColumnInfo) -> Self {
         let extraction_id = value.extraction_id();
-        let slot = extraction_id[0].0 as u8;
+        let slot = extraction_id[7] as u8;
 
         SlotInput {
             slot,
-            byte_offset: value.byte_offset().0 as usize,
-            length: value.length().0 as usize,
-            evm_word: value.location_offset().0 as u32,
+            byte_offset: value.byte_offset() as usize,
+            length: value.length() as usize,
+            evm_word: value.location_offset() as u32,
         }
     }
 }

@@ -1114,7 +1114,7 @@ mod tests {
             }
             // Mapping variable
             StorageSlot::Mapping(mapping_key, slot) => {
-                let key_id = metadata.input_columns()[0].identifier().to_canonical_u64();
+                let key_id = metadata.input_columns()[0].identifier();
                 let metadata_digest = compute_leaf_mapping_metadata_digest(&test_slot, key_id);
                 let values_digest = compute_leaf_mapping_values_digest(
                     &test_slot,
@@ -1123,7 +1123,7 @@ mod tests {
                     key_id,
                 );
 
-                let outer_key_id = metadata.input_columns()[0].identifier().0;
+                let outer_key_id = metadata.input_columns()[0].identifier();
 
                 let circuit_input = CircuitInput::new_mapping_variable_leaf(
                     node,
@@ -1153,7 +1153,7 @@ mod tests {
                 }
                 // Mapping Struct
                 StorageSlot::Mapping(mapping_key, slot) => {
-                    let key_id = metadata.input_columns()[0].identifier().to_canonical_u64();
+                    let key_id = metadata.input_columns()[0].identifier();
                     let metadata_digest = compute_leaf_mapping_metadata_digest(&test_slot, key_id);
                     let values_digest = compute_leaf_mapping_values_digest(
                         &test_slot,
@@ -1178,8 +1178,8 @@ mod tests {
                     match *grand {
                         StorageSlot::Mapping(outer_mapping_key, slot) => {
                             let input_columns = metadata.input_columns();
-                            let outer_key_id = input_columns[0].identifier().to_canonical_u64();
-                            let inner_key_id = input_columns[1].identifier().to_canonical_u64();
+                            let outer_key_id = input_columns[0].identifier();
+                            let inner_key_id = input_columns[1].identifier();
                             let outer_mapping_data = (outer_mapping_key, outer_key_id);
                             let inner_mapping_data = (inner_mapping_key, inner_key_id);
                             let metadata_digest = compute_leaf_mapping_of_mappings_metadata_digest(

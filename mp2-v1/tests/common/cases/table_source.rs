@@ -47,7 +47,7 @@ use mp2_v1::{
         StorageSlotInfo,
     },
 };
-use plonky2::field::types::PrimeField64;
+
 use rand::{
     distributions::{Alphanumeric, DistString},
     rngs::StdRng,
@@ -88,11 +88,11 @@ impl SlotEvmWordColumns {
     fn new(column_info: Vec<ExtractedColumnInfo>) -> Self {
         // Ensure the column information should have the same slot and EVM word.
 
-        let slot = column_info[0].extraction_id()[7].0 as u8;
-        let evm_word = column_info[0].location_offset().0 as u32;
+        let slot = column_info[0].extraction_id()[7] as u8;
+        let evm_word = column_info[0].location_offset() as u32;
         column_info[1..].iter().for_each(|col| {
-            let col_slot = col.extraction_id()[7].0 as u8;
-            let col_word = col.location_offset().0 as u32;
+            let col_slot = col.extraction_id()[7] as u8;
+            let col_word = col.location_offset() as u32;
             assert_eq!(col_slot, slot);
             assert_eq!(col_word, evm_word);
         });
@@ -101,11 +101,11 @@ impl SlotEvmWordColumns {
     }
     fn slot(&self) -> u8 {
         // The columns should have the same slot.
-        u8::try_from(self.0[0].extraction_id()[7].to_canonical_u64()).unwrap()
+        u8::try_from(self.0[0].extraction_id()[7]).unwrap()
     }
     fn evm_word(&self) -> u32 {
         // The columns should have the same EVM word.
-        u32::try_from(self.0[0].location_offset().to_canonical_u64()).unwrap()
+        u32::try_from(self.0[0].location_offset()).unwrap()
     }
     fn column_info(&self) -> &[ExtractedColumnInfo] {
         &self.0
@@ -1104,8 +1104,8 @@ impl SingleExtractionArgs {
             evm_word_col.column_info().iter().for_each(|col_info| {
                 let extracted_value = col_info.extract_value(value_bytes.as_slice());
                 let extracted_value = U256::from_be_bytes(extracted_value);
-                let id = col_info.identifier().to_canonical_u64();
-                let cell = Cell::new(col_info.identifier().to_canonical_u64(), extracted_value);
+                let id = col_info.identifier();
+                let cell = Cell::new(col_info.identifier(), extracted_value);
                 if Some(id) == secondary_id {
                     assert!(secondary_cell.is_none());
                     secondary_cell = Some(SecondaryIndexCell::new_from(cell, 0));
@@ -1764,10 +1764,7 @@ fn evm_word_column_info(table_info: &[ExtractedColumnInfo]) -> Vec<SlotEvmWordCo
     let mut column_info_map = HashMap::new();
     table_info.iter().for_each(|col| {
         column_info_map
-            .entry((
-                col.extraction_id()[7].0 as u8,
-                col.location_offset().0 as u32,
-            ))
+            .entry((col.extraction_id()[7] as u8, col.location_offset() as u32))
             .and_modify(|cols: &mut Vec<_>| cols.push(*col))
             .or_insert(vec![*col]);
     });

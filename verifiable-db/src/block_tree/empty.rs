@@ -8,6 +8,7 @@ use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     default_config,
+    group_hashing::CircuitBuilderGroupHashing,
     poseidon::H,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -84,6 +85,8 @@ impl EmptyCircuit {
         let metadata_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
 
         let h_old = b.add_virtual_hash();
+
+        b.connect_curve_points(curve_zero, extraction_pi.value_set_digest());
 
         // Register the public inputs.
         PublicInputs::new(

@@ -159,9 +159,9 @@ impl TableMetadata {
     }
 
     pub fn extracted_value_digest(&self, value: &[u8], slot: &StorageSlot) -> Point {
-        let mut slot_extraction_id = [F::ZERO; 8];
-        slot_extraction_id[7] = F::from_canonical_u8(slot.slot());
-        let location_offset = F::from_canonical_u32(slot.evm_offset());
+        let mut slot_extraction_id = [0u32; 8];
+        slot_extraction_id[7] = slot.slot() as u32;
+        let location_offset = slot.evm_offset() as u64;
         self.extracted_columns()
             .iter()
             .fold(Point::NEUTRAL, |acc, column| {

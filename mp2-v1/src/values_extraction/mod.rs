@@ -559,6 +559,20 @@ pub fn row_unique_data_for_mapping_of_mappings_leaf(
     H::hash_no_pad(&inputs).into()
 }
 
+/// Compute the row unique data for receipt leaf.
+pub fn row_unique_data_for_receipt_leaf(tx_index: &[u8], gas_used: &[u8]) -> HashOutput {
+    let [packed_tx_index, packed_gas_used] = [tx_index, gas_used].map(|key| {
+        left_pad32(key)
+            .pack(Endianness::Big)
+            .into_iter()
+            .map(F::from_canonical_u32)
+    });
+    // Compute the unique data to identify a row is the tx index and the gas used:
+    // row_unique_data = H(tx_index || gas_used)
+    let inputs = packed_tx_index.chain(packed_gas_used).collect_vec();
+    H::hash_no_pad(&inputs).into()
+}
+
 /// Function to compute a storage value digest
 fn storage_value_digest(
     table_metadata: &TableMetadata,

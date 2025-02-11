@@ -28,8 +28,9 @@ futures.workspace = true
 rand.workspace = true
 serial_test.workspace = true
 tokio.workspace = true
-mp2_v1 = { path = "../mp2-v1" }
+
 
 [features]
 original_poseidon = ["mp2_common/original_poseidon"]
-results_tree = [] # temporary features to disable compiling results_tree code by default, as it is still WiP
+results_tree = [
+] # temporary features to disable compiling results_tree code by default, as it is still WiP
