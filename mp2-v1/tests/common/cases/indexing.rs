@@ -380,7 +380,7 @@ impl<T: TableSource> TableIndexing<T> {
         let contract_address = contract.address;
         let chain_id = contract.chain_id;
 
-        let slot_input = SlotInput::new(MAPPING_SLOT, 0, 32, 0);
+        let slot_input = SlotInput::new(MAPPING_SLOT, 12, 20, 0);
         let key_id =
             identifier_for_mapping_key_column(MAPPING_SLOT, &contract_address, chain_id, vec![]);
         let value_id =
@@ -878,16 +878,17 @@ impl<T: TableSource> TableIndexing<T> {
             .await
             .expect("can't update index tree");
         info!("Applied updates to index tree for block {current_block}");
-        let _root_proof_key = ctx.prove_update_index_tree(bn, &self.table, updates).await;
+        let root_proof_key = ctx
+            .prove_update_index_tree(bn, &self.table, updates)
+            .await?;
         info!("Generated final BLOCK tree proofs for block {current_block}");
-        let _ = ctx
-            .prove_ivc(
-                &self.table.public_name,
-                bn,
-                &self.table.index,
-                expected_metadata_hash,
-            )
-            .await;
+        ctx.prove_ivc(
+            bn,
+            root_proof_key,
+            &self.table.index,
+            expected_metadata_hash,
+        )
+        .await?;
         info!("Generated final IVC proof for block {}", current_block);
 
         Ok(())

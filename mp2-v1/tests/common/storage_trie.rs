@@ -501,7 +501,7 @@ impl TestStorageTrie {
             .rev()
             .map(|node| node.to_vec())
             .collect();
-
+        println!("first node: {:?}", nodes[0]);
         log::debug!(
             "Storage slot {storage_slot:?} queried, appending `{}` proof nodes to the trie",
             nodes.len()
