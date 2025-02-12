@@ -1,12 +1,13 @@
 //! Module to handle the block number as a primary index
-use anyhow::anyhow;
+use crate::query::planner::TreeFetcher;
+
 use ryhope::{
+    error::RyhopeError,
     storage::{pgsql::PgsqlStorage, RoEpochKvStorage},
     tree::{sbbst, TreeTopology},
     MerkleTreeKvDb,
 };
-
-use crate::query::planner::TreeFetcher;
+use std::fmt::{Display, Formatter};
 
 use super::index::IndexNode;
 
@@ -25,16 +26,41 @@ pub type BlockPrimaryIndex = BlockTreeKey;
 pub type IndexStorage = PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>, false>;
 pub type MerkleIndexTree = MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>;
 
+#[derive(Debug)]
+pub enum EpochError {
+    NotFound(usize),
+    RyhopeError(RyhopeError),
+}
+
+impl std::error::Error for EpochError {}
+
+impl Display for EpochError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EpochError::NotFound(epoch) => write!(f, "epoch {} not found in the tree", epoch),
+            EpochError::RyhopeError(e) => {
+                write!(f, "Ryhope encountered an error {{ inner: {:?} }}", e)
+            }
+        }
+    }
+}
+
+impl From<RyhopeError> for EpochError {
+    fn from(value: RyhopeError) -> Self {
+        EpochError::RyhopeError(value)
+    }
+}
+
 /// Get the previous epoch of `epoch` in `tree`
 pub async fn get_previous_epoch(
     tree: &MerkleIndexTree,
     epoch: BlockPrimaryIndex,
-) -> anyhow::Result<Option<BlockPrimaryIndex>> {
+) -> Result<Option<BlockPrimaryIndex>, EpochError> {
     let current_epoch = tree.current_epoch().await?;
     let epoch_ctx = tree
         .node_context(&epoch)
         .await?
-        .ok_or(anyhow!("epoch {epoch} not found in the tree"))?;
+        .ok_or(EpochError::NotFound(epoch))?;
 
     Ok(tree
         .get_predecessor(&epoch_ctx, current_epoch)
@@ -46,12 +72,12 @@ pub async fn get_previous_epoch(
 pub async fn get_next_epoch(
     tree: &MerkleIndexTree,
     epoch: BlockPrimaryIndex,
-) -> anyhow::Result<Option<BlockPrimaryIndex>> {
+) -> Result<Option<BlockPrimaryIndex>, EpochError> {
     let current_epoch = tree.current_epoch().await?;
     let epoch_ctx = tree
         .node_context(&epoch)
         .await?
-        .ok_or(anyhow!("epoch {epoch} not found in the tree"))?;
+        .ok_or(EpochError::NotFound(epoch))?;
 
     Ok(tree
         .get_successor(&epoch_ctx, current_epoch)

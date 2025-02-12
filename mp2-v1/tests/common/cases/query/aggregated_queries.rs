@@ -3,15 +3,18 @@ use plonky2::{
 };
 use std::collections::HashMap;
 
-use crate::common::{
-    cases::{
-        indexing::BLOCK_COLUMN_NAME,
-        query::{QueryCooking, SqlReturn, SqlType, NUM_CHUNKS, NUM_ROWS},
-        table_source::{TableSource, BASE_VALUE},
+use crate::{
+    common::{
+        cases::{
+            indexing::BLOCK_COLUMN_NAME,
+            query::{QueryCooking, SqlReturn, SqlType, NUM_CHUNKS, NUM_ROWS},
+            table_source::BASE_VALUE,
+        },
+        proof_storage::{ProofKey, ProofStorage},
+        table::Table,
+        TableInfo,
     },
-    proof_storage::{ProofKey, ProofStorage},
-    table::Table,
-    TableInfo,
+    TableSource,
 };
 
 use crate::context::TestContext;

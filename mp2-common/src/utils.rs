@@ -146,6 +146,7 @@ pub fn less_than<F: RichField + Extendable<D>, const D: usize>(
 ///
 /// Will panic if `n >= F::BITS-1`.
 /// This variant is unsafe since it assumes that `a < 2^n` and `b < 2^n`;
+/// It will however still check this if `a` or `b` are constants.
 /// undefined behavior may occur if this assumption is not ensured by the
 /// caller
 pub fn less_than_unsafe<F: RichField + Extendable<D>, const D: usize>(
@@ -154,6 +155,12 @@ pub fn less_than_unsafe<F: RichField + Extendable<D>, const D: usize>(
     b: Target,
     n: usize,
 ) -> BoolTarget {
+    if let Some(value) = builder.target_as_constant(a) {
+        assert!(F::to_canonical_u64(&value) < (1u64 << n))
+    }
+    if let Some(value) = builder.target_as_constant(b) {
+        assert!(F::to_canonical_u64(&value) < (1u64 << n))
+    }
     assert!(n < F::BITS - 1);
 
     let power_of_two = builder.constant(F::from_canonical_u64(1 << n));

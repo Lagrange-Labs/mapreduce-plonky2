@@ -323,7 +323,14 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         k: &K,
         s: &S,
     ) -> Result<Option<NodePath<K>>, RyhopeError> {
-        let mut path = Vec::with_capacity(self.size(s).await?.ilog2() as usize);
+        // Since ilog2() panics if used on zero we first check self.size(s) and short circuit out
+        // if it returns 0.
+        let size = self.size(s).await?;
+        if size == 0 {
+            return Ok(None);
+        }
+
+        let mut path = Vec::with_capacity(size.ilog2() as usize);
 
         if let Some(root) = s.state().fetch().await?.root.as_ref() {
             let mut cursor = root.to_owned();

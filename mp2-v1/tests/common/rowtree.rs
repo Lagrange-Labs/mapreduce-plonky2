@@ -11,7 +11,7 @@ use mp2_v1::{
     },
     values_extraction::{
         row_unique_data_for_mapping_leaf, row_unique_data_for_mapping_of_mappings_leaf,
-        row_unique_data_for_single_leaf,
+        row_unique_data_for_receipt_leaf, row_unique_data_for_single_leaf,
     },
 };
 use plonky2::plonk::config::GenericHashOut;
@@ -141,7 +141,7 @@ impl TestContext {
                     );
 
                     // The receipt row unique id is computed in the same way as mapping of mappings
-                    row_unique_data_for_mapping_of_mappings_leaf(&tx_index, &gas_used)
+                    row_unique_data_for_receipt_leaf(&tx_index, &gas_used)
                 }
             };
             // NOTE remove that when playing more with sec. index

@@ -104,7 +104,7 @@ impl TableColumns {
             .iter()
             .chain(once(&self.secondary))
             .find(|c| c.identifier() == identifier)
-            .expect("can't find cell from identifier")
+            .unwrap_or_else(|| panic!("can't find cell from identifier: {}", identifier))
             .clone()
     }
     pub fn ordered_cells(
@@ -382,7 +382,12 @@ impl Table {
         &mut self,
         new_primary: BlockPrimaryIndex,
         updates: Vec<TreeRowUpdate>,
-    ) -> Result<RowUpdateResult> {
+    ) -> Result<Option<RowUpdateResult>> {
+        if let &[TreeRowUpdate::Wipe] = updates.as_slice() {
+            // If its just a wipe then we do nothing and just return None as the tree will be wiped before the next time
+            // an actual value is inserted.
+            return Ok(None);
+        }
         let out = self
             .row
             .in_transaction(|t| {
@@ -406,6 +411,9 @@ impl Table {
                             }
                             TreeRowUpdate::Insertion(row) => {
                                 t.store(row.k.clone(), row.payload.clone()).await?;
+                            }
+                            TreeRowUpdate::Wipe => {
+                                t.remove_all().await?;
                             }
                         }
                     }
@@ -449,15 +457,18 @@ impl Table {
                 println!("Out was an error: {:?}", out);
             }
             println!("\n+++++++++++++++++++++++++++++++++\n");
-            let root = self.row.root_data().await?.unwrap();
-            println!(
-                " ++ After row update, row cell tree root tree proof hash = {:?}",
-                hex::encode(root.cell_root_hash.unwrap().0)
-            );
+            let root_opt = self.row.root_data().await?;
+            match root_opt {
+                Some(root) => println!(
+                    " ++ After row update, row cell tree root tree proof hash = {:?}",
+                    hex::encode(root.cell_root_hash.unwrap().0)
+                ),
+                None => println!(" ++ After row update, row cell tree was empty",),
+            }
             self.row.print_tree().await;
             println!("\n+++++++++++++++++++++++++++++++++\n");
         }
-        Ok(out?)
+        Ok(Some(out?))
     }
 
     // apply the transformation on the index tree and returns the new nodes to prove
@@ -465,19 +476,8 @@ impl Table {
     pub async fn apply_index_update(
         &mut self,
         updates: IndexUpdate<BlockPrimaryIndex>,
-    ) -> anyhow::Result<IndexUpdateResult<BlockTreeKey>> {
-        let plan = self
-            .index
-            .in_transaction(|t| {
-                async move {
-                    t.store(updates.added_index.0, updates.added_index.1)
-                        .await?;
-                    Ok(())
-                }
-                .boxed()
-            })
-            .await?;
-        Ok(IndexUpdateResult { plan })
+    ) -> anyhow::Result<Option<IndexUpdateResult<BlockTreeKey>>> {
+        updates.apply_update(self).await
     }
 }
 
@@ -485,8 +485,32 @@ impl Table {
 pub struct IndexUpdate<PrimaryIndex> {
     // TODO: at the moment we only append one by one the block.
     // Depending on how we do things for CSV, this might be a vector
-    pub added_index: (PrimaryIndex, IndexNode<PrimaryIndex>),
+    pub added_index: (PrimaryIndex, Option<IndexNode<PrimaryIndex>>),
     // TODO for CSV modification and deletion ?
+}
+
+impl IndexUpdate<BlockPrimaryIndex> {
+    pub(crate) async fn apply_update(
+        &self,
+        table: &mut Table,
+    ) -> anyhow::Result<Option<IndexUpdateResult<BlockTreeKey>>> {
+        if let (bn, Some(node)) = self.added_index.clone() {
+            let plan = table
+                .index
+                .in_transaction(|t| {
+                    async move {
+                        t.store(bn, node).await?;
+                        Ok(())
+                    }
+                    .boxed()
+                })
+                .await?;
+            Ok(Some(IndexUpdateResult { plan }))
+        } else {
+            // In this case there was no new node to store so we simply return None
+            Ok(None)
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -500,6 +524,7 @@ pub enum TreeRowUpdate {
     Insertion(Row<BlockPrimaryIndex>),
     Update(Row<BlockPrimaryIndex>),
     Deletion(RowTreeKey),
+    Wipe,
 }
 
 #[derive(Clone, Debug)]

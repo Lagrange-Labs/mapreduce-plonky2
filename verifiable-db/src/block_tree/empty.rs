@@ -4,15 +4,17 @@
 use super::public_inputs::PublicInputs;
 use crate::extraction::{ExtractionPI, ExtractionPIWrap};
 
+use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     default_config,
+    group_hashing::CircuitBuilderGroupHashing,
     poseidon::H,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
     types::CBuilder,
-    u256::CircuitBuilderU256,
+    u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
     CHasher, C, D, F,
 };
@@ -42,6 +44,8 @@ pub struct EmptyWires {
     /// The old root of the tree,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) h_old: HashOutTarget,
+    /// The old minimum value
+    pub(crate) min_val: UInt256Target,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -50,6 +54,8 @@ pub struct EmptyCircuit {
     pub(crate) index_identifier: F,
     /// The old root of the tree,
     pub(crate) h_old: HashOut<F>,
+    /// The old minimum value
+    pub(crate) min_val: U256,
 }
 
 impl EmptyCircuit {
@@ -57,6 +63,8 @@ impl EmptyCircuit {
         let zero_256 = b.zero_u256();
         let curve_zero = b.curve_zero();
         let index_identifier = b.add_virtual_target();
+
+        let min_val = b.add_virtual_u256();
 
         let extraction_pi = E::PI::from_slice(extraction_pi);
 
@@ -78,11 +86,13 @@ impl EmptyCircuit {
 
         let h_old = b.add_virtual_hash();
 
+        b.connect_curve_points(curve_zero, extraction_pi.value_set_digest());
+
         // Register the public inputs.
         PublicInputs::new(
             &h_old.to_targets(),
             &h_old.to_targets(),
-            &zero_256.to_targets(),
+            &min_val.to_targets(),
             &zero_256.to_targets(),
             &block_number,
             &extraction_pi.commitment(),
@@ -95,12 +105,14 @@ impl EmptyCircuit {
         EmptyWires {
             index_identifier,
             h_old,
+            min_val,
         }
     }
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &EmptyWires) {
         pw.set_target(wires.index_identifier, self.index_identifier);
+        pw.set_u256_target(&wires.min_val, self.min_val);
         pw.set_hash_target(wires.h_old, self.h_old);
     }
 }
@@ -210,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn test_block_index_parent_circuit() {
+    fn test_block_index_empty_circuit() {
         test_empty_circuit();
     }
 
@@ -221,6 +233,7 @@ mod tests {
 
         let h_old = HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
 
+        let min_val = U256::from_limbs(std::array::from_fn(|_| rng.gen()));
         let extraction_pi =
             &random_extraction_pi(&mut rng, U256::from(1), &Digest::NEUTRAL.to_fields(), false);
 
@@ -228,6 +241,7 @@ mod tests {
             c: EmptyCircuit {
                 index_identifier,
                 h_old,
+                min_val,
             },
             extraction_pi,
         };
@@ -248,7 +262,8 @@ mod tests {
         }
         // Check minimum block number
         {
-            assert_eq!(pi.min, [F::ZERO; 8]);
+            let exp_val: [F; 8] = min_val.to_fields().try_into().unwrap();
+            assert_eq!(pi.min, exp_val);
         }
         // Check maximum block number
         {
