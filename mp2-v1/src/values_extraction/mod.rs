@@ -297,12 +297,12 @@ fn compute_id_with_prefix_raw(prefix: &[u8], slot: u8, extra: Vec<u8>) -> Column
 
 /// Compute the row unique data for single leaf.
 pub fn row_unique_data_for_single_leaf() -> HashOutput {
-    row_unique_data(vec![].into_iter())
+    row_unique_data(vec![])
 }
 
 /// Compute the row unique data for mapping leaf.
 pub fn row_unique_data_for_mapping_leaf(mapping_key: &[u8]) -> HashOutput {
-    row_unique_data(vec![mapping_key].into_iter())
+    row_unique_data(vec![mapping_key])
 }
 
 /// Compute the row unique data for mapping of mappings leaf.
@@ -310,7 +310,7 @@ pub fn row_unique_data_for_mapping_of_mappings_leaf(
     outer_mapping_key: &[u8],
     inner_mapping_key: &[u8],
 ) -> HashOutput {
-    row_unique_data(vec![outer_mapping_key, inner_mapping_key].into_iter())
+    row_unique_data(vec![outer_mapping_key, inner_mapping_key])
 }
 
 /// Compute the metadata digest for single variable leaf.
@@ -496,8 +496,9 @@ pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: u
 }
 
 /// Compute the row unique data using the set of column values provided as input
-pub fn row_unique_data<'a, I: Iterator<Item = &'a [u8]>>(columns: I) -> HashOutput {
+pub fn row_unique_data<'a, I: IntoIterator<Item = &'a [u8]>>(columns: I) -> HashOutput {
     let packed_columns = columns
+        .into_iter()
         .flat_map(|column| {
             left_pad32(column)
                 .pack(Endianness::Big)

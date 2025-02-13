@@ -16,7 +16,7 @@ use crate::common::{
 
 use crate::context::TestContext;
 use alloy::primitives::U256;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use futures::{stream, FutureExt, StreamExt};
 
 use itertools::Itertools;
@@ -738,41 +738,42 @@ pub(crate) async fn cook_query_non_matching_entries_some_blocks(
 /// Cook a query with a block range that doesn't match any primary index value in
 /// the table. Differently from `cook_query_no_matching_entries`, this query uses
 /// a block range that is entirely between 2 subsequent epochs in the index tree,
-/// therefore it is meaningful only in tables where epochs may be non-consecutive
+/// therefore it is meaningful only in tables where epochs may be non-consecutive.
+/// The method returns None if there are no non-consecutive epochs in the index tree.
 pub(crate) async fn cook_query_no_matching_block_range(
     table: &Table,
     info: &TableInfo,
-) -> Result<QueryCooking> {
+) -> Result<Option<QueryCooking>> {
     let subsequent_epochs = subsequent_epochs(table).await?;
     // find if there are 2 subsequent epochs in the index tree which are not consecutive
-    let non_consecutive_epochs = subsequent_epochs
+    Ok(subsequent_epochs
         .into_iter()
-        .find_map(|(e0, e1)| (e1 > e0 + 1).then_some((e0, e1)))
-        .ok_or(anyhow!("No non-consecutive epochs found in the index tree"))?;
+        .find(|(e0, e1)| *e1 > *e0 + 1)
+        .map(|non_consecutive_epochs| {
+            // now choose min and max block between the identifier non-consecutive epochs
+            let min_block = non_consecutive_epochs.0 as BlockPrimaryIndex + 1;
+            let max_block = non_consecutive_epochs.1 as BlockPrimaryIndex - 1;
 
-    // now choose min and max block between the identifier non-consecutive epochs
-    let min_block = non_consecutive_epochs.0 as BlockPrimaryIndex + 1;
-    let max_block = non_consecutive_epochs.1 as BlockPrimaryIndex - 1;
+            let value_column = &info.value_column;
+            let table_name = &table.public_name;
+            let placeholders =
+                Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
 
-    let value_column = &info.value_column;
-    let table_name = &table.public_name;
-    let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
-
-    let query_str = format!(
-        "SELECT AVG({value_column})
-                FROM {table_name}
-                WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
-                AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER};"
-    );
-
-    Ok(QueryCooking {
-        query: query_str,
-        placeholders,
-        min_block,
-        max_block: max_block as usize,
-        limit: None,
-        offset: None,
-    })
+            let query_str = format!(
+                "SELECT AVG({value_column})
+                        FROM {table_name}
+                        WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
+                        AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER};"
+            );
+            QueryCooking {
+                query: query_str,
+                placeholders,
+                min_block,
+                max_block,
+                limit: None,
+                offset: None,
+            }
+        }))
 }
 
 /// Utility function to associated to each row in the tree, the blocks where the row

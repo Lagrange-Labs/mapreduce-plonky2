@@ -109,26 +109,10 @@ pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Re
         | TableSource::Merge(_)
         | TableSource::MappingStruct(_, _)
         | TableSource::MappingOfSingleValueMappings(_)
-        | TableSource::MappingOfStructMappings(_) => query_mapping(ctx, &table, &t).await?,
-        TableSource::OffChain(_) => {
-            query_mapping(ctx, &table, &t).await?;
-            // for off-chain data we can also run queries that require having non-consecutive blocks
-            query_table_with_no_consecutive_blocks(ctx, &table, &t).await?
-        }
+        | TableSource::MappingOfStructMappings(_)
+        | TableSource::OffChain(_) => query_mapping(ctx, &table, &t).await?,
         _ => unimplemented!("yet"),
     }
-    Ok(())
-}
-
-// These queries can be run only on tables where there might be non-conseuctive blocks
-async fn query_table_with_no_consecutive_blocks(
-    ctx: &mut TestContext,
-    table: &Table,
-    info: &TableInfo,
-) -> Result<()> {
-    let table_hash = info.metadata_hash();
-    let query_info = cook_query_no_matching_block_range(table, info).await?;
-    test_query_mapping(ctx, table, query_info, &table_hash).await?;
     Ok(())
 }
 
@@ -153,6 +137,12 @@ async fn query_mapping(ctx: &mut TestContext, table: &Table, info: &TableInfo) -
     // cook query with block query range partially overlapping with blocks in the DB
     let query_info = cook_query_partial_block_range(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    // cook query with a block number range that is entirely between 2 subsequent blocks
+    // in the DB; we actually test this query only on tables where such a range can be found,
+    // that is on tables where there are at least 2 non-consecutive blocks
+    if let Some(query_info) = cook_query_no_matching_block_range(table, info).await? {
+        test_query_mapping(ctx, table, query_info, &table_hash).await?;
+    }
     // cook simple no aggregation query with matching rows
     let query_info = cook_query_with_matching_rows(table, info).await?;
     test_query_mapping(ctx, table, query_info, &table_hash).await?;
