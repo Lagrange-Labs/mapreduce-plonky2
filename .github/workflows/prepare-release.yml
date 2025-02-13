@@ -34,7 +34,7 @@ jobs:
           pr-meta-comment: false
           pr-merge-strategy: "squash"
   public-params:
-    if: inputs.bump == "major"
+    if: inputs.bump == 'major'
     name: Generate & Upload PPs
     runs-on: ['memory:32GB']
     environment: CI
