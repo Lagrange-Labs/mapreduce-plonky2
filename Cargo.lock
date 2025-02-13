@@ -2172,7 +2172,7 @@ dependencies = [
  "k256",
  "log",
  "rand 0.8.5",
- "rlp 0.5.2",
+ "rlp",
  "serde",
  "sha3",
  "zeroize",
@@ -2306,7 +2306,7 @@ dependencies = [
  "keccak-hash 0.10.0",
  "log",
  "parking_lot",
- "rlp 0.5.2",
+ "rlp",
 ]
 
 [[package]]
@@ -2544,7 +2544,7 @@ dependencies = [
  "once_cell",
  "open-fastrlp",
  "rand 0.8.5",
- "rlp 0.5.2",
+ "rlp",
  "serde",
  "serde_json",
  "strum",
@@ -2574,7 +2574,7 @@ dependencies = [
  "once_cell",
  "open-fastrlp",
  "rand 0.8.5",
- "rlp 0.5.2",
+ "rlp",
  "serde",
  "serde_json",
  "strum",
@@ -3866,7 +3866,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f28220f89297a075ddc7245cd538076ee98b01f2a9c23a53a4f1105d5a322808"
 dependencies = [
- "rlp 0.5.2",
+ "rlp",
 ]
 
 [[package]]
@@ -4380,7 +4380,7 @@ dependencies = [
  "plonky2_ecgfp5",
  "poseidon2_plonky2",
  "rand 0.8.5",
- "rlp 0.6.1",
+ "rlp",
  "rstest 0.23.0",
  "serde",
  "sha3",
@@ -4410,7 +4410,7 @@ dependencies = [
  "plonky2_ecgfp5",
  "poseidon2_plonky2",
  "rand 0.8.5",
- "rlp 0.5.2",
+ "rlp",
  "serde",
  "sha3",
 ]
@@ -4483,7 +4483,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "recursion_framework 1.2.1",
- "rlp 0.6.1",
+ "rlp",
  "ryhope 1.2.1",
  "serde",
  "serde_json",
@@ -4522,7 +4522,7 @@ dependencies = [
  "plonky2_ecgfp5",
  "rand 0.8.5",
  "recursion_framework 1.2.1 (git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?rev=1.2.1)",
- "rlp 0.5.2",
+ "rlp",
  "ryhope 1.2.1 (git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?rev=1.2.1)",
  "serde",
  "serde_json",
@@ -5886,16 +5886,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rlp"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa24e92bb2a83198bb76d661a71df9f7076b8c420b8696e4d3d97d50d94479e3"
-dependencies = [
- "bytes",
- "rustc-hex",
-]
-
-[[package]]
 name = "rlp-derive"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5982,7 +5972,7 @@ dependencies = [
  "primitive-types 0.12.2",
  "proptest",
  "rand 0.8.5",
- "rlp 0.5.2",
+ "rlp",
  "ruint-macro",
  "serde",
  "thiserror 2.0.11",
