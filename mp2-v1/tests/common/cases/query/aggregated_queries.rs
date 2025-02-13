@@ -1,7 +1,7 @@
 use plonky2::{
     field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::GenericHashOut,
 };
-use std::collections::HashMap;
+use std::{cmp::max, collections::HashMap};
 
 use crate::common::{
     cases::{
@@ -117,10 +117,10 @@ pub(crate) async fn prove_query(
         )
         .find_node_for_non_existence(current_epoch as BlockPrimaryIndex)
         .await
-        .unwrap_or_else(|_| {
+        .unwrap_or_else(|e| {
             panic!(
                 "Empty block range to be proven for query bounds {}, {}, but no node
-                    to be proven with non-existence circuit was found. Something is wrong",
+                    to be proven with non-existence circuit was found: {e:?}",
                 planner.query.min_block, planner.query.max_block
             )
         });
@@ -672,7 +672,7 @@ pub(crate) async fn cook_query_no_matching_entries(
 ) -> Result<QueryCooking> {
     let initial_epoch = table.row.initial_epoch().await;
     // choose query bounds outside of the range [initial_epoch, last_epoch]
-    let min_block = 0;
+    let min_block = max(0, initial_epoch - 2) as usize;
     let max_block = initial_epoch - 1;
     // now we can fetch the key that we want
     let value_column = &info.value_column;
@@ -735,6 +735,47 @@ pub(crate) async fn cook_query_non_matching_entries_some_blocks(
     })
 }
 
+/// Cook a query with a block range that doesn't match any primary index value in
+/// the table. Differently from `cook_query_no_matching_entries`, this query uses
+/// a block range that is entirely between 2 subsequent epochs in the index tree,
+/// therefore it is meaningful only in tables where epochs may be non-consecutive.
+/// The method returns None if there are no non-consecutive epochs in the index tree.
+pub(crate) async fn cook_query_no_matching_block_range(
+    table: &Table,
+    info: &TableInfo,
+) -> Result<Option<QueryCooking>> {
+    let subsequent_epochs = subsequent_epochs(table).await?;
+    // find if there are 2 subsequent epochs in the index tree which are not consecutive
+    Ok(subsequent_epochs
+        .into_iter()
+        .find(|(e0, e1)| *e1 > *e0 + 1)
+        .map(|non_consecutive_epochs| {
+            // now choose min and max block between the identifier non-consecutive epochs
+            let min_block = non_consecutive_epochs.0 as BlockPrimaryIndex + 1;
+            let max_block = non_consecutive_epochs.1 as BlockPrimaryIndex - 1;
+
+            let value_column = &info.value_column;
+            let table_name = &table.public_name;
+            let placeholders =
+                Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
+
+            let query_str = format!(
+                "SELECT AVG({value_column})
+                        FROM {table_name}
+                        WHERE {BLOCK_COLUMN_NAME} >= {DEFAULT_MIN_BLOCK_PLACEHOLDER}
+                        AND {BLOCK_COLUMN_NAME} <= {DEFAULT_MAX_BLOCK_PLACEHOLDER};"
+            );
+            QueryCooking {
+                query: query_str,
+                placeholders,
+                min_block,
+                max_block,
+                limit: None,
+                offset: None,
+            }
+        }))
+}
+
 /// Utility function to associated to each row in the tree, the blocks where the row
 /// was valid
 async fn extract_row_liveness(table: &Table) -> Result<HashMap<RowTreeKey, Vec<UserEpoch>>> {
@@ -762,6 +803,18 @@ async fn extract_row_liveness(table: &Table) -> Result<HashMap<RowTreeKey, Vec<U
     Ok(all_table)
 }
 
+/// Associate to each epoch found in the index tree of `table` the subsequent
+/// epoch in the tree
+async fn subsequent_epochs(table: &Table) -> Result<HashMap<UserEpoch, UserEpoch>> {
+    let last_epoch = table.index.current_epoch().await?;
+    let mut epochs = table.index.keys_at(last_epoch).await;
+    epochs.sort_unstable();
+    Ok(epochs
+        .windows(2)
+        .map(|w| (w[0] as i64, w[1] as i64))
+        .collect())
+}
+
 /// Find the the key of the node that lives the longest across all the blocks. If the
 /// `must_not_be_alive_in_some_blocks` flag is true, then the method considers only nodes
 /// that aren't live for all the blocks
@@ -772,21 +825,14 @@ pub(crate) async fn find_longest_lived_key(
     let initial_epoch = table.genesis_block as UserEpoch;
     let last_epoch = table.row.current_epoch().await?;
     let all_table = extract_row_liveness(table).await?;
-    let consecutive_epochs = {
-        let mut epochs = table.index.keys_at(last_epoch).await;
-        epochs.sort_unstable();
-        epochs
-            .windows(2)
-            .map(|w| (w[0] as i64, w[1] as i64))
-            .collect::<HashMap<_, _>>()
-    };
+    let subsequent_epochs = subsequent_epochs(table).await?;
     // find the longest running row
     let (longest_key, _, starting, ending) = all_table
         .iter()
         .filter_map(|(k, epochs)| {
             // simplification here to start at first epoch where this row was. Otherwise need to do
             // longest consecutive sequence etc...
-            let (l, start, end) = find_longest_consecutive_sequence(epochs, &consecutive_epochs);
+            let (l, start, end) = find_longest_consecutive_sequence(epochs, &subsequent_epochs);
             debug!("finding sequence of {l} blocks for key {k:?} (epochs {epochs:?}");
             if must_not_be_alive_in_some_blocks {
                 if start > initial_epoch || end < last_epoch {
@@ -858,7 +904,7 @@ async fn collect_all_at(
 
 fn find_longest_consecutive_sequence(
     v: &[i64],
-    consecutive_epochs: &HashMap<i64, i64>,
+    subsequent_epochs: &HashMap<i64, i64>,
 ) -> (usize, i64, i64) {
     let mut current = 0;
     let mut starting_idx = 0;
@@ -870,7 +916,7 @@ fn find_longest_consecutive_sequence(
         starting_idx = idx + 1;
     };
     for i in 0..v.len() - 1 {
-        if *consecutive_epochs.get(&v[i]).unwrap() == v[i + 1] {
+        if *subsequent_epochs.get(&v[i]).unwrap() == v[i + 1] {
             current += 1;
         } else {
             update_longest(current, i);
