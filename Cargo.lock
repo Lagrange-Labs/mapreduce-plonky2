@@ -4474,6 +4474,7 @@ dependencies = [
  "paste",
  "plonky2",
  "plonky2_crypto",
+ "plonky2_ecdsa",
  "plonky2_ecgfp5",
  "rand 0.8.5",
  "recursion_framework 1.2.1",
