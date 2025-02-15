@@ -188,10 +188,10 @@ where
     }
 
     /// Return, if any, the set of nodes that will be touched, either directly
-    /// or as a result of the aggregation update process, byt the operations
+    /// or as a result of the aggregation update process, by the operations
     /// defined in the current transactions.
     ///
-    /// The set will be empty if their is no transaction active.
+    /// The set will be empty if there is no active transaction.
     pub async fn touched(&mut self) -> HashSet<T::Key> {
         stream::iter(self.dirty.iter())
             .filter_map(|k| async { self.tree.lineage(k, &self.storage).await.unwrap() })

@@ -2,6 +2,7 @@ use anyhow::*;
 use colored::Colorize;
 use ryhope::{storage::pgsql::PgsqlStorage, MerkleTreeKvDb};
 use std::collections::HashMap;
+use tokio_postgres::Client;
 
 use dialoguer::MultiSelect;
 use itertools::Itertools;
@@ -17,7 +18,7 @@ use crate::repl::PayloadFormatter;
 pub(crate) type RowDb = MerkleTreeKvDb<
     RowTree,
     RowPayload<BlockPrimaryIndex>,
-    PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>>,
+    PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>, Client>,
 >;
 
 struct RowPayloadFormatterDisplay {
