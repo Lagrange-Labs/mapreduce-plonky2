@@ -3,16 +3,13 @@
 use alloy::{
     consensus::{ReceiptEnvelope as CRE, ReceiptWithBloom},
     eips::BlockNumberOrTag,
-    network::{eip2718::Encodable2718, BlockResponse},
+    network::eip2718::Encodable2718,
     primitives::{Address, Log, B256, U256},
     providers::{Provider, RootProvider},
     rlp::{Decodable, Encodable as AlloyEncodable},
     rpc::{
         json_rpc::RpcError,
-        types::{
-            Block, BlockTransactions, EIP1186AccountProofResponse, ReceiptEnvelope, Transaction,
-            TransactionReceipt,
-        },
+        types::{Block, EIP1186AccountProofResponse, TransactionReceipt},
     },
     transports::Transport,
 };
@@ -27,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use std::{
     array::from_fn as create_array,
-    collections::{BTreeSet, HashMap},
+    collections::BTreeSet,
     fmt::{Debug, Display, Formatter},
     sync::Arc,
 };
@@ -46,7 +43,7 @@ const RETRY_NUM: usize = 3;
 /// The maximum size an additional piece of data can be in bytes.
 /// It should always be a multiple of 32 since Solidity event data encodes every object in 32 byte chunks
 /// regardless of its true size.
-const MAX_RECEIPT_DATA_SIZE: usize = 32;
+pub const MAX_RECEIPT_DATA_SIZE: usize = 32;
 
 /// The size of an event topic rlp encoded.
 const ENCODED_TOPIC_SIZE: usize = 33;
@@ -215,6 +212,13 @@ pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
     }
 }
 
+/// Query the latest block
+pub async fn query_latest_block<T: Transport + Clone>(
+    provider: &RootProvider<T>,
+) -> Result<Block, MP2EthError> {
+    query_block(provider, BlockNumberOrTag::Latest).await
+}
+
 /// Query a specific block.
 pub async fn query_block<T: Transport + Clone>(
     provider: &RootProvider<T>,
@@ -308,6 +312,8 @@ pub struct ReceiptProofInfo {
 pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
     /// Size in bytes of the whole log rlp encoded
     pub size: usize,
+    /// The chain ID
+    pub chain_id: u64,
     /// Packed contract address to check
     pub address: Address,
     /// Byte offset for the address from the beginning of a Log
@@ -332,7 +338,7 @@ pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
 
 impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS, MAX_DATA_WORDS> {
     /// Create a new instance from a contract [`Address`] and a [`str`] that is the event signature
-    pub fn new(contract: Address, event_signature: &str) -> Self {
+    pub fn new(contract: Address, chain_id: u64, event_signature: &str) -> Self {
         // To calculate the total size of the log rlp encoded we use the fact that the address takes 21 bytes to encode, topics
         // take 33 bytes each to incode and form a list that has length between 33 bytes and 132 bytes and data is a string that has 32 * MAX_DATA_WORDS length
 
@@ -369,6 +375,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
 
         Self {
             size,
+            chain_id,
             address: contract,
             add_rel_offset,
             event_signature: event_sig.0,
@@ -382,7 +389,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
     pub fn get_log_offset(&self, node: &[u8]) -> Result<usize, MP2EthError> {
         let node_rlp = rlp::Rlp::new(node);
 
-        // The actual receipt data is item 1 in the list
+        // The actual receipt data is item 1 in the list because the first byte is the transaction type
         let (receipt_rlp, receipt_off) = node_rlp.at_with_offset(1)?;
         // The rlp encoded Receipt is not a list but a string that is formed of the `tx_type` followed by the remaining receipt
         // data rlp encoded as a list. We retrieve the payload info so that we can work out relevant offsets later.
@@ -395,7 +402,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
         let (logs_rlp, logs_off) = receipt_list.at_with_offset(3)?;
 
         // We calculate the offset the that the logs are at from the start of the node
-        let logs_offset = receipt_off + receipt_str_payload.header_len + 1 + logs_off;
+        let logs_offset = receipt_off + receipt_str_payload.header_len + TX_TYPE_BYTES + logs_off;
 
         // Now we produce an iterator over the logs with each logs offset.
         let relevant_log_offset = std::iter::successors(Some(0usize), |i| Some(i + 1))
@@ -762,7 +769,7 @@ impl ReceiptProofInfo {
                 "No proof found when verifying".to_string(),
             ))?;
 
-        let rlp_receipt = rlp::Rlp::new(&valid[1..]);
+        let rlp_receipt = rlp::Rlp::new(&valid[TX_TYPE_BYTES..]);
         ReceiptWithBloom::decode(&mut rlp_receipt.as_raw()).map_err(|e| e.into())
     }
 }
@@ -786,105 +793,6 @@ impl Rlpable for alloy::consensus::Header {
         let mut out = Vec::new();
         self.encode(&mut out);
         out
-    }
-}
-
-#[allow(dead_code)]
-pub struct BlockUtil {
-    /// The actual [`Block`] that the rest of the data relates to
-    pub block: Block,
-    /// The transactions and Receipts in the block paired together
-    pub txs: Vec<TxWithReceipt>,
-    /// The Receipts Trie
-    pub receipts_trie: EthTrie<MemoryDB>,
-    /// The Transactions Trie
-    pub transactions_trie: EthTrie<MemoryDB>,
-}
-
-pub struct TxWithReceipt(Transaction, ReceiptEnvelope);
-impl TxWithReceipt {
-    pub fn receipt(&self) -> &ReceiptEnvelope {
-        &self.1
-    }
-    pub fn transaction(&self) -> &Transaction {
-        &self.0
-    }
-}
-
-impl BlockUtil {
-    pub async fn fetch<T: Transport + Clone>(
-        t: &RootProvider<T>,
-        id: BlockNumberOrTag,
-    ) -> Result<BlockUtil, MP2EthError> {
-        let block = query_block(t, id).await?;
-
-        let receipts = query_block_receipts(t, id).await?;
-        let BlockTransactions::Full(all_tx) = block.transactions() else {
-            return Err(MP2EthError::InternalError(
-                "Could not recover full transactions from Block".to_string(),
-            ));
-        };
-        // check receipt root
-        let all_tx_map = HashMap::<u64, &Transaction>::from_iter(
-            all_tx
-                .iter()
-                .map_while(|tx| tx.transaction_index.map(|tx_index| (tx_index, tx))),
-        );
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut receipts_trie = EthTrie::new(memdb.clone());
-        let mut transactions_trie = EthTrie::new(memdb.clone());
-        let consensus_receipts = receipts
-            .into_iter()
-            .map(|receipt| {
-                let tx_index_u64 = receipt.transaction_index.unwrap();
-                // If the HashMap doesn't have an entry for this tx_index then the recceipts and transactions aren't from the same block.
-                let transaction = all_tx_map.get(&tx_index_u64).cloned().unwrap();
-                let tx_index = tx_index_u64.rlp_bytes();
-
-                let receipt_primitive = match receipt.inner {
-                    CRE::Legacy(ref r) => CRE::Legacy(from_rpc_logs_to_consensus(r)),
-                    CRE::Eip2930(ref r) => CRE::Eip2930(from_rpc_logs_to_consensus(r)),
-                    CRE::Eip1559(ref r) => CRE::Eip1559(from_rpc_logs_to_consensus(r)),
-                    CRE::Eip4844(ref r) => CRE::Eip4844(from_rpc_logs_to_consensus(r)),
-                    CRE::Eip7702(ref r) => CRE::Eip7702(from_rpc_logs_to_consensus(r)),
-                    _ => panic!("aie"),
-                };
-
-                let body_rlp = receipt_primitive.encoded_2718();
-
-                let tx_body_rlp = transaction.inner.encoded_2718();
-
-                receipts_trie
-                    .insert(&tx_index, &body_rlp)
-                    .expect("can't insert receipt");
-                transactions_trie
-                    .insert(&tx_index, &tx_body_rlp)
-                    .expect("can't insert transaction");
-                TxWithReceipt(transaction.clone(), receipt_primitive)
-            })
-            .collect::<Vec<_>>();
-        receipts_trie.root_hash()?;
-        transactions_trie.root_hash()?;
-        Ok(BlockUtil {
-            block,
-            txs: consensus_receipts,
-            receipts_trie,
-            transactions_trie,
-        })
-    }
-
-    /// recompute the receipts trie by first converting all receipts form RPC type to consensus type
-    /// since in Alloy these are two different types and RLP functions are only implemented for
-    /// consensus ones.
-    #[cfg(test)]
-    fn check(&mut self) -> Result<(), MP2EthError> {
-        let computed = self.receipts_trie.root_hash()?;
-        let tx_computed = self.transactions_trie.root_hash()?;
-        let expected = self.block.header.receipts_root;
-        let tx_expected = self.block.header.transactions_root;
-        assert_eq!(expected.0, computed.0);
-        assert_eq!(tx_expected.0, tx_computed.0);
-        Ok(())
     }
 }
 
@@ -916,10 +824,11 @@ mod test {
     use std::str::FromStr;
 
     use alloy::{
-        network::TransactionResponse,
+        network::{BlockResponse, TransactionResponse},
         primitives::{Bytes, Log},
         providers::{Provider, ProviderBuilder},
         rlp::Decodable,
+        rpc::types::{ReceiptEnvelope, Transaction},
     };
     use anyhow::{anyhow, Context, Result};
     use eth_trie::Nibbles;
@@ -940,6 +849,104 @@ mod test {
     };
 
     use super::*;
+
+    pub struct BlockUtil {
+        /// The actual [`Block`] that the rest of the data relates to
+        pub block: Block,
+        /// The transactions and Receipts in the block paired together
+        pub txs: Vec<TxWithReceipt>,
+        /// The Receipts Trie
+        pub receipts_trie: EthTrie<MemoryDB>,
+        /// The Transactions Trie
+        pub transactions_trie: EthTrie<MemoryDB>,
+    }
+
+    pub struct TxWithReceipt(Transaction, ReceiptEnvelope);
+    impl TxWithReceipt {
+        pub fn receipt(&self) -> &ReceiptEnvelope {
+            &self.1
+        }
+        #[allow(dead_code)]
+        pub fn transaction(&self) -> &Transaction {
+            &self.0
+        }
+    }
+
+    impl BlockUtil {
+        pub async fn fetch<T: Transport + Clone>(
+            t: &RootProvider<T>,
+            id: BlockNumberOrTag,
+        ) -> Result<BlockUtil, MP2EthError> {
+            let block = query_block(t, id).await?;
+
+            let receipts = query_block_receipts(t, id).await?;
+            let all_tx = if let Some(txns) = block.transactions().as_transactions() {
+                txns.to_vec()
+            } else {
+                return Err(MP2EthError::InternalError(
+                    "Could not recover full transactions from Block".to_string(),
+                ));
+            };
+            // check receipt root
+            let all_tx_map = HashMap::<u64, &Transaction>::from_iter(
+                all_tx
+                    .iter()
+                    .map_while(|tx| tx.transaction_index.map(|tx_index| (tx_index, tx))),
+            );
+            let memdb = Arc::new(MemoryDB::new(true));
+            let mut receipts_trie = EthTrie::new(memdb.clone());
+            let mut transactions_trie = EthTrie::new(memdb.clone());
+            let consensus_receipts = receipts
+                .into_iter()
+                .map(|receipt| {
+                    let tx_index_u64 = receipt.transaction_index.unwrap();
+                    // If the HashMap doesn't have an entry for this tx_index then the recceipts and transactions aren't from the same block.
+                    let transaction = all_tx_map.get(&tx_index_u64).cloned().unwrap();
+                    let tx_index = tx_index_u64.rlp_bytes();
+
+                    let receipt_primitive = match receipt.inner {
+                        CRE::Legacy(ref r) => CRE::Legacy(from_rpc_logs_to_consensus(r)),
+                        CRE::Eip2930(ref r) => CRE::Eip2930(from_rpc_logs_to_consensus(r)),
+                        CRE::Eip1559(ref r) => CRE::Eip1559(from_rpc_logs_to_consensus(r)),
+                        CRE::Eip4844(ref r) => CRE::Eip4844(from_rpc_logs_to_consensus(r)),
+                        CRE::Eip7702(ref r) => CRE::Eip7702(from_rpc_logs_to_consensus(r)),
+                        _ => panic!("aie"),
+                    };
+
+                    let body_rlp = receipt_primitive.encoded_2718();
+
+                    let tx_body_rlp = transaction.inner.encoded_2718();
+
+                    receipts_trie
+                        .insert(&tx_index, &body_rlp)
+                        .expect("can't insert receipt");
+                    transactions_trie
+                        .insert(&tx_index, &tx_body_rlp)
+                        .expect("can't insert transaction");
+                    TxWithReceipt(transaction.clone(), receipt_primitive)
+                })
+                .collect::<Vec<_>>();
+            receipts_trie.root_hash()?;
+            transactions_trie.root_hash()?;
+            Ok(BlockUtil {
+                block,
+                txs: consensus_receipts,
+                receipts_trie,
+                transactions_trie,
+            })
+        }
+
+        /// Function to check everything has been computed correctly.
+        fn check(&mut self) -> Result<(), MP2EthError> {
+            let computed = self.receipts_trie.root_hash()?;
+            let tx_computed = self.transactions_trie.root_hash()?;
+            let expected = self.block.header.receipts_root;
+            let tx_expected = self.block.header.transactions_root;
+            assert_eq!(expected.0, computed.0);
+            assert_eq!(tx_expected.0, tx_computed.0);
+            Ok(())
+        }
+    }
 
     #[tokio::test]
     async fn test_block_receipt_trie() -> Result<()> {
@@ -1106,13 +1113,14 @@ mod test {
             let receipt_str_payload = receipt_rlp.payload_info()?;
 
             // We make a new `Rlp` struct that should be the encoding of the inner list representing the `ReceiptEnvelope`
-            let receipt_list = rlp::Rlp::new(&receipt_rlp.data()?[1..]);
+            let receipt_list = rlp::Rlp::new(&receipt_rlp.data()?[TX_TYPE_BYTES..]);
 
             // The logs themselves start are the item at index 3 in this list
             let (logs_rlp, logs_off) = receipt_list.at_with_offset(3)?;
 
             // We calculate the offset the that the logs are at from the start of the node
-            let logs_offset = receipt_off + receipt_str_payload.header_len + 1 + logs_off;
+            let logs_offset =
+                receipt_off + receipt_str_payload.header_len + TX_TYPE_BYTES + logs_off;
 
             // Now we produce an iterator over the logs with each logs offset.
             let relevant_logs_offset = std::iter::successors(Some(0usize), |i| Some(i + 1))
@@ -1128,7 +1136,7 @@ mod test {
                     {
                         Some(logs_offset + log_off)
                     } else {
-                        Some(0usize)
+                        None
                     }
                 })
                 .collect::<Vec<usize>>();

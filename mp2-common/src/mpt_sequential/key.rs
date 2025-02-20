@@ -4,7 +4,7 @@ use crate::{
     array::Array,
     keccak::PACKED_HASH_LEN,
     rlp::MAX_KEY_NIBBLE_LEN,
-    utils::{less_than, less_than_or_equal_to_unsafe},
+    utils::{less_than, less_than_unsafe},
 };
 use core::array::from_fn as create_array;
 use eth_trie::Nibbles;
@@ -173,6 +173,7 @@ impl<const KEY_LENGTH: usize> MPTKeyWireGeneric<KEY_LENGTH> {
         let t = b._true();
         let zero = b.zero();
         let one = b.one();
+        let two = b.two();
 
         // First we check that the pointer is at most 15, other wise the result will not fit in a Target
         // (without overflow)
@@ -183,20 +184,29 @@ impl<const KEY_LENGTH: usize> MPTKeyWireGeneric<KEY_LENGTH> {
         // We have to check if the first two nibbles sum to precisely 128, we should
         // always have at least two nibbles otherwise the key was empty.
         let first_nibbles = &self.key.arr[..2];
-        let tmp = b.mul(first_nibbles[0], sixteen);
-        let tmp = b.add(tmp, first_nibbles[1]);
+        let tmp = b.mul_add(first_nibbles[0], sixteen, first_nibbles[1]);
 
         let one_two_eight = b.constant(F::from_canonical_u8(128));
 
         let first_byte_128 = b.is_equal(one_two_eight, tmp);
 
-        // If the pointer is 1 then we should make sure we return zero as the value
-        let pointer_is_one = b.is_equal(self.pointer, one);
-        let byte_selector = b.and(pointer_is_one, first_byte_128);
+        // If 128 is strictly less than tmp the pointer should be larger than 1
+        let pointer_not_one = less_than_unsafe(b, one_two_eight, tmp, 8);
+
+        let mut possible_length = b.sub(tmp, one_two_eight);
+        possible_length = b.mul(possible_length, two);
+        let expected_pointer = b.mul_add(pointer_not_one.target, possible_length, one);
+
+        b.connect(expected_pointer, self.pointer);
+
+        // If pointer is not 1 or the first byte is 128 (only happens when encoding 0) then
+        // we need to skip the first byte as it is part of the rlp encoding or it is meant to be zero
+        let byte_selector = b.or(pointer_not_one, first_byte_128);
 
         let initial = b.select(byte_selector, zero, tmp);
 
         let combiner = b.constant(F::from_canonical_u32(1u32 << 8));
+        let mut at_the_end = b.not(pointer_not_one);
         // We fold over the remaining nibbles of the key
         self.key
             .arr
@@ -205,18 +215,79 @@ impl<const KEY_LENGTH: usize> MPTKeyWireGeneric<KEY_LENGTH> {
             .skip(1)
             .fold(initial, |acc, (i, chunk)| {
                 // First we multiply the accumulator by 2^8, then recreate the current byte by multiplying the large_nibble by 16 and adding the current small_nibble
-                let tmp = b.mul(chunk[0], sixteen);
-                let tmp = b.add(tmp, chunk[1]);
-
-                let tmp_acc = b.mul(acc, combiner);
-                let tmp = b.add(tmp_acc, tmp);
+                let tmp = b.mul_add(chunk[0], sixteen, chunk[1]);
+                let tmp = b.mul_add(acc, combiner, tmp);
 
                 // Convert the index to a target
-                let index = b.constant(F::from_canonical_usize(2 * i));
+                let index = b.constant(F::from_canonical_usize(2 * i + 1));
 
-                // If the index is lees than the pointer we return tmp, otherwise we return acc.
-                let selector = less_than_or_equal_to_unsafe(b, index, self.pointer, 8);
-                b.select(selector, tmp, acc)
+                // If at the end is true we want to return the previously stored value, if it is false we should accumulate this chunk
+                let out = b.select(at_the_end, acc, tmp);
+                let is_end = b.is_equal(index, self.pointer);
+                at_the_end = b.or(is_end, at_the_end);
+                out
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{mpt_sequential::utils::bytes_to_nibbles, types::CBuilder, C, D, F};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::field::types::Field;
+    use rand::{thread_rng, Rng};
+    use rlp::Encodable;
+
+    #[derive(Debug, Clone)]
+    struct FoldKeyTestWires {
+        key: MPTKeyWire,
+        exp_key: Target,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct FoldKeyTestCircuit {
+        raw_key: u64,
+    }
+
+    impl UserCircuit<F, D> for FoldKeyTestCircuit {
+        type Wires = FoldKeyTestWires;
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let key = MPTKeyWire::new(b);
+            let folded_key = key.fold_key(b);
+
+            let exp_key = b.add_virtual_target();
+            b.connect(exp_key, folded_key);
+
+            FoldKeyTestWires { key, exp_key }
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            let key_encoded = self.raw_key.rlp_bytes();
+            let mut nibbles = bytes_to_nibbles(&key_encoded);
+            let ptr = nibbles.len() - 1;
+            nibbles.resize(MAX_KEY_NIBBLE_LEN, 0u8);
+
+            let key_nibbles: [u8; MAX_KEY_NIBBLE_LEN] = nibbles
+                .try_into()
+                .expect("Couldn't create mpt key with correct length");
+
+            wires.key.assign(pw, &key_nibbles, ptr);
+            pw.set_target(wires.exp_key, F::from_canonical_u64(self.raw_key));
+        }
+    }
+
+    #[test]
+    fn test_key_folding() {
+        let rng = &mut thread_rng();
+        for i in 0..5 {
+            let to_add = if i < 2 { 0 } else { 128 };
+            let raw_key: u64 = rng.gen_range(0..256) + to_add;
+
+            let c = FoldKeyTestCircuit { raw_key };
+
+            let _ = run_circuit::<F, D, C, _>(c);
+        }
     }
 }

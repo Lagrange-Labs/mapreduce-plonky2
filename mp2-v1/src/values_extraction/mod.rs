@@ -11,13 +11,14 @@ use mp2_common::{
     digest::Digest,
     eth::{left_pad32, EventLogInfo, StorageSlot},
     keccak::HASH_LEN,
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::{empty_poseidon_hash, HashPermutation, H},
     types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
     F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
+    hash::hashing::hash_n_to_hash_no_pad,
     plonk::config::Hasher,
 };
 
@@ -204,13 +205,33 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
     From<EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>> for TableMetadata
 {
     fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>) -> Self {
-        let extraction_id = event.event_signature;
+        let packed_sig = event.event_signature.pack(Endianness::Big);
+        let packed_address = event.address.0 .0.pack(Endianness::Big);
+        let input = packed_sig
+            .into_iter()
+            .chain(packed_address)
+            .map(F::from_canonical_u32)
+            .collect::<Vec<F>>();
 
-        let tx_index_column_id =
-            identifier_for_tx_index_column(&event.event_signature, &event.address, &[]);
+        let extraction_id = hash_n_to_hash_no_pad::<F, HashPermutation>(&input)
+            .elements
+            .into_iter()
+            .flat_map(|elem| elem.to_canonical_u64().to_be_bytes())
+            .collect::<Vec<u8>>();
 
-        let gas_used_column_id =
-            identifier_for_gas_used_column(&event.event_signature, &event.address, &[]);
+        let tx_index_column_id = identifier_for_tx_index_column(
+            &event.event_signature,
+            &event.address,
+            event.chain_id,
+            &[],
+        );
+
+        let gas_used_column_id = identifier_for_gas_used_column(
+            &event.event_signature,
+            &event.address,
+            event.chain_id,
+            &[],
+        );
 
         let tx_index_input_column = InputColumnInfo::new(
             extraction_id.as_slice(),
@@ -233,7 +254,9 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
                     identifier_for_topic_column(
                         &event.event_signature,
                         &event.address,
-                        &[j as u8 + 1],
+                        event.chain_id,
+                        j as u8 + 1,
+                        &[],
                     ),
                     offset,
                     32,
@@ -252,7 +275,9 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
                     identifier_for_data_column(
                         &event.event_signature,
                         &event.address,
-                        &[j as u8 + 1],
+                        event.chain_id,
+                        j as u8 + 1,
+                        &[],
                     ),
                     offset,
                     32,
@@ -377,9 +402,10 @@ pub fn identifier_for_inner_mapping_key_column_raw(slot: u8, extra: Vec<u8>) -> 
 pub fn identifier_for_tx_index_column(
     event_signature: &[u8; HASH_LEN],
     contract_address: &Address,
+    chain_id: u64,
     extra: &[u8],
 ) -> ColumnId {
-    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+    let extra = identifier_raw_extra(contract_address, chain_id, extra.to_vec());
 
     let inputs: Vec<F> = TX_INDEX_PREFIX
         .iter()
@@ -397,9 +423,10 @@ pub fn identifier_for_tx_index_column(
 pub fn identifier_for_gas_used_column(
     event_signature: &[u8; HASH_LEN],
     contract_address: &Address,
+    chain_id: u64,
     extra: &[u8],
 ) -> ColumnId {
-    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+    let extra = identifier_raw_extra(contract_address, chain_id, extra.to_vec());
 
     let inputs: Vec<F> = GAS_USED_PREFIX
         .iter()
@@ -414,16 +441,20 @@ pub fn identifier_for_gas_used_column(
 
 /// Compute topic identifier for topic variable.
 /// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+/// Here the `topic_word` field refers to which topic this is (starting from 1 as we don't include the zeroth topic because its the event signature).
 pub fn identifier_for_topic_column(
     event_signature: &[u8; HASH_LEN],
     contract_address: &Address,
+    chain_id: u64,
+    topic_word: u8,
     extra: &[u8],
 ) -> ColumnId {
-    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+    let extra = identifier_raw_extra(contract_address, chain_id, extra.to_vec());
 
     let inputs: Vec<F> = TOPIC_PREFIX
         .iter()
         .copied()
+        .chain(std::iter::once(topic_word))
         .chain(*event_signature)
         .chain(extra)
         .collect_vec()
@@ -434,16 +465,20 @@ pub fn identifier_for_topic_column(
 
 /// Compute data identifier for data variable.
 /// `inner_key_id = H(PREFIX || event_signature || contract_address || chain_id || extra)[0]`
+/// /// Here the `data_word` field refers to which word of data (starting at 1) this is.
 pub fn identifier_for_data_column(
     event_signature: &[u8; HASH_LEN],
     contract_address: &Address,
+    chain_id: u64,
+    data_word: u8,
     extra: &[u8],
 ) -> ColumnId {
-    let extra = identifier_raw_extra(contract_address, 0, extra.to_vec());
+    let extra = identifier_raw_extra(contract_address, chain_id, extra.to_vec());
 
     let inputs: Vec<F> = DATA_PREFIX
         .iter()
         .copied()
+        .chain(std::iter::once(data_word))
         .chain(*event_signature)
         .chain(extra)
         .collect_vec()
@@ -521,6 +556,20 @@ pub fn row_unique_data_for_mapping_of_mappings_leaf(
     // Compute the unique data to identify a row is the mapping key:
     // row_unique_data = H(outer_key || inner_key)
     let inputs = packed_outer_key.chain(packed_inner_key).collect_vec();
+    H::hash_no_pad(&inputs).into()
+}
+
+/// Compute the row unique data for receipt leaf.
+pub fn row_unique_data_for_receipt_leaf(tx_index: &[u8], gas_used: &[u8]) -> HashOutput {
+    let [packed_tx_index, packed_gas_used] = [tx_index, gas_used].map(|key| {
+        left_pad32(key)
+            .pack(Endianness::Big)
+            .into_iter()
+            .map(F::from_canonical_u32)
+    });
+    // Compute the unique data to identify a row is the tx index and the gas used:
+    // row_unique_data = H(tx_index || gas_used)
+    let inputs = packed_tx_index.chain(packed_gas_used).collect_vec();
     H::hash_no_pad(&inputs).into()
 }
 
@@ -639,4 +688,20 @@ pub fn compute_leaf_mapping_of_mappings_values_digest(
         &value,
         slot_info,
     )
+}
+
+/// Compute the metadata digest for a Receipt leaf
+pub fn compute_leaf_receipt_metadata_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+) -> Digest {
+    TableMetadata::from(*event).digest()
+}
+
+/// Compute the value digest for a Receipt leaf
+pub fn compute_leaf_receipt_values_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
+    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+    value: &[u8],
+    tx_index: u64,
+) -> Digest {
+    TableMetadata::from(*event).receipt_value_digest(tx_index, value, event)
 }

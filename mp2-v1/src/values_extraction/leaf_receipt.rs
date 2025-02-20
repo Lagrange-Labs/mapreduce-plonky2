@@ -47,8 +47,10 @@ pub(crate) struct ReceiptLeafWires<const NODE_LEN: usize, const MAX_EXTRACTED_CO
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    /// The event we are monitoring for
-    pub(crate) event: EventWires,
+    /// Byte offset for the address from the beginning of a Log
+    pub(crate) add_rel_offset: Target,
+    /// Byte offset from the start of the log to event signature
+    pub(crate) sig_rel_offset: Target,
     /// The node bytes
     pub(crate) node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
     /// the hash of the node bytes
@@ -59,19 +61,6 @@ where
     pub(crate) mpt_key: MPTKeyWire,
     /// The table metadata
     pub(crate) metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
-}
-
-/// Contains all the information for an [`Event`] in rlp form
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EventWires {
-    /// Packed contract address to check
-    address: Array<Target, 20>,
-    /// Byte offset for the address from the beginning of a Log
-    add_rel_offset: Target,
-    /// Packed event signature,
-    event_signature: Array<Target, HASH_LEN>,
-    /// Byte offset from the start of the log to event signature
-    sig_rel_offset: Target,
 }
 
 /// Circuit to prove a transaction receipt contains logs relating to a specific event.
@@ -138,8 +127,10 @@ where
     }
 
     pub(crate) fn build(b: &mut CBuilder) -> ReceiptLeafWires<NODE_LEN, MAX_EXTRACTED_COLUMNS> {
-        // Build the event wires
-        let event_wires = Self::build_event_wires(b);
+        // relative offset of the address
+        let add_rel_offset = b.add_virtual_target();
+        // Signature relative offset
+        let sig_rel_offset = b.add_virtual_target();
         // Build the metadata
         let metadata = TableMetadata::build(b, 2);
         let zero = b.zero();
@@ -193,9 +184,8 @@ where
         let gas_used_len = b.add_const(gas_used_header, -F::from_canonical_u64(128));
 
         let initial_gas_index = b.add(gas_used_offset, one);
-        // We want gas_used_offset + gas_used_len + one here because we want to stop our sum one
-        // after the gas_used_offset + gas_used_len
-        let final_gas_index = b.add(initial_gas_index, gas_used_len);
+        // This is the last index in the array (so inclusive) that contains data relating to gas used
+        let final_gas_index = b.add(gas_used_offset, gas_used_len);
 
         let combiner = b.constant(F::from_canonical_u64(1 << 8));
         let mut last_byte_found = b._false();
@@ -205,10 +195,11 @@ where
 
             // Check to see if we have reached the index where we stop summing
             let at_end = b.is_equal(access_index, final_gas_index);
-            last_byte_found = b.or(at_end, last_byte_found);
 
             let tmp = b.mul_add(acc, combiner, array_value);
-            b.select(last_byte_found, acc, tmp)
+            let out = b.select(last_byte_found, acc, tmp);
+            last_byte_found = b.or(at_end, last_byte_found);
+            out
         });
 
         let zero_u32 = b.zero_u32();
@@ -248,8 +239,16 @@ where
             .try_into()
             .expect("This should never fail");
 
-        let extraction_id_packed = event_wires.event_signature.pack(b, Endianness::Big);
-        let extraction_id = extraction_id_packed.downcast_to_targets();
+        // Now we verify extracted values
+        let (extraction_id, extracted_metadata_digest, extracted_value_digest) = metadata
+            .extracted_receipt_digests(
+                b,
+                &node.arr,
+                relevant_log_offset,
+                add_rel_offset,
+                sig_rel_offset,
+            );
+
         // Extract input values
         let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(
             b,
@@ -257,18 +256,6 @@ where
             &[&tx_index_prefix, &gas_used_prefix],
             &extraction_id.arr,
         );
-        // Now we verify extracted values
-        let (address_extract, signature_extract, extracted_metadata_digest, extracted_value_digest) =
-            metadata.extracted_receipt_digests(
-                b,
-                &node.arr,
-                relevant_log_offset,
-                event_wires.add_rel_offset,
-                event_wires.sig_rel_offset,
-            );
-
-        address_extract.enforce_equal(b, &event_wires.address);
-        signature_extract.enforce_equal(b, &event_wires.event_signature);
 
         let dm = b.add_curve_point(&[input_metadata_digest, extracted_metadata_digest]);
 
@@ -308,7 +295,8 @@ where
         .register_args(b);
 
         ReceiptLeafWires {
-            event: event_wires,
+            add_rel_offset,
+            sig_rel_offset,
             node,
             root,
             relevant_log_offset,
@@ -317,33 +305,20 @@ where
         }
     }
 
-    fn build_event_wires(b: &mut CBuilder) -> EventWires {
-        // Packed address
-        let address = Array::<Target, 20>::new(b);
-
-        // relative offset of the address
-        let add_rel_offset = b.add_virtual_target();
-
-        // Event signature
-        let event_signature = Array::<Target, 32>::new(b);
-
-        // Signature relative offset
-        let sig_rel_offset = b.add_virtual_target();
-
-        EventWires {
-            address,
-            add_rel_offset,
-            event_signature,
-            sig_rel_offset,
-        }
-    }
-
     pub(crate) fn assign(
         &self,
         pw: &mut PartialWitness<GFp>,
         wires: &ReceiptLeafWires<NODE_LEN, MAX_EXTRACTED_COLUMNS>,
     ) {
-        self.assign_event_wires(pw, &wires.event);
+        pw.set_target(
+            wires.add_rel_offset,
+            F::from_canonical_usize(self.rel_add_offset),
+        );
+
+        pw.set_target(
+            wires.sig_rel_offset,
+            F::from_canonical_usize(self.sig_rel_offset),
+        );
 
         let pad_node =
             Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(&self.node).expect("invalid node given");
@@ -370,26 +345,6 @@ where
         wires.mpt_key.assign(pw, &key_nibbles, ptr);
 
         TableMetadata::assign(pw, &self.metadata, &wires.metadata);
-    }
-
-    pub fn assign_event_wires(&self, pw: &mut PartialWitness<GFp>, wires: &EventWires) {
-        wires
-            .address
-            .assign(pw, &self.address.0.map(GFp::from_canonical_u8));
-
-        pw.set_target(
-            wires.add_rel_offset,
-            F::from_canonical_usize(self.rel_add_offset),
-        );
-
-        wires
-            .event_signature
-            .assign(pw, &self.event_signature.map(GFp::from_canonical_u8));
-
-        pw.set_target(
-            wires.sig_rel_offset,
-            F::from_canonical_usize(self.sig_rel_offset),
-        );
     }
 }
 
@@ -426,6 +381,10 @@ where
 #[cfg(test)]
 mod tests {
 
+    use crate::values_extraction::{
+        compute_leaf_receipt_metadata_digest, compute_leaf_receipt_values_digest,
+    };
+
     use super::*;
 
     use mp2_common::{
@@ -460,6 +419,7 @@ mod tests {
     #[test]
     fn test_leaf_circuit() {
         const NODE_LEN: usize = 512;
+        test_leaf_circuit_helper::<0, 0, NODE_LEN>();
         test_leaf_circuit_helper::<1, 0, NODE_LEN>();
         test_leaf_circuit_helper::<2, 0, NODE_LEN>();
         test_leaf_circuit_helper::<3, 0, NODE_LEN>();
@@ -486,11 +446,13 @@ mod tests {
             event,
         )
         .unwrap();
-        let metadata = c.metadata.clone();
 
         let test_circuit = TestReceiptLeafCircuit { c };
 
         let node = info.mpt_proof.last().unwrap().clone();
+
+        let metadata_digest = compute_leaf_receipt_metadata_digest(event);
+        let values_digest = compute_leaf_receipt_values_digest(event, &node, info.tx_index);
 
         assert!(node.len() <= NODE_LEN);
         let proof = run_circuit::<F, D, C, _>(test_circuit);
@@ -504,14 +466,12 @@ mod tests {
 
         // Check value digest
         {
-            let exp_digest = metadata.receipt_value_digest(info.tx_index, &node, event);
-            assert_eq!(pi.values_digest(), exp_digest.to_weierstrass());
+            assert_eq!(pi.values_digest(), values_digest.to_weierstrass());
         }
 
         // Check metadata digest
         {
-            let exp_digest = metadata.digest();
-            assert_eq!(pi.metadata_digest(), exp_digest.to_weierstrass());
+            assert_eq!(pi.metadata_digest(), metadata_digest.to_weierstrass());
         }
     }
 }

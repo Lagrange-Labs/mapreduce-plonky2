@@ -1,8 +1,6 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
-use std::future::Future;
-
 use anyhow::Result;
 use itertools::Itertools;
 use log::{debug, info};
@@ -53,7 +51,7 @@ use alloy::{
     contract::private::{Network, Provider, Transport},
     network::{Ethereum, TransactionBuilder},
     primitives::U256,
-    providers::{ext::AnvilApi, ProviderBuilder, RootProvider},
+    providers::{ext::AnvilApi, ProviderBuilder},
     sol_types::SolEvent,
 };
 use mp2_common::{
@@ -382,7 +380,7 @@ impl<T: TableSource> TableIndexing<T> {
         let contract_address = contract.address;
         let chain_id = contract.chain_id;
 
-        let slot_input = SlotInput::new(MAPPING_SLOT, 0, 32, 0);
+        let slot_input = SlotInput::new(MAPPING_SLOT, 12, 20, 0);
         let key_id =
             identifier_for_mapping_key_column(MAPPING_SLOT, &contract_address, chain_id, vec![]);
         let value_id =
@@ -647,8 +645,8 @@ impl<T: TableSource> TableIndexing<T> {
                 no_topics, no_data
             ),
         };
-
-        let mut source = T::new(contract.address(), event_signature);
+        let chain_id = provider.get_chain_id().await?;
+        let mut source = T::new(contract.address(), chain_id, event_signature);
         let genesis_updates = source.init_contract_data(ctx, &contract).await;
 
         let indexing_genesis_block = ctx.block_number().await;
@@ -726,27 +724,12 @@ impl<T: TableSource> TableIndexing<T> {
                 .source
                 .random_contract_update(ctx, &self.contract, ut)
                 .await;
+
             if table_row_updates.is_empty() {
                 continue;
             }
 
-            // If we are dealing with receipts we need to remove everything already in the row tree
             let bn = ctx.block_number().await as BlockPrimaryIndex;
-
-            let table_row_updates = if let ChangeType::Receipt(..) = ut {
-                let current_row_epoch = self.table.row.current_epoch().await?;
-                let current_row_keys = self
-                    .table
-                    .row
-                    .keys_at(current_row_epoch)
-                    .await
-                    .into_iter()
-                    .map(TableRowUpdate::<BlockPrimaryIndex>::Deletion)
-                    .collect::<Vec<_>>();
-                [current_row_keys, table_row_updates].concat()
-            } else {
-                table_row_updates
-            };
 
             log::info!("Applying follow up updates to contract done - now at block {bn}",);
             // we first run the initial preprocessing and db creation.
@@ -861,16 +844,23 @@ impl<T: TableSource> TableIndexing<T> {
                 // containing output of previous steps, the former is only created from the updates
                 // of a table, this is the source.
                 TableRowUpdate::Deletion(k) => TreeRowUpdate::Deletion(k.clone()),
+                TableRowUpdate::DeleteAll => TreeRowUpdate::Wipe,
             };
             rows_update.push(tree_update);
         }
         info!("Generated final CELLs tree proofs for block {current_block}");
         let updates = self.table.apply_row_update(bn, rows_update).await?;
         info!("Applied updates to row tree");
-        let index_node = ctx
-            .prove_update_row_tree(bn, &self.table, updates)
-            .await
-            .expect("unable to prove row tree");
+        let index_node = if let Some(updates) = updates {
+            Some(
+                ctx.prove_update_row_tree(bn, &self.table, updates)
+                    .await
+                    .expect("unable to prove row tree"),
+            )
+        } else {
+            None
+        };
+
         info!("Generated final ROWs tree proofs for block {current_block}");
 
         // NOTE the reason we separate and use block number as IndexTreeKey is because this index
@@ -888,18 +878,17 @@ impl<T: TableSource> TableIndexing<T> {
             .await
             .expect("can't update index tree");
         info!("Applied updates to index tree for block {current_block}");
-        let _root_proof_key = ctx
-            .prove_update_index_tree(bn, &self.table, updates.plan)
-            .await;
+        let root_proof_key = ctx
+            .prove_update_index_tree(bn, &self.table, updates)
+            .await?;
         info!("Generated final BLOCK tree proofs for block {current_block}");
-        let _ = ctx
-            .prove_ivc(
-                &self.table.public_name,
-                bn,
-                &self.table.index,
-                expected_metadata_hash,
-            )
-            .await;
+        ctx.prove_ivc(
+            bn,
+            root_proof_key,
+            &self.table.index,
+            expected_metadata_hash,
+        )
+        .await?;
         info!("Generated final IVC proof for block {}", current_block);
 
         Ok(())
@@ -1017,7 +1006,7 @@ pub fn compute_non_indexed_receipt_column_ids<
     event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
 ) -> Vec<(String, ColumnID)> {
     let gas_used_column_id =
-        identifier_for_gas_used_column(&event.event_signature, &event.address, &[]);
+        identifier_for_gas_used_column(&event.event_signature, &event.address, event.chain_id, &[]);
 
     let topic_ids = event
         .topics
@@ -1026,7 +1015,13 @@ pub fn compute_non_indexed_receipt_column_ids<
         .map(|(j, _)| {
             (
                 format!("{}_{}", TOPIC_NAME, j + 1),
-                identifier_for_topic_column(&event.event_signature, &event.address, &[j as u8 + 1]),
+                identifier_for_topic_column(
+                    &event.event_signature,
+                    &event.address,
+                    event.chain_id,
+                    j as u8 + 1,
+                    &[],
+                ),
             )
         })
         .collect::<Vec<(String, ColumnID)>>();
@@ -1038,7 +1033,13 @@ pub fn compute_non_indexed_receipt_column_ids<
         .map(|(j, _)| {
             (
                 format!("{}_{}", DATA_NAME, j + 1),
-                identifier_for_data_column(&event.event_signature, &event.address, &[j as u8 + 1]),
+                identifier_for_data_column(
+                    &event.event_signature,
+                    &event.address,
+                    event.chain_id,
+                    j as u8 + 1,
+                    &[],
+                ),
             )
         })
         .collect::<Vec<(String, ColumnID)>>();
@@ -1279,33 +1280,10 @@ impl ReceiptUpdate {
 
         for j in 0..(self.no_relevant + self.no_others) {
             let (tx_req, address_index) = {
-                let first_random = rand::random::<u8>() % 5;
-                let second_random = rand::random::<u8>() % 5;
                 let tx_req = if j < self.no_relevant {
                     self.select_event(contract)
                 } else {
-                    let random = match first_random {
-                        0 => contract.testNoIndexed().into_transaction_request(),
-                        1 => contract.testTwoIndexed().into_transaction_request(),
-                        2 => contract.testThreeIndexed().into_transaction_request(),
-                        3 => contract.testOneData().into_transaction_request(),
-                        4 => contract.testTwoData().into_transaction_request(),
-                        _ => unreachable!(),
-                    };
-
-                    let random_two = match second_random {
-                        0 => contract.testOneIOneD().into_transaction_request(),
-                        1 => contract.testTwoIOneD().into_transaction_request(),
-                        2 => contract.testTwoITwoD().into_transaction_request(),
-                        3 => contract.testNoIOneD().into_transaction_request(),
-                        4 => contract.testNoITwoD().into_transaction_request(),
-                        _ => unreachable!(),
-                    };
-                    match j % 2 {
-                        0 => random,
-                        1 => random_two,
-                        _ => unreachable!(),
-                    }
+                    self.select_non_indexed_event(contract)
                 };
                 let address_index = rand::random::<usize>() % addresses.len();
                 (tx_req, address_index)
@@ -1361,27 +1339,36 @@ impl ReceiptUpdate {
             _ => contract.testNoIndexed().into_transaction_request(),
         }
     }
-}
 
-pub trait ContractUpdate<T>: std::fmt::Debug
-where
-    T: Transport + Clone,
-{
-    type Contract;
-
-    fn apply_to(&self, ctx: &TestContext, contract: &Self::Contract) -> impl Future<Output = ()>;
-}
-
-impl<T> ContractUpdate<T> for ReceiptUpdate
-where
-    T: Transport + Clone,
-{
-    type Contract = EventEmitterInstance<T, RootProvider<T, Ethereum>>;
-
-    async fn apply_to(&self, ctx: &TestContext, contract: &Self::Contract) {
-        self.apply_update(ctx, contract).await
+    fn select_non_indexed_event<T: Transport + Clone, P: Provider<T, N>, N: Network>(
+        &self,
+        contract: &EventEmitterInstance<T, P, N>,
+    ) -> N::TransactionRequest {
+        // Randomly pick a pair that is not equal to `self.event_type`
+        let mut first_random = rand::random::<u8>() % 4;
+        let mut second_random = rand::random::<u8>() % 3;
+        while (first_random, second_random) == self.event_type {
+            first_random = rand::random::<u8>() % 4;
+            second_random = rand::random::<u8>() % 3;
+        }
+        match (first_random, second_random) {
+            (0, 0) => contract.testNoIndexed().into_transaction_request(),
+            (1, 0) => contract.testOneIndexed().into_transaction_request(),
+            (2, 0) => contract.testTwoIndexed().into_transaction_request(),
+            (3, 0) => contract.testThreeIndexed().into_transaction_request(),
+            (0, 1) => contract.testNoIOneD().into_transaction_request(),
+            (0, 2) => contract.testNoITwoD().into_transaction_request(),
+            (1, 1) => contract.testOneIOneD().into_transaction_request(),
+            (1, 2) => contract.testOneITwoD().into_transaction_request(),
+            (2, 1) => contract.testTwoIOneD().into_transaction_request(),
+            (2, 2) => contract.testTwoITwoD().into_transaction_request(),
+            (3, 1) => contract.testOneData().into_transaction_request(),
+            (3, 2) => contract.testTwoData().into_transaction_request(),
+            _ => contract.testNoIndexed().into_transaction_request(),
+        }
     }
 }
+
 #[derive(Clone, Debug, Copy)]
 pub enum ChangeType {
     Deletion,
@@ -1499,6 +1486,9 @@ pub enum TableRowUpdate<PrimaryIndex> {
     Update(CellsUpdate<PrimaryIndex>),
     /// Used to insert a new row from scratch
     Insertion(CellsUpdate<PrimaryIndex>, SecondaryIndexCell),
+    /// Used to wipe the current row tree before any other operation occurs,
+    /// useful with Receipts
+    DeleteAll,
 }
 
 impl<PrimaryIndex> TableRowUpdate<PrimaryIndex>
@@ -1514,7 +1504,7 @@ where
     ) -> CellCollection<PrimaryIndex> {
         let new_cells = CellCollection(
             match self {
-                TableRowUpdate::Deletion(_) => vec![],
+                TableRowUpdate::Deletion(_) | TableRowUpdate::DeleteAll => vec![],
                 TableRowUpdate::Insertion(cells, index) => {
                     let rest = cells.updated_cells.clone();
                     // we want the new secondary index value to put inside the CellCollection of the JSON

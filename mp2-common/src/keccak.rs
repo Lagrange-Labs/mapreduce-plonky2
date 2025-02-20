@@ -172,6 +172,9 @@ impl<const N: usize> KeccakCircuit<N> {
         let blocks = (0..total_num_blocks)
             .map(|i| {
                 let i_target = b.constant(F::from_canonical_usize(i));
+                // Since `i_target` is a constant we only need to range check
+                // nb_actual_blocks once and then we can use the unsafe variant for the remainder
+                // since the unsafe variant still enforces constants are in the provided range.
                 if i == 0 {
                     less_than(b, i_target, nb_actual_blocks, 8)
                 } else {

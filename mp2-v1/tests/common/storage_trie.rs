@@ -14,11 +14,11 @@ use mp2_common::{
     utils::{keccak256, Endianness, Packer},
 };
 use mp2_v1::{
-    api::{generate_proof, CircuitInput},
+    api::{generate_proof, get_slot, CircuitInput},
     length_extraction,
     values_extraction::{self, StorageSlotInfo},
 };
-use plonky2::field::types::PrimeField64;
+
 use rlp::{Prototype, Rlp};
 use std::collections::HashMap;
 
@@ -330,10 +330,10 @@ impl TrieNode {
                 .extracted_columns()
                 .iter()
                 .filter_map(|column| {
-                    let check_one = column.extraction_id()[7].0 as u8 == slot_info.slot().slot();
-                    let check_two = column.location_offset().0 as u32 == slot_info.evm_word();
+                    let check_one = get_slot(column) == slot_info.slot().slot();
+                    let check_two = column.location_offset() as u32 == slot_info.evm_word();
                     if check_one && check_two {
-                        Some(column.identifier().to_canonical_u64())
+                        Some(column.identifier())
                     } else {
                         None
                     }
@@ -501,7 +501,7 @@ impl TestStorageTrie {
             .rev()
             .map(|node| node.to_vec())
             .collect();
-
+        println!("first node: {:?}", nodes[0]);
         log::debug!(
             "Storage slot {storage_slot:?} queried, appending `{}` proof nodes to the trie",
             nodes.len()

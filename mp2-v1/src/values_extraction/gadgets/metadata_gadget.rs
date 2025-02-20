@@ -11,13 +11,13 @@ use mp2_common::{
     eth::{left_pad32, EventLogInfo, StorageSlot},
     group_hashing::CircuitBuilderGroupHashing,
     keccak::PACKED_HASH_LEN,
-    poseidon::{empty_poseidon_hash, hash_to_int_value, H},
+    poseidon::{empty_poseidon_hash, flatten_poseidon_hash_target, hash_to_int_value, H},
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
     types::{CBuilder, HashOutput},
     utils::{Endianness, Packer, ToFields},
-    F,
+    CHasher, F,
 };
 use plonky2::{
     field::types::Field,
@@ -159,9 +159,9 @@ impl TableMetadata {
     }
 
     pub fn extracted_value_digest(&self, value: &[u8], slot: &StorageSlot) -> Point {
-        let mut slot_extraction_id = [F::ZERO; 8];
-        slot_extraction_id[7] = F::from_canonical_u8(slot.slot());
-        let location_offset = F::from_canonical_u32(slot.evm_offset());
+        let mut slot_extraction_id = [0u32; 8];
+        slot_extraction_id[7] = slot.slot() as u32;
+        let location_offset = slot.evm_offset() as u64;
         self.extracted_columns()
             .iter()
             .fold(Point::NEUTRAL, |acc, column| {
@@ -211,8 +211,8 @@ impl TableMetadata {
         value: &[u8],
         event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
     ) -> Point {
-        let mut tx_index_input = [0u8; 32];
-        tx_index_input[31] = tx_index as u8;
+        let tx_index_bytes = tx_index.to_be_bytes();
+        let tx_index_input = left_pad32(tx_index_bytes.as_slice());
 
         // The actual receipt data is item 1 in the list
         let node_rlp = rlp::Rlp::new(value);
@@ -331,11 +331,25 @@ impl TableMetadata {
             columns_metadata.input_columns.as_slice(),
         );
 
+        // We need to pad out the assigned extracted columns to `MAX_EXTRACTED_COLUMNS`, we use the first extracted column for this.
+        // If there are no extracted columns we make a dummy column with the correct extraction_id.
+        let padding_column = match columns_metadata.extracted_columns.first() {
+            Some(col) => *col,
+            None => {
+                let extraction_id = columns_metadata.input_columns[0]
+                    .extraction_id()
+                    .iter()
+                    .flat_map(|val| val.to_be_bytes())
+                    .collect::<Vec<u8>>();
+                ExtractedColumnInfo::new(&extraction_id, 0, 0, 0, 0)
+            }
+        };
+
         let padded_extracted_columns = columns_metadata
             .extracted_columns
             .iter()
             .copied()
-            .chain(std::iter::repeat(columns_metadata.extracted_columns[0]))
+            .chain(std::iter::repeat(padding_column))
             .take(MAX_EXTRACTED_COLUMNS)
             .collect::<Vec<ExtractedColumnInfo>>();
         pw.set_extracted_column_info_target_arr(
@@ -373,12 +387,7 @@ pub(crate) struct TableMetadataTarget<const MAX_EXTRACTED_COLUMNS: usize> {
     pub(crate) num_actual_columns: Target,
 }
 
-type ReceiptExtractedOutput = (
-    Array<Target, 20>,
-    Array<Target, 32>,
-    CurveTarget,
-    CurveTarget,
-);
+type ReceiptExtractedOutput = (Array<Target, PACKED_HASH_LEN>, CurveTarget, CurveTarget);
 
 impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUMNS> {
     #[cfg(test)]
@@ -536,6 +545,23 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
         let signature_start = b.add(log_offset, signature_offset);
         let signature = value.extract_array_large::<_, _, 32>(b, signature_start);
 
+        let event_sig_id_packed = signature.pack(b, Endianness::Big).downcast_to_targets();
+        let address_packed = address.pack(b, Endianness::Big).downcast_to_targets();
+
+        let inputs = event_sig_id_packed
+            .arr
+            .iter()
+            .chain(address_packed.arr.iter())
+            .copied()
+            .collect::<Vec<Target>>();
+
+        let extraction_id_hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
+
+        let extraction_id_array: [Target; PACKED_HASH_LEN] =
+            flatten_poseidon_hash_target(b, extraction_id_hash);
+
+        let extraction_id = Array::from_array(extraction_id_array);
+
         let (metadata_points, value_points): (Vec<CurveTarget>, Vec<CurveTarget>) = self
             .extracted_columns
             .into_iter()
@@ -543,6 +569,8 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
             .map(|(column, selector)| {
                 // Calculate the column digest
                 let column_digest = column.digest(b);
+                // Enforce that we have the correct extraction_id
+                extraction_id.enforce_equal(b, &Array::from_array(column.extraction_id()));
                 // If selector is true (from self.real_columns) we need it to be false when we feed it into `column.extract_value()` later.
                 let selector = b.not(selector);
 
@@ -571,8 +599,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
             .unzip();
 
         (
-            address,
-            signature,
+            extraction_id,
             b.add_curve_point(&metadata_points),
             b.add_curve_point(&value_points),
         )

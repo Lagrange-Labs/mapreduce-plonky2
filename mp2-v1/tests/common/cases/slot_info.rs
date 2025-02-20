@@ -26,97 +26,57 @@ use mp2_common::{
 };
 use mp2_v1::api::{SlotInput, SlotInputs};
 use rand::{thread_rng, Rng};
+use serde::de::DeserializeOwned;
 
 use std::{array, fmt::Debug, future::Future, hash::Hash};
 
 use super::contract::MappingUpdate;
 
-pub(crate) trait MappingInfo: StorageSlotMappingKey {
+/// Trait that gives information about a solidity mapping
+pub(crate) trait MappingInfo: Sized {
+    /// The key to the mapping
+    type Key: StorageSlotMappingKey;
+    /// The value stored in the mapping/final mapping if nested mappings
     type Value: StorageSlotValue;
+    /// The struct that is used as input to the contract method that updates this mapping
     type Call;
-    fn to_call(update: &MappingUpdate<Self, Self::Value>) -> Self::Call;
-
+    /// Converts a [`MappingUpdate`] to the struct defined by [`Self::Call`]
+    fn to_call(update: &MappingUpdate<Self>) -> Self::Call;
+    /// Apply a list of updates to the contract
     fn call_contract<T: Transport + Clone, P: Provider<T, N>, N: Network>(
         contract: &SimpleInstance<T, P, N>,
         changes: Vec<Self::Call>,
     ) -> impl Future<Output = ()> + Send;
+    /// Sample a random key for a random update
+    fn sample_key() -> Self::Key {
+        Self::Key::sample_key()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
-pub struct SimpleMapping {
-    inner: U256,
-}
+pub struct SimpleMapping {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
-pub struct StructMapping {
-    inner: U256,
-}
+pub struct StructMapping {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
-pub struct SimpleNestedMapping {
-    outer: U256,
-    inner: U256,
-}
+pub struct SimpleNestedMapping {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
-pub struct StructNestedMapping {
-    outer: U256,
-    inner: U256,
-}
-
-impl StorageSlotMappingKey for StructNestedMapping {
-    type Key = U256;
-
-    const NO_KEYS: usize = 2;
-
-    fn sample_key() -> Self {
-        let rng = &mut thread_rng();
-        StructNestedMapping {
-            outer: U256::from_limbs(rng.gen()),
-            inner: U256::from_limbs(rng.gen()),
-        }
-    }
-
-    fn slot_inputs(slot_inputs: Vec<SlotInput>, length: Option<u8>) -> SlotInputs {
-        if let Some(length_slot) = length {
-            SlotInputs::MappingWithLength(slot_inputs, length_slot)
-        } else {
-            SlotInputs::MappingOfMappings(slot_inputs)
-        }
-    }
-    fn to_u256_vec(&self) -> Vec<U256> {
-        vec![self.outer, self.inner]
-    }
-    fn storage_slot(&self, slot: u8, evm_word: u32) -> StorageSlot {
-        let storage_slot = {
-            let parent_slot = StorageSlot::Mapping(self.outer.to_be_bytes_vec(), slot as usize);
-            StorageSlot::Node(
-                StorageSlotNode::new_mapping(parent_slot, self.inner.to_be_bytes_vec()).unwrap(),
-            )
-        };
-        if evm_word == 0 {
-            // We could construct the mapping slot for the EVM word of 0 directly even if the
-            // mapping value is a Struct, since the returned storage slot is only used to compute
-            // the slot location, and it's same with the Struct mapping and the EVM word of 0.
-            return storage_slot;
-        }
-
-        // It's definitely a Struct if the EVM word is non zero.
-        StorageSlot::Node(StorageSlotNode::new_struct(storage_slot, evm_word))
-    }
-}
+pub struct StructNestedMapping {}
 
 impl MappingInfo for StructNestedMapping {
+    type Key = MappingOfMappingsKey;
     type Value = LargeStruct;
     type Call = MappingOfStructMappingsChange;
-    fn to_call(update: &MappingUpdate<Self, Self::Value>) -> MappingOfStructMappingsChange {
+    fn to_call(update: &MappingUpdate<Self>) -> MappingOfStructMappingsChange {
         let op: MappingOperation = update.into();
 
         let (key, value) = update.to_tuple();
 
         MappingOfStructMappingsChange {
-            outerKey: key.outer,
-            innerKey: key.inner,
+            outerKey: key.outer_key,
+            innerKey: key.inner_key,
             field1: value.field1,
             field2: value.field2,
             field3: value.field3,
@@ -133,59 +93,18 @@ impl MappingInfo for StructNestedMapping {
     }
 }
 
-impl StorageSlotMappingKey for SimpleNestedMapping {
-    type Key = U256;
-
-    const NO_KEYS: usize = 2;
-
-    fn sample_key() -> Self {
-        let rng = &mut thread_rng();
-        SimpleNestedMapping {
-            outer: U256::from_limbs(rng.gen()),
-            inner: U256::from_limbs(rng.gen()),
-        }
-    }
-
-    fn slot_inputs(slot_inputs: Vec<SlotInput>, length: Option<u8>) -> SlotInputs {
-        if let Some(length_slot) = length {
-            SlotInputs::MappingWithLength(slot_inputs, length_slot)
-        } else {
-            SlotInputs::MappingOfMappings(slot_inputs)
-        }
-    }
-    fn to_u256_vec(&self) -> Vec<U256> {
-        vec![self.outer, self.inner]
-    }
-    fn storage_slot(&self, slot: u8, evm_word: u32) -> StorageSlot {
-        let storage_slot = {
-            let parent_slot = StorageSlot::Mapping(self.outer.to_be_bytes_vec(), slot as usize);
-            StorageSlot::Node(
-                StorageSlotNode::new_mapping(parent_slot, self.inner.to_be_bytes_vec()).unwrap(),
-            )
-        };
-        if evm_word == 0 {
-            // We could construct the mapping slot for the EVM word of 0 directly even if the
-            // mapping value is a Struct, since the returned storage slot is only used to compute
-            // the slot location, and it's same with the Struct mapping and the EVM word of 0.
-            return storage_slot;
-        }
-
-        // It's definitely a Struct if the EVM word is non zero.
-        StorageSlot::Node(StorageSlotNode::new_struct(storage_slot, evm_word))
-    }
-}
-
 impl MappingInfo for SimpleNestedMapping {
+    type Key = MappingOfMappingsKey;
     type Value = U256;
     type Call = MappingOfSingleValueMappingsChange;
-    fn to_call(update: &MappingUpdate<Self, Self::Value>) -> MappingOfSingleValueMappingsChange {
+    fn to_call(update: &MappingUpdate<Self>) -> MappingOfSingleValueMappingsChange {
         let op: MappingOperation = update.into();
 
         let (key, value) = update.to_tuple();
 
         MappingOfSingleValueMappingsChange {
-            outerKey: key.outer,
-            innerKey: key.inner,
+            outerKey: key.outer_key,
+            innerKey: key.inner_key,
             value,
             operation: op.into(),
         }
@@ -200,51 +119,18 @@ impl MappingInfo for SimpleNestedMapping {
     }
 }
 
-impl StorageSlotMappingKey for SimpleMapping {
-    type Key = U256;
-
-    const NO_KEYS: usize = 1;
-
-    fn sample_key() -> Self {
-        SimpleMapping {
-            inner: sample_u256(),
-        }
-    }
-    fn slot_inputs(slot_inputs: Vec<SlotInput>, length: Option<u8>) -> SlotInputs {
-        if let Some(length_slot) = length {
-            SlotInputs::MappingWithLength(slot_inputs, length_slot)
-        } else {
-            SlotInputs::Mapping(slot_inputs)
-        }
-    }
-    fn to_u256_vec(&self) -> Vec<U256> {
-        vec![self.inner]
-    }
-    fn storage_slot(&self, slot: u8, evm_word: u32) -> StorageSlot {
-        let storage_slot = StorageSlot::Mapping(self.inner.to_be_bytes_vec(), slot as usize);
-        if evm_word == 0 {
-            // We could construct the mapping slot for the EVM word of 0 directly even if the
-            // mapping value is a Struct, since the returned storage slot is only used to compute
-            // the slot location, and it's same with the Struct mapping and the EVM word of 0.
-            return storage_slot;
-        }
-
-        // It's definitely a Struct if the EVM word is non zero.
-        StorageSlot::Node(StorageSlotNode::new_struct(storage_slot, evm_word))
-    }
-}
-
 impl MappingInfo for SimpleMapping {
+    type Key = MappingKey;
     type Value = Address;
     type Call = MappingChange;
 
-    fn to_call(update: &MappingUpdate<Self, Self::Value>) -> Self::Call {
+    fn to_call(update: &MappingUpdate<Self>) -> Self::Call {
         let op: MappingOperation = update.into();
 
         let (key, value) = update.to_tuple();
 
         MappingChange {
-            key: key.inner,
+            key,
             value,
             operation: op.into(),
         }
@@ -259,51 +145,18 @@ impl MappingInfo for SimpleMapping {
     }
 }
 
-impl StorageSlotMappingKey for StructMapping {
-    type Key = U256;
-
-    const NO_KEYS: usize = 1;
-
-    fn sample_key() -> Self {
-        StructMapping {
-            inner: sample_u256(),
-        }
-    }
-    fn slot_inputs(slot_inputs: Vec<SlotInput>, length: Option<u8>) -> SlotInputs {
-        if let Some(length_slot) = length {
-            SlotInputs::MappingWithLength(slot_inputs, length_slot)
-        } else {
-            SlotInputs::Mapping(slot_inputs)
-        }
-    }
-    fn to_u256_vec(&self) -> Vec<U256> {
-        vec![self.inner]
-    }
-    fn storage_slot(&self, slot: u8, evm_word: u32) -> StorageSlot {
-        let storage_slot = StorageSlot::Mapping(self.inner.to_be_bytes_vec(), slot as usize);
-        if evm_word == 0 {
-            // We could construct the mapping slot for the EVM word of 0 directly even if the
-            // mapping value is a Struct, since the returned storage slot is only used to compute
-            // the slot location, and it's same with the Struct mapping and the EVM word of 0.
-            return storage_slot;
-        }
-
-        // It's definitely a Struct if the EVM word is non zero.
-        StorageSlot::Node(StorageSlotNode::new_struct(storage_slot, evm_word))
-    }
-}
-
 impl MappingInfo for StructMapping {
+    type Key = MappingKey;
     type Value = LargeStruct;
     type Call = MappingStructChange;
 
-    fn to_call(update: &MappingUpdate<Self, Self::Value>) -> MappingStructChange {
+    fn to_call(update: &MappingUpdate<Self>) -> MappingStructChange {
         let op: MappingOperation = update.into();
 
         let (key, value) = update.to_tuple();
 
         MappingStructChange {
-            key: key.inner,
+            key,
             field1: value.field1,
             field2: value.field2,
             field3: value.field3,
@@ -323,7 +176,9 @@ impl MappingInfo for StructMapping {
 /// Abstract for the mapping key of the storage slot.
 /// It could be a normal mapping key, or a pair of keys which identifies the
 /// mapping of mapppings key.
-pub trait StorageSlotMappingKey: Clone + Debug + PartialOrd + Ord + Send + Sync {
+pub trait StorageSlotMappingKey:
+    Clone + Debug + PartialOrd + Ord + Send + Sync + Serialize + DeserializeOwned
+{
     /// This is what the keys actually look like.
     type Key;
 

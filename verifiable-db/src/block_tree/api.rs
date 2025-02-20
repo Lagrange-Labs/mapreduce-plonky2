@@ -115,12 +115,14 @@ impl CircuitInput {
     pub fn new_empty(
         index_identifier: u64,
         tree_hash: &HashOutput,
+        min_val: U256,
         extraction_proof: Vec<u8>,
     ) -> Self {
         CircuitInput::Empty {
             witness: EmptyCircuit {
                 index_identifier: F::from_canonical_u64(index_identifier),
                 h_old: HashOut::<F>::from_bytes(tree_hash.into()),
+                min_val,
             },
             extraction_proof,
         }

@@ -23,7 +23,7 @@ use crate::common::proof_storage::{IndexProofIdentifier, ProofKey};
 
 use super::{
     proof_storage::{ProofStorage, RowProofIdentifier},
-    table::{Table, TableID},
+    table::{IndexUpdateResult, Table, TableID},
     TestContext,
 };
 
@@ -230,32 +230,83 @@ impl TestContext {
         &mut self,
         bn: BlockPrimaryIndex,
         table: &Table,
-        ut: UpdateTree<BlockTreeKey>,
+        ut: Option<IndexUpdateResult<BlockPrimaryIndex>>,
     ) -> anyhow::Result<IndexProofIdentifier<BlockPrimaryIndex>> {
-        let row_tree_root = table.row.root().await?.unwrap();
-        let row_payload = table.row.try_fetch(&row_tree_root).await?.unwrap();
-        let row_root_proof_key = RowProofIdentifier {
-            table: table.public_name.clone(),
-            tree_key: row_tree_root,
-            primary: row_payload.primary_index_value(),
-        };
+        if let Some(update_result) = ut {
+            let ut = update_result.plan;
+            let row_tree_root = table.row.root().await?.unwrap();
+            let row_payload = table.row.try_fetch(&row_tree_root).await?.unwrap();
+            let row_root_proof_key = RowProofIdentifier {
+                table: table.public_name.clone(),
+                tree_key: row_tree_root,
+                primary: row_payload.primary_index_value(),
+            };
 
-        let row_tree_proof = self
+            let row_tree_proof = self
+                .storage
+                .get_proof_exact(&ProofKey::Row(row_root_proof_key.clone()))
+                .unwrap();
+            let row_tree_hash = verifiable_db::row_tree::extract_hash_from_proof(&row_tree_proof)
+                .expect("can't find hash?");
+            let node = IndexNode {
+                identifier: identifier_block_column(),
+                value: U256::from(bn).into(),
+                // NOTE: here we put the latest key found, since it may have been generated at a
+                // previous block than the current one.
+                row_tree_hash: row_tree_hash.to_bytes().try_into().unwrap(),
+                ..Default::default()
+            };
+            info!("Generated index tree");
+            self.prove_index_tree(&table.public_name.clone(), &table.index, ut, &node)
+                .await
+        } else {
+            self.prove_empty_index_tree(&table.public_name, &table.index, bn)
+                .await
+        }
+    }
+
+    pub async fn prove_empty_index_tree(
+        &mut self,
+        table_id: &TableID,
+        t: &MerkleIndexTree,
+        bn: BlockPrimaryIndex,
+    ) -> anyhow::Result<IndexProofIdentifier<BlockPrimaryIndex>> {
+        info!("NODE index proving empty node");
+        let extraction_proof = self
             .storage
-            .get_proof_exact(&ProofKey::Row(row_root_proof_key.clone()))
-            .unwrap();
-        let row_tree_hash = verifiable_db::row_tree::extract_hash_from_proof(&row_tree_proof)
-            .expect("can't find hash?");
-        let node = IndexNode {
-            identifier: identifier_block_column(),
-            value: U256::from(bn).into(),
-            // NOTE: here we put the latest key found, since it may have been generated at a
-            // previous block than the current one.
-            row_tree_hash: row_tree_hash.to_bytes().try_into().unwrap(),
-            ..Default::default()
+            .get_proof_exact(&ProofKey::FinalExtraction((table_id.clone(), bn)))
+            .expect("should find extraction proof");
+        // We need to get the last node that was added to the index tree
+        let prev_node = t.current_epoch().await? as BlockPrimaryIndex;
+
+        let previous = t.try_fetch(&prev_node).await?.unwrap();
+        let inputs =
+            api::CircuitInput::BlockTree(verifiable_db::block_tree::CircuitInput::new_empty(
+                previous.identifier,
+                &previous.node_hash,
+                previous.min,
+                extraction_proof,
+            ));
+        let proof = self
+            .b
+            .bench("indexing::index_tree::empty", || {
+                api::generate_proof(self.params(), inputs)
+            })
+            .expect("error during empty index proof generation");
+
+        let proof_key = IndexProofIdentifier {
+            table: table_id.clone(),
+            tree_key: bn,
         };
-        info!("Generated index tree");
-        self.prove_index_tree(&table.public_name.clone(), &table.index, ut, &node)
-            .await
+        self.storage
+            .store_proof(ProofKey::Index(proof_key.clone()), proof)
+            .expect("unable to store index tree proof");
+
+        // just checking the storage is there
+        let _ = self
+            .storage
+            .get_proof_exact(&ProofKey::Index(proof_key.clone()))
+            .unwrap();
+        Ok(proof_key)
     }
 }

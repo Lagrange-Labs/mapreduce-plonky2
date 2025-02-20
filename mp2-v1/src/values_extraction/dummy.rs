@@ -16,7 +16,7 @@ use mp2_common::{
     D,
 };
 use plonky2::{
-    field::types::{Field, PrimeField64},
+    field::types::Field,
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -31,7 +31,6 @@ use serde::{Deserialize, Serialize};
 pub struct DummyNodeWires {
     root: Array<Target, PACKED_HASH_LEN>,
     metadata_digest: Vec<Target>,
-    key: MPTKeyWire,
 }
 
 /// Circuit to proving the processing of an extension node
@@ -45,7 +44,14 @@ pub struct DummyNodeCircuit {
 impl DummyNodeCircuit {
     pub fn build(b: &mut CBuilder) -> DummyNodeWires {
         // Build the key wire which will have all zeroes for nibbles and the pointer set to F::NEG_ONE
-        let key = MPTKeyWire::new(b);
+        let neg_one = b.constant(GFp::NEG_ONE);
+        let zero = b.zero();
+        let nibble_arr: [Target; MAX_KEY_NIBBLE_LEN] = std::array::from_fn(|_| zero);
+        let key_nibbles = Array::<Target, MAX_KEY_NIBBLE_LEN>::from_array(nibble_arr);
+        let key = MPTKeyWire {
+            key: key_nibbles,
+            pointer: neg_one,
+        };
 
         // Build the output hash array
         let root = OutputHash::new(b);
@@ -66,7 +72,6 @@ impl DummyNodeCircuit {
         DummyNodeWires {
             root: root.downcast_to_targets(),
             metadata_digest: dm.to_targets(),
-            key,
         }
     }
 
@@ -85,10 +90,6 @@ impl DummyNodeCircuit {
             &wires.metadata_digest,
             &self.metadata_digest.to_weierstrass().to_fields(),
         );
-
-        // First get field negative one in usize form
-        let ptr = GFp::NEG_ONE.to_canonical_u64() as usize;
-        wires.key.assign(pw, &[0; MAX_KEY_NIBBLE_LEN], ptr);
     }
 }
 
@@ -125,7 +126,7 @@ mod tests {
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
-        field::types::{Field, Sample},
+        field::types::{Field, PrimeField64, Sample},
         iop::{target::Target, witness::WitnessWrite},
         plonk::circuit_builder::CircuitBuilder,
     };

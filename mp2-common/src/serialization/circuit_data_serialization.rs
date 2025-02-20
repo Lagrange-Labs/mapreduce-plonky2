@@ -407,5 +407,13 @@ pub(super) mod tests {
         let decoded_p: TestPointSerialization = bincode::deserialize(&encoded).unwrap();
 
         assert_eq!(decoded_p.0, point);
+
+        // Check neutral point serialization
+        let point = Point::NEUTRAL;
+        let p = TestPointSerialization(point);
+        let encoded = bincode::serialize(&p).unwrap();
+        let decoded_p: TestPointSerialization = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(decoded_p.0, point);
     }
 }

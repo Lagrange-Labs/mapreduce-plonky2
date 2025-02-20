@@ -274,7 +274,7 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         // stop when you've looked at exactly the same number of  bytes than
         // the RLP list header indicates
         let before_the_end = b.is_not_equal(offset, end_idx);
-        let offset_to_use = b.select(before_the_end, offset, zero);
+        let offset_to_use = b.mul(before_the_end.target, offset);
         // read the header starting from the offset
         let header = decode_header(b, data, offset_to_use);
         let new_offset = b.add(header.offset, header.len);

@@ -93,16 +93,16 @@ where
         let headers = decode_fixed_list::<_, D, MAX_ITEMS_IN_LIST>(b, &node.arr.arr, zero);
 
         let zero_point = b.curve_zero();
-        let mut should_process = b._false();
+        let mut all_children_processed = b._false();
         let mut seen_nibbles = vec![];
         for (i, proof_inputs) in inputs.iter().enumerate() {
             let it = b.constant(GFp::from_canonical_usize(i));
             let proof_limit = b.is_equal(it, n_proof_valid);
-            should_process = b.or(should_process, proof_limit);
+            all_children_processed = b.or(all_children_processed, proof_limit);
 
             // Accumulate the values digest.
             let child_digest = proof_inputs.values_digest_target();
-            let child_digest = b.curve_select(should_process, zero_point, child_digest);
+            let child_digest = b.curve_select(all_children_processed, zero_point, child_digest);
             values_digest = b.curve_add(values_digest, child_digest);
 
             let child_digest = proof_inputs.metadata_digest_target();
@@ -114,7 +114,7 @@ where
             }
 
             // Add the number of leaves this proof has processed.
-            let maybe_n = b.select(should_process, zero, proof_inputs.n());
+            let maybe_n = b.select(all_children_processed, zero, proof_inputs.n());
             n = b.add(n, maybe_n);
 
             let child_key = proof_inputs.mpt_key();
@@ -127,7 +127,8 @@ where
             // Make sure we don't process twice the same proof for same nibble.
             seen_nibbles.iter().for_each(|sn| {
                 let is_equal = b.is_equal(*sn, nibble);
-                let should_be_false = b.select(should_process, ffalse.target, is_equal.target);
+                let should_be_false =
+                    b.select(all_children_processed, ffalse.target, is_equal.target);
                 b.connect(should_be_false, ffalse.target);
             });
             seen_nibbles.push(nibble);

@@ -17,6 +17,7 @@ pub mod index_tree;
 pub mod ivc;
 mod length_extraction;
 pub(crate) mod proof_storage;
+mod receipt_trie;
 pub mod rowtree;
 mod storage_trie;
 pub mod table;

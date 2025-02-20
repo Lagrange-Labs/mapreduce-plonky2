@@ -20,15 +20,17 @@ use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
-    eth::{EventLogInfo, ProofQuery, ReceiptProofInfo, StorageSlot, StorageSlotNode},
-    poseidon::H,
+    eth::{
+        left_pad32, EventLogInfo, ProofQuery, ReceiptProofInfo, StorageSlot, StorageSlotNode,
+        MAX_RECEIPT_DATA_SIZE,
+    },
     proof::ProofWithVK,
-    types::{GFp, HashOutput},
+    types::HashOutput,
 };
 use mp2_v1::{
     api::{
-        combine_digest_and_block, compute_table_info, merge_metadata_hash,
-        metadata_hash as metadata_hash_function, SlotInput, SlotInputs,
+        compute_table_info, get_slot, merge_metadata_hash, metadata_hash as metadata_hash_function,
+        receipt_metadata_hash, SlotInput, SlotInputs,
     },
     indexing::{
         block::BlockPrimaryIndex,
@@ -36,14 +38,16 @@ use mp2_v1::{
         row::{RowTreeKey, ToNonce},
     },
     values_extraction::{
-        gadgets::{column_info::ExtractedColumnInfo, metadata_gadget::TableMetadata},
+        gadgets::column_info::ExtractedColumnInfo,
+        identifier_for_data_column, identifier_for_gas_used_column,
         identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
-        identifier_for_outer_mapping_key_column, identifier_for_value_column,
-        planner::Extractable,
-        StorageSlotInfo,
+        identifier_for_outer_mapping_key_column, identifier_for_topic_column,
+        identifier_for_tx_index_column, identifier_for_value_column,
+        planner::{receipts::ReceiptBlockData, Extractable},
+        row_unique_data_for_receipt_leaf, StorageSlotInfo,
     },
 };
-use plonky2::field::types::PrimeField64;
+
 use rand::{
     distributions::{Alphanumeric, DistString},
     rngs::StdRng,
@@ -51,10 +55,8 @@ use rand::{
 };
 
 use crate::common::{
-    cases::{
-        contract::EventContract,
-        indexing::{ReceiptUpdate, TableRowValues, TX_INDEX_COLUMN},
-    },
+    bindings::eventemitter::EventEmitter::EventEmitterInstance,
+    cases::indexing::{ReceiptUpdate, TableRowValues},
     final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
@@ -63,7 +65,7 @@ use crate::common::{
 };
 
 use super::{
-    contract::{Contract, ContractController, MappingUpdate, SimpleSingleValues, TestContract},
+    contract::{Contract, ContractController, MappingUpdate, SimpleSingleValues},
     indexing::{ChangeType, TableRowUpdate, UpdateType, SINGLE_SLOTS, SINGLE_STRUCT_SLOT},
     slot_info::{LargeStruct, MappingInfo, StorageSlotMappingKey, StorageSlotValue, StructMapping},
 };
@@ -85,11 +87,11 @@ impl SlotEvmWordColumns {
     fn new(column_info: Vec<ExtractedColumnInfo>) -> Self {
         // Ensure the column information should have the same slot and EVM word.
 
-        let slot = column_info[0].extraction_id()[7].0 as u8;
-        let evm_word = column_info[0].location_offset().0 as u32;
+        let slot = get_slot(&column_info[0]);
+        let evm_word = column_info[0].location_offset() as u32;
         column_info[1..].iter().for_each(|col| {
-            let col_slot = col.extraction_id()[7].0 as u8;
-            let col_word = col.location_offset().0 as u32;
+            let col_slot = get_slot(col);
+            let col_word = col.location_offset() as u32;
             assert_eq!(col_slot, slot);
             assert_eq!(col_word, evm_word);
         });
@@ -98,11 +100,11 @@ impl SlotEvmWordColumns {
     }
     fn slot(&self) -> u8 {
         // The columns should have the same slot.
-        u8::try_from(self.0[0].extraction_id()[7].to_canonical_u64()).unwrap()
+        get_slot(&self.0[0])
     }
     fn evm_word(&self) -> u32 {
         // The columns should have the same EVM word.
-        u32::try_from(self.0[0].location_offset().to_canonical_u64()).unwrap()
+        u32::try_from(self.0[0].location_offset()).unwrap()
     }
     fn column_info(&self) -> &[ExtractedColumnInfo] {
         &self.0
@@ -329,6 +331,16 @@ impl<K: StorageSlotMappingKey, V: StorageSlotValue> UniqueMappingEntry<K, V> {
     }
 }
 
+/// Enum used to identify where original data has come from, used by queries
+/// to work out whether they can be run on the table.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub(crate) enum TableType {
+    Simple,
+    Mapping,
+    Receipt,
+    Merge,
+}
+
 pub(crate) trait TableSource {
     type Metadata;
 
@@ -356,7 +368,8 @@ pub(crate) trait TableSource {
 
     fn metadata_hash(&self, contract_address: Address, chain_id: u64) -> MetadataHash;
 
-    fn can_query(&self) -> bool;
+    #[allow(dead_code)]
+    fn table_type(&self) -> TableType;
 }
 
 impl TableSource for SingleExtractionArgs {
@@ -398,8 +411,8 @@ impl TableSource for SingleExtractionArgs {
         metadata_hash(slot, &contract_address, chain_id, vec![])
     }
 
-    fn can_query(&self) -> bool {
-        false
+    fn table_type(&self) -> TableType {
+        TableType::Simple
     }
 }
 
@@ -441,8 +454,8 @@ impl TableSource for MergeSource {
         merge_metadata_hash(contract_address, chain_id, vec![], single, mapping)
     }
 
-    fn can_query(&self) -> bool {
-        true
+    fn table_type(&self) -> TableType {
+        TableType::Merge
     }
 }
 
@@ -485,13 +498,14 @@ impl MergeSource {
                 // all updates of table b
                 update_single.iter().map(|us| match (refm, us) {
                     // We start by a few impossible methods
-                    (_, TableRowUpdate::Deletion(_)) => panic!("no deletion on single table"),
+                    (_, TableRowUpdate::Deletion(_)) | (_, TableRowUpdate::DeleteAll) => panic!("no deletion on single table"),
                     (TableRowUpdate::Update(_), TableRowUpdate::Insertion(_, _)) => {
                         panic!("insertion on single only happens at genesis")
                     }
                     // WARNING: when a mapping row is deleted, it deletes the whole row even for single
                     // values
                     (TableRowUpdate::Deletion(ref d), _) => TableRowUpdate::Deletion(d.clone()),
+                    (TableRowUpdate::DeleteAll, _) => panic!("Cannot currently delete all mapping entries"),
                     // Regular update on both 
                     (TableRowUpdate::Update(ref update_a), TableRowUpdate::Update(update_b)) => {
                         let mut update_a = update_a.clone();
@@ -586,6 +600,7 @@ impl MergeSource {
                         match row_update {
                             // nothing else to do for deletion
                             TableRowUpdate::Deletion(k) => TableRowUpdate::Deletion(k),
+                            TableRowUpdate::DeleteAll => panic!("Cannot delete all for a mapping"),
                             // NOTE: nothing else to do for update as well since we know the
                             // update comes from the mapping, so single didn't change, so no need
                             // to add anything.
@@ -673,7 +688,7 @@ pub trait ReceiptExtractionArgs:
     const NO_TOPICS: usize;
     const MAX_DATA_WORDS: usize;
 
-    fn new(address: Address, event_signature: &str) -> Self
+    fn new(address: Address, chain_id: u64, event_signature: &str) -> Self
     where
         Self: Sized;
 
@@ -686,30 +701,41 @@ pub trait ReceiptExtractionArgs:
         event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>,
         block: PrimaryIndex,
     ) -> Vec<TableRowUpdate<PrimaryIndex>> {
-        let metadata = TableMetadata::from(*event);
+        let tx_index_identifier = identifier_for_tx_index_column(
+            &event.event_signature,
+            &event.address,
+            event.chain_id,
+            &[],
+        );
+        let gas_used_identifier = identifier_for_gas_used_column(
+            &event.event_signature,
+            &event.address,
+            event.chain_id,
+            &[],
+        );
 
-        let (_, row_id) = metadata.input_value_digest(&[&[0u8; 32]; 2]);
-        let input_columns_ids = metadata
-            .input_columns()
-            .iter()
-            .map(|col| col.identifier().0)
-            .collect::<Vec<u64>>();
-        let extracted_column_ids = metadata
-            .extracted_columns()
-            .iter()
-            .map(|col| col.identifier().0)
-            .collect::<Vec<u64>>();
-
-        proof_infos
-            .iter()
-            .flat_map(|info| {
+        std::iter::once(TableRowUpdate::DeleteAll)
+            .chain(proof_infos.iter().flat_map(|info| {
                 let receipt_with_bloom = info.to_receipt().unwrap();
 
-                let tx_index_cell = Cell::new(input_columns_ids[0], U256::from(info.tx_index));
+                let tx_index_cell = Cell::new(tx_index_identifier, U256::from(info.tx_index));
 
                 let gas_used_cell = Cell::new(
-                    input_columns_ids[1],
+                    gas_used_identifier,
                     U256::from(receipt_with_bloom.receipt.cumulative_gas_used),
+                );
+
+                let tx_index_inputs = left_pad32(info.tx_index.to_be_bytes().as_slice());
+                let gas_used_inputs = left_pad32(
+                    receipt_with_bloom
+                        .receipt
+                        .cumulative_gas_used
+                        .to_be_bytes()
+                        .as_slice(),
+                );
+                let row_id = row_unique_data_for_receipt_leaf(
+                    tx_index_inputs.as_slice(),
+                    gas_used_inputs.as_slice(),
                 );
 
                 receipt_with_bloom
@@ -731,18 +757,30 @@ pub trait ReceiptExtractionArgs:
                             .into_iter()
                             .skip(1)
                             .enumerate()
-                            .map(|(j, topic)| Cell::new(extracted_column_ids[j], topic.into()))
+                            .map(|(j, topic)| {
+                                let topic_id = identifier_for_topic_column(
+                                    &event.event_signature,
+                                    &event.address,
+                                    event.chain_id,
+                                    j as u8 + 1,
+                                    &[],
+                                );
+                                Cell::new(topic_id, topic.into())
+                            })
                             .collect::<Vec<Cell>>();
 
-                        let data_start = topics_cells.len();
                         let data_cells = data
-                            .chunks(32)
+                            .chunks(MAX_RECEIPT_DATA_SIZE)
                             .enumerate()
                             .map(|(j, data_slice)| {
-                                Cell::new(
-                                    extracted_column_ids[data_start + j],
-                                    U256::from_be_slice(data_slice),
-                                )
+                                let data_id = identifier_for_data_column(
+                                    &event.event_signature,
+                                    &event.address,
+                                    event.chain_id,
+                                    j as u8 + 1,
+                                    &[],
+                                );
+                                Cell::new(data_id, U256::from_be_slice(data_slice))
                             })
                             .collect::<Vec<Cell>>();
 
@@ -759,7 +797,7 @@ pub trait ReceiptExtractionArgs:
                         TableRowUpdate::<PrimaryIndex>::Insertion(collection, secondary)
                     })
                     .collect::<Vec<TableRowUpdate<PrimaryIndex>>>()
-            })
+            }))
             .collect::<Vec<TableRowUpdate<PrimaryIndex>>>()
     }
 }
@@ -770,11 +808,11 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptExtractionArgs
     const MAX_DATA_WORDS: usize = MAX_DATA_WORDS;
     const NO_TOPICS: usize = NO_TOPICS;
 
-    fn new(address: Address, event_signature: &str) -> Self
+    fn new(address: Address, chain_id: u64, event_signature: &str) -> Self
     where
         Self: Sized,
     {
-        EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(address, event_signature)
+        EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(address, chain_id, event_signature)
     }
 
     fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>
@@ -796,6 +834,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptExtractionArgs
             .unwrap();
         EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }> {
             size: self.size,
+            chain_id: self.chain_id,
             address: self.address,
             add_rel_offset: self.add_rel_offset,
             event_signature: self.event_signature,
@@ -806,21 +845,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptExtractionArgs
     }
 
     fn get_index(&self) -> u64 {
-        use plonky2::{
-            field::types::{Field, PrimeField64},
-            plonk::config::Hasher,
-        };
-
-        let tx_index_input = [
-            self.address.as_slice(),
-            self.event_signature.as_slice(),
-            TX_INDEX_COLUMN.as_bytes(),
-        ]
-        .concat()
-        .into_iter()
-        .map(GFp::from_canonical_u8)
-        .collect::<Vec<GFp>>();
-        H::hash_no_pad(&tx_index_input).elements[0].to_canonical_u64()
+        identifier_for_tx_index_column(&self.event_signature, &self.address, self.chain_id, &[])
     }
 }
 
@@ -831,8 +856,8 @@ where
 {
     type Metadata = EventLogInfo<{ R::NO_TOPICS }, { R::MAX_DATA_WORDS }>;
 
-    fn can_query(&self) -> bool {
-        true
+    fn table_type(&self) -> TableType {
+        TableType::Receipt
     }
 
     fn get_data(&self) -> Self::Metadata {
@@ -847,18 +872,15 @@ where
         let event = self.get_event();
         async move {
             let contract_update =
-                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA_WORDS as u8), 5, 15);
+                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA_WORDS as u8), 1, 5);
 
             let provider = ProviderBuilder::new()
                 .with_recommended_fillers()
                 .wallet(ctx.wallet())
                 .on_http(ctx.rpc_url.parse().unwrap());
 
-            let event_emitter = EventContract::new(contract.address(), provider.root());
-            event_emitter
-                .apply_update(ctx, &contract_update)
-                .await
-                .unwrap();
+            let event_emitter = EventEmitterInstance::new(contract.address(), provider.root());
+            contract_update.apply_update(ctx, &event_emitter).await;
 
             let block_number = ctx.block_number().await;
             let new_block_number = block_number as BlockPrimaryIndex;
@@ -890,13 +912,18 @@ where
             .wallet(ctx.wallet())
             .on_http(ctx.rpc_url.parse().unwrap());
 
-        let value_proof = event
-            .prove_value_extraction::<32, 512, _>(
-                bn as u64,
-                ctx.params().get_value_extraction_params(),
-                provider.root(),
-            )
-            .await?;
+        let (proof_infos, receipt_root) = event
+            .query_receipt_proofs(provider.root(), (bn as u64).into())
+            .await
+            .unwrap();
+
+        let block_data = ReceiptBlockData::new(proof_infos, receipt_root, bn as u64);
+        let mut value_proof_plan =
+            EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>::create_update_plan(
+                &block_data,
+            )?;
+
+        let value_proof = ctx.prove_extractable(&mut value_proof_plan, &event)?;
         Ok((
             ExtractionProofInput::Receipt(value_proof),
             self.metadata_hash(contract.address(), contract.chain_id()),
@@ -925,11 +952,8 @@ where
                 .wallet(ctx.wallet())
                 .on_http(ctx.rpc_url.parse().unwrap());
 
-            let event_emitter = EventContract::new(contract.address(), provider.root());
-            event_emitter
-                .apply_update(ctx, &contract_update)
-                .await
-                .unwrap();
+            let event_emitter = EventEmitterInstance::new(contract.address(), provider.root());
+            contract_update.apply_update(ctx, &event_emitter).await;
 
             let block_number = ctx.block_number().await;
             let new_block_number = block_number as BlockPrimaryIndex;
@@ -945,9 +969,7 @@ where
     }
 
     fn metadata_hash(&self, _contract_address: Address, _chain_id: u64) -> MetadataHash {
-        let table_metadata = TableMetadata::from(self.get_event());
-        let digest = table_metadata.digest();
-        combine_digest_and_block(digest)
+        receipt_metadata_hash(&self.get_event())
     }
 }
 
@@ -1086,8 +1108,8 @@ impl SingleExtractionArgs {
             evm_word_col.column_info().iter().for_each(|col_info| {
                 let extracted_value = col_info.extract_value(value_bytes.as_slice());
                 let extracted_value = U256::from_be_bytes(extracted_value);
-                let id = col_info.identifier().to_canonical_u64();
-                let cell = Cell::new(col_info.identifier().to_canonical_u64(), extracted_value);
+                let id = col_info.identifier();
+                let cell = Cell::new(col_info.identifier(), extracted_value);
                 if Some(id) == secondary_id {
                     assert!(secondary_cell.is_none());
                     secondary_cell = Some(SecondaryIndexCell::new_from(cell, 0));
@@ -1286,7 +1308,7 @@ pub(crate) struct MappingExtractionArgs<T: MappingInfo> {
     /// need to know an existing key
     ///     * doing the MPT proofs over, since this test doesn't implement the copy on write for MPT
     /// (yet), we're just recomputing all the proofs at every block and we need the keys for that.
-    mapping_keys: BTreeSet<T>,
+    mapping_keys: BTreeSet<T::Key>,
     /// The optional length extraction parameters
     length_args: Option<LengthExtractionArgs>,
 }
@@ -1294,15 +1316,15 @@ pub(crate) struct MappingExtractionArgs<T: MappingInfo> {
 impl<T> TableSource for MappingExtractionArgs<T>
 where
     T: MappingInfo,
-    Vec<MappingUpdate<T, T::Value>>: ContractController,
+    Vec<MappingUpdate<T>>: ContractController,
 {
     type Metadata = SlotInputs;
 
     fn get_data(&self) -> Self::Metadata {
         if let Some(l_args) = self.length_args.as_ref() {
-            T::slot_inputs(self.slot_inputs.clone(), Some(l_args.slot))
+            T::Key::slot_inputs(self.slot_inputs.clone(), Some(l_args.slot))
         } else {
-            T::slot_inputs(self.slot_inputs.clone(), None)
+            T::Key::slot_inputs(self.slot_inputs.clone(), None)
         }
     }
 
@@ -1343,7 +1365,7 @@ where
             Ok(p) => p,
             Err(_) => {
                 let storage_slot_info = self.all_storage_slot_info(contract);
-                let mapping_values_proof = ctx
+                let mapping_values_proof: Vec<u8> = ctx
                     .prove_values_extraction(
                         &contract.address,
                         BlockNumberOrTag::Number(bn as u64),
@@ -1522,7 +1544,7 @@ where
                     }
                     MappingUpdate::Insertion(key_to_insert, _) => {
                         info!("Inserting key {key_to_insert:?} to tracking mapping keys");
-                        self.mapping_keys.insert(key_to_insert.clone());
+                        self.mapping_keys.insert(Clone::clone(key_to_insert));
                     }
                     // the mapping key doesn't change here so no need to update the list
                     MappingUpdate::Update(_, _, _) => {}
@@ -1543,8 +1565,8 @@ where
         metadata_hash(self.get_data(), &contract_address, chain_id, vec![])
     }
 
-    fn can_query(&self) -> bool {
-        true
+    fn table_type(&self) -> TableType {
+        TableType::Mapping
     }
 }
 
@@ -1568,7 +1590,7 @@ impl<T: MappingInfo> MappingExtractionArgs<T> {
         &self,
         block_number: BlockPrimaryIndex,
         contract: &Contract,
-        updates: &[MappingUpdate<T, T::Value>],
+        updates: &[MappingUpdate<T>],
     ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
         updates
             .iter()
@@ -1671,7 +1693,7 @@ impl<T: MappingInfo> MappingExtractionArgs<T> {
         &self,
         evm_word: u32,
         table_info: Vec<ExtractedColumnInfo>,
-        mapping_key: &T,
+        mapping_key: &T::Key,
     ) -> StorageSlotInfo {
         let storage_slot = mapping_key.storage_slot(self.slot, evm_word);
 
@@ -1696,7 +1718,7 @@ impl<T: MappingInfo> MappingExtractionArgs<T> {
         &self,
         ctx: &mut TestContext,
         contract: &Contract,
-        mapping_key: &T,
+        mapping_key: &T::Key,
     ) -> T::Value {
         let mut extracted_values = vec![];
         let evm_word_cols = self.evm_word_column_info(contract);
@@ -1746,10 +1768,7 @@ fn evm_word_column_info(table_info: &[ExtractedColumnInfo]) -> Vec<SlotEvmWordCo
     let mut column_info_map = HashMap::new();
     table_info.iter().for_each(|col| {
         column_info_map
-            .entry((
-                col.extraction_id()[7].0 as u8,
-                col.location_offset().0 as u32,
-            ))
+            .entry((get_slot(col), col.location_offset() as u32))
             .and_modify(|cols: &mut Vec<_>| cols.push(*col))
             .or_insert(vec![*col]);
     });
