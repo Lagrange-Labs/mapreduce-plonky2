@@ -29,7 +29,7 @@ use mp2_common::{
 };
 use mp2_v1::{
     api::{
-        compute_table_info, merge_metadata_hash, metadata_hash as metadata_hash_function,
+        compute_table_info, get_slot, merge_metadata_hash, metadata_hash as metadata_hash_function,
         receipt_metadata_hash, SlotInput, SlotInputs,
     },
     indexing::{
@@ -38,13 +38,13 @@ use mp2_v1::{
         row::{RowTreeKey, ToNonce},
     },
     values_extraction::{
-        gadgets::{column_info::ExtractedColumnInfo, metadata_gadget::TableMetadata},
+        gadgets::column_info::ExtractedColumnInfo,
         identifier_for_data_column, identifier_for_gas_used_column,
         identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
         identifier_for_outer_mapping_key_column, identifier_for_topic_column,
         identifier_for_tx_index_column, identifier_for_value_column,
         planner::{receipts::ReceiptBlockData, Extractable},
-        StorageSlotInfo,
+        row_unique_data_for_receipt_leaf, StorageSlotInfo,
     },
 };
 
@@ -59,7 +59,6 @@ use crate::common::{
     cases::indexing::{ReceiptUpdate, TableRowValues},
     final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
     proof_storage::{ProofKey, ProofStorage},
-    receipt_trie::prove_extractable,
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
     Deserialize, MetadataHash, Serialize, TestContext,
@@ -88,10 +87,10 @@ impl SlotEvmWordColumns {
     fn new(column_info: Vec<ExtractedColumnInfo>) -> Self {
         // Ensure the column information should have the same slot and EVM word.
 
-        let slot = column_info[0].extraction_id()[7] as u8;
+        let slot = get_slot(&column_info[0]);
         let evm_word = column_info[0].location_offset() as u32;
         column_info[1..].iter().for_each(|col| {
-            let col_slot = col.extraction_id()[7] as u8;
+            let col_slot = get_slot(col);
             let col_word = col.location_offset() as u32;
             assert_eq!(col_slot, slot);
             assert_eq!(col_word, evm_word);
@@ -101,7 +100,7 @@ impl SlotEvmWordColumns {
     }
     fn slot(&self) -> u8 {
         // The columns should have the same slot.
-        u8::try_from(self.0[0].extraction_id()[7]).unwrap()
+        get_slot(&self.0[0])
     }
     fn evm_word(&self) -> u32 {
         // The columns should have the same EVM word.
@@ -702,8 +701,6 @@ pub trait ReceiptExtractionArgs:
         event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>,
         block: PrimaryIndex,
     ) -> Vec<TableRowUpdate<PrimaryIndex>> {
-        let metadata = TableMetadata::from(*event);
-
         let tx_index_identifier = identifier_for_tx_index_column(
             &event.event_signature,
             &event.address,
@@ -736,8 +733,10 @@ pub trait ReceiptExtractionArgs:
                         .to_be_bytes()
                         .as_slice(),
                 );
-                let (_, row_id) =
-                    metadata.input_value_digest(&[&tx_index_inputs, &gas_used_inputs]);
+                let row_id = row_unique_data_for_receipt_leaf(
+                    tx_index_inputs.as_slice(),
+                    gas_used_inputs.as_slice(),
+                );
 
                 receipt_with_bloom
                     .logs()
@@ -912,14 +911,19 @@ where
             .with_recommended_fillers()
             .wallet(ctx.wallet())
             .on_http(ctx.rpc_url.parse().unwrap());
-        let block_data =
-            ReceiptBlockData::get_block_data(&event, bn as u64, provider.root()).await?;
+
+        let (proof_infos, receipt_root) = event
+            .query_receipt_proofs(provider.root(), (bn as u64).into())
+            .await
+            .unwrap();
+
+        let block_data = ReceiptBlockData::new(proof_infos, receipt_root, bn as u64);
         let mut value_proof_plan =
             EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>::create_update_plan(
                 &block_data,
             )?;
 
-        let value_proof = prove_extractable(&mut value_proof_plan, ctx.params(), &event)?;
+        let value_proof = ctx.prove_extractable(&mut value_proof_plan, &event)?;
         Ok((
             ExtractionProofInput::Receipt(value_proof),
             self.metadata_hash(contract.address(), contract.chain_id()),
@@ -1764,7 +1768,7 @@ fn evm_word_column_info(table_info: &[ExtractedColumnInfo]) -> Vec<SlotEvmWordCo
     let mut column_info_map = HashMap::new();
     table_info.iter().for_each(|col| {
         column_info_map
-            .entry((col.extraction_id()[7] as u8, col.location_offset() as u32))
+            .entry((get_slot(col), col.location_offset() as u32))
             .and_modify(|cols: &mut Vec<_>| cols.push(*col))
             .or_insert(vec![*col]);
     });

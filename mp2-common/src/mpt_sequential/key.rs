@@ -1,6 +1,11 @@
 //! MPT key gadget
 
-use crate::{array::Array, keccak::PACKED_HASH_LEN, rlp::MAX_KEY_NIBBLE_LEN, utils::less_than};
+use crate::{
+    array::Array,
+    keccak::PACKED_HASH_LEN,
+    rlp::MAX_KEY_NIBBLE_LEN,
+    utils::{less_than, less_than_unsafe},
+};
 use core::array::from_fn as create_array;
 use eth_trie::Nibbles;
 use plonky2::{
@@ -168,6 +173,7 @@ impl<const KEY_LENGTH: usize> MPTKeyWireGeneric<KEY_LENGTH> {
         let t = b._true();
         let zero = b.zero();
         let one = b.one();
+        let two = b.two();
 
         // First we check that the pointer is at most 15, other wise the result will not fit in a Target
         // (without overflow)
@@ -184,15 +190,23 @@ impl<const KEY_LENGTH: usize> MPTKeyWireGeneric<KEY_LENGTH> {
 
         let first_byte_128 = b.is_equal(one_two_eight, tmp);
 
+        // If 128 is strictly less than tmp the pointer should be larger than 1
+        let pointer_not_one = less_than_unsafe(b, one_two_eight, tmp, 8);
+
+        let mut possible_length = b.sub(tmp, one_two_eight);
+        possible_length = b.mul(possible_length, two);
+        let expected_pointer = b.mul_add(pointer_not_one.target, possible_length, one);
+
+        b.connect(expected_pointer, self.pointer);
+
         // If pointer is not 1 or the first byte is 128 (only happens when encoding 0) then
         // we need to skip the first byte as it is part of the rlp encoding or it is meant to be zero
-        let pointer_is_one = b.is_not_equal(self.pointer, one);
-        let byte_selector = b.or(pointer_is_one, first_byte_128);
+        let byte_selector = b.or(pointer_not_one, first_byte_128);
 
         let initial = b.select(byte_selector, zero, tmp);
 
         let combiner = b.constant(F::from_canonical_u32(1u32 << 8));
-        let mut at_the_end = b.not(pointer_is_one);
+        let mut at_the_end = b.not(pointer_not_one);
         // We fold over the remaining nibbles of the key
         self.key
             .arr

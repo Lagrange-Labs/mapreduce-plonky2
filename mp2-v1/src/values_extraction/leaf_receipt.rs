@@ -47,8 +47,10 @@ pub(crate) struct ReceiptLeafWires<const NODE_LEN: usize, const MAX_EXTRACTED_CO
 where
     [(); PAD_LEN(NODE_LEN)]:,
 {
-    /// The event we are monitoring for
-    pub(crate) event: EventWires,
+    /// Byte offset for the address from the beginning of a Log
+    pub(crate) add_rel_offset: Target,
+    /// Byte offset from the start of the log to event signature
+    pub(crate) sig_rel_offset: Target,
     /// The node bytes
     pub(crate) node: VectorWire<Target, { PAD_LEN(NODE_LEN) }>,
     /// the hash of the node bytes
@@ -59,19 +61,6 @@ where
     pub(crate) mpt_key: MPTKeyWire,
     /// The table metadata
     pub(crate) metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
-}
-
-/// Contains all the information for an [`Event`] in rlp form
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EventWires {
-    /// Packed contract address to check
-    address: Array<Target, 20>,
-    /// Byte offset for the address from the beginning of a Log
-    add_rel_offset: Target,
-    /// Packed event signature,
-    event_signature: Array<Target, HASH_LEN>,
-    /// Byte offset from the start of the log to event signature
-    sig_rel_offset: Target,
 }
 
 /// Circuit to prove a transaction receipt contains logs relating to a specific event.
@@ -138,8 +127,10 @@ where
     }
 
     pub(crate) fn build(b: &mut CBuilder) -> ReceiptLeafWires<NODE_LEN, MAX_EXTRACTED_COLUMNS> {
-        // Build the event wires
-        let event_wires = Self::build_event_wires(b);
+        // relative offset of the address
+        let add_rel_offset = b.add_virtual_target();
+        // Signature relative offset
+        let sig_rel_offset = b.add_virtual_target();
         // Build the metadata
         let metadata = TableMetadata::build(b, 2);
         let zero = b.zero();
@@ -254,8 +245,8 @@ where
                 b,
                 &node.arr,
                 relevant_log_offset,
-                event_wires.add_rel_offset,
-                event_wires.sig_rel_offset,
+                add_rel_offset,
+                sig_rel_offset,
             );
 
         // Extract input values
@@ -304,7 +295,8 @@ where
         .register_args(b);
 
         ReceiptLeafWires {
-            event: event_wires,
+            add_rel_offset,
+            sig_rel_offset,
             node,
             root,
             relevant_log_offset,
@@ -313,33 +305,20 @@ where
         }
     }
 
-    fn build_event_wires(b: &mut CBuilder) -> EventWires {
-        // Packed address
-        let address = Array::<Target, 20>::new(b);
-
-        // relative offset of the address
-        let add_rel_offset = b.add_virtual_target();
-
-        // Event signature
-        let event_signature = Array::<Target, 32>::new(b);
-
-        // Signature relative offset
-        let sig_rel_offset = b.add_virtual_target();
-
-        EventWires {
-            address,
-            add_rel_offset,
-            event_signature,
-            sig_rel_offset,
-        }
-    }
-
     pub(crate) fn assign(
         &self,
         pw: &mut PartialWitness<GFp>,
         wires: &ReceiptLeafWires<NODE_LEN, MAX_EXTRACTED_COLUMNS>,
     ) {
-        self.assign_event_wires(pw, &wires.event);
+        pw.set_target(
+            wires.add_rel_offset,
+            F::from_canonical_usize(self.rel_add_offset),
+        );
+
+        pw.set_target(
+            wires.sig_rel_offset,
+            F::from_canonical_usize(self.sig_rel_offset),
+        );
 
         let pad_node =
             Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(&self.node).expect("invalid node given");
@@ -366,26 +345,6 @@ where
         wires.mpt_key.assign(pw, &key_nibbles, ptr);
 
         TableMetadata::assign(pw, &self.metadata, &wires.metadata);
-    }
-
-    pub fn assign_event_wires(&self, pw: &mut PartialWitness<GFp>, wires: &EventWires) {
-        wires
-            .address
-            .assign(pw, &self.address.0.map(GFp::from_canonical_u8));
-
-        pw.set_target(
-            wires.add_rel_offset,
-            F::from_canonical_usize(self.rel_add_offset),
-        );
-
-        wires
-            .event_signature
-            .assign(pw, &self.event_signature.map(GFp::from_canonical_u8));
-
-        pw.set_target(
-            wires.sig_rel_offset,
-            F::from_canonical_usize(self.sig_rel_offset),
-        );
     }
 }
 

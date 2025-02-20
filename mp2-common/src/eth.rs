@@ -390,7 +390,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
         let node_rlp = rlp::Rlp::new(node);
 
         // The actual receipt data is item 1 in the list because the first byte is the transaction type
-        let (receipt_rlp, receipt_off) = node_rlp.at_with_offset(TX_TYPE_BYTES)?;
+        let (receipt_rlp, receipt_off) = node_rlp.at_with_offset(1)?;
         // The rlp encoded Receipt is not a list but a string that is formed of the `tx_type` followed by the remaining receipt
         // data rlp encoded as a list. We retrieve the payload info so that we can work out relevant offsets later.
         let receipt_str_payload = receipt_rlp.payload_info()?;
@@ -1107,7 +1107,7 @@ mod test {
             let node_rlp = rlp::Rlp::new(last_node);
 
             // The actual receipt data is item 1 in the list
-            let (receipt_rlp, receipt_off) = node_rlp.at_with_offset(TX_TYPE_BYTES)?;
+            let (receipt_rlp, receipt_off) = node_rlp.at_with_offset(1)?;
             // The rlp encoded Receipt is not a list but a string that is formed of the `tx_type` followed by the remaining receipt
             // data rlp encoded as a list. We retrieve the payload info so that we can work out relevant offsets later.
             let receipt_str_payload = receipt_rlp.payload_info()?;

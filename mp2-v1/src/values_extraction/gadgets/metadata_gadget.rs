@@ -331,17 +331,25 @@ impl TableMetadata {
             columns_metadata.input_columns.as_slice(),
         );
 
+        // We need to pad out the assigned extracted columns to `MAX_EXTRACTED_COLUMNS`, we use the first extracted column for this.
+        // If there are no extracted columns we make a dummy column with the correct extraction_id.
+        let padding_column = match columns_metadata.extracted_columns.first() {
+            Some(col) => *col,
+            None => {
+                let extraction_id = columns_metadata.input_columns[0]
+                    .extraction_id()
+                    .iter()
+                    .flat_map(|val| val.to_be_bytes())
+                    .collect::<Vec<u8>>();
+                ExtractedColumnInfo::new(&extraction_id, 0, 0, 0, 0)
+            }
+        };
+
         let padded_extracted_columns = columns_metadata
             .extracted_columns
             .iter()
             .copied()
-            .chain(std::iter::repeat(
-                columns_metadata
-                    .extracted_columns
-                    .first()
-                    .copied()
-                    .unwrap_or_default(),
-            ))
+            .chain(std::iter::repeat(padding_column))
             .take(MAX_EXTRACTED_COLUMNS)
             .collect::<Vec<ExtractedColumnInfo>>();
         pw.set_extracted_column_info_target_arr(
@@ -562,17 +570,10 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
                 // Calculate the column digest
                 let column_digest = column.digest(b);
                 // Enforce that we have the correct extraction_id
-                let slice_len = b.constant(F::from_canonical_usize(PACKED_HASH_LEN));
-                let slices_equal = extraction_id.is_slice_equals(
-                    b,
-                    &Array::from_array(column.extraction_id()),
-                    slice_len,
-                );
+                extraction_id.enforce_equal(b, &Array::from_array(column.extraction_id()));
                 // If selector is true (from self.real_columns) we need it to be false when we feed it into `column.extract_value()` later.
                 let selector = b.not(selector);
-                // If selector is true here its not a real column so we just set it to one.
-                let to_enforce = b.select(selector, one, slices_equal.target);
-                b.connect(to_enforce, one);
+
                 let location = b.add(log_offset, column.byte_offset());
 
                 // We iterate over the result bytes in reverse order, the first element that we want to access

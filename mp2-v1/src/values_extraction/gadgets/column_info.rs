@@ -7,7 +7,7 @@ use mp2_common::{
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
     keccak::PACKED_HASH_LEN,
     poseidon::H,
-    types::{CBuilder, MAPPING_LEAF_VALUE_LEN},
+    types::{CBuilder, HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer},
     CHasher, F,
 };
@@ -35,6 +35,12 @@ pub trait ColumnInfo {
 
     /// Getter for the identifier as a [`u64`]
     fn identifier(&self) -> u64;
+
+    /// Getter for the slot (this will try and reconstruct a slot even in cases where it doesn't make sense)
+    fn slot(&self) -> u8;
+
+    /// Getter for the event id used in receipt indexing which is H(event_signature || event_address)
+    fn event_id(&self) -> HashOutput;
 }
 
 /// This struct is used for information in MPT nodes that isn't explicitly extractable from the node itself, but is used
@@ -318,6 +324,20 @@ impl ColumnInfo for InputColumnInfo {
     fn identifier(&self) -> u64 {
         self.identifier.0
     }
+
+    fn slot(&self) -> u8 {
+        self.extraction_id()[7] as u8
+    }
+
+    fn event_id(&self) -> HashOutput {
+        HashOutput::try_from(
+            self.extraction_id()
+                .into_iter()
+                .flat_map(|val| val.to_be_bytes())
+                .collect::<Vec<u8>>(),
+        )
+        .expect("This should never fail")
+    }
 }
 
 impl ColumnInfo for ExtractedColumnInfo {
@@ -327,6 +347,20 @@ impl ColumnInfo for ExtractedColumnInfo {
 
     fn identifier(&self) -> u64 {
         self.identifier.0
+    }
+
+    fn slot(&self) -> u8 {
+        self.extraction_id()[7] as u8
+    }
+
+    fn event_id(&self) -> HashOutput {
+        HashOutput::try_from(
+            self.extraction_id()
+                .into_iter()
+                .flat_map(|val| val.to_be_bytes())
+                .collect::<Vec<u8>>(),
+        )
+        .expect("This should never fail")
     }
 }
 /// Column info

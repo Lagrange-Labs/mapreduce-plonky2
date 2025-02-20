@@ -12,7 +12,7 @@ use crate::{
     values_extraction::{
         self,
         gadgets::{
-            column_info::{ExtractedColumnInfo, InputColumnInfo},
+            column_info::{ColumnInfo, ExtractedColumnInfo, InputColumnInfo},
             metadata_gadget::TableMetadata,
         },
         identifier_block_column, identifier_for_inner_mapping_key_column,
@@ -458,4 +458,14 @@ pub fn receipt_metadata_hash<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize
     event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
 ) -> MetadataHash {
     combine_digest_and_block(TableMetadata::from(*event).digest())
+}
+
+/// Returns the slot relating to this [`ExtractedColumnInfo`]
+pub fn get_slot<C: ColumnInfo>(column: &C) -> u8 {
+    column.slot()
+}
+
+/// Returns the event id (H(event_signature || event_address)) relating to this [`ExtractedColumnInfo`]
+pub fn get_event_id<C: ColumnInfo>(column: &C) -> HashOutput {
+    column.event_id()
 }

@@ -1,9 +1,4 @@
-use alloy::{
-    network::Ethereum,
-    primitives::{keccak256, B256},
-    providers::RootProvider,
-    transports::Transport,
-};
+use alloy::primitives::{keccak256, B256};
 use anyhow::Result;
 use mp2_common::{
     eth::{EventLogInfo, ReceiptProofInfo},
@@ -50,20 +45,6 @@ impl ReceiptBlockData {
 
     pub fn epoch(&self) -> u64 {
         self.epoch
-    }
-
-    pub async fn get_block_data<
-        const NO_TOPICS: usize,
-        const MAX_DATA_WORDS: usize,
-        T: Transport + Clone,
-    >(
-        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-        epoch: u64,
-        provider: &RootProvider<T, Ethereum>,
-    ) -> Result<Self, MP2PlannerError> {
-        let (proofs, receipt_root) = event.query_receipt_proofs(provider, epoch.into()).await?;
-
-        Ok(ReceiptBlockData::new(proofs, receipt_root, epoch))
     }
 }
 
@@ -187,7 +168,11 @@ pub mod tests {
         // get some tx and receipt
         let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
 
-        let block_data = ReceiptBlockData::get_block_data(&event_info, epoch, &provider).await?;
+        let (proofs, receipt_root) = event_info
+            .query_receipt_proofs(&provider, epoch.into())
+            .await?;
+
+        let block_data = ReceiptBlockData::new(proofs, receipt_root, epoch);
         let extraction_plan = EventLogInfo::<2, 1>::create_update_plan(&block_data)?;
 
         assert_eq!(*extraction_plan.update_tree.root(), receipts_root);
