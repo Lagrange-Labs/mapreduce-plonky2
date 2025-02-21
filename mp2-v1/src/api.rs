@@ -13,7 +13,7 @@ use crate::{
         self,
         gadgets::{
             column_info::{ColumnInfo, ExtractedColumnInfo, InputColumnInfo},
-            metadata_gadget::TableMetadata,
+            metadata_gadget::{EmptyableTableMetadata, NonEmptyableTableMetadata, TableMetadata},
         },
         identifier_block_column, identifier_for_inner_mapping_key_column,
         identifier_for_mapping_key_column, identifier_for_outer_mapping_key_column,
@@ -38,6 +38,7 @@ use plonky2::{
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };
+use plonky2_ecgfp5::curve::curve::Point;
 use serde::{Deserialize, Serialize};
 
 /// Struct containing the expected input MPT Extension/Branch node
@@ -232,12 +233,12 @@ pub enum SlotInputs {
 }
 
 impl SlotInputs {
-    pub fn to_column_metadata(
+    pub fn metadata_digest(
         &self,
         contract_address: &Address,
         chain_id: u64,
         extra: Vec<u8>,
-    ) -> TableMetadata {
+    ) -> Point {
         let (slot, extracted_columns) = match self {
             SlotInputs::Simple(ref inner)
             | SlotInputs::Mapping(ref inner)
@@ -248,8 +249,12 @@ impl SlotInputs {
             ),
         };
 
-        let input_columns = match self {
-            SlotInputs::Simple(..) => vec![],
+        match self {
+            SlotInputs::Simple(..) => NonEmptyableTableMetadata::new(
+                &[], // no input columns
+                &extracted_columns,
+            )
+            .digest(),
             SlotInputs::Mapping(..) | SlotInputs::MappingWithLength(..) => {
                 let identifier = identifier_for_mapping_key_column(
                     slot,
@@ -258,8 +263,8 @@ impl SlotInputs {
                     extra.clone(),
                 );
 
-                let input_column = InputColumnInfo::new(&[slot], identifier, KEY_ID_PREFIX);
-                vec![input_column]
+                let input_columns = vec![InputColumnInfo::new(&[slot], identifier, KEY_ID_PREFIX)];
+                EmptyableTableMetadata::new(&input_columns, &extracted_columns).digest()
             }
             SlotInputs::MappingOfMappings(..) => {
                 let outer_identifier = identifier_for_outer_mapping_key_column(
@@ -274,14 +279,13 @@ impl SlotInputs {
                     chain_id,
                     extra.clone(),
                 );
-                vec![
+                let input_columns = vec![
                     InputColumnInfo::new(&[slot], outer_identifier, OUTER_KEY_ID_PREFIX),
                     InputColumnInfo::new(&[slot], inner_identifier, INNER_KEY_ID_PREFIX),
-                ]
+                ];
+                EmptyableTableMetadata::new(&input_columns, &extracted_columns).digest()
             }
-        };
-
-        TableMetadata::new(&input_columns, &extracted_columns)
+        }
     }
 }
 
@@ -380,9 +384,7 @@ fn value_metadata(
     chain_id: u64,
     extra: Vec<u8>,
 ) -> (Digest, Digest) {
-    let column_metadata = inputs.to_column_metadata(contract, chain_id, extra.clone());
-
-    let md = column_metadata.digest();
+    let md = inputs.metadata_digest(contract, chain_id, extra.clone());
 
     let length_digest = match inputs {
         SlotInputs::Simple(..) | SlotInputs::Mapping(..) | SlotInputs::MappingOfMappings(..) => {

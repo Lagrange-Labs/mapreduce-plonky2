@@ -1,8 +1,10 @@
 //! The metadata gadget is used to ensure the correct extraction from the set of all identifiers.
 
+use crate::values_extraction::dummy::{DummyNodeCircuit, DummyNodeWires};
+
 use super::column_info::{
-    CircuitBuilderColumnInfo, ExtractedColumnInfo, ExtractedColumnInfoTarget, InputColumnInfo,
-    InputColumnInfoTarget, WitnessWriteColumnInfo,
+    CircuitBuilderColumnInfo, ColumnInfo, ExtractedColumnInfo, ExtractedColumnInfoTarget,
+    InputColumnInfo, InputColumnInfoTarget, WitnessWriteColumnInfo,
 };
 
 use itertools::Itertools;
@@ -33,9 +35,46 @@ use plonky2_ecgfp5::{
     curve::{curve::Point, scalar_field::Scalar},
     gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
 };
-use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
-use std::{array, borrow::Borrow, iter::once};
+use std::{array, borrow::Borrow, iter::once, vec::IntoIter};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Data structure containing the columns of a table
+pub struct TableColumns {
+    pub(crate) input_columns: Vec<InputColumnInfo>,
+    pub(crate) extracted_columns: Vec<ExtractedColumnInfo>,
+}
+
+impl IntoIterator for TableColumns {
+    type Item = Box<dyn ColumnInfo>;
+
+    type IntoIter = IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.input_columns
+            .into_iter()
+            .map(|col| Box::new(col) as Box<dyn ColumnInfo>)
+            .chain(
+                self.extracted_columns
+                    .into_iter()
+                    .map(|col| Box::new(col.clone()) as Box<dyn ColumnInfo>),
+            )
+            .collect_vec()
+            .into_iter()
+    }
+}
+
+impl TableColumns {
+    /// Get the input columns
+    pub fn input_columns(&self) -> &[InputColumnInfo] {
+        self.input_columns.as_slice()
+    }
+
+    /// Get the extracted columns
+    pub fn extracted_columns(&self) -> &[ExtractedColumnInfo] {
+        self.extracted_columns.as_slice()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// This struct stores the [`InputColumnInfo`] and [`ExtractedColumnInfo`] for an object that we wish to index.
@@ -45,75 +84,47 @@ use std::{array, borrow::Borrow, iter::once};
 /// `num_actual_columns` is the number of columns that aren't dummy columns. We need this since a circuit has to always have the same number of columns but not every table will need all of them.
 ///
 /// We use this struct so we can store all information about the columns of a table easily and use it to calculate value and metadata digests.
-pub struct TableMetadata {
+/// The `CAN_BE_EMPTY` fag specifies whether the table whom the metadata refers to
+/// can have no rows for a given block
+pub(crate) struct TableMetadata<const CAN_BE_EMPTY: bool> {
     /// Columns that aren't extracted from the node, like the mapping keys
-    pub(crate) input_columns: Vec<InputColumnInfo>,
-    /// The extracted column info
-    pub(crate) extracted_columns: Vec<ExtractedColumnInfo>,
+    pub(crate) columns: TableColumns,
     /// Actual column number
     pub(crate) num_actual_columns: usize,
 }
 
-impl TableMetadata {
+pub(crate) type EmptyableTableMetadata = TableMetadata<true>;
+pub(crate) type NonEmptyableTableMetadata = TableMetadata<false>;
+
+impl<const CAN_BE_EMPTY: bool> TableMetadata<CAN_BE_EMPTY> {
     /// Create a new instance of [`TableMetadata`] from a slice of [`InputColumnInfo`] and a slice of [`ExtractedColumnInfo`] we assume that the columns are sorted into a predetermined order.
-    pub fn new(
+    pub(crate) fn new(
         input_columns: &[InputColumnInfo],
         extracted_columns: &[ExtractedColumnInfo],
-    ) -> TableMetadata {
+    ) -> Self {
         let num_actual_columns = extracted_columns.len() + input_columns.len();
 
-        TableMetadata {
-            input_columns: input_columns.to_vec(),
-            extracted_columns: extracted_columns.to_vec(),
+        Self {
+            columns: TableColumns {
+                input_columns: input_columns.to_vec(),
+                extracted_columns: extracted_columns.to_vec(),
+            },
             num_actual_columns,
         }
     }
 
-    /// Create a sample MPT metadata. It could be used in testing.
-    pub fn sample<const NUM_EXTRACTED_COLUMNS: usize>(
-        flag: bool,
-        input_prefixes: &[&[u8]],
-        extraction_identifier: &[u8],
-        location_offset: F,
-    ) -> Self {
-        let rng = &mut thread_rng();
-
-        let input_columns = input_prefixes
-            .iter()
-            .map(|prefix| InputColumnInfo::new(extraction_identifier, rng.gen(), prefix))
-            .collect::<Vec<InputColumnInfo>>();
-
-        let num_actual_columns = rng.gen_range(1..=NUM_EXTRACTED_COLUMNS);
-
-        let mut extraction_vec = extraction_identifier.pack(Endianness::Little);
-        extraction_vec.resize(8, 0u32);
-        extraction_vec.reverse();
-        let extraction_id: [F; 8] = extraction_vec
-            .into_iter()
-            .map(F::from_canonical_u32)
-            .collect::<Vec<F>>()
-            .try_into()
-            .expect("This should never fail");
-
-        let extracted_columns = (0..num_actual_columns)
-            .map(|_| ExtractedColumnInfo::sample(flag, &extraction_id, location_offset))
-            .collect::<Vec<ExtractedColumnInfo>>();
-
-        TableMetadata::new(&input_columns, &extracted_columns)
-    }
-
     /// Get the input columns
-    pub fn input_columns(&self) -> &[InputColumnInfo] {
-        self.input_columns.as_slice()
+    pub(crate) fn input_columns(&self) -> &[InputColumnInfo] {
+        self.columns.input_columns()
     }
 
     /// Get the columns we actually extract from
-    pub fn extracted_columns(&self) -> &[ExtractedColumnInfo] {
-        &self.extracted_columns[..self.num_actual_columns - self.input_columns.len()]
+    pub(crate) fn extracted_columns(&self) -> &[ExtractedColumnInfo] {
+        &self.columns.extracted_columns()
     }
 
     /// Compute the metadata digest.
-    pub fn digest(&self) -> Point {
+    pub(crate) fn digest(&self) -> Point {
         let input_iter = self
             .input_columns()
             .iter()
@@ -126,16 +137,25 @@ impl TableMetadata {
             .map(|column| column.digest())
             .collect::<Vec<Point>>();
 
-        input_iter
+        let digest = input_iter
             .into_iter()
             .chain(extracted_iter)
-            .fold(Point::NEUTRAL, |acc, b| acc + b)
+            .fold(Point::NEUTRAL, |acc, b| acc + b);
+        // add constant identifier `EMPTY_TABLE` to the digest if the table could be empty
+        if CAN_BE_EMPTY {
+            DummyNodeCircuit::add_empty_identifier_to_digest(digest)
+        } else {
+            digest
+        }
     }
 
     /// Computes the value digest for a provided value array and the unique row_id
-    pub fn input_value_digest<T: Borrow<[u8; 32]>>(&self, input_vals: &[T]) -> (Point, HashOutput) {
+    pub(crate) fn input_value_digest<T: Borrow<[u8; 32]>>(
+        &self,
+        input_vals: &[T],
+    ) -> (Point, HashOutput) {
         // Make sure we have the same number of input values and columns
-        assert_eq!(input_vals.len(), self.input_columns.len());
+        assert_eq!(input_vals.len(), self.input_columns().len());
 
         let point = self
             .input_columns()
@@ -158,7 +178,7 @@ impl TableMetadata {
         (point, H::hash_no_pad(&row_id_input).into())
     }
 
-    pub fn extracted_value_digest(&self, value: &[u8], slot: &StorageSlot) -> Point {
+    pub(crate) fn extracted_value_digest(&self, value: &[u8], slot: &StorageSlot) -> Point {
         let mut slot_extraction_id = [0u32; 8];
         slot_extraction_id[7] = slot.slot() as u32;
         let location_offset = slot.evm_offset() as u64;
@@ -190,18 +210,6 @@ impl TableMetadata {
             .fold(Point::NEUTRAL, |acc, column| {
                 acc + column.receipt_value_digest(value, relevant_log_offset)
             })
-    }
-
-    pub fn num_actual_columns(&self) -> usize {
-        self.num_actual_columns
-    }
-
-    /// Create a new instance of [`TableMetadata`] from an [`EventLogInfo`]. Events
-    /// always have two input columns relating to the transaction index and gas used for the transaction.
-    pub fn from_event_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-    ) -> TableMetadata {
-        TableMetadata::from(*event)
     }
 
     /// Function to calculate the full receipt value digest from a receipt leaf node and [`EventLogInfo`]
@@ -290,11 +298,19 @@ impl TableMetadata {
     }
 }
 
-impl TableMetadata {
+impl EmptyableTableMetadata {
+    pub(crate) fn digest_for_empty_circuit(&self) -> Point {
+        let metadata =
+            NonEmptyableTableMetadata::new(self.input_columns(), self.extracted_columns());
+        metadata.digest()
+    }
+}
+
+impl<const CAN_BE_EMPTY: bool> TableMetadata<CAN_BE_EMPTY> {
     pub(crate) fn build<const MAX_EXTRACTED_COLUMNS: usize>(
         b: &mut CBuilder,
         num_input_columns: usize,
-    ) -> TableMetadataTarget<MAX_EXTRACTED_COLUMNS> {
+    ) -> TableMetadataTarget<MAX_EXTRACTED_COLUMNS, CAN_BE_EMPTY> {
         let real_columns = array::from_fn(|_| b.add_virtual_bool_target_safe());
 
         let num_actual_columns = b.add_many(real_columns.iter().map(|bool_tar| bool_tar.target));
@@ -314,29 +330,29 @@ impl TableMetadata {
 
     pub(crate) fn assign<const MAX_EXTRACTED_COLUMNS: usize>(
         pw: &mut PartialWitness<F>,
-        columns_metadata: &TableMetadata,
-        metadata_target: &TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
+        columns_metadata: &Self,
+        metadata_target: &TableMetadataTarget<MAX_EXTRACTED_COLUMNS, CAN_BE_EMPTY>,
     ) {
         // First we check that we are trying to assign from a `TableMetadata` with the correct
         // number of columns
         assert_eq!(
-            columns_metadata.input_columns.len(),
+            columns_metadata.input_columns().len(),
             metadata_target.input_columns.len()
         );
 
-        assert!(columns_metadata.extracted_columns.len() <= MAX_EXTRACTED_COLUMNS);
+        assert!(columns_metadata.extracted_columns().len() <= MAX_EXTRACTED_COLUMNS);
 
         pw.set_input_column_info_target_arr(
             metadata_target.input_columns.as_slice(),
-            columns_metadata.input_columns.as_slice(),
+            columns_metadata.input_columns(),
         );
 
         // We need to pad out the assigned extracted columns to `MAX_EXTRACTED_COLUMNS`, we use the first extracted column for this.
         // If there are no extracted columns we make a dummy column with the correct extraction_id.
-        let padding_column = match columns_metadata.extracted_columns.first() {
+        let padding_column = match columns_metadata.extracted_columns().first() {
             Some(col) => *col,
             None => {
-                let extraction_id = columns_metadata.input_columns[0]
+                let extraction_id = columns_metadata.input_columns()[0]
                     .extraction_id()
                     .iter()
                     .flat_map(|val| val.to_be_bytes())
@@ -346,7 +362,7 @@ impl TableMetadata {
         };
 
         let padded_extracted_columns = columns_metadata
-            .extracted_columns
+            .extracted_columns()
             .iter()
             .copied()
             .chain(std::iter::repeat(padding_column))
@@ -362,13 +378,14 @@ impl TableMetadata {
             .iter()
             .enumerate()
             .for_each(|(i, &b_target)| {
-                pw.set_bool_target(b_target, i < columns_metadata.extracted_columns.len())
+                pw.set_bool_target(b_target, i < columns_metadata.extracted_columns().len())
             });
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct TableMetadataTarget<const MAX_EXTRACTED_COLUMNS: usize> {
+pub(crate) struct TableMetadataTarget<const MAX_EXTRACTED_COLUMNS: usize, const CAN_BE_EMPTY: bool>
+{
     /// Information about all input columns of the table
     pub(crate) input_columns: Vec<InputColumnInfoTarget>,
     #[serde(
@@ -387,11 +404,17 @@ pub(crate) struct TableMetadataTarget<const MAX_EXTRACTED_COLUMNS: usize> {
     pub(crate) num_actual_columns: Target,
 }
 
-type ReceiptExtractedOutput = (Array<Target, PACKED_HASH_LEN>, CurveTarget, CurveTarget);
+pub(crate) type EmptyableTableMetadataTarget<const MAX_EXTRACTED_COLUMNS: usize> =
+    TableMetadataTarget<MAX_EXTRACTED_COLUMNS, true>;
+pub(crate) type NonEmptyableTableMetadataTarget<const MAX_EXTRACTED_COLUMNS: usize> =
+    TableMetadataTarget<MAX_EXTRACTED_COLUMNS, false>;
 
-impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUMNS> {
-    #[cfg(test)]
-    pub fn metadata_digest(
+type ReceiptExtractedOutput = (Array<Target, PACKED_HASH_LEN>, CurveTarget);
+
+impl<const MAX_EXTRACTED_COLUMNS: usize, const CAN_BE_EMPTY: bool>
+    TableMetadataTarget<MAX_EXTRACTED_COLUMNS, CAN_BE_EMPTY>
+{
+    pub(crate) fn metadata_digest(
         &self,
         b: &mut CBuilder,
         metadata_prefixes: &[&[Target; PACKED_HASH_LEN]],
@@ -417,66 +440,57 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
 
         let points = [input_points, extracted_points].concat();
 
-        b.add_curve_point(&points)
+        let digest = b.add_curve_point(&points);
+        if CAN_BE_EMPTY {
+            DummyNodeWires::add_empty_identifier_to_digest(b, &digest)
+        } else {
+            digest
+        }
     }
 
-    /// Computes the value digest and metadata digest for the input columns from the supplied inputs.
-    /// Outputs are ordered as `(MetadataDigest, ValueDigest)`.
-    pub(crate) fn inputs_digests(
+    /// Computes the value digest for the input columns from the supplied inputs.
+    pub(crate) fn inputs_value_digest(
         &self,
         b: &mut CBuilder,
         input_values: &[Array<U32Target, PACKED_HASH_LEN>],
-        metadata_prefixes: &[&[Target; PACKED_HASH_LEN]],
-        extraction_id: &[Target; PACKED_HASH_LEN],
-    ) -> (CurveTarget, CurveTarget) {
-        let (metadata_points, value_points): (Vec<CurveTarget>, Vec<CurveTarget>) = self
+    ) -> CurveTarget {
+        let value_points = self
             .input_columns
             .iter()
             .zip_eq(input_values.iter())
-            .zip_eq(metadata_prefixes)
-            .map(|((column, input_val), metadata_prefix)| {
+            .map(|(column, input_val)| {
                 let inputs = once(column.identifier)
                     .chain(input_val.arr.iter().map(|t| t.to_target()))
                     .collect_vec();
-                (
-                    column.digest(b, metadata_prefix, extraction_id),
-                    b.map_to_curve_point(&inputs),
-                )
+                b.map_to_curve_point(&inputs)
             })
-            .unzip();
+            .collect_vec();
 
-        (
-            b.add_curve_point(&metadata_points),
-            b.add_curve_point(&value_points),
-        )
+        b.add_curve_point(&value_points)
     }
 
-    /// Computes the value digest and metadata digest for the extracted columns from the supplied value
-    /// Outputs are ordered as `(MetadataDigest, ValueDigest)`.
+    /// Computes the value digest for the extracted columns from the supplied value
     /// The inputs `location_no_offset` and `location` represent the MPT key for the slot of this variable without an evm word offset
     /// and the MPT key of the current leaf node respectively. To determine whether we should extract a value or not we check to see if
     /// `location_no_offset + column.loction_offset == location`, if this is true we extract, if false we dummy the value.
-    pub(crate) fn extracted_digests<const VALUE_LEN: usize>(
+    pub(crate) fn extracted_value_digest<const VALUE_LEN: usize>(
         &self,
         b: &mut CBuilder,
         value: &Array<Target, VALUE_LEN>,
         offset: Target,
         extraction_id: &[Target; PACKED_HASH_LEN],
-    ) -> (CurveTarget, CurveTarget) {
+    ) -> CurveTarget {
         let one = b.one();
 
         let curve_zero = b.curve_zero();
 
         let ex_id_arr = Array::<Target, PACKED_HASH_LEN>::from(*extraction_id);
 
-        let (metadata_points, value_points): (Vec<CurveTarget>, Vec<CurveTarget>) = self
+        let value_points = self
             .extracted_columns
             .into_iter()
             .zip(self.real_columns)
             .map(|(column, selector)| {
-                // Calculate the column digest
-                let column_digest = column.digest(b);
-
                 // Now we work out if the column is to be extracted, if it is we will take the value we recover from `value[column.byte_offset..column.byte_offset + column.length]`
                 // left padded.
                 let correct_offset = b.is_equal(offset, column.location_offset());
@@ -513,17 +527,11 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
                 let value_digest = b.map_to_curve_point(&inputs);
                 let value_selector = b.not(correct);
 
-                (
-                    b.curve_select(selector, column_digest, curve_zero),
-                    b.curve_select(value_selector, curve_zero, value_digest),
-                )
+                b.curve_select(value_selector, curve_zero, value_digest)
             })
-            .unzip();
+            .collect_vec();
 
-        (
-            b.add_curve_point(&metadata_points),
-            b.add_curve_point(&value_points),
-        )
+        b.add_curve_point(&value_points)
     }
 
     /// Computes the value digest and metadata digest for the extracted columns from the supplied value
@@ -562,13 +570,11 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
 
         let extraction_id = Array::from_array(extraction_id_array);
 
-        let (metadata_points, value_points): (Vec<CurveTarget>, Vec<CurveTarget>) = self
+        let value_points = self
             .extracted_columns
             .into_iter()
             .zip(self.real_columns)
             .map(|(column, selector)| {
-                // Calculate the column digest
-                let column_digest = column.digest(b);
                 // Enforce that we have the correct extraction_id
                 extraction_id.enforce_equal(b, &Array::from_array(column.extraction_id()));
                 // If selector is true (from self.real_columns) we need it to be false when we feed it into `column.extract_value()` later.
@@ -591,18 +597,11 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> TableMetadataTarget<MAX_EXTRACTED_COLUM
                     .chain(result_packed.arr.iter().map(|t| t.to_target()))
                     .collect_vec();
                 let value_digest = b.map_to_curve_point(&inputs);
-                (
-                    b.curve_select(selector, curve_zero, column_digest),
-                    b.curve_select(selector, curve_zero, value_digest),
-                )
+                b.curve_select(selector, curve_zero, value_digest)
             })
-            .unzip();
+            .collect_vec();
 
-        (
-            extraction_id,
-            b.add_curve_point(&metadata_points),
-            b.add_curve_point(&value_points),
-        )
+        (extraction_id, b.add_curve_point(&value_points))
     }
 }
 
@@ -613,26 +612,62 @@ pub(crate) mod tests {
     use mp2_common::{C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2_ecgfp5::gadgets::curve::PartialWitnessCurve;
+    use rand::{thread_rng, Rng};
+
+    impl<const CAN_BE_EMPTY: bool> TableMetadata<CAN_BE_EMPTY> {
+        /// Create a sample MPT metadata. It could be used in testing.
+        pub(crate) fn sample<const NUM_EXTRACTED_COLUMNS: usize>(
+            flag: bool,
+            input_prefixes: &[&[u8]],
+            extraction_identifier: &[u8],
+            location_offset: F,
+        ) -> Self {
+            let rng = &mut thread_rng();
+
+            let input_columns = input_prefixes
+                .iter()
+                .map(|prefix| InputColumnInfo::new(extraction_identifier, rng.gen(), prefix))
+                .collect::<Vec<InputColumnInfo>>();
+
+            let num_actual_columns = rng.gen_range(1..=NUM_EXTRACTED_COLUMNS);
+
+            let mut extraction_vec = extraction_identifier.pack(Endianness::Little);
+            extraction_vec.resize(8, 0u32);
+            extraction_vec.reverse();
+            let extraction_id: [F; 8] = extraction_vec
+                .into_iter()
+                .map(F::from_canonical_u32)
+                .collect::<Vec<F>>()
+                .try_into()
+                .expect("This should never fail");
+
+            let extracted_columns = (0..num_actual_columns)
+                .map(|_| ExtractedColumnInfo::sample(flag, &extraction_id, location_offset))
+                .collect::<Vec<ExtractedColumnInfo>>();
+
+            TableMetadata::new(&input_columns, &extracted_columns)
+        }
+    }
 
     #[derive(Clone, Debug)]
-    struct TestMedataCircuit {
-        columns_metadata: TableMetadata,
+    struct TestMedataCircuit<const CAN_BE_EMPTY: bool> {
+        columns_metadata: TableMetadata<CAN_BE_EMPTY>,
         slot: u8,
         expected_num_actual_columns: usize,
         expected_metadata_digest: Point,
     }
 
-    impl UserCircuit<F, D> for TestMedataCircuit {
+    impl<const CAN_BE_EMPTY: bool> UserCircuit<F, D> for TestMedataCircuit<CAN_BE_EMPTY> {
         // Metadata target + slot + expected number of actual columns + expected metadata digest
         type Wires = (
-            TableMetadataTarget<TEST_MAX_COLUMNS>,
+            TableMetadataTarget<TEST_MAX_COLUMNS, CAN_BE_EMPTY>,
             Target,
             Target,
             CurveTarget,
         );
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let metadata_target = TableMetadata::build(b, 0);
+            let metadata_target = TableMetadata::<CAN_BE_EMPTY>::build(b, 0);
             let slot = b.add_virtual_target();
             let zero = b.zero();
             let expected_num_actual_columns = b.add_virtual_target();
@@ -674,14 +709,14 @@ pub(crate) mod tests {
         let slot = rng.gen();
         let evm_word = rng.gen();
 
-        let metadata = TableMetadata::sample::<TEST_MAX_COLUMNS>(
+        let metadata = TableMetadata::<true>::sample::<TEST_MAX_COLUMNS>(
             true,
             &[],
             &[slot],
             F::from_canonical_u32(evm_word),
         );
 
-        let expected_num_actual_columns = metadata.num_actual_columns();
+        let expected_num_actual_columns = metadata.num_actual_columns;
         let expected_metadata_digest = metadata.digest();
 
         let test_circuit = TestMedataCircuit {

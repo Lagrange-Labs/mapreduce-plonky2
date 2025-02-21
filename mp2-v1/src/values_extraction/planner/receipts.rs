@@ -10,9 +10,10 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 
+use crate::values_extraction::compute_receipt_metadata_digest_for_empty_circuit;
+
 use super::{
-    super::gadgets::metadata_gadget::TableMetadata, CircuitInput, Extractable,
-    ExtractionUpdatePlan, InputEnum, MP2PlannerError, ProofData,
+    CircuitInput, Extractable, ExtractionUpdatePlan, InputEnum, MP2PlannerError, ProofData,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -137,8 +138,8 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
                 CircuitInput::new_receipt_leaf(node, *tx_index, extractable)
             }
             InputEnum::Dummy(block_hash) => {
-                let metadata = TableMetadata::from_event_info(extractable);
-                let metadata_digest = metadata.digest();
+                let metadata_digest =
+                    compute_receipt_metadata_digest_for_empty_circuit(extractable);
                 CircuitInput::new_dummy(*block_hash, metadata_digest)
             }
         }

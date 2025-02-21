@@ -34,7 +34,9 @@ use serde::{Deserialize, Serialize};
 use std::iter::once;
 
 use super::{
-    gadgets::metadata_gadget::{TableMetadata, TableMetadataTarget},
+    gadgets::metadata_gadget::{
+        EmptyableTableMetadata, EmptyableTableMetadataTarget, TableMetadata,
+    },
     KEY_ID_PREFIX,
 };
 
@@ -49,7 +51,7 @@ pub struct LeafMappingWires<const MAX_EXTRACTED_COLUMNS: usize> {
     /// Storage mapping variable slot
     pub(crate) slot: MappingStructSlotWires,
     /// MPT metadata
-    metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
+    metadata: EmptyableTableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
     /// The offset from the base slot
     offset: Target,
 }
@@ -59,7 +61,7 @@ pub struct LeafMappingWires<const MAX_EXTRACTED_COLUMNS: usize> {
 pub struct LeafMappingCircuit<const MAX_EXTRACTED_COLUMNS: usize> {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: MappingSlot,
-    pub(crate) metadata: TableMetadata,
+    pub(crate) metadata: EmptyableTableMetadata,
     pub(crate) offset: u32,
 }
 
@@ -94,22 +96,20 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> LeafMappingCircuit<MAX_EXTRACTED_COLUMN
             .expect("This should never fail");
 
         let extraction_id = [zero, zero, zero, zero, zero, zero, zero, slot.mapping_slot];
-        let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(
+        let metadata_digest = metadata.metadata_digest(b, &[&key_prefix], &extraction_id);
+        let input_value_digest = metadata.inputs_value_digest(b, &[packed_mapping_key.clone()]);
+        let extracted_value_digest = metadata.extracted_value_digest::<MAPPING_LEAF_VALUE_LEN>(
             b,
-            &[packed_mapping_key.clone()],
-            &[&key_prefix],
+            &value,
+            offset,
             &extraction_id,
         );
-        let (extracted_metadata_digest, extracted_value_digest) =
-            metadata.extracted_digests::<MAPPING_LEAF_VALUE_LEN>(b, &value, offset, &extraction_id);
 
         let selector = b.is_equal(zero, offset);
         let curve_zero = b.curve_zero();
         let selected_input_value_digest = b.curve_select(selector, input_value_digest, curve_zero);
         let value_digest =
             b.add_curve_point(&[selected_input_value_digest, extracted_value_digest]);
-        let metadata_digest =
-            b.add_curve_point(&[input_metadata_digest, extracted_metadata_digest]);
 
         // Compute the unique data to identify a row is the mapping key.
         // row_unique_data = H(pack(left_pad32(key))
@@ -278,7 +278,7 @@ mod tests {
         let metadata_digest = table_metadata.digest();
         let slot_info = StorageSlotInfo::new(
             storage_slot.clone(),
-            table_metadata.extracted_columns.clone(),
+            table_metadata.extracted_columns().to_vec(),
         );
         let values_digest = storage_value_digest(
             &table_metadata,

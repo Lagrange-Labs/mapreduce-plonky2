@@ -3,10 +3,7 @@
 //! outer key, while the key for the mapping stored in the entry mapping is referred to as inner key.
 
 use crate::{
-    values_extraction::{
-        gadgets::metadata_gadget::TableMetadataTarget,
-        public_inputs::{PublicInputs, PublicInputsArgs},
-    },
+    values_extraction::public_inputs::{PublicInputs, PublicInputsArgs},
     MAX_LEAF_NODE_LEN,
 };
 use anyhow::Result;
@@ -39,7 +36,12 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter::once;
 
-use super::{gadgets::metadata_gadget::TableMetadata, INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX};
+use super::{
+    gadgets::metadata_gadget::{
+        EmptyableTableMetadata, EmptyableTableMetadataTarget, TableMetadata,
+    },
+    INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafMappingOfMappingsWires<const MAX_EXTRACTED_COLUMNS: usize> {
@@ -52,7 +54,7 @@ pub struct LeafMappingOfMappingsWires<const MAX_EXTRACTED_COLUMNS: usize> {
     /// Mapping slot associating wires including outer and inner mapping keys
     pub(crate) slot: MappingOfMappingsSlotWires,
     /// MPT metadata
-    metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
+    metadata: EmptyableTableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
     offset: Target,
 }
 
@@ -63,7 +65,7 @@ pub struct LeafMappingOfMappingsCircuit<const MAX_EXTRACTED_COLUMNS: usize> {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: MappingSlot,
     pub(crate) inner_key: Vec<u8>,
-    pub(crate) metadata: TableMetadata,
+    pub(crate) metadata: EmptyableTableMetadata,
     pub(crate) evm_word: u8,
 }
 
@@ -106,17 +108,16 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> LeafMappingOfMappingsCircuit<MAX_EXTRAC
             .try_into()
             .expect("This should never fail");
         let extraction_id = [zero, zero, zero, zero, zero, zero, zero, slot.mapping_slot];
-        let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(
-            b,
-            &input_values,
-            &[&outer_key_prefix, &inner_key_prefix],
-            &extraction_id,
-        );
-        let (extracted_metadata_digest, extracted_value_digest) =
-            metadata.extracted_digests::<MAPPING_LEAF_VALUE_LEN>(b, &value, offset, &extraction_id);
 
         let metadata_digest =
-            b.add_curve_point(&[input_metadata_digest, extracted_metadata_digest]);
+            metadata.metadata_digest(b, &[&outer_key_prefix, &inner_key_prefix], &extraction_id);
+        let input_value_digest = metadata.inputs_value_digest(b, &input_values);
+        let extracted_value_digest = metadata.extracted_value_digest::<MAPPING_LEAF_VALUE_LEN>(
+            b,
+            &value,
+            offset,
+            &extraction_id,
+        );
 
         let input_selector = b.is_equal(zero, offset);
         let curve_zero = b.curve_zero();
@@ -304,7 +305,7 @@ mod tests {
         let metadata_digest = table_metadata.digest();
         let slot_info = StorageSlotInfo::new(
             storage_slot.clone(),
-            table_metadata.extracted_columns.clone(),
+            table_metadata.extracted_columns().to_vec(),
         );
 
         let values_digest = storage_value_digest(

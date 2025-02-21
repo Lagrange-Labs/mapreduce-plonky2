@@ -1,7 +1,9 @@
 //! Module handling the leaf node inside a Receipt Trie
 
 use super::{
-    gadgets::metadata_gadget::{TableMetadata, TableMetadataTarget},
+    gadgets::metadata_gadget::{
+        EmptyableTableMetadata, EmptyableTableMetadataTarget, TableMetadata,
+    },
     public_inputs::{PublicInputs, PublicInputsArgs},
     GAS_USED_PREFIX, TX_INDEX_PREFIX,
 };
@@ -60,31 +62,31 @@ where
     /// The key in the MPT Trie
     pub(crate) mpt_key: MPTKeyWire,
     /// The table metadata
-    pub(crate) metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
+    pub(crate) metadata: EmptyableTableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
 }
 
 /// Circuit to prove a transaction receipt contains logs relating to a specific event.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReceiptLeafCircuit<const NODE_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize> {
     /// This is the RLP encoded leaf node in the Receipt Trie.
-    pub node: Vec<u8>,
+    pub(crate) node: Vec<u8>,
     /// The transaction index, telling us where the receipt is in the block. The RLP encoding of the index
     /// is also the key used in the Receipt Trie.
-    pub tx_index: u64,
+    pub(crate) tx_index: u64,
     /// The size of the node in bytes
-    pub size: usize,
+    pub(crate) size: usize,
     /// The address of the contract that emits the log
-    pub address: Address,
+    pub(crate) address: Address,
     /// The offset of the address in the rlp encoded log
-    pub rel_add_offset: usize,
+    pub(crate) rel_add_offset: usize,
     /// The event signature hash
-    pub event_signature: [u8; HASH_LEN],
+    pub(crate) event_signature: [u8; HASH_LEN],
     /// The offset of the event signature in the rlp encoded log
-    pub sig_rel_offset: usize,
+    pub(crate) sig_rel_offset: usize,
     /// This is the offset in the node to the start of the log that relates to `event_info`
-    pub relevant_log_offset: usize,
+    pub(crate) relevant_log_offset: usize,
     /// The table metadata
-    pub metadata: TableMetadata,
+    pub(crate) metadata: EmptyableTableMetadata,
 }
 
 impl<const NODE_LEN: usize, const MAX_EXTRACTED_COLUMNS: usize>
@@ -240,24 +242,20 @@ where
             .expect("This should never fail");
 
         // Now we verify extracted values
-        let (extraction_id, extracted_metadata_digest, extracted_value_digest) = metadata
-            .extracted_receipt_digests(
-                b,
-                &node.arr,
-                relevant_log_offset,
-                add_rel_offset,
-                sig_rel_offset,
-            );
-
-        // Extract input values
-        let (input_metadata_digest, input_value_digest) = metadata.inputs_digests(
+        let (extraction_id, extracted_value_digest) = metadata.extracted_receipt_digests(
             b,
-            &[tx_index_input.clone(), gas_used_input.clone()],
-            &[&tx_index_prefix, &gas_used_prefix],
-            &extraction_id.arr,
+            &node.arr,
+            relevant_log_offset,
+            add_rel_offset,
+            sig_rel_offset,
         );
 
-        let dm = b.add_curve_point(&[input_metadata_digest, extracted_metadata_digest]);
+        let metadata_digest =
+            metadata.metadata_digest(b, &[&tx_index_prefix, &gas_used_prefix], &extraction_id.arr);
+
+        // Extract input values
+        let input_value_digest =
+            metadata.inputs_value_digest(b, &[tx_index_input.clone(), gas_used_input.clone()]);
 
         let value_digest = b.add_curve_point(&[input_value_digest, extracted_value_digest]);
 
@@ -289,7 +287,7 @@ where
             h: &root.output_array,
             k: &wires.key,
             dv,
-            dm,
+            dm: metadata_digest,
             n: one,
         }
         .register_args(b);

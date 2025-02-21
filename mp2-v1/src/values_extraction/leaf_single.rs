@@ -1,7 +1,7 @@
 //! Module handling the single variable inside a storage trie
 #![allow(clippy::identity_op)]
 use crate::values_extraction::{
-    gadgets::metadata_gadget::{TableMetadata, TableMetadataTarget},
+    gadgets::metadata_gadget::TableMetadata,
     public_inputs::{PublicInputs, PublicInputsArgs},
 };
 use anyhow::Result;
@@ -33,6 +33,8 @@ use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::iter::once;
 
+use super::gadgets::metadata_gadget::{NonEmptyableTableMetadata, NonEmptyableTableMetadataTarget};
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafSingleWires<const MAX_EXTRACTED_COLUMNS: usize> {
     /// Full node from the MPT proof
@@ -44,7 +46,7 @@ pub struct LeafSingleWires<const MAX_EXTRACTED_COLUMNS: usize> {
     /// Storage single variable slot
     slot: SimpleStructSlotWires,
     /// MPT metadata
-    metadata: TableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
+    metadata: NonEmptyableTableMetadataTarget<MAX_EXTRACTED_COLUMNS>,
     /// Offset from the base slot,
     offset: Target,
 }
@@ -54,7 +56,7 @@ pub struct LeafSingleWires<const MAX_EXTRACTED_COLUMNS: usize> {
 pub struct LeafSingleCircuit<const MAX_EXTRACTED_COLUMNS: usize> {
     pub(crate) node: Vec<u8>,
     pub(crate) slot: SimpleSlot,
-    pub(crate) metadata: TableMetadata,
+    pub(crate) metadata: NonEmptyableTableMetadata,
     pub(crate) offset: u32,
 }
 
@@ -75,8 +77,17 @@ impl<const MAX_EXTRACTED_COLUMNS: usize> LeafSingleCircuit<MAX_EXTRACTED_COLUMNS
         // Left pad the leaf value.
         let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
 
-        // Compute the metadata digest and the value digest
-        let (metadata_digest, value_digest) = metadata.extracted_digests::<MAPPING_LEAF_VALUE_LEN>(
+        let extraction_id = [zero, zero, zero, zero, zero, zero, zero, slot.base.slot];
+
+        // compute the metadata digest
+        let metadata_digest = metadata.metadata_digest(
+            b,
+            &[], // there are no input columns
+            &extraction_id,
+        );
+
+        // Compute the value digest
+        let value_digest = metadata.extracted_value_digest::<MAPPING_LEAF_VALUE_LEN>(
             b,
             &value,
             offset,
@@ -244,7 +255,7 @@ mod tests {
 
         let slot_info = StorageSlotInfo::new(
             storage_slot.clone(),
-            table_metadata.extracted_columns.clone(),
+            table_metadata.extracted_columns().to_vec(),
         );
         let values_digest = storage_value_digest(
             &table_metadata,

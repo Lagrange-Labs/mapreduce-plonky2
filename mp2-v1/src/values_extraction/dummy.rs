@@ -4,8 +4,10 @@
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use alloy::primitives::B256;
 use anyhow::Result;
+use itertools::Itertools;
 use mp2_common::{
     array::Array,
+    group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::MPTKeyWire,
     public_inputs::PublicInputCommon,
@@ -13,7 +15,7 @@ use mp2_common::{
     serialization::{deserialize, serialize},
     types::{CBuilder, GFp},
     utils::{Endianness, Packer, ToFields, ToTargets},
-    D,
+    D, F,
 };
 use plonky2::{
     field::types::Field,
@@ -23,14 +25,36 @@ use plonky2::{
     },
     plonk::proof::ProofWithPublicInputsTarget,
 };
-use plonky2_ecgfp5::{curve::curve::Point, gadgets::curve::CircuitBuilderEcGFp5};
+use plonky2_ecgfp5::{
+    curve::curve::Point,
+    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
+};
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
+
+pub(crate) const EMPTY_TABLE: &str = "EMPTY_EXTRACTION";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DummyNodeWires {
     root: Array<Target, PACKED_HASH_LEN>,
     metadata_digest: Vec<Target>,
+}
+
+impl DummyNodeWires {
+    /// Add constant `EMPTY_TABLE` to the digest provided as input
+    pub(crate) fn add_empty_identifier_to_digest(
+        b: &mut CBuilder,
+        digest: &CurveTarget,
+    ) -> CurveTarget {
+        let inputs = EMPTY_TABLE
+            .as_bytes()
+            .pack(Endianness::Big)
+            .into_iter()
+            .map(|empty_id| b.constant(F::from_canonical_u32(empty_id)))
+            .chain(digest.to_targets())
+            .collect_vec();
+        b.map_to_curve_point(&inputs)
+    }
 }
 
 /// Circuit to proving the processing of an extension node
@@ -59,12 +83,16 @@ impl DummyNodeCircuit {
         // Build the metadata target
         let dm = b.add_virtual_curve_target();
 
+        // Add empty circuit identifier to the metadata digest, to ensure that this circuit
+        // is employed only for tables where there could be no values to be extracted
+        let final_dm = DummyNodeWires::add_empty_identifier_to_digest(b, &dm);
+
         // Expose the public inputs.
         PublicInputsArgs {
             h: &root,
             k: &key,
             dv: b.curve_zero(),
-            dm,
+            dm: final_dm,
             n: b.zero(),
         }
         .register(b);
@@ -90,6 +118,19 @@ impl DummyNodeCircuit {
             &wires.metadata_digest,
             &self.metadata_digest.to_weierstrass().to_fields(),
         );
+    }
+
+    /// Method to add the constant identifier `EMPTY_TABLE` to the input digest
+    pub(crate) fn add_empty_identifier_to_digest(digest: Point) -> Point {
+        map_to_curve_point(
+            &EMPTY_TABLE
+                .as_bytes()
+                .pack(Endianness::Big)
+                .into_iter()
+                .map(F::from_canonical_u32)
+                .chain(digest.to_fields())
+                .collect_vec(),
+        )
     }
 }
 
@@ -165,7 +206,8 @@ mod tests {
         // Prepare the public inputs
         let random_hash = B256::random();
         let md = Point::rand();
-        let random_md = md.to_weierstrass();
+        // compute the metadata digest expected to be computed by the circuit
+        let expected_md = DummyNodeCircuit::add_empty_identifier_to_digest(md).to_weierstrass();
         let key = vec![0u8; MAX_KEY_NIBBLE_LEN];
         let ptr = GFp::NEG_ONE.to_canonical_u64() as usize;
         let values_digest = Point::NEUTRAL.to_weierstrass();
@@ -175,7 +217,7 @@ mod tests {
             &key,
             ptr,
             &values_digest,
-            &random_md,
+            &expected_md,
             0,
         );
 
@@ -193,7 +235,7 @@ mod tests {
         );
         assert_eq!(exp_ptr, GFp::NEG_ONE);
         assert_eq!(Point::NEUTRAL.to_weierstrass(), exp_pi.values_digest());
-        assert_eq!(random_md, exp_pi.metadata_digest());
+        assert_eq!(expected_md, exp_pi.metadata_digest());
         assert_eq!(GFp::ZERO, exp_pi.n());
 
         let circuit = TestDummyNodeCircuit {
