@@ -29,7 +29,7 @@ use std::iter::once;
 
 pub mod api;
 mod branch;
-mod dummy;
+mod empty;
 mod extension;
 pub mod gadgets;
 mod leaf_mapping;

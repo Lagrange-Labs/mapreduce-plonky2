@@ -140,7 +140,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
             InputEnum::Dummy(block_hash) => {
                 let metadata_digest =
                     compute_receipt_metadata_digest_for_empty_circuit(extractable);
-                CircuitInput::new_dummy(*block_hash, metadata_digest)
+                CircuitInput::new_empty_extraction(*block_hash, metadata_digest)
             }
         }
     }

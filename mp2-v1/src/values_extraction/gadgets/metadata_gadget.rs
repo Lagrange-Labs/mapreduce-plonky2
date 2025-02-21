@@ -1,6 +1,6 @@
 //! The metadata gadget is used to ensure the correct extraction from the set of all identifiers.
 
-use crate::values_extraction::dummy::{DummyNodeCircuit, DummyNodeWires};
+use crate::values_extraction::empty::{EmptyExtractionCircuit, EmptyExtractionWires};
 
 use super::column_info::{
     CircuitBuilderColumnInfo, ColumnInfo, ExtractedColumnInfo, ExtractedColumnInfoTarget,
@@ -57,7 +57,7 @@ impl IntoIterator for TableColumns {
             .chain(
                 self.extracted_columns
                     .into_iter()
-                    .map(|col| Box::new(col.clone()) as Box<dyn ColumnInfo>),
+                    .map(|col| Box::new(col) as Box<dyn ColumnInfo>),
             )
             .collect_vec()
             .into_iter()
@@ -120,7 +120,7 @@ impl<const CAN_BE_EMPTY: bool> TableMetadata<CAN_BE_EMPTY> {
 
     /// Get the columns we actually extract from
     pub(crate) fn extracted_columns(&self) -> &[ExtractedColumnInfo] {
-        &self.columns.extracted_columns()
+        self.columns.extracted_columns()
     }
 
     /// Compute the metadata digest.
@@ -143,7 +143,7 @@ impl<const CAN_BE_EMPTY: bool> TableMetadata<CAN_BE_EMPTY> {
             .fold(Point::NEUTRAL, |acc, b| acc + b);
         // add constant identifier `EMPTY_TABLE` to the digest if the table could be empty
         if CAN_BE_EMPTY {
-            DummyNodeCircuit::add_empty_identifier_to_digest(digest)
+            EmptyExtractionCircuit::add_empty_identifier_to_digest(digest)
         } else {
             digest
         }
@@ -442,7 +442,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize, const CAN_BE_EMPTY: bool>
 
         let digest = b.add_curve_point(&points);
         if CAN_BE_EMPTY {
-            DummyNodeWires::add_empty_identifier_to_digest(b, &digest)
+            EmptyExtractionWires::add_empty_identifier_to_digest(b, &digest)
         } else {
             digest
         }
@@ -534,8 +534,7 @@ impl<const MAX_EXTRACTED_COLUMNS: usize, const CAN_BE_EMPTY: bool>
         b.add_curve_point(&value_points)
     }
 
-    /// Computes the value digest and metadata digest for the extracted columns from the supplied value
-    /// Outputs are ordered as `(MetadataDigest, ValueDigest)`.
+    /// Computes the value digest for the extracted columns from the supplied value
     pub(crate) fn extracted_receipt_digests<const VALUE_LEN: usize>(
         &self,
         b: &mut CBuilder,
