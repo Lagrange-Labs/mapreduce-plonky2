@@ -195,11 +195,7 @@ impl<const CAN_BE_EMPTY: bool> TableMetadata<CAN_BE_EMPTY> {
             })
     }
 
-    fn extracted_receipt_value_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-        &self,
-        value: &[u8],
-        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-    ) -> Point {
+    fn extracted_receipt_value_digest(&self, value: &[u8], event: &EventLogInfo) -> Point {
         // Get the relevant log offset
         let relevant_log_offset = event
             .get_log_offset(value)
@@ -213,12 +209,7 @@ impl<const CAN_BE_EMPTY: bool> TableMetadata<CAN_BE_EMPTY> {
     }
 
     /// Function to calculate the full receipt value digest from a receipt leaf node and [`EventLogInfo`]
-    pub fn receipt_value_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-        &self,
-        tx_index: u64,
-        value: &[u8],
-        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-    ) -> Point {
+    pub fn receipt_value_digest(&self, tx_index: u64, value: &[u8], event: &EventLogInfo) -> Point {
         let tx_index_bytes = tx_index.to_be_bytes();
         let tx_index_input = left_pad32(tx_index_bytes.as_slice());
 

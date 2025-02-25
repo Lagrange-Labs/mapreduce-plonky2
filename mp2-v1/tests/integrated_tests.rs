@@ -25,7 +25,10 @@ use common::{
             MAX_NUM_RESULT_OPS,
         },
         slot_info::{SimpleMapping, SimpleNestedMapping, StructMapping, StructNestedMapping},
-        table_source::{MappingExtractionArgs, MergeSource, SingleExtractionArgs, TableSource},
+        table_source::{
+            MappingExtractionArgs, MergeSource, ReceiptExtractionArgs, SingleExtractionArgs,
+            TableSource,
+        },
         TableIndexing,
     },
     context::{self, ParamsType, TestContextConfig},
@@ -36,7 +39,6 @@ use common::{
 use envconfig::Envconfig;
 use log::info;
 
-use mp2_common::eth::EventLogInfo;
 use parsil::{
     assembler::DynamicCircuitPis,
     parse_and_validate,
@@ -94,7 +96,7 @@ async fn integrated_indexing() -> Result<()> {
     info!("Params built");
 
     let (mut receipt, genesis) =
-        TableIndexing::<EventLogInfo<0, 0>>::receipt_test_case(0, 0, &mut ctx).await?;
+        TableIndexing::<ReceiptExtractionArgs>::receipt_test_case(1, 2, &mut ctx).await?;
     let changes = vec![
         ChangeType::Receipt(1, 10),
         ChangeType::Receipt(0, 5),
@@ -233,7 +235,7 @@ async fn integrated_querying_mapping_of_mappings_table() -> Result<()> {
 async fn integrated_querying_receipt_table() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test for receipt table");
-    let table_info: TableInfo<EventLogInfo<0, 0>> = read_table_info(RECEIPT_TABLE_INFO_FILE)?;
+    let table_info: TableInfo<ReceiptExtractionArgs> = read_table_info(RECEIPT_TABLE_INFO_FILE)?;
     integrated_querying(table_info).await
 }
 

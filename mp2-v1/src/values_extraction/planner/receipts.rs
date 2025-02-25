@@ -49,9 +49,7 @@ impl ReceiptBlockData {
     }
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> Extractable
-    for EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>
-{
+impl Extractable for EventLogInfo {
     type ExtraLeafInput = u64;
     type BlockData = ReceiptBlockData;
 
@@ -174,13 +172,13 @@ pub mod tests {
             .await?;
 
         let block_data = ReceiptBlockData::new(proofs, receipt_root, epoch);
-        let extraction_plan = EventLogInfo::<2, 1>::create_update_plan(&block_data)?;
+        let extraction_plan = EventLogInfo::create_update_plan(&block_data)?;
 
         assert_eq!(*extraction_plan.update_tree.root(), receipts_root);
         Ok(())
     }
 
-    type TestData = (B256, EventLogInfo<2, 1>, Vec<ReceiptProofInfo>);
+    type TestData = (B256, EventLogInfo, Vec<ReceiptProofInfo>);
     /// Function that fetches a block together with its transaction trie and receipt trie for testing purposes.
     async fn build_test_data(block_number: u64) -> Result<TestData> {
         let url = get_mainnet_url();
@@ -218,7 +216,7 @@ pub mod tests {
     }
 
     /// Function to build a list of [`ReceiptProofInfo`] for a set block.
-    async fn test_receipt_trie_helper() -> Result<EventLogInfo<2, 1>> {
+    async fn test_receipt_trie_helper() -> Result<EventLogInfo> {
         // First we choose the contract and event we are going to monitor.
         // We use the mainnet PudgyPenguins contract at address 0xbd3531da5cf5857e7cfaa92426877b022e612cf8
         // and monitor for the `Approval` event.
@@ -240,10 +238,12 @@ pub mod tests {
             .ok_or(anyhow!("No ApprovalForAll event exists"))?[0]
             .clone();
 
-        Ok(EventLogInfo::<2, 1>::new(
+        Ok(EventLogInfo::new(
             address,
             1u64,
             &approval_event.signature(),
-        ))
+            2,
+            1,
+        )?)
     }
 }

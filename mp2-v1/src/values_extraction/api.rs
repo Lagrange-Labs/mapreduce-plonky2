@@ -141,16 +141,10 @@ where
     }
 
     /// Create a circuit input for proving a leaf MPT node of a transaction receipt.
-    pub fn new_receipt_leaf<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-        node: &[u8],
-        tx_index: u64,
-        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-    ) -> Self {
+    pub fn new_receipt_leaf(node: &[u8], tx_index: u64, event: &EventLogInfo) -> Self {
         CircuitInput::LeafReceipt(
-            ReceiptLeafCircuit::<LEAF_LEN, MAX_RECEIPT_COLUMNS>::new::<NO_TOPICS, MAX_DATA_WORDS>(
-                node, tx_index, event,
-            )
-            .expect("Could not construct Receipt Leaf Circuit"),
+            ReceiptLeafCircuit::<LEAF_LEN, MAX_RECEIPT_COLUMNS>::new(node, tx_index, event)
+                .expect("Could not construct Receipt Leaf Circuit"),
         )
     }
 
@@ -976,7 +970,7 @@ mod tests {
     }
     #[test]
     fn test_receipt_api() {
-        let receipt_proof_infos = generate_receipt_test_info::<1, 0>();
+        let receipt_proof_infos = generate_receipt_test_info(1, 0);
         let receipt_proofs = receipt_proof_infos.proofs();
         let event = receipt_proof_infos.info();
         // We need two nodes that are children of the same branch so we compare the last but two nodes for each of them until we find a case that works

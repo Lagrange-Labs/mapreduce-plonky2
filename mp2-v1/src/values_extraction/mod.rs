@@ -188,28 +188,18 @@ impl StorageSlotInfo {
 
 /// Prefix used for making a topic column id.
 pub const TOPIC_PREFIX: &[u8] = b"topic";
-/// [`TOPIC_PREFIX`] as a [`str`]
-pub const TOPIC_NAME: &str = "topic";
 
 /// Prefix used for making a data column id.
 pub const DATA_PREFIX: &[u8] = b"data";
-/// [`DATA_PREFIX`] as a [`str`]
-pub const DATA_NAME: &str = "data";
 
 /// Prefix for transaction index
 pub const TX_INDEX_PREFIX: &[u8] = b"tx_index";
-/// [`TX_INDEX_PREFIX`] as a [`str`]
-pub const TX_INDEX_NAME: &str = "tx_index";
 
 /// Prefix for gas used
 pub const GAS_USED_PREFIX: &[u8] = b"gas_used";
-/// [`GAS_USED_PREFIX`] as a [`str`]
-pub const GAS_USED_NAME: &str = "gas_used";
 
-impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
-    From<EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>> for EmptyableTableMetadata
-{
-    fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>) -> Self {
+impl From<&EventLogInfo> for EmptyableTableMetadata {
+    fn from(event: &EventLogInfo) -> Self {
         let packed_sig = event.event_signature.pack(Endianness::Big);
         let packed_address = event.address.0 .0.pack(Endianness::Big);
         let input = packed_sig
@@ -753,27 +743,20 @@ pub fn compute_leaf_mapping_of_mappings_values_digest(
 /// Compute the metadata digest for a receipt leaf, which is needed
 /// as input for the circuit to be employed for value extraction roof in case no
 /// events to be extracted are found in the current block
-pub fn compute_receipt_metadata_digest_for_empty_circuit<
-    const NO_TOPICS: usize,
-    const MAX_DATA_WORDS: usize,
->(
-    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-) -> Digest {
-    TableMetadata::from(*event).digest_for_empty_circuit()
+pub fn compute_receipt_metadata_digest_for_empty_circuit(event: &EventLogInfo) -> Digest {
+    TableMetadata::from(event).digest_for_empty_circuit()
 }
 
 /// Compute the metadata digest for a Receipt leaf
-pub fn compute_leaf_receipt_metadata_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-) -> Digest {
-    TableMetadata::from(*event).digest()
+pub fn compute_leaf_receipt_metadata_digest(event: &EventLogInfo) -> Digest {
+    TableMetadata::from(event).digest()
 }
 
 /// Compute the value digest for a Receipt leaf
-pub fn compute_leaf_receipt_values_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+pub fn compute_leaf_receipt_values_digest(
+    event: &EventLogInfo,
     value: &[u8],
     tx_index: u64,
 ) -> Digest {
-    TableMetadata::from(*event).receipt_value_digest(tx_index, value, event)
+    TableMetadata::from(event).receipt_value_digest(tx_index, value, event)
 }

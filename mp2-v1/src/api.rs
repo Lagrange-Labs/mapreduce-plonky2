@@ -456,10 +456,8 @@ pub fn metadata_hash(
 }
 
 /// Compute metadata hash for a table related to the provided event.
-pub fn receipt_metadata_hash<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-) -> MetadataHash {
-    combine_digest_and_block(TableMetadata::from(*event).digest())
+pub fn receipt_metadata_hash(event: &EventLogInfo) -> MetadataHash {
+    combine_digest_and_block(TableMetadata::from(event).digest())
 }
 
 /// Returns the slot relating to this [`ExtractedColumnInfo`]

@@ -9,7 +9,7 @@ use super::{
 };
 
 use alloy::primitives::Address;
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use mp2_common::{
     array::{extract_value, Array, Targetable, Vector, VectorWire},
     eth::{left_pad32, EventLogInfo},
@@ -95,15 +95,21 @@ where
     [(); PAD_LEN(NODE_LEN)]:,
 {
     /// Create a new [`ReceiptLeafCircuit`] from a [`ReceiptProofInfo`] and a [`EventLogInfo`]
-    pub fn new<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-        last_node: &[u8],
-        tx_index: u64,
-        event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-    ) -> Result<Self> {
+    pub fn new(last_node: &[u8], tx_index: u64, event: &EventLogInfo) -> Result<Self> {
+        // check that the event doesn't require more than `MAX_EXTRACTED_COLUMNS` columns
+        let num_columns = event.num_topics() + event.num_data_words();
+        ensure!(
+            num_columns < MAX_EXTRACTED_COLUMNS,
+            "Number of columns required to the event is too high: 
+            found {num_columns}, maximum allowed is {MAX_EXTRACTED_COLUMNS}"
+        );
         // Get the relevant log offset
         let relevant_log_offset = event.get_log_offset(last_node)?;
 
-        let EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS> {
+        // Construct the table metadata from the event
+        let metadata = TableMetadata::from(event);
+
+        let EventLogInfo {
             size,
             address,
             add_rel_offset,
@@ -111,9 +117,6 @@ where
             sig_rel_offset,
             ..
         } = *event;
-
-        // Construct the table metadata from the event
-        let metadata = TableMetadata::from(*event);
 
         Ok(Self {
             node: last_node.to_vec(),
@@ -417,28 +420,24 @@ mod tests {
     #[test]
     fn test_leaf_circuit() {
         const NODE_LEN: usize = 512;
-        test_leaf_circuit_helper::<0, 0, NODE_LEN>();
-        test_leaf_circuit_helper::<1, 0, NODE_LEN>();
-        test_leaf_circuit_helper::<2, 0, NODE_LEN>();
-        test_leaf_circuit_helper::<3, 0, NODE_LEN>();
-        test_leaf_circuit_helper::<3, 1, NODE_LEN>();
-        test_leaf_circuit_helper::<3, 2, NODE_LEN>();
+        test_leaf_circuit_helper::<NODE_LEN>(0, 0);
+        test_leaf_circuit_helper::<NODE_LEN>(1, 0);
+        test_leaf_circuit_helper::<NODE_LEN>(2, 0);
+        test_leaf_circuit_helper::<NODE_LEN>(3, 0);
+        test_leaf_circuit_helper::<NODE_LEN>(3, 1);
+        test_leaf_circuit_helper::<NODE_LEN>(3, 2);
     }
 
-    fn test_leaf_circuit_helper<
-        const NO_TOPICS: usize,
-        const MAX_DATA_WORDS: usize,
-        const NODE_LEN: usize,
-    >()
+    fn test_leaf_circuit_helper<const NODE_LEN: usize>(no_topics: usize, data_words: usize)
     where
         [(); PAD_LEN(NODE_LEN)]:,
     {
-        let receipt_proof_infos = generate_receipt_test_info::<NO_TOPICS, MAX_DATA_WORDS>();
+        let receipt_proof_infos = generate_receipt_test_info(no_topics, data_words);
         let proofs = receipt_proof_infos.proofs();
         let info = proofs.first().unwrap();
         let event = receipt_proof_infos.info();
 
-        let c = ReceiptLeafCircuit::<NODE_LEN, 5>::new::<NO_TOPICS, MAX_DATA_WORDS>(
+        let c = ReceiptLeafCircuit::<NODE_LEN, 5>::new(
             info.mpt_proof.last().unwrap(),
             info.tx_index,
             event,
