@@ -99,7 +99,7 @@ where
         // check that the event doesn't require more than `MAX_EXTRACTED_COLUMNS` columns
         let num_columns = event.num_topics() + event.num_data_words();
         ensure!(
-            num_columns < MAX_EXTRACTED_COLUMNS,
+            num_columns <= MAX_EXTRACTED_COLUMNS,
             "Number of columns required to the event is too high: 
             found {num_columns}, maximum allowed is {MAX_EXTRACTED_COLUMNS}"
         );
