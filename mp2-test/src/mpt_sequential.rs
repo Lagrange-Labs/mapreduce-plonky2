@@ -51,31 +51,28 @@ pub fn generate_random_storage_mpt<const DEPTH: usize, const VALUE_LEN: usize>(
 }
 
 #[derive(Debug, Clone)]
-pub struct ReceiptTestInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
+pub struct ReceiptTestInfo {
     /// The event which we have returned proofs for
-    pub event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+    pub event: EventLogInfo,
     /// The proofs for receipts relating to `self.query`
     pub proofs: Vec<ReceiptProofInfo>,
     /// The root of the Receipt Trie at this block (in case there are no relevant events)
     pub receipts_root: B256,
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
-    ReceiptTestInfo<NO_TOPICS, MAX_DATA_WORDS>
-{
+impl ReceiptTestInfo {
     /// Getter for the proofs
     pub fn proofs(&self) -> Vec<ReceiptProofInfo> {
         self.proofs.clone()
     }
     /// Getter for the query
-    pub fn info(&self) -> &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS> {
+    pub fn info(&self) -> &EventLogInfo {
         &self.event
     }
 }
 /// This function is used so that we can generate a Receipt Trie for a blog with varying transactions
 /// (i.e. some we are interested in and some we are not).
-pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-) -> ReceiptTestInfo<NO_TOPICS, MAX_DATA_WORDS> {
+pub fn generate_receipt_test_info(no_topics: usize, data_words: usize) -> ReceiptTestInfo {
     // Make a contract that emits events so we can pick up on them
     sol! {
         #[allow(missing_docs)]
@@ -235,7 +232,7 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: 
         let relevant_event_count = rng.gen_range(5..15);
         for i in 0..150 {
             let tx_req = if i < relevant_event_count || (128 < i && i < 133) {
-                match (NO_TOPICS, MAX_DATA_WORDS) {
+                match (no_topics, data_words) {
                     (0, 0) => event_contract.testNoIndexed().into_transaction_request(),
                     (1, 0) => event_contract.testOneIndexed().into_transaction_request(),
                     (2, 0) => event_contract.testTwoIndexed().into_transaction_request(),
@@ -251,10 +248,10 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: 
                     _ => unreachable!(),
                 }
             } else {
-                // Randomly pick a pair that is not equal to `(NO_TOPICS, MAX_DATA_WORDS`
+                // Randomly pick a pair that is not equal to `(no_topics, data_words`
                 let mut first_random = rand::random::<usize>() % 4;
                 let mut second_random = rand::random::<usize>() % 3;
-                while (first_random, second_random) == (NO_TOPICS, MAX_DATA_WORDS) {
+                while (first_random, second_random) == (no_topics, data_words) {
                     first_random = rand::random::<usize>() % 4;
                     second_random = rand::random::<usize>() % 3;
                 }
@@ -307,7 +304,7 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: 
         let all_events = EventEmitter::abi::events();
 
         let chain_id = rpc.get_chain_id().await.unwrap();
-        let events = match (NO_TOPICS, MAX_DATA_WORDS) {
+        let events = match (no_topics, data_words) {
             (0, 0) => all_events.get("noIndexed"),
             (1, 0) => all_events.get("oneIndexed"),
             (2, 0) => all_events.get("twoIndexed"),
@@ -323,11 +320,14 @@ pub fn generate_receipt_test_info<const NO_TOPICS: usize, const MAX_DATA_WORDS: 
             _ => panic!(),
         };
 
-        let event = EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(
+        let event = EventLogInfo::new(
             *event_contract.address(),
             chain_id,
             &events.unwrap()[0].signature(),
-        );
+            no_topics,
+            data_words,
+        )
+        .unwrap();
 
         let (proofs, receipts_root) = event
             .query_receipt_proofs(rpc.root(), BlockNumberOrTag::Number(block_number))

@@ -36,6 +36,7 @@ use mp2_v1::{
         block::BlockPrimaryIndex,
         cell::Cell,
         row::{RowTreeKey, ToNonce},
+        ColumnID,
     },
     values_extraction::{
         gadgets::column_info::ExtractedColumnInfo,
@@ -682,35 +683,122 @@ pub(crate) struct LengthExtractionArgs {
     pub(crate) value: u8,
 }
 
-pub trait ReceiptExtractionArgs:
-    Serialize + for<'de> Deserialize<'de> + Debug + Hash + Eq + PartialEq + Clone + Copy
-{
-    const NO_TOPICS: usize;
-    const MAX_DATA_WORDS: usize;
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct ReceiptExtractionArgs(EventLogInfo);
 
-    fn new(address: Address, chain_id: u64, event_signature: &str) -> Self
-    where
-        Self: Sized;
+impl ReceiptExtractionArgs {
+    /// Name for transaction index column
+    pub(crate) const TX_INDEX_NAME: &str = "tx_index";
 
-    fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>;
+    /// Name for gas used column
+    pub(crate) const GAS_USED_NAME: &str = "gas_used";
 
-    fn get_index(&self) -> u64;
+    /// Prefix used for names of topic columns
+    pub(crate) const TOPIC_NAME: &str = "topic";
 
-    fn to_table_rows<PrimaryIndex: Clone>(
-        proof_infos: &[ReceiptProofInfo],
-        event: &EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>,
-        block: PrimaryIndex,
-    ) -> Vec<TableRowUpdate<PrimaryIndex>> {
-        let tx_index_identifier = identifier_for_tx_index_column(
+    /// Prefix used for names of data columns
+    pub(crate) const DATA_NAME: &str = "data";
+
+    pub(crate) fn new(
+        address: Address,
+        chain_id: u64,
+        event_signature: &str,
+        no_topics: usize,
+        data_words: usize,
+    ) -> Result<Self> {
+        Ok(Self(EventLogInfo::new(
+            address,
+            chain_id,
+            event_signature,
+            no_topics,
+            data_words,
+        )?))
+    }
+
+    /// Return the column name and the column id for the column of the table
+    /// being employed as secondary index
+    pub(crate) fn secondary_index_column_id(&self) -> (String, ColumnID) {
+        (
+            Self::TX_INDEX_NAME.to_string(),
+            identifier_for_tx_index_column(
+                &self.0.event_signature,
+                &self.0.address,
+                self.0.chain_id,
+                &[],
+            ),
+        )
+    }
+
+    /// Compute the column id and the column name for each of the columns
+    /// in receipt table which are neither primary nor secondary index columns
+    pub(crate) fn compute_non_indexed_receipt_column_ids(&self) -> Vec<(String, ColumnID)> {
+        let event = &self.0;
+        let gas_used_column_id = identifier_for_gas_used_column(
             &event.event_signature,
             &event.address,
             event.chain_id,
             &[],
         );
+
+        let topic_ids = event
+            .topics
+            .iter()
+            .enumerate()
+            .map(|(j, _)| {
+                (
+                    format!("{}_{}", Self::TOPIC_NAME, j + 1),
+                    identifier_for_topic_column(
+                        &event.event_signature,
+                        &event.address,
+                        event.chain_id,
+                        j as u8 + 1,
+                        &[],
+                    ),
+                )
+            })
+            .collect::<Vec<(String, ColumnID)>>();
+
+        let data_ids = event
+            .data
+            .iter()
+            .enumerate()
+            .map(|(j, _)| {
+                (
+                    format!("{}_{}", Self::DATA_NAME, j + 1),
+                    identifier_for_data_column(
+                        &event.event_signature,
+                        &event.address,
+                        event.chain_id,
+                        j as u8 + 1,
+                        &[],
+                    ),
+                )
+            })
+            .collect::<Vec<(String, ColumnID)>>();
+
+        [
+            vec![(Self::GAS_USED_NAME.to_string(), gas_used_column_id)],
+            topic_ids,
+            data_ids,
+        ]
+        .concat()
+    }
+
+    pub(crate) fn to_table_rows<PrimaryIndex: Clone>(
+        &self,
+        proof_infos: &[ReceiptProofInfo],
+        block: PrimaryIndex,
+    ) -> Vec<TableRowUpdate<PrimaryIndex>> {
+        let tx_index_identifier = identifier_for_tx_index_column(
+            &self.0.event_signature,
+            &self.0.address,
+            self.0.chain_id,
+            &[],
+        );
         let gas_used_identifier = identifier_for_gas_used_column(
-            &event.event_signature,
-            &event.address,
-            event.chain_id,
+            &self.0.event_signature,
+            &self.0.address,
+            self.0.chain_id,
             &[],
         );
 
@@ -742,8 +830,8 @@ pub trait ReceiptExtractionArgs:
                     .logs()
                     .iter()
                     .filter_map(|log| {
-                        if log.address == event.address
-                            && log.topics()[0].0 == event.event_signature
+                        if log.address == self.0.address
+                            && log.topics()[0].0 == self.0.event_signature
                         {
                             Some(log.clone())
                         } else {
@@ -759,9 +847,9 @@ pub trait ReceiptExtractionArgs:
                             .enumerate()
                             .map(|(j, topic)| {
                                 let topic_id = identifier_for_topic_column(
-                                    &event.event_signature,
-                                    &event.address,
-                                    event.chain_id,
+                                    &self.0.event_signature,
+                                    &self.0.address,
+                                    self.0.chain_id,
                                     j as u8 + 1,
                                     &[],
                                 );
@@ -774,9 +862,9 @@ pub trait ReceiptExtractionArgs:
                             .enumerate()
                             .map(|(j, data_slice)| {
                                 let data_id = identifier_for_data_column(
-                                    &event.event_signature,
-                                    &event.address,
-                                    event.chain_id,
+                                    &self.0.event_signature,
+                                    &self.0.address,
+                                    self.0.chain_id,
                                     j as u8 + 1,
                                     &[],
                                 );
@@ -802,66 +890,15 @@ pub trait ReceiptExtractionArgs:
     }
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> ReceiptExtractionArgs
-    for EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>
-{
-    const MAX_DATA_WORDS: usize = MAX_DATA_WORDS;
-    const NO_TOPICS: usize = NO_TOPICS;
-
-    fn new(address: Address, chain_id: u64, event_signature: &str) -> Self
-    where
-        Self: Sized,
-    {
-        EventLogInfo::<NO_TOPICS, MAX_DATA_WORDS>::new(address, chain_id, event_signature)
-    }
-
-    fn get_event(&self) -> EventLogInfo<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>
-    where
-        [(); Self::NO_TOPICS]:,
-        [(); Self::MAX_DATA_WORDS]:,
-    {
-        let topics: [usize; Self::NO_TOPICS] = self
-            .topics
-            .into_iter()
-            .collect::<Vec<usize>>()
-            .try_into()
-            .unwrap();
-        let data: [usize; Self::MAX_DATA_WORDS] = self
-            .data
-            .into_iter()
-            .collect::<Vec<usize>>()
-            .try_into()
-            .unwrap();
-        EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }> {
-            size: self.size,
-            chain_id: self.chain_id,
-            address: self.address,
-            add_rel_offset: self.add_rel_offset,
-            event_signature: self.event_signature,
-            sig_rel_offset: self.sig_rel_offset,
-            topics,
-            data,
-        }
-    }
-
-    fn get_index(&self) -> u64 {
-        identifier_for_tx_index_column(&self.event_signature, &self.address, self.chain_id, &[])
-    }
-}
-
-impl<R: ReceiptExtractionArgs> TableSource for R
-where
-    [(); <R as ReceiptExtractionArgs>::NO_TOPICS]:,
-    [(); <R as ReceiptExtractionArgs>::MAX_DATA_WORDS]:,
-{
-    type Metadata = EventLogInfo<{ R::NO_TOPICS }, { R::MAX_DATA_WORDS }>;
+impl TableSource for ReceiptExtractionArgs {
+    type Metadata = EventLogInfo;
 
     fn table_type(&self) -> TableType {
         TableType::Receipt
     }
 
     fn get_data(&self) -> Self::Metadata {
-        self.get_event()
+        self.0.clone()
     }
 
     fn init_contract_data<'a>(
@@ -869,10 +906,14 @@ where
         ctx: &'a mut TestContext,
         contract: &'a Contract,
     ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        let event = self.get_event();
         async move {
-            let contract_update =
-                ReceiptUpdate::new((R::NO_TOPICS as u8, R::MAX_DATA_WORDS as u8), 1, 5);
+            let event = &self.0;
+
+            let contract_update = ReceiptUpdate::new(
+                (event.num_topics() as u8, event.num_data_words() as u8),
+                1,
+                5,
+            );
 
             let provider = ProviderBuilder::new()
                 .with_recommended_fillers()
@@ -890,7 +931,7 @@ where
                 .await
                 .unwrap();
 
-            R::to_table_rows(&proof_infos, &event, new_block_number)
+            self.to_table_rows(&proof_infos, new_block_number)
         }
         .boxed()
     }
@@ -901,7 +942,7 @@ where
         contract: &Contract,
         value_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
-        let event = self.get_event();
+        let event = &self.0;
 
         let ProofKey::ValueExtraction((_, bn)) = value_key else {
             bail!("key wrong");
@@ -918,12 +959,9 @@ where
             .unwrap();
 
         let block_data = ReceiptBlockData::new(proof_infos, receipt_root, bn as u64);
-        let mut value_proof_plan =
-            EventLogInfo::<{ Self::NO_TOPICS }, { Self::MAX_DATA_WORDS }>::create_update_plan(
-                &block_data,
-            )?;
+        let mut value_proof_plan = EventLogInfo::create_update_plan(&block_data)?;
 
-        let value_proof = ctx.prove_extractable(&mut value_proof_plan, &event)?;
+        let value_proof = ctx.prove_extractable(&mut value_proof_plan, event)?;
         Ok((
             ExtractionProofInput::Receipt(value_proof),
             self.metadata_hash(contract.address(), contract.chain_id()),
@@ -936,13 +974,13 @@ where
         contract: &'a Contract,
         c: ChangeType,
     ) -> BoxFuture<'a, Vec<TableRowUpdate<BlockPrimaryIndex>>> {
-        let event = self.get_event();
         async move {
+            let event = &self.0;
             let ChangeType::Receipt(relevant, others) = c else {
                 panic!("Need ChangeType::Receipt, got: {:?}", c);
             };
             let contract_update = ReceiptUpdate::new(
-                (R::NO_TOPICS as u8, R::MAX_DATA_WORDS as u8),
+                (event.num_topics() as u8, event.num_data_words() as u8),
                 relevant,
                 others,
             );
@@ -963,13 +1001,13 @@ where
                 .await
                 .unwrap();
 
-            R::to_table_rows(&proof_infos, &event, new_block_number)
+            self.to_table_rows(&proof_infos, new_block_number)
         }
         .boxed()
     }
 
     fn metadata_hash(&self, _contract_address: Address, _chain_id: u64) -> MetadataHash {
-        receipt_metadata_hash(&self.get_event())
+        receipt_metadata_hash(&self.0)
     }
 }
 

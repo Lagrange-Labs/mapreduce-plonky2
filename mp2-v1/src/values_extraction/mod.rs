@@ -2,7 +2,9 @@ use crate::api::SlotInput;
 
 use gadgets::{
     column_info::{ExtractedColumnInfo, InputColumnInfo},
-    metadata_gadget::TableMetadata,
+    metadata_gadget::{
+        EmptyableTableMetadata, NonEmptyableTableMetadata, TableColumns, TableMetadata,
+    },
 };
 use itertools::Itertools;
 
@@ -27,7 +29,7 @@ use std::iter::once;
 
 pub mod api;
 mod branch;
-mod dummy;
+mod empty;
 mod extension;
 pub mod gadgets;
 mod leaf_mapping;
@@ -137,7 +139,7 @@ impl StorageSlotInfo {
         contract_address: &Address,
         chain_id: u64,
         extra: Vec<u8>,
-    ) -> TableMetadata {
+    ) -> TableColumns {
         let slot = self.slot().slot();
         let num_mapping_keys = self.slot().mapping_keys().len();
 
@@ -177,34 +179,27 @@ impl StorageSlotInfo {
             _ => vec![],
         };
 
-        TableMetadata::new(&input_columns, self.table_info())
+        TableColumns {
+            input_columns,
+            extracted_columns: self.table_info().to_vec(),
+        }
     }
 }
 
 /// Prefix used for making a topic column id.
 pub const TOPIC_PREFIX: &[u8] = b"topic";
-/// [`TOPIC_PREFIX`] as a [`str`]
-pub const TOPIC_NAME: &str = "topic";
 
 /// Prefix used for making a data column id.
 pub const DATA_PREFIX: &[u8] = b"data";
-/// [`DATA_PREFIX`] as a [`str`]
-pub const DATA_NAME: &str = "data";
 
 /// Prefix for transaction index
 pub const TX_INDEX_PREFIX: &[u8] = b"tx_index";
-/// [`TX_INDEX_PREFIX`] as a [`str`]
-pub const TX_INDEX_NAME: &str = "tx_index";
 
 /// Prefix for gas used
 pub const GAS_USED_PREFIX: &[u8] = b"gas_used";
-/// [`GAS_USED_PREFIX`] as a [`str`]
-pub const GAS_USED_NAME: &str = "gas_used";
 
-impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>
-    From<EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>> for TableMetadata
-{
-    fn from(event: EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>) -> Self {
+impl From<&EventLogInfo> for EmptyableTableMetadata {
+    fn from(event: &EventLogInfo) -> Self {
         let packed_sig = event.event_signature.pack(Endianness::Big);
         let packed_address = event.address.0 .0.pack(Endianness::Big);
         let input = packed_sig
@@ -574,8 +569,8 @@ pub fn row_unique_data_for_receipt_leaf(tx_index: &[u8], gas_used: &[u8]) -> Has
 }
 
 /// Function to compute a storage value digest
-fn storage_value_digest(
-    table_metadata: &TableMetadata,
+fn storage_value_digest<const CAN_BE_EMPTY: bool>(
+    table_metadata: &TableMetadata<CAN_BE_EMPTY>,
     keys: &[&[u8]],
     value: &[u8; MAPPING_LEAF_VALUE_LEN],
     slot: &StorageSlotInfo,
@@ -587,17 +582,17 @@ fn storage_value_digest(
     // Panic if the number of keys provided is not equal to the number of input columns
     assert_eq!(
         keys.len(),
-        table_metadata.input_columns.len(),
+        table_metadata.input_columns().len(),
         "Number of keys: {}, does not equal the number of input columns: {}",
         keys.len(),
-        table_metadata.input_columns.len()
+        table_metadata.input_columns().len()
     );
     table_metadata.storage_values_digest(padded_keys.as_slice(), value.as_slice(), slot.slot())
 }
 
 /// Compute the metadata digest for single variable leaf.
 pub fn compute_leaf_single_metadata_digest(slot_info: &StorageSlotInfo) -> Digest {
-    TableMetadata::new(&[], slot_info.table_info()).digest()
+    NonEmptyableTableMetadata::new(&[], slot_info.table_info()).digest()
 }
 
 /// Compute the values digest for single variable leaf.
@@ -605,8 +600,36 @@ pub fn compute_leaf_single_values_digest(
     slot_info: &StorageSlotInfo,
     value: [u8; MAPPING_LEAF_VALUE_LEN],
 ) -> Digest {
-    let table_metadata = TableMetadata::new(&[], slot_info.table_info());
+    let table_metadata = NonEmptyableTableMetadata::new(&[], slot_info.table_info());
     storage_value_digest(&table_metadata, &[], &value, slot_info)
+}
+
+/// Internal method to compute the metadata digest for mapping variable.
+/// The const generic flag is employed to specify whether the final metadata
+/// digest is computed or the intermediate one to be provided as input to the
+/// empty circuit, i.e., the circuit to be employed for value extraction in
+/// case no mapping entries are found for the current block
+fn compute_mapping_metadata_digest<const EMPTY_CIRCUIT: bool>(
+    slot_info: &StorageSlotInfo,
+    key_id: ColumnId,
+) -> Digest {
+    let input_column = InputColumnInfo::new(&[slot_info.slot().slot()], key_id, KEY_ID_PREFIX);
+    let metadata = EmptyableTableMetadata::new(&[input_column], slot_info.table_info());
+    if EMPTY_CIRCUIT {
+        metadata.digest_for_empty_circuit()
+    } else {
+        metadata.digest()
+    }
+}
+
+/// Compute the metadata digest for mapping variable, which is needed as input
+/// for the circuit to be employed for value extraction roof in case no
+/// mapping entires are found in the current block
+pub fn compute_mapping_metadata_digest_for_empty_circuit(
+    slot_info: &StorageSlotInfo,
+    key_id: ColumnId,
+) -> Digest {
+    compute_mapping_metadata_digest::<true>(slot_info, key_id)
 }
 
 /// Compute the metadata digest for mapping variable leaf.
@@ -614,8 +637,7 @@ pub fn compute_leaf_mapping_metadata_digest(
     slot_info: &StorageSlotInfo,
     key_id: ColumnId,
 ) -> Digest {
-    let input_column = InputColumnInfo::new(&[slot_info.slot().slot()], key_id, KEY_ID_PREFIX);
-    TableMetadata::new(&[input_column], slot_info.table_info()).digest()
+    compute_mapping_metadata_digest::<false>(slot_info, key_id)
 }
 
 /// Compute the values digest for mapping variable leaf.
@@ -626,7 +648,7 @@ pub fn compute_leaf_mapping_values_digest(
     key_id: ColumnId,
 ) -> Digest {
     let input_column = InputColumnInfo::new(&[slot_info.slot().slot()], key_id, KEY_ID_PREFIX);
-    let table_metadata = TableMetadata::new(&[input_column], slot_info.table_info());
+    let table_metadata = EmptyableTableMetadata::new(&[input_column], slot_info.table_info());
     storage_value_digest(
         &table_metadata,
         &[mapping_key.as_slice()],
@@ -635,8 +657,12 @@ pub fn compute_leaf_mapping_values_digest(
     )
 }
 
-/// Compute the metadata digest for mapping of mappings leaf.
-pub fn compute_leaf_mapping_of_mappings_metadata_digest(
+/// Internal method to compute the metadata digest for mapping of mappings variable.
+/// The const generic flag is employed to specify whether the final metadata
+/// digest is computed or the intermediate one to be provided as input to the
+/// empty circuit, i.e., the circuit to be employed for value extraction in
+/// case no mapping entries are found for the current block
+fn compute_mapping_of_mappings_metadata_digest<const EMPTY_CIRCUIT: bool>(
     slot_info: &StorageSlotInfo,
     outer_key_id: ColumnId,
     inner_key_id: ColumnId,
@@ -651,11 +677,35 @@ pub fn compute_leaf_mapping_of_mappings_metadata_digest(
         inner_key_id,
         INNER_KEY_ID_PREFIX,
     );
-    TableMetadata::new(
+    let metadata = EmptyableTableMetadata::new(
         &[outer_key_column, inner_key_column],
         slot_info.table_info(),
-    )
-    .digest()
+    );
+    if EMPTY_CIRCUIT {
+        metadata.digest_for_empty_circuit()
+    } else {
+        metadata.digest()
+    }
+}
+
+/// Compute the metadata digest for mapping of mappings variable, which is needed
+/// as input for the circuit to be employed for value extraction roof in case no
+/// mapping entires are found in the current block
+pub fn compute_mapping_of_mappings_metadata_digest_for_empty_circuit(
+    slot_info: &StorageSlotInfo,
+    outer_key_id: ColumnId,
+    inner_key_id: ColumnId,
+) -> Digest {
+    compute_mapping_of_mappings_metadata_digest::<true>(slot_info, outer_key_id, inner_key_id)
+}
+
+/// Compute the metadata digest for mapping of mappings leaf.
+pub fn compute_leaf_mapping_of_mappings_metadata_digest(
+    slot_info: &StorageSlotInfo,
+    outer_key_id: ColumnId,
+    inner_key_id: ColumnId,
+) -> Digest {
+    compute_mapping_of_mappings_metadata_digest::<false>(slot_info, outer_key_id, inner_key_id)
 }
 
 /// Compute the values digest for mapping of mappings leaf.
@@ -677,7 +727,7 @@ pub fn compute_leaf_mapping_of_mappings_values_digest(
         inner_key_id,
         INNER_KEY_ID_PREFIX,
     );
-    let table_metadata = TableMetadata::new(
+    let table_metadata = EmptyableTableMetadata::new(
         &[outer_key_column, inner_key_column],
         slot_info.table_info(),
     );
@@ -690,18 +740,23 @@ pub fn compute_leaf_mapping_of_mappings_values_digest(
     )
 }
 
+/// Compute the metadata digest for a receipt leaf, which is needed
+/// as input for the circuit to be employed for value extraction roof in case no
+/// events to be extracted are found in the current block
+pub fn compute_receipt_metadata_digest_for_empty_circuit(event: &EventLogInfo) -> Digest {
+    TableMetadata::from(event).digest_for_empty_circuit()
+}
+
 /// Compute the metadata digest for a Receipt leaf
-pub fn compute_leaf_receipt_metadata_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-) -> Digest {
-    TableMetadata::from(*event).digest()
+pub fn compute_leaf_receipt_metadata_digest(event: &EventLogInfo) -> Digest {
+    TableMetadata::from(event).digest()
 }
 
 /// Compute the value digest for a Receipt leaf
-pub fn compute_leaf_receipt_values_digest<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>(
-    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
+pub fn compute_leaf_receipt_values_digest(
+    event: &EventLogInfo,
     value: &[u8],
     tx_index: u64,
 ) -> Digest {
-    TableMetadata::from(*event).receipt_value_digest(tx_index, value, event)
+    TableMetadata::from(event).receipt_value_digest(tx_index, value, event)
 }

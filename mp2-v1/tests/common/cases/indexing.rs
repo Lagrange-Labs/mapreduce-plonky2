@@ -14,10 +14,8 @@ use mp2_v1::{
         ColumnID,
     },
     values_extraction::{
-        identifier_block_column, identifier_for_data_column, identifier_for_gas_used_column,
-        identifier_for_inner_mapping_key_column, identifier_for_outer_mapping_key_column,
-        identifier_for_topic_column, identifier_for_value_column, DATA_NAME, GAS_USED_NAME,
-        TOPIC_NAME,
+        identifier_block_column, identifier_for_inner_mapping_key_column,
+        identifier_for_outer_mapping_key_column, identifier_for_value_column,
     },
 };
 
@@ -54,11 +52,7 @@ use alloy::{
     providers::{ext::AnvilApi, ProviderBuilder},
     sol_types::SolEvent,
 };
-use mp2_common::{
-    eth::{EventLogInfo, StorageSlot},
-    proof::ProofWithVK,
-    types::HashOutput,
-};
+use mp2_common::{eth::StorageSlot, proof::ProofWithVK, types::HashOutput};
 
 /// Test slots for single values extraction
 pub(crate) const SINGLE_SLOTS: [u8; 4] = [0, 1, 2, 3];
@@ -112,8 +106,6 @@ fn single_value_slot_inputs() -> Vec<SlotInput> {
 
     slot_inputs
 }
-
-pub(crate) const TX_INDEX_COLUMN: &str = "tx_index";
 
 impl<T: TableSource> TableIndexing<T> {
     pub(crate) async fn merge_table_test_case(
@@ -602,12 +594,10 @@ impl<T: TableSource> TableIndexing<T> {
         no_topics: usize,
         no_data: usize,
         ctx: &mut TestContext,
-    ) -> Result<(TableIndexing<T>, Vec<TableRowUpdate<BlockPrimaryIndex>>)>
-    where
-        T: ReceiptExtractionArgs,
-        [(); <T as ReceiptExtractionArgs>::NO_TOPICS]:,
-        [(); <T as ReceiptExtractionArgs>::MAX_DATA_WORDS]:,
-    {
+    ) -> Result<(
+        TableIndexing<ReceiptExtractionArgs>,
+        Vec<TableRowUpdate<BlockPrimaryIndex>>,
+    )> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
@@ -646,7 +636,13 @@ impl<T: TableSource> TableIndexing<T> {
             ),
         };
         let chain_id = provider.get_chain_id().await?;
-        let mut source = T::new(contract.address(), chain_id, event_signature);
+        let mut source = ReceiptExtractionArgs::new(
+            contract.address(),
+            chain_id,
+            event_signature,
+            no_topics,
+            no_data,
+        )?;
         let genesis_updates = source.init_contract_data(ctx, &contract).await;
 
         let indexing_genesis_block = ctx.block_number().await;
@@ -660,15 +656,19 @@ impl<T: TableSource> TableIndexing<T> {
                 index: IndexType::Primary,
                 multiplier: false,
             },
-            secondary: TableColumn {
-                name: TX_INDEX_COLUMN.to_string(),
-                identifier: <T as ReceiptExtractionArgs>::get_index(&source),
+            secondary: {
+                let (name, identifier) = source.secondary_index_column_id();
+                TableColumn {
+                    name,
+                    identifier,
 
-                index: IndexType::Secondary,
-                // here we put false always since these are not coming from a "merged" table
-                multiplier: false,
+                    index: IndexType::Secondary,
+                    // here we put false always since these are not coming from a "merged" table
+                    multiplier: false,
+                }
             },
-            rest: compute_non_indexed_receipt_column_ids(&source.get_event())
+            rest: source
+                .compute_non_indexed_receipt_column_ids()
                 .into_iter()
                 .map(|(name, identifier)| TableColumn {
                     name,
@@ -690,7 +690,7 @@ impl<T: TableSource> TableIndexing<T> {
         )
         .await?;
         Ok((
-            TableIndexing::<T> {
+            TableIndexing {
                 value_column: table.columns.rest[0].name.clone(),
                 source,
                 table,
@@ -996,60 +996,6 @@ impl<T: TableSource> TableIndexing<T> {
         info!("Generated ALL MPT preprocessing proofs for block {bn}");
         Ok(metadata_hash)
     }
-}
-
-/// Function that computes the column identifiers for the non-indexed columns together with their names as [`String`]s.
-pub fn compute_non_indexed_receipt_column_ids<
-    const NO_TOPICS: usize,
-    const MAX_DATA_WORDS: usize,
->(
-    event: &EventLogInfo<NO_TOPICS, MAX_DATA_WORDS>,
-) -> Vec<(String, ColumnID)> {
-    let gas_used_column_id =
-        identifier_for_gas_used_column(&event.event_signature, &event.address, event.chain_id, &[]);
-
-    let topic_ids = event
-        .topics
-        .iter()
-        .enumerate()
-        .map(|(j, _)| {
-            (
-                format!("{}_{}", TOPIC_NAME, j + 1),
-                identifier_for_topic_column(
-                    &event.event_signature,
-                    &event.address,
-                    event.chain_id,
-                    j as u8 + 1,
-                    &[],
-                ),
-            )
-        })
-        .collect::<Vec<(String, ColumnID)>>();
-
-    let data_ids = event
-        .data
-        .iter()
-        .enumerate()
-        .map(|(j, _)| {
-            (
-                format!("{}_{}", DATA_NAME, j + 1),
-                identifier_for_data_column(
-                    &event.event_signature,
-                    &event.address,
-                    event.chain_id,
-                    j as u8 + 1,
-                    &[],
-                ),
-            )
-        })
-        .collect::<Vec<(String, ColumnID)>>();
-
-    [
-        vec![(GAS_USED_NAME.to_string(), gas_used_column_id)],
-        topic_ids,
-        data_ids,
-    ]
-    .concat()
 }
 
 /// Build the mapping table.

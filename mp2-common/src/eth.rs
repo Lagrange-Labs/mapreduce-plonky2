@@ -30,10 +30,7 @@ use std::{
 };
 
 use crate::{
-    keccak::HASH_LEN,
-    mpt_sequential::utils::bytes_to_nibbles,
-    rlp::MAX_KEY_NIBBLE_LEN,
-    serialization::{deserialize_long_array, serialize_long_array},
+    keccak::HASH_LEN, mpt_sequential::utils::bytes_to_nibbles, rlp::MAX_KEY_NIBBLE_LEN,
     utils::keccak256,
 };
 
@@ -308,8 +305,8 @@ pub struct ReceiptProofInfo {
 }
 
 /// Contains all the information for an [`Event`] in rlp form
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Hash, PartialEq, Eq)]
-pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub struct EventLogInfo {
     /// Size in bytes of the whole log rlp encoded
     pub size: usize,
     /// The chain ID
@@ -322,36 +319,46 @@ pub struct EventLogInfo<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> {
     pub event_signature: [u8; HASH_LEN],
     /// Byte offset from the start of the log to event signature
     pub sig_rel_offset: usize,
-    /// The the offsets to the other topics for this Log
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub topics: [usize; NO_TOPICS],
+    /// The offsets to the other topics for this Log
+    pub topics: Vec<usize>,
     /// The offsets to the start of the extra data stored by this Log
-    #[serde(
-        serialize_with = "serialize_long_array",
-        deserialize_with = "deserialize_long_array"
-    )]
-    pub data: [usize; MAX_DATA_WORDS],
+    pub data: Vec<usize>,
 }
 
-impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS, MAX_DATA_WORDS> {
-    /// Create a new instance from a contract [`Address`] and a [`str`] that is the event signature
-    pub fn new(contract: Address, chain_id: u64, event_signature: &str) -> Self {
+impl EventLogInfo {
+    pub const MAX_NUM_TOPICS: usize = 3;
+    /// Create a new instance from:
+    /// - a contract [`Address`]
+    /// - The event signature
+    /// - The number of topis besides the event signature (from 0 to Self::MAX_NUM_TOPICS)
+    /// - The number of data words to be extracted
+    pub fn new(
+        contract: Address,
+        chain_id: u64,
+        event_signature: &str,
+        no_topics: usize,
+        data_words: usize,
+    ) -> Result<Self, MP2EthError> {
+        // first, check that no_topics is at most MAX_NUM_TOPICS
+        if no_topics > Self::MAX_NUM_TOPICS {
+            return Err(MP2EthError::InternalError(format!(
+                "Number of topics is {no_topics}, must be at most {}",
+                Self::MAX_NUM_TOPICS
+            )));
+        }
         // To calculate the total size of the log rlp encoded we use the fact that the address takes 21 bytes to encode, topics
         // take 33 bytes each to incode and form a list that has length between 33 bytes and 132 bytes and data is a string that has 32 * MAX_DATA_WORDS length
 
         // If we have more than one topic that is not the event signature the rlp encoding is a list that is over 55 bytes whose total length can be encoded in one byte, so the header length is 2
         // Otherwise its still a list but the header is a single byte.
-        let topics_header_len = alloy::rlp::length_of_length((1 + NO_TOPICS) * ENCODED_TOPIC_SIZE);
+        let topics_header_len = alloy::rlp::length_of_length((1 + no_topics) * ENCODED_TOPIC_SIZE);
 
         // If the we have more than one piece of data it is rlp encoded as a string with length greater than 55 bytes
-        let data_header_len = alloy::rlp::length_of_length(MAX_DATA_WORDS * MAX_RECEIPT_DATA_SIZE);
+        let data_header_len = alloy::rlp::length_of_length(data_words * MAX_RECEIPT_DATA_SIZE);
 
         let address_size = 21;
-        let topics_size = (1 + NO_TOPICS) * ENCODED_TOPIC_SIZE + topics_header_len;
-        let data_size = MAX_DATA_WORDS * MAX_RECEIPT_DATA_SIZE + data_header_len;
+        let topics_size = (1 + no_topics) * ENCODED_TOPIC_SIZE + topics_header_len;
+        let data_size = data_words * MAX_RECEIPT_DATA_SIZE + data_header_len;
 
         let payload_size = address_size + topics_size + data_size;
         let header_size = alloy::rlp::length_of_length(payload_size);
@@ -364,16 +371,23 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
         // The event signature offset is after the header, the address and the topics list header.
         let sig_rel_offset = header_size + address_size + topics_header_len + 1;
 
-        let topics: [usize; NO_TOPICS] =
-            create_array(|i| sig_rel_offset + (i + 1) * ENCODED_TOPIC_SIZE);
+        let topics = (0..no_topics)
+            .map(|i| sig_rel_offset + (i + 1) * ENCODED_TOPIC_SIZE)
+            .collect();
 
-        let data: [usize; MAX_DATA_WORDS] = create_array(|i| {
-            header_size + address_size + topics_size + data_header_len + (i * MAX_RECEIPT_DATA_SIZE)
-        });
+        let data = (0..data_words)
+            .map(|i| {
+                header_size
+                    + address_size
+                    + topics_size
+                    + data_header_len
+                    + (i * MAX_RECEIPT_DATA_SIZE)
+            })
+            .collect();
 
         let event_sig = alloy::primitives::keccak256(event_signature.as_bytes());
 
-        Self {
+        Ok(Self {
             size,
             chain_id,
             address: contract,
@@ -382,7 +396,7 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
             sig_rel_offset,
             topics,
             data,
-        }
+        })
     }
 
     /// Function used to return the offset from the start of an Receipt Trie Leaf Node to the log relevant to [`EventLogInfo`]
@@ -427,6 +441,16 @@ impl<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize> EventLogInfo<NO_TOPICS
             ))?;
 
         Ok(relevant_log_offset)
+    }
+
+    /// Get the number of topics of the event
+    pub fn num_topics(&self) -> usize {
+        self.topics.len()
+    }
+
+    /// Get the number of data words extracted from the event
+    pub fn num_data_words(&self) -> usize {
+        self.data.len()
     }
 
     /// Function that returns the MPT Trie inclusion proofs for all receipts in a block whose logs contain
@@ -1074,17 +1098,16 @@ mod test {
 
     #[test]
     fn test_receipt_query() -> Result<()> {
-        test_receipt_query_helper::<1, 0>()?;
-        test_receipt_query_helper::<2, 0>()?;
-        test_receipt_query_helper::<3, 0>()?;
-        test_receipt_query_helper::<3, 1>()?;
-        test_receipt_query_helper::<3, 2>()
+        test_receipt_query_helper(1, 0)?;
+        test_receipt_query_helper(2, 0)?;
+        test_receipt_query_helper(3, 0)?;
+        test_receipt_query_helper(3, 1)?;
+        test_receipt_query_helper(3, 2)
     }
 
-    fn test_receipt_query_helper<const NO_TOPICS: usize, const MAX_DATA_WORDS: usize>() -> Result<()>
-    {
+    fn test_receipt_query_helper(no_topics: usize, data_words: usize) -> Result<()> {
         // Now for each transaction we fetch the block, then get the MPT Trie proof that the receipt is included and verify it
-        let test_info = generate_receipt_test_info::<NO_TOPICS, MAX_DATA_WORDS>();
+        let test_info = generate_receipt_test_info(no_topics, data_words);
         let proofs = test_info.proofs();
         let event = test_info.info();
         for proof in proofs.iter() {

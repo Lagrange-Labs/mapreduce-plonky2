@@ -4,8 +4,10 @@
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
 use alloy::primitives::B256;
 use anyhow::Result;
+use itertools::Itertools;
 use mp2_common::{
     array::Array,
+    group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
     keccak::{OutputHash, PACKED_HASH_LEN},
     mpt_sequential::MPTKeyWire,
     public_inputs::PublicInputCommon,
@@ -13,7 +15,7 @@ use mp2_common::{
     serialization::{deserialize, serialize},
     types::{CBuilder, GFp},
     utils::{Endianness, Packer, ToFields, ToTargets},
-    D,
+    D, F,
 };
 use plonky2::{
     field::types::Field,
@@ -23,26 +25,48 @@ use plonky2::{
     },
     plonk::proof::ProofWithPublicInputsTarget,
 };
-use plonky2_ecgfp5::{curve::curve::Point, gadgets::curve::CircuitBuilderEcGFp5};
+use plonky2_ecgfp5::{
+    curve::curve::Point,
+    gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget},
+};
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 
+pub(crate) const EMPTY_TABLE: &str = "EMPTY_EXTRACTION";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DummyNodeWires {
+pub struct EmptyExtractionWires {
     root: Array<Target, PACKED_HASH_LEN>,
     metadata_digest: Vec<Target>,
 }
 
+impl EmptyExtractionWires {
+    /// Add constant `EMPTY_TABLE` to the digest provided as input
+    pub(crate) fn add_empty_identifier_to_digest(
+        b: &mut CBuilder,
+        digest: &CurveTarget,
+    ) -> CurveTarget {
+        let inputs = EMPTY_TABLE
+            .as_bytes()
+            .pack(Endianness::Big)
+            .into_iter()
+            .map(|empty_id| b.constant(F::from_canonical_u32(empty_id)))
+            .chain(digest.to_targets())
+            .collect_vec();
+        b.map_to_curve_point(&inputs)
+    }
+}
+
 /// Circuit to proving the processing of an extension node
 #[derive(Clone, Debug, Copy, Serialize, Deserialize)]
-pub struct DummyNodeCircuit {
+pub struct EmptyExtractionCircuit {
     pub(crate) root_hash: B256,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
     pub(crate) metadata_digest: Point,
 }
 
-impl DummyNodeCircuit {
-    pub fn build(b: &mut CBuilder) -> DummyNodeWires {
+impl EmptyExtractionCircuit {
+    pub fn build(b: &mut CBuilder) -> EmptyExtractionWires {
         // Build the key wire which will have all zeroes for nibbles and the pointer set to F::NEG_ONE
         let neg_one = b.constant(GFp::NEG_ONE);
         let zero = b.zero();
@@ -59,23 +83,27 @@ impl DummyNodeCircuit {
         // Build the metadata target
         let dm = b.add_virtual_curve_target();
 
+        // Add empty circuit identifier to the metadata digest, to ensure that this circuit
+        // is employed only for tables where there could be no values to be extracted
+        let final_dm = EmptyExtractionWires::add_empty_identifier_to_digest(b, &dm);
+
         // Expose the public inputs.
         PublicInputsArgs {
             h: &root,
             k: &key,
             dv: b.curve_zero(),
-            dm,
+            dm: final_dm,
             n: b.zero(),
         }
         .register(b);
 
-        DummyNodeWires {
+        EmptyExtractionWires {
             root: root.downcast_to_targets(),
             metadata_digest: dm.to_targets(),
         }
     }
 
-    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &DummyNodeWires) {
+    pub fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &EmptyExtractionWires) {
         // Set the root
         let packed_root = self
             .root_hash
@@ -91,13 +119,26 @@ impl DummyNodeCircuit {
             &self.metadata_digest.to_weierstrass().to_fields(),
         );
     }
+
+    /// Method to add the constant identifier `EMPTY_TABLE` to the input digest
+    pub(crate) fn add_empty_identifier_to_digest(digest: Point) -> Point {
+        map_to_curve_point(
+            &EMPTY_TABLE
+                .as_bytes()
+                .pack(Endianness::Big)
+                .into_iter()
+                .map(F::from_canonical_u32)
+                .chain(digest.to_fields())
+                .collect_vec(),
+        )
+    }
 }
 
 /// Num of children = 1
-impl CircuitLogicWires<GFp, D, 0> for DummyNodeWires {
+impl CircuitLogicWires<GFp, D, 0> for EmptyExtractionWires {
     type CircuitBuilderParams = ();
 
-    type Inputs = DummyNodeCircuit;
+    type Inputs = EmptyExtractionCircuit;
 
     const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
 
@@ -106,7 +147,7 @@ impl CircuitLogicWires<GFp, D, 0> for DummyNodeWires {
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         _builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        DummyNodeCircuit::build(builder)
+        EmptyExtractionCircuit::build(builder)
     }
 
     fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<GFp>) -> Result<()> {
@@ -132,18 +173,18 @@ mod tests {
     };
 
     #[derive(Clone, Debug)]
-    struct TestDummyNodeCircuit<'a> {
-        c: DummyNodeCircuit,
+    struct TestEmptyExtractionCircuit<'a> {
+        c: EmptyExtractionCircuit,
         exp_pi: PublicInputs<'a, F>,
     }
 
-    impl UserCircuit<F, D> for TestDummyNodeCircuit<'_> {
+    impl UserCircuit<F, D> for TestEmptyExtractionCircuit<'_> {
         // Extension node wires + child public inputs
-        type Wires = (DummyNodeWires, Vec<Target>);
+        type Wires = (EmptyExtractionWires, Vec<Target>);
 
         fn build(b: &mut CircuitBuilder<F, D>) -> Self::Wires {
             let exp_pi = b.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
-            let ext_wires = DummyNodeCircuit::build(b);
+            let ext_wires = EmptyExtractionCircuit::build(b);
 
             (ext_wires, exp_pi)
         }
@@ -161,11 +202,13 @@ mod tests {
     }
 
     #[test]
-    fn test_values_extraction_dummy_node_circuit() {
+    fn test_values_extraction_empty_circuit() {
         // Prepare the public inputs
         let random_hash = B256::random();
         let md = Point::rand();
-        let random_md = md.to_weierstrass();
+        // compute the metadata digest expected to be computed by the circuit
+        let expected_md =
+            EmptyExtractionCircuit::add_empty_identifier_to_digest(md).to_weierstrass();
         let key = vec![0u8; MAX_KEY_NIBBLE_LEN];
         let ptr = GFp::NEG_ONE.to_canonical_u64() as usize;
         let values_digest = Point::NEUTRAL.to_weierstrass();
@@ -175,7 +218,7 @@ mod tests {
             &key,
             ptr,
             &values_digest,
-            &random_md,
+            &expected_md,
             0,
         );
 
@@ -193,11 +236,11 @@ mod tests {
         );
         assert_eq!(exp_ptr, GFp::NEG_ONE);
         assert_eq!(Point::NEUTRAL.to_weierstrass(), exp_pi.values_digest());
-        assert_eq!(random_md, exp_pi.metadata_digest());
+        assert_eq!(expected_md, exp_pi.metadata_digest());
         assert_eq!(GFp::ZERO, exp_pi.n());
 
-        let circuit = TestDummyNodeCircuit {
-            c: DummyNodeCircuit {
+        let circuit = TestEmptyExtractionCircuit {
+            c: EmptyExtractionCircuit {
                 root_hash: random_hash,
                 metadata_digest: md,
             },
