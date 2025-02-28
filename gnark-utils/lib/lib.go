@@ -35,7 +35,7 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/logger"
 	"github.com/pkg/errors"
-	"github.com/succinctlabs/gnark-plonky2-verifier/types"
+	"github.com/lagrange-labs/gnark-plonky2-verifier/types"
 )
 
 // Global variables for the proving process are only necessary to initialize
