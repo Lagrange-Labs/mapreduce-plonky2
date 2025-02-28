@@ -3,7 +3,7 @@
 
 use crate::{
     prover::groth16::combine_proofs,
-    utils::{deserialize_json_file, hex_to_u256, read_file, write_file},
+    utils::{hex_to_u256, read_file, write_file},
     EVMVerifier, Groth16Proof, Groth16Prover, Groth16Verifier, C,
 };
 use alloy::{contract::Interface, dyn_abi::DynSolValue, json_abi::JsonAbi};
@@ -14,7 +14,7 @@ use std::path::Path;
 const R1CS_FILENAME: &str = "r1cs.bin";
 const PK_FILENAME: &str = "pk.bin";
 const CIRCUIT_FILENAME: &str = "circuit.bin";
-const GROTH16_PROOF_FILENAME: &str = "groth16_proof.json";
+pub(crate) const GROTH16_PROOF_FILENAME: &str = "groth16_proof.json";
 
 /// Test Groth16 proving, verification and Solidity verification.
 pub fn test_groth16_proving_and_verification(asset_dir: &str, plonky2_proof: &[u8]) {
@@ -68,16 +68,8 @@ fn groth16_verify(asset_dir: &str, proof: &Groth16Proof) {
     verifier.verify(proof).expect("Failed to verify the proof")
 }
 
-/// Test the Solidity verification on a JSON file of Groth16 proof.
-pub(crate) fn evm_verify_on_groth16_proof_file(asset_dir: &str) {
-    let groth16_proof_path = Path::new(asset_dir).join(GROTH16_PROOF_FILENAME);
-    let groth16_proof = deserialize_json_file(groth16_proof_path).unwrap();
-
-    evm_verify(asset_dir, &groth16_proof);
-}
-
 /// Test the Solidity verification.
-fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
+pub(crate) fn evm_verify(asset_dir: &str, proof: &Groth16Proof) {
     let solidity_file_path = Path::new(asset_dir)
         .join("Verifier.sol")
         .to_string_lossy()
