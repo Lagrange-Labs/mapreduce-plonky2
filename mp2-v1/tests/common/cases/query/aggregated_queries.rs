@@ -562,7 +562,7 @@ pub(crate) async fn cook_query_unique_secondary_index(
     // primary_min_placeholder = ".."
     // primary_max_placeholder = ".."
     // Address == $3 --> placeholders.hashmap empty, put in query bounds secondary_min = secondary_max = "$3""
-    // adddress IN ($3,$4,$5) -> min "$3" max "$5", put in query bounds
+    // address IN ($3,$4,$5) -> min "$3" max "$5", put in query bounds
     // secondary_min = $3, and secondary_max = "$5", placeholders.put(generic, "$4")
     // placeholders.generic(("generic", $3)),(generic,$4), (generic,$5))
     // WHERE price > $3 AND price < $4 <--

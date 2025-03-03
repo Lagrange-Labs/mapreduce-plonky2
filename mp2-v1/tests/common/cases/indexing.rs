@@ -110,7 +110,7 @@ impl TableIndexing {
             index: mapping_index,
             // at the beginning there is no mapping key inserted
             // NOTE: This array is a convenience to handle smart contract updates
-            // manually, but does not need to be stored explicitely by dist system.
+            // manually, but does not need to be stored explicitly by dist system.
             mapping_keys: vec![],
         };
         let mut source = TableSource::Merge(MergeSource::new(single_source, mapping_source));
@@ -307,7 +307,7 @@ impl TableIndexing {
             index: mapping_index,
             // at the beginning there is no mapping key inserted
             // NOTE: This array is a convenience to handle smart contract updates
-            // manually, but does not need to be stored explicitely by dist system.
+            // manually, but does not need to be stored explicitly by dist system.
             mapping_keys: vec![],
         };
 
