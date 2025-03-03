@@ -547,7 +547,9 @@ contract Verifier {
     }
 
     bytes32 constant CIRCUIT_DIGEST = 0x2f0c0a5231fca4b38dcb986d12c55e4d18cc65ed56b501599d606d5af41cf842;
- 
+}
+
+contract Groth16Verifier is Verifier {
     // Top 3 bits mask.
     uint256 constant TOP_THREE_BIT_MASK = ~(uint256(7) << 253);
 

@@ -14,9 +14,10 @@ use common::{
     utils::{read_full_proof, read_query_input, read_query_output, verify_pi_sha256},
     TestContext,
 };
-use groth16_framework::{test_utils::test_groth16_proving_and_verification, EVMVerifier};
+use groth16_framework::{test_utils::test_groth16_proving_and_verification, utils::{read_file_to_string, write_file, SOLIDITY_VERIFIER_FILENAME}, EVMVerifier};
 use itertools::Itertools;
 use serial_test::serial;
+use verifiable_db::test_utils;
 use std::path::Path;
 
 /// Test Groth16 proof on local.
@@ -123,11 +124,62 @@ fn verify_query_in_solidity(asset_dir: &str) {
         .encode_input("processQuery", &[data, query_input])
         .expect("Failed to encode the inputs of Solidity function processQuery");
 
-    // Initialize the EVM verifier.
-    let solidity_file_path = Path::new("test_data")
+    // construct the test Solidity contract
+    let verifier_contract_path = Path::new(asset_dir)
+        .join(SOLIDITY_VERIFIER_FILENAME)
+        .to_string_lossy()
+        .to_string();
+
+    let verifier_code = read_file_to_string(&verifier_contract_path)
+        .expect(format!("Failed to read Solidity verifier contract from {verifier_contract_path}").as_str()
+    );
+
+    let verifier_logic_path = Path::new("test_data")
+    .join("Groth16VerifierExtension.sol")
+    .to_string_lossy()
+    .to_string();
+
+    let mut verifier_logic_code = read_file_to_string(&verifier_logic_path)
+        .expect(format!("Failed to read Solidity verifier contract from {verifier_logic_path}").as_str()
+    );
+
+    // trim license and import from source code
+
+    let prefix_lines = [
+        "// SPDX-License-Identifier: MIT\n",
+        "pragma solidity ^0.8.0;\n",
+        "import {Verifier} from \"./Verifier.sol\";\n",
+    ];
+    for prefix in prefix_lines {
+        verifier_logic_code = verifier_logic_code.replace(prefix, "");
+    }
+
+    // replace constants in verifier logic code
+    let mut replace_constant = |constant_name: &str, constant_value: usize| {
+        let start_constant = verifier_logic_code.find(
+            format!("uint32 constant {constant_name}").as_str()
+        ).expect("MAX_NUM_OUTPUTS definition not found in verifier contract");
+        let end_constant = verifier_logic_code[start_constant..].find(
+            ";\n"
+        ).expect("no end of line found after MAX_NUM_OUTPUTS definition");
+        verifier_logic_code.replace_range(
+            start_constant..start_constant + end_constant, 
+            format!("uint32 constant {constant_name} = {constant_value}").as_str(),    
+        );
+    };
+    replace_constant("MAX_NUM_OUTPUTS", test_utils::MAX_NUM_OUTPUTS);
+    replace_constant("MAX_NUM_ITEMS_PER_OUTPUT", test_utils::MAX_NUM_ITEMS_PER_OUTPUT);
+    replace_constant("MAX_NUM_PLACEHOLDERS", test_utils::MAX_NUM_PLACEHOLDERS);
+    
+    // concatenate verifier code with verifier logic code and write to file
+    let solidity_file_path = Path::new(asset_dir)
         .join("TestGroth16Verifier.sol")
         .to_string_lossy()
         .to_string();
+    write_file(&solidity_file_path, format!("{}{}", verifier_code, verifier_logic_code).as_bytes())
+        .expect("Failed writing test verifier contract to file");
+
+    // Initialize the EVM verifier.
     let verifier =
         EVMVerifier::new(&solidity_file_path).expect("Failed to initialize the EVM verifier");
 
