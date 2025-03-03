@@ -3,7 +3,9 @@
 
 use anyhow::{bail, Result};
 use revm::{
-    handler::register::EvmHandler, primitives::{CreateScheme, ExecutionResult, LatestSpec, Output, TransactTo, TxEnv}, Context, Evm, InMemoryDB
+    handler::register::EvmHandler,
+    primitives::{CreateScheme, ExecutionResult, LatestSpec, Output, TransactTo, TxEnv},
+    Context, Evm, InMemoryDB,
 };
 
 /// Deploy contract and then call with calldata.
