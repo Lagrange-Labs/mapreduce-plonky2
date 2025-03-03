@@ -69,6 +69,7 @@ in
     channel = "nightly";
   };
   languages.go.enable = true;
+  languages.solidity.enable = true;
 
   # https://devenv.sh/pre-commit-hooks/
   ## pre-commit.hooks = {

@@ -79,7 +79,7 @@ fn verify_query_in_solidity(asset_dir: &str) {
     // Build the contract interface for encoding the verification input.
     let abi = JsonAbi::parse(["function processQuery( \
             bytes32[], \
-            tuple(uint32, uint32, uint64, uint64, bytes32, bytes32, uint256[]) \
+            tuple(uint32, uint32, uint64, uint64, bytes32, bytes32, bytes32[]) \
         ) public view returns (tuple(uint256, bytes[], uint256))"])
     .unwrap();
     let contract = Interface::new(abi);
@@ -113,7 +113,7 @@ fn verify_query_in_solidity(asset_dir: &str) {
             query_input
                 .user_placeholders
                 .into_iter()
-                .map(|u| DynSolValue::Uint(u, 256))
+                .map(|u| DynSolValue::FixedBytes(u.to_be_bytes().into(), 32))
                 .collect(),
         ),
     ]);
@@ -170,8 +170,8 @@ fn verify_query_in_solidity(asset_dir: &str) {
                 .zip_eq(query_output.rows)
                 .for_each(|(sol_bytes, u256s)| {
                     let encoded_bytes =
-                        DynSolValue::Array(u256s.map(|u| DynSolValue::Uint(u, 256)).to_vec())
-                            .abi_encode();
+                        DynSolValue::Array(u256s.map(|u| DynSolValue::Bytes(u.to_be_bytes_trimmed_vec())).to_vec())
+                            .abi_encode_packed();
 
                     assert_eq!(sol_bytes, DynSolValue::Bytes(encoded_bytes));
                 });
