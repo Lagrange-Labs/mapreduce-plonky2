@@ -138,6 +138,10 @@ fn verify_query_in_solidity(asset_dir: &str) {
         panic!("Failed to read Solidity verifier contract from {verifier_contract_path}")
     });
 
+    // remove closing `}` from verifier code
+    let verifier_code = verifier_code.trim_end().strip_suffix('}')
+        .expect("No } found at the end of verifier code");
+
     let verifier_logic_path = Path::new("test_data")
         .join("Groth16VerifierExtension.sol")
         .to_string_lossy()
@@ -153,6 +157,7 @@ fn verify_query_in_solidity(asset_dir: &str) {
         "// SPDX-License-Identifier: MIT\n",
         "pragma solidity ^0.8.0;\n",
         "import {Verifier} from \"./Verifier.sol\";\n",
+        "contract Groth16VerifierExtension is Verifier {\n",
     ];
     for prefix in prefix_lines {
         verifier_logic_code = verifier_logic_code.replace(prefix, "");
