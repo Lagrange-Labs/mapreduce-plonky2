@@ -51,6 +51,15 @@ pub fn read_file<P: AsRef<Path>>(file_path: P) -> Result<Vec<u8>> {
     Ok(data)
 }
 
+/// Read the data from a file as a String
+pub fn read_file_to_string<P: AsRef<Path>>(file_path: P) -> Result<String> {
+    let mut data = String::new();
+    let mut fd = File::open(file_path)?;
+    fd.read_to_string(&mut data)?;
+
+    Ok(data)
+}
+
 /// Write the data to a file.
 pub fn write_file<P: AsRef<Path>>(file_path: P, data: &[u8]) -> Result<()> {
     // Try to create the parent dir if not exists.
