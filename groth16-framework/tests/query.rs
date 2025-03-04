@@ -139,7 +139,9 @@ fn verify_query_in_solidity(asset_dir: &str) {
     });
 
     // remove closing `}` from verifier code
-    let verifier_code = verifier_code.trim_end().strip_suffix('}')
+    let verifier_code = verifier_code
+        .trim_end()
+        .strip_suffix('}')
         .expect("No } found at the end of verifier code");
 
     let verifier_logic_path = Path::new("test_data")

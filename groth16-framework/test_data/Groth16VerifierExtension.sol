@@ -55,8 +55,8 @@ contract Groth16VerifierExtension is Verifier {
     uint32 constant MAX_NUM_PLACEHOLDERS = 5;
 
     // The start uint256 offset of the public inputs in calldata.
-    // groth16_proof_number (8) + groth16_input_number (3)
-    uint32 constant PI_OFFSET = 11;
+    // groth16_proof_number (8) + groth16_input_number (2)
+    uint32 constant PI_OFFSET = 10;
 
     // These values are aligned and each is an uint256.
     // Block hash uint256 position in the public inputs
@@ -114,7 +114,7 @@ contract Groth16VerifierExtension is Verifier {
     }
 
     // Parse the Groth16 proofs and inputs, do verification, and returns the Groth16 inputs.
-    function verifyGroth16Proof(bytes32[] calldata data) internal view virtual returns (uint256[3] memory) {
+    function verifyGroth16Proof(bytes32[] calldata data) internal view virtual returns (uint256[2] memory) {
         uint256[8] memory proofs;
         uint256[2] memory inputs;
 
