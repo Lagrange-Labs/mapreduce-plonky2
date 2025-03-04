@@ -3,13 +3,14 @@
 package main
 
 import "C"
+
 import (
 	"encoding/json"
 
 	"github.com/pkg/errors"
-	"github.com/succinctlabs/gnark-plonky2-verifier/plonk/gates"
-	"github.com/succinctlabs/gnark-plonky2-verifier/types"
-	"github.com/succinctlabs/gnark-plonky2-verifier/variables"
+	"github.com/lagrange-labs/gnark-plonky2-verifier/plonk/gates"
+	"github.com/lagrange-labs/gnark-plonky2-verifier/types"
+	"github.com/lagrange-labs/gnark-plonky2-verifier/variables"
 )
 
 // Deserialize the proof with public inputs.

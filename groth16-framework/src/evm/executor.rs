@@ -3,21 +3,22 @@
 
 use anyhow::{bail, Result};
 use revm::{
-    primitives::{CreateScheme, ExecutionResult, Output, TransactTo, TxEnv},
-    InMemoryDB, EVM,
+    handler::register::EvmHandler,
+    primitives::{CreateScheme, ExecutionResult, LatestSpec, Output, TransactTo, TxEnv},
+    Context, Evm, InMemoryDB,
 };
 
 /// Deploy contract and then call with calldata.
 /// Return the gas_used and the output bytes of call to deployed contract if
 /// both transactions are successful.
 pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<(u64, Vec<u8>)> {
-    let mut evm = EVM {
-        env: Default::default(),
-        db: Some(InMemoryDB::default()),
-    };
+    let mut evm = Evm::new(
+        Context::new_with_db(InMemoryDB::default()),
+        EvmHandler::mainnet::<LatestSpec>(),
+    );
 
-    evm.env.tx = TxEnv {
-        gas_limit: u64::MAX,
+    *evm.tx_mut() = TxEnv {
+        gas_limit: u32::MAX as u64,
         transact_to: TransactTo::Create(CreateScheme::Create),
         data: deployment_code.into(),
         ..Default::default()
@@ -41,7 +42,7 @@ pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<(u
         _ => unreachable!(),
     };
 
-    evm.env.tx = TxEnv {
+    *evm.tx_mut() = TxEnv {
         gas_limit: u64::MAX,
         transact_to: TransactTo::Call(contract),
         data: calldata.into(),

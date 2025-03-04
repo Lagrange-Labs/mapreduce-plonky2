@@ -7,9 +7,9 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 /// The byte offset of the last Groth16 input in the full proof
-const LAST_GROTH16_INPUT_OFFSET: usize = 10 * 32;
+const LAST_GROTH16_INPUT_OFFSET: usize = 9 * 32;
 /// The start byte offset of the public inputs in the full proof
-const PI_OFFSET: usize = 11 * 32;
+const PI_OFFSET: usize = 10 * 32;
 
 const FULL_PROOF_FILENAME: &str = "full_proof.bin";
 const PLONKY2_PROOF_FILENAME: &str = "plonky2_proof.bin";

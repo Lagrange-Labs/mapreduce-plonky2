@@ -55,8 +55,8 @@ contract Groth16VerifierExtension is Verifier {
     uint32 constant MAX_NUM_PLACEHOLDERS = 5;
 
     // The start uint256 offset of the public inputs in calldata.
-    // groth16_proof_number (8) + groth16_input_number (3)
-    uint32 constant PI_OFFSET = 11;
+    // groth16_proof_number (8) + groth16_input_number (2)
+    uint32 constant PI_OFFSET = 10;
 
     // These values are aligned and each is an uint256.
     // Block hash uint256 position in the public inputs
@@ -88,10 +88,10 @@ contract Groth16VerifierExtension is Verifier {
     uint32 constant PI_LEN = 32 * (PI_REM_OFFSET - PI_OFFSET) + (REM_QUERY_OFFSET_POS + 1) * 4;
 
     // The processQuery function does the followings:
-    // 1. Parse the Groth16 proofs (8 uint256) and inputs (3 uint256) from the `data`
+    // 1. Parse the Groth16 proofs (8 uint256) and inputs (2 uint256) from the `data`
     //    argument, and call `verifyProof` function for Groth16 verification.
     // 2. Calculate sha256 on the public inputs, and set the top 3 bits of this hash to 0.
-    //    Then ensure this hash value equals to the last Groth16 input (groth16_inputs[2]).
+    //    Then ensure this hash value equals to the last Groth16 input (groth16_inputs[1]).
     // 3. Parse the items from public inputs, and check as expected for query.
     // 4. Parse and return the query output from public inputs.
     function processQuery(bytes32[] calldata data, QueryInput memory query)
@@ -101,7 +101,7 @@ contract Groth16VerifierExtension is Verifier {
         returns (QueryOutput memory)
     {
         // 1. Groth16 verification
-        uint256[3] memory groth16Inputs = verifyGroth16Proof(data);
+        uint256[2] memory groth16Inputs = verifyGroth16Proof(data);
 
         // 2. Ensure the sha256 of public inputs equals to the last Groth16 input.
         verifyPublicInputs(data, groth16Inputs);
@@ -114,14 +114,14 @@ contract Groth16VerifierExtension is Verifier {
     }
 
     // Parse the Groth16 proofs and inputs, do verification, and returns the Groth16 inputs.
-    function verifyGroth16Proof(bytes32[] calldata data) internal view virtual returns (uint256[3] memory) {
+    function verifyGroth16Proof(bytes32[] calldata data) internal view virtual returns (uint256[2] memory) {
         uint256[8] memory proofs;
-        uint256[3] memory inputs;
+        uint256[2] memory inputs;
 
         for (uint32 i = 0; i < 8; ++i) {
             proofs[i] = uint256(data[i]);
         }
-        for (uint32 i = 0; i < 3; ++i) {
+        for (uint32 i = 0; i < 2; ++i) {
             inputs[i] = uint256(data[i + 8]);
         }
 
@@ -135,7 +135,7 @@ contract Groth16VerifierExtension is Verifier {
     }
 
     // Compute sha256 on the public inputs, and ensure it equals to the last Groth16 input.
-    function verifyPublicInputs(bytes32[] calldata data, uint256[3] memory groth16Inputs) internal pure virtual {
+    function verifyPublicInputs(bytes32[] calldata data, uint256[2] memory groth16Inputs) internal pure virtual {
         // Parse the public inputs from calldata.
         bytes memory pi = parsePublicInputs(data);
 
@@ -146,7 +146,7 @@ contract Groth16VerifierExtension is Verifier {
 
         // Require the sha256 equals to the last Groth16 input.
         require(
-            hash == groth16Inputs[2], "The sha256 hash of public inputs must be equal to the last of the Groth16 inputs"
+            hash == groth16Inputs[1], "The sha256 hash of public inputs must be equal to the last of the Groth16 inputs"
         );
     }
 

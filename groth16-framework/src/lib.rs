@@ -102,8 +102,13 @@ pub type C = PoseidonGoldilocksConfig;
 // Reference more test cases in the `tests` folder.
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
-    use crate::test_utils::test_groth16_proving_and_verification;
+    use crate::{
+        test_utils::{evm_verify, test_groth16_proving_and_verification, GROTH16_PROOF_FILENAME},
+        utils::deserialize_json_file,
+    };
     use mp2_common::{proof::serialize_proof, D, F};
     use plonky2::{
         field::types::Field,
@@ -116,14 +121,30 @@ mod tests {
     use rand::{thread_rng, Rng};
     use serial_test::serial;
 
+    const ASSET_DIR: &str = "groth16_simple";
+
+    /// Test the Solidity verification on a JSON file of Groth16 proof.
+    pub(crate) fn evm_verify_on_groth16_proof_file(asset_dir: &str) {
+        let groth16_proof_path = Path::new(asset_dir).join(GROTH16_PROOF_FILENAME);
+        let groth16_proof = deserialize_json_file(groth16_proof_path).unwrap();
+
+        evm_verify(asset_dir, &groth16_proof);
+    }
+
+    /// Test the verification on a local file of generated Groth16 proof for the simple circuit.
+    #[ignore] // Ignore in CI, since it could only run for local test.
+    #[serial]
+    #[test]
+    fn test_groth16_simple_local_verification() {
+        evm_verify_on_groth16_proof_file(ASSET_DIR);
+    }
+
     /// Test proving and verifying with a simple circuit.
     #[ignore] // Ignore for long running time in CI.
     #[serial]
     #[test]
     fn test_groth16_proving_simple() {
         env_logger::init();
-
-        const ASSET_DIR: &str = "groth16_simple";
 
         // Build for the simple circuit and generate the plonky2 proof.
         let (circuit_data, proof) = plonky2_build_and_prove();
