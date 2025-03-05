@@ -97,14 +97,37 @@ fn new_child_input(
     }
 }
 
-/// Main struct holding the different circuit parameters for each of the circuits defined here.
 #[derive(Serialize, Deserialize)]
-pub struct PublicParameters {
+struct ParametersInner {
     leaf: CircuitWithUniversalVerifier<F, C, D, 0, LeafWires>,
     full_node: CircuitWithUniversalVerifier<F, C, D, 2, FullNodeWires>,
     partial_node: CircuitWithUniversalVerifier<F, C, D, 1, PartialNodeWires>,
     empty_node: CircuitWithUniversalVerifier<F, C, D, 0, EmptyNodeWires>,
     set: RecursiveCircuits<F, C, D>,
+}
+
+impl From<ParametersInner> for PublicParameters {
+    fn from(value: ParametersInner) -> Self {
+        // Generate the proof for the empty node. It could be reused.
+        let proof = value
+            .set
+            .generate_proof(&value.empty_node, [], [], EmptyNodeCircuit)
+            .unwrap();
+        let empty_node_proof =
+            ProofWithVK::from((proof, value.empty_node.get_verifier_data().clone()));
+        Self {
+            inner: value,
+            empty_node_proof,
+        }
+    }
+}
+
+/// Main struct holding the different circuit parameters for each of the circuits defined here.
+#[derive(Serialize, Deserialize)]
+#[serde(from = "ParametersInner")]
+pub struct PublicParameters {
+    inner: ParametersInner,
+    #[serde(skip_serializing)]
     empty_node_proof: ProofWithVK,
 }
 
@@ -127,8 +150,11 @@ impl PublicParameters {
             CircuitWithUniversalVerifierBuilder::<F, D, NUM_IO>::new::<C>(config, CIRCUIT_SET_SIZE);
 
         let leaf = builder.build_circuit(());
+
         let full_node = builder.build_circuit(());
+
         let partial_node = builder.build_circuit(());
+
         let empty_node = builder.build_circuit(());
 
         let set = RecursiveCircuits::new_from_circuit_digests(vec![
@@ -145,25 +171,27 @@ impl PublicParameters {
         let empty_node_proof = ProofWithVK::from((proof, empty_node.get_verifier_data().clone()));
 
         PublicParameters {
-            leaf,
-            full_node,
-            partial_node,
-            empty_node,
-            set,
+            inner: ParametersInner {
+                leaf,
+                full_node,
+                partial_node,
+                empty_node,
+                set,
+            },
             empty_node_proof,
         }
     }
 
     pub fn vk_set(&self) -> &RecursiveCircuits<F, C, D> {
-        &self.set
+        &self.inner.set
     }
     pub fn generate_proof(&self, circuit_type: CircuitInput) -> Result<Vec<u8>> {
-        let set = &self.set;
+        let set = &self.inner.set;
 
         let proof_with_vk = match circuit_type {
             CircuitInput::Leaf(leaf) => {
-                let proof = set.generate_proof(&self.leaf, [], [], leaf)?;
-                (proof, self.leaf.get_verifier_data().clone())
+                let proof = set.generate_proof(&self.inner.leaf, [], [], leaf)?;
+                (proof, self.inner.leaf.get_verifier_data().clone())
             }
             CircuitInput::FullNode(node) => {
                 let child_proofs = node.get_child_proofs()?;
@@ -175,12 +203,12 @@ impl PublicParameters {
                 let (child_pis, child_vks): (Vec<_>, Vec<_>) =
                     child_proofs.into_iter().map(|p| (p.proof, p.vk)).unzip();
                 let proof = set.generate_proof(
-                    &self.full_node,
+                    &self.inner.full_node,
                     child_pis.try_into().unwrap(),
                     array::from_fn(|i| &child_vks[i]),
                     node.input.into(),
                 )?;
-                (proof, self.full_node.get_verifier_data().clone())
+                (proof, self.inner.full_node.get_verifier_data().clone())
             }
             CircuitInput::PartialNode(node) => {
                 let mut child_proofs = node.get_child_proofs()?;
@@ -191,12 +219,12 @@ impl PublicParameters {
                 );
                 let (child_proof, child_vk) = child_proofs.pop().unwrap().into();
                 let proof = set.generate_proof(
-                    &self.partial_node,
+                    &self.inner.partial_node,
                     [child_proof],
                     [&child_vk],
                     node.input.into(),
                 )?;
-                (proof, self.partial_node.get_verifier_data().clone())
+                (proof, self.inner.partial_node.get_verifier_data().clone())
             }
         };
 

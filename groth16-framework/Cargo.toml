@@ -1,6 +1,6 @@
 [package]
 name = "groth16_framework"
-version = "0.1.0"
+version = "1.2.2"
 edition = "2021"
 
 [dependencies]
@@ -14,8 +14,8 @@ revm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-gnark-utils = { path = "../gnark-utils" }
-mp2_common = { path = "../mp2-common" }
+gnark-utils = { path = "../gnark-utils" , version = "1.2.2" }
+mp2_common = { path = "../mp2-common" , version = "1.2.2" }
 
 [dev-dependencies]
 env_logger.workspace = true
@@ -23,7 +23,7 @@ itertools.workspace = true
 rand.workspace = true
 serial_test.workspace = true
 sha2.workspace = true
-mp2_test = { path = "../mp2-test" }
+mp2_test = { path = "../mp2-test" , version = "1.2.2" }
 
-recursion_framework = { path = "../recursion-framework" }
-verifiable-db = { path = "../verifiable-db" }
+recursion_framework = { path = "../recursion-framework" , version = "1.2.2" }
+verifiable-db = { path = "../verifiable-db" , version = "1.2.2" }

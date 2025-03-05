@@ -1,6 +1,6 @@
 [package]
 name = "parsil"
-version = "0.1.0"
+version = "1.2.2"
 edition = "2021"
 
 [lib]
@@ -24,8 +24,8 @@ sqlparser.workspace = true
 stderrlog = { workspace = true, optional = true }
 thiserror.workspace = true
 
-ryhope = { path = "../ryhope" }
-verifiable-db = { path = "../verifiable-db" }
+ryhope = { path = "../ryhope" , version = "1.2.2" }
+verifiable-db = { path = "../verifiable-db" , version = "1.2.2" }
 
 [features]
 cli = ["dep:stderrlog", "dep:clap"]

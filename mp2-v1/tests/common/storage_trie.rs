@@ -1,9 +1,6 @@
 //! Storage trie for proving tests
 
-use super::{
-    benchmarker::Benchmarker, PublicParameters, TestContext, TEST_MAX_COLUMNS,
-    TEST_MAX_FIELD_PER_EVM,
-};
+use super::{benchmarker::Benchmarker, PublicParameters, TestContext, TEST_MAX_COLUMNS};
 use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
@@ -17,7 +14,7 @@ use mp2_common::{
     utils::{keccak256, Endianness, Packer},
 };
 use mp2_v1::{
-    api::{generate_proof, CircuitInput},
+    api::{generate_proof, CircuitInput, MAX_FIELD_PER_EVM},
     length_extraction,
     values_extraction::{self, StorageSlotInfo},
 };
@@ -329,7 +326,7 @@ impl TrieNode {
             "[+] [+] MPT SLOT {} -> identifiers {:?} value {:?} value.digest() = {:?}",
             slot_info.slot().slot(),
             slot_info
-                .metadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>()
+                .metadata::<TEST_MAX_COLUMNS, MAX_FIELD_PER_EVM>()
                 .extracted_table_info()
                 .iter()
                 .map(|info| info.identifier().to_canonical_u64())
