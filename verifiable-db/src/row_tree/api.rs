@@ -1,6 +1,6 @@
 use alloy::primitives::U256;
 use anyhow::Result;
-use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
+use mp2_common::{default_config, proof::ProofWithVK, types::HashOutput, C, D, F};
 use plonky2::{field::types::Field, hash::hash_types::HashOut};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -14,6 +14,7 @@ use super::{
     full_node::{self, FullNodeCircuit},
     leaf::{self, LeafCircuit},
     partial_node::{self, PartialNodeCircuit},
+    secondary_index_cell::SecondaryIndexCell,
     PublicInputs,
 };
 
@@ -38,7 +39,7 @@ pub struct PublicParameters {
     row_set: RecursiveCircuits<F, C, D>,
 }
 
-const ROW_IO_LEN: usize = super::public_inputs::TOTAL_LEN;
+const ROW_IO_LEN: usize = super::PublicInputs::<F>::total_len();
 
 impl PublicParameters {
     pub fn build(cells_set: &RecursiveCircuits<F, C, D>) -> Self {
@@ -184,11 +185,13 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
+        row_unique_data: HashOutput,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let circuit = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
+        let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
+        let secondary_index_cell = SecondaryIndexCell::new(cell, row_unique_data.into());
         Ok(CircuitInput::Leaf {
-            witness: circuit.into(),
+            witness: secondary_index_cell.into(),
             cells_proof,
         })
     }
@@ -197,28 +200,33 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
+        row_unique_data: HashOutput,
         left_proof: Vec<u8>,
         right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let circuit = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
+        let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
+        let secondary_index_cell = SecondaryIndexCell::new(cell, row_unique_data.into());
         Ok(CircuitInput::Full {
-            witness: circuit.into(),
+            witness: secondary_index_cell.into(),
             left_proof,
             right_proof,
             cells_proof,
         })
     }
+
     pub fn partial(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
         is_child_left: bool,
+        row_unique_data: HashOutput,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let tuple = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
-        let witness = PartialNodeCircuit::new(tuple, is_child_left);
+        let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
+        let secondary_index_cell = SecondaryIndexCell::new(cell, row_unique_data.into());
+        let witness = PartialNodeCircuit::new(secondary_index_cell, is_child_left);
         Ok(CircuitInput::Partial {
             witness,
             child_proof,
@@ -229,20 +237,21 @@ impl CircuitInput {
 
 pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
     let p = ProofWithVK::deserialize(proof)?;
-    Ok(PublicInputs::from_slice(&p.proof.public_inputs).root_hash_hashout())
+    Ok(PublicInputs::from_slice(&p.proof.public_inputs).root_hash())
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{cells_tree, row_tree::public_inputs::PublicInputs};
-
     use super::*;
+    use crate::cells_tree;
+    use itertools::Itertools;
     use mp2_common::{
+        group_hashing::weierstrass_to_point,
         poseidon::{empty_poseidon_hash, H},
         utils::ToFields,
         F,
     };
-    use mp2_test::{log::init_logging, utils::weierstrass_to_point};
+    use mp2_test::log::init_logging;
     use partial_node::test::partial_safety_check;
     use plonky2::{
         field::types::{PrimeField64, Sample},
@@ -251,10 +260,10 @@ mod test {
             circuit_data::VerifierOnlyCircuitData, config::Hasher, proof::ProofWithPublicInputs,
         },
     };
-    use plonky2_ecgfp5::curve::curve::Point;
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
+    use std::iter::once;
 
-    const CELL_IO_LEN: usize = cells_tree::PublicInputs::<F>::TOTAL_LEN;
+    const CELL_IO_LEN: usize = cells_tree::PublicInputs::<F>::total_len();
 
     struct TestParams {
         cells_test: TestingRecursiveCircuits<F, C, D, CELL_IO_LEN>,
@@ -263,17 +272,17 @@ mod test {
         // to save on test time
         cells_proof: ProofWithPublicInputs<F, C, D>,
         cells_vk: VerifierOnlyCircuitData<C, D>,
-        leaf1: Cell,
-        leaf2: Cell,
-        full: Cell,
-        partial: Cell,
+        leaf1: SecondaryIndexCell,
+        leaf2: SecondaryIndexCell,
+        full: SecondaryIndexCell,
+        partial: SecondaryIndexCell,
     }
 
     impl TestParams {
         fn build() -> Result<Self> {
             let cells_test = TestingRecursiveCircuits::<F, C, D, CELL_IO_LEN>::default();
             let params = PublicParameters::build(cells_test.get_recursive_circuit_set());
-            let cells_pi = Self::rand_cells_pi();
+            let cells_pi = cells_tree::PublicInputs::sample(false);
             let cells_proof =
                 cells_test.generate_input_proofs::<1>([cells_pi.clone().try_into().unwrap()])?;
             let cells_vk = cells_test.verifier_data_for_input_proofs::<1>()[0].clone();
@@ -295,10 +304,16 @@ mod test {
                 params,
                 cells_proof: cells_proof[0].clone(),
                 cells_vk,
-                leaf1: Cell::new(identifier, v1, false),
-                leaf2: Cell::new(identifier, v2, false),
-                full: Cell::new(identifier, v_full, false),
-                partial: Cell::new(identifier, v_partial, false),
+                leaf1: SecondaryIndexCell::new(Cell::new(identifier, v1, false), HashOut::rand()),
+                leaf2: SecondaryIndexCell::new(Cell::new(identifier, v2, false), HashOut::rand()),
+                full: SecondaryIndexCell::new(
+                    Cell::new(identifier, v_full, false),
+                    HashOut::rand(),
+                ),
+                partial: SecondaryIndexCell::new(
+                    Cell::new(identifier, v_partial, false),
+                    HashOut::rand(),
+                ),
             })
         }
 
@@ -307,19 +322,6 @@ mod test {
         }
         fn cells_proof_vk(&self) -> ProofWithVK {
             ProofWithVK::new(self.cells_proof.clone(), self.cells_vk.clone())
-        }
-
-        fn rand_cells_pi() -> Vec<F> {
-            // generate cells tree input and fake proof
-            let cells_hash = HashOut::rand().to_fields();
-            let cells_digest = Point::rand().to_weierstrass().to_fields();
-            let cells_pi = cells_tree::PublicInputs::new(
-                &cells_hash,
-                &cells_digest,
-                &Point::NEUTRAL.to_fields(),
-            )
-            .to_vec();
-            cells_pi
         }
     }
 
@@ -336,29 +338,35 @@ mod test {
         log::info!("Generating full proof (from leaf 1 and leaf 2)");
         let full_proof = generate_full_proof(&params, children_proof)?;
         log::info!("Generating partial proof (from full proof)");
-        let _ = generate_partial_proof(&params, params.partial.clone(), true, full_proof)?;
+        let _ = generate_partial_proof(&params, true, full_proof)?;
         log::info!("Test done");
         Ok(())
     }
 
     fn generate_partial_proof(
         p: &TestParams,
-        tuple: Cell,
         is_left: bool,
         child_proof_buff: Vec<u8>,
     ) -> Result<Vec<u8>> {
+        let secondary_index_cell = &p.partial;
+        let id = secondary_index_cell.cell.identifier;
+        let value = secondary_index_cell.cell.value;
+        let row_unique_data = secondary_index_cell.row_unique_data.into();
+        let row_digest = secondary_index_cell.digest(&p.cells_pi());
+
         let child_proof = ProofWithVK::deserialize(&child_proof_buff)?;
         let child_pi = PublicInputs::from_slice(&child_proof.proof.public_inputs);
-        let child_min = child_pi.min_value_u256();
-        let child_max = child_pi.max_value_u256();
+        let child_min = child_pi.min_value();
+        let child_max = child_pi.max_value();
 
-        partial_safety_check(child_min, child_max, tuple.value, is_left);
+        partial_safety_check(child_min, child_max, value, is_left);
 
         let input = CircuitInput::partial(
-            tuple.identifier.to_canonical_u64(),
-            tuple.value,
+            id.to_canonical_u64(),
+            value,
             false,
             is_left,
+            row_unique_data,
             child_proof_buff.clone(),
             p.cells_proof_vk().serialize()?,
         )?;
@@ -367,47 +375,66 @@ mod test {
             .generate_proof(input, p.cells_test.get_recursive_circuit_set().clone())?;
         let pi = ProofWithVK::deserialize(&proof)?.proof.public_inputs;
         let pi = PublicInputs::from_slice(&pi);
+
+        // Check root hash
         {
             // node_min = left ? child_proof.min : index_value
             // node_max = left ? index_value : child_proof.max
             let (node_min, node_max) = match is_left {
-                true => (pi.min_value_u256(), tuple.value),
-                false => (tuple.value, pi.max_value_u256()),
+                true => (pi.min_value(), value),
+                false => (value, pi.max_value()),
             };
-
-            let child_hash = child_pi.root_hash_hashout();
-            let empty_hash = empty_poseidon_hash();
+            // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
+            let child_hash = child_pi.root_hash().to_fields();
+            let empty_hash = empty_poseidon_hash().to_fields();
             let input_hash = match is_left {
-                true => [child_hash.to_fields(), empty_hash.to_fields()].concat(),
-                false => [empty_hash.to_fields(), child_hash.to_fields()].concat(),
+                true => [child_hash, empty_hash].concat(),
+                false => [empty_hash, child_hash].concat(),
             };
             let inputs = input_hash
-                .iter()
-                .chain(node_min.to_fields().iter())
-                .chain(node_max.to_fields().iter())
-                .chain(tuple.to_fields().iter())
-                .chain(p.cells_pi().h_raw().iter())
-                .cloned()
-                .collect::<Vec<_>>();
-            let hash = H::hash_no_pad(&inputs);
-            assert_eq!(hash, pi.root_hash_hashout());
-
-            // final_digest = HashToInt(mul_digest) * D(ind_digest) + row_proof.digest()
-            let split_digest = tuple.split_and_accumulate_digest(p.cells_pi().split_digest_point());
-            let res = split_digest.cond_combine_to_row_digest();
-            // then adding with the rest of the rows digest, the other nodes
-            let res = res + weierstrass_to_point(&child_pi.rows_digest_field());
-            assert_eq!(res.to_weierstrass(), pi.rows_digest_field());
+                .into_iter()
+                .chain(node_min.to_fields())
+                .chain(node_max.to_fields())
+                .chain(once(id))
+                .chain(value.to_fields())
+                .chain(p.cells_pi().node_hash().to_fields())
+                .collect_vec();
+            let exp_root_hash = H::hash_no_pad(&inputs);
+            assert_eq!(pi.root_hash(), exp_root_hash);
         }
+        // Check individual digest
+        assert_eq!(
+            pi.individual_digest_point(),
+            (row_digest.individual_vd + weierstrass_to_point(&child_pi.individual_digest_point()))
+                .to_weierstrass()
+        );
+        // Check multiplier digest
+        assert_eq!(
+            pi.multiplier_digest_point(),
+            row_digest.multiplier_vd.to_weierstrass()
+        );
+        // Check minimum value
+        assert_eq!(pi.min_value(), value.min(child_min));
+        // Check maximum value
+        assert_eq!(pi.max_value(), value.max(child_max));
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
+
         Ok(vec![])
     }
 
     fn generate_full_proof(p: &TestParams, child_proof: [Vec<u8>; 2]) -> Result<Vec<u8>> {
-        let tuple = p.full.clone();
+        let secondary_index_cell = &p.full;
+        let id = secondary_index_cell.cell.identifier;
+        let value = secondary_index_cell.cell.value;
+        let row_unique_data = secondary_index_cell.row_unique_data.into();
+        let row_digest = secondary_index_cell.digest(&p.cells_pi());
+
         let input = CircuitInput::full(
-            tuple.identifier.to_canonical_u64(),
-            tuple.value,
+            id.to_canonical_u64(),
+            value,
             false,
+            row_unique_data,
             child_proof[0].to_vec(),
             child_proof[1].to_vec(),
             p.cells_proof_vk().serialize()?,
@@ -416,53 +443,62 @@ mod test {
         let left_pi = PublicInputs::from_slice(&left_proof.proof.public_inputs);
         let right_proof = ProofWithVK::deserialize(&child_proof[1])?;
         let right_pi = PublicInputs::from_slice(&right_proof.proof.public_inputs);
-        assert!(left_pi.max_value_u256() < tuple.value);
-        assert!(tuple.value < right_pi.min_value_u256());
+        assert!(left_pi.max_value() < value);
+        assert!(value < right_pi.min_value());
         let proof = p
             .params
             .generate_proof(input, p.cells_test.get_recursive_circuit_set().clone())?;
         let pi = ProofWithVK::deserialize(&proof)?.proof.public_inputs;
         let pi = PublicInputs::from_slice(&pi);
+
+        // Check root hash
         {
-            // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
-            // min coming from left
-            // max coming from right
-            let inputs: Vec<_> = left_pi
-                .root_hash_hashout()
+            // Poseidon(p1.H || p2.H || node_min || node_max || index_id || index_value ||p.H)) as H
+            let inputs = left_pi
+                .root_hash()
                 .to_fields()
-                .iter()
-                .chain(right_pi.root_hash_hashout().to_fields().iter())
-                .chain(left_pi.min_value_u256().to_fields().iter())
-                .chain(right_pi.max_value_u256().to_fields().iter())
-                .chain(tuple.to_fields().iter())
-                .chain(p.cells_pi().h_raw().iter())
-                .cloned()
-                .collect();
-            let exp_hash = H::hash_no_pad(&inputs);
-            assert_eq!(pi.root_hash_hashout(), exp_hash);
-
-            {
-                // final_digest = HashToInt(mul_digest) * D(ind_digest) + p1.digest() + p2.digest()
-                let split_digest =
-                    tuple.split_and_accumulate_digest(p.cells_pi().split_digest_point());
-                let row_digest = split_digest.cond_combine_to_row_digest();
-
-                let p1dr = weierstrass_to_point(&left_pi.rows_digest_field());
-                let p2dr = weierstrass_to_point(&right_pi.rows_digest_field());
-                let result_digest = p1dr + p2dr + row_digest;
-                assert_eq!(result_digest.to_weierstrass(), pi.rows_digest_field());
-            }
+                .into_iter()
+                .chain(right_pi.root_hash().to_fields())
+                .chain(left_pi.min_value().to_fields())
+                .chain(right_pi.max_value().to_fields())
+                .chain(once(id))
+                .chain(value.to_fields())
+                .chain(p.cells_pi().node_hash().to_fields())
+                .collect_vec();
+            let hash = H::hash_no_pad(&inputs);
+            assert_eq!(hash, pi.root_hash());
         }
+        // Check individual digest
+        assert_eq!(
+            pi.individual_digest_point(),
+            (row_digest.individual_vd
+                + weierstrass_to_point(&left_pi.individual_digest_point())
+                + weierstrass_to_point(&right_pi.individual_digest_point()))
+            .to_weierstrass()
+        );
+        // Check multiplier digest
+        assert_eq!(
+            pi.multiplier_digest_point(),
+            row_digest.multiplier_vd.to_weierstrass()
+        );
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
+
         Ok(proof)
     }
 
-    fn generate_leaf_proof(p: &TestParams, tuple: &Cell) -> Result<Vec<u8>> {
-        let cells_pi = p.cells_pi();
+    fn generate_leaf_proof(p: &TestParams, row: &SecondaryIndexCell) -> Result<Vec<u8>> {
+        let id = row.cell.identifier;
+        let value = row.cell.value;
+        let row_unique_data = row.row_unique_data.into();
+        let row_digest = row.digest(&p.cells_pi());
+
         //  generate row leaf proof
         let input = CircuitInput::leaf(
-            tuple.identifier.to_canonical_u64(),
-            tuple.value,
+            id.to_canonical_u64(),
+            value,
             false,
+            row_unique_data,
             p.cells_proof_vk().serialize()?,
         )?;
 
@@ -474,29 +510,41 @@ mod test {
             .proof
             .public_inputs;
         let pi = PublicInputs::from_slice(&pi);
-        let tuple = tuple.clone();
+
+        // Check root hash
         {
-            let empty_hash = empty_poseidon_hash();
-            // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
-            let inputs: Vec<_> = empty_hash
-                .to_fields()
+            let value = value.to_fields();
+            let empty_hash = empty_poseidon_hash().to_fields();
+            let inputs = empty_hash
                 .iter()
-                .chain(empty_hash.to_fields().iter())
-                .chain(tuple.value.to_fields().iter())
-                .chain(tuple.value.to_fields().iter())
-                .chain(tuple.to_fields().iter())
-                .chain(cells_pi.h_raw().iter())
+                .chain(empty_hash.iter())
+                .chain(value.iter())
+                .chain(value.iter())
+                .chain(once(&id))
+                .chain(value.iter())
+                .chain(p.cells_pi().to_node_hash_raw())
                 .cloned()
-                .collect();
-            let exp_hash = H::hash_no_pad(&inputs);
-            assert_eq!(pi.root_hash_hashout(), exp_hash);
+                .collect_vec();
+            let exp_root_hash = H::hash_no_pad(&inputs);
+            assert_eq!(pi.root_hash(), exp_root_hash);
         }
-        {
-            // final_digest = HashToInt(mul_digest) * D(ind_digest)
-            let split_digest = tuple.split_and_accumulate_digest(cells_pi.split_digest_point());
-            let result = split_digest.cond_combine_to_row_digest();
-            assert_eq!(result.to_weierstrass(), pi.rows_digest_field());
-        }
+        // Check individual digest
+        assert_eq!(
+            pi.individual_digest_point(),
+            row_digest.individual_vd.to_weierstrass()
+        );
+        // Check multiplier digest
+        assert_eq!(
+            pi.multiplier_digest_point(),
+            row_digest.multiplier_vd.to_weierstrass()
+        );
+        // Check minimum value
+        assert_eq!(pi.min_value(), value);
+        // Check maximum value
+        assert_eq!(pi.max_value(), value);
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
+
         Ok(proof)
     }
 }

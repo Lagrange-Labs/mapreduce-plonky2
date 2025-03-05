@@ -1,5 +1,4 @@
 use alloy::primitives::U256;
-
 use log::{debug, info};
 use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK};
 use mp2_v1::{
@@ -19,6 +18,7 @@ use ryhope::{
     },
     MerkleTreeKvDb,
 };
+use verifiable_db::block_tree::compute_final_digest;
 
 use crate::common::proof_storage::{IndexProofIdentifier, ProofKey};
 
@@ -83,13 +83,18 @@ impl TestContext {
                 let ext_pi = mp2_v1::final_extraction::PublicInputs::from_slice(
                     &ext_proof.proof().public_inputs,
                 );
-                // TODO: Fix the rows digest in rows tree according to values extraction update.
-                // <https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/385>
+                let is_merge = ext_pi.merge_flag();
+                let final_db_digest = compute_final_digest(is_merge, &row_pi).to_weierstrass();
                 assert_eq!(
-                    row_pi.rows_digest_field(),
+                    final_db_digest,
                     ext_pi.value_point(),
-                    "values extracted vs value in db don't match (left row, right mpt (block {})",
+                    "Block (DB) values digest and values extraction don't match (left DB, right MPT, is_merge {} block {})",
+                    is_merge,
                     node.value.0.to::<u64>()
+                );
+                debug!(
+                    "NodeIndex Proving - multiplier digest: {:?}",
+                    row_pi.multiplier_digest_point(),
                 );
             }
             let proof = if context.is_leaf() {

@@ -12,6 +12,7 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher};
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
 
 use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 use sha3::Digest;
@@ -402,6 +403,7 @@ impl<F: RichField> ToFields<F> for HashOut<F> {
         self.elements.to_vec()
     }
 }
+
 pub trait Fieldable<F: RichField> {
     fn to_field(&self) -> F;
 }
@@ -472,6 +474,12 @@ impl ToTargets for Vec<Target> {
 impl ToTargets for &[Target] {
     fn to_targets(&self) -> Vec<Target> {
         self.to_vec()
+    }
+}
+
+impl ToTargets for BigUintTarget {
+    fn to_targets(&self) -> Vec<Target> {
+        self.limbs.iter().map(|u| u.0).collect()
     }
 }
 

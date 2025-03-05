@@ -239,7 +239,6 @@ pub(crate) mod test {
     use anyhow::Result;
     use itertools::Itertools;
     use mp2_common::{
-        digest::TableDimension,
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
         rlp::MAX_KEY_NIBBLE_LEN,
@@ -386,7 +385,6 @@ pub(crate) mod test {
         pub(crate) fn check_proof_public_inputs(
             &self,
             proof: &ProofWithPublicInputs<F, C, D>,
-            dimension: TableDimension,
             length_dm: Option<WeierstrassPoint>,
         ) {
             let proof_pis = PublicInputs::from_slice(&proof.public_inputs);
@@ -398,13 +396,7 @@ pub(crate) mod test {
 
             // check digests
             let value_pi = values_extraction::PublicInputs::new(&self.values_pi);
-            if let TableDimension::Compound = dimension {
-                assert_eq!(proof_pis.value_point(), value_pi.values_digest());
-            } else {
-                // in this case, dv is D(value_dv)
-                let exp_dv = map_to_curve_point(&value_pi.values_digest().to_fields());
-                assert_eq!(proof_pis.value_point(), exp_dv.to_weierstrass());
-            }
+            assert_eq!(proof_pis.value_point(), value_pi.values_digest());
             // metadata is addition of contract and value
             // ToDo: make it a trait once we understand it's sound
             let weierstrass_to_point = |wp: WeierstrassPoint| {

@@ -236,7 +236,7 @@ where
     /// Assign the nodes to the wires. The reason we have the output wires
     /// as well is due to the keccak circuit that requires some special assignement
     /// from the raw vectors.
-    pub fn assign_wires<F: RichField + Extendable<D>, const D: usize>(
+    pub fn assign<F: RichField + Extendable<D>, const D: usize>(
         &self,
         p: &mut PartialWitness<F>,
         inputs: &InputWires<DEPTH, NODE_LEN>,
@@ -497,7 +497,7 @@ mod test {
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
-            self.c.assign_wires(pw, &wires.0, &wires.1).unwrap();
+            self.c.assign(pw, &wires.0, &wires.1).unwrap();
             wires.2.assign(
                 pw,
                 &create_array(|i| F::from_canonical_u8(self.exp_root[i])),

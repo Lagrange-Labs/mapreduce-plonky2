@@ -4,7 +4,7 @@ use super::{public_inputs::PublicInputs, Cell, CellWire};
 use anyhow::Result;
 use derive_more::{From, Into};
 use mp2_common::{
-    public_inputs::PublicInputCommon, types::CBuilder, utils::ToTargets, CHasher, D, F,
+    poseidon::H, public_inputs::PublicInputCommon, types::CBuilder, utils::ToTargets, D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -12,7 +12,7 @@ use plonky2::{
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::{array, iter};
+use std::{array, iter::once};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Into, From)]
 pub struct FullNodeWires(CellWire);
@@ -22,30 +22,42 @@ pub struct FullNodeCircuit(Cell);
 
 impl FullNodeCircuit {
     pub fn build(b: &mut CBuilder, child_proofs: [PublicInputs<Target>; 2]) -> FullNodeWires {
-        let cell = CellWire::new(b);
+        let [p1, p2] = child_proofs;
 
-        // h = Poseidon(p1.H || p2.H || identifier || value)
-        let [p1_hash, p2_hash] = [0, 1].map(|i| child_proofs[i].node_hash());
-        let inputs: Vec<_> = p1_hash
-            .elements
-            .iter()
-            .cloned()
-            .chain(p2_hash.elements)
-            .chain(iter::once(cell.identifier))
+        let cell = CellWire::new(b);
+        let values_digests =
+            cell.split_and_accumulate_values_digest(b, &p1.split_values_digest_target());
+        let values_digests = values_digests.accumulate(b, &p2.split_values_digest_target());
+
+        let is_individual = cell.is_individual(b);
+        let individual_cnt = b.add_many([
+            is_individual.target,
+            p1.individual_counter_target(),
+            p2.individual_counter_target(),
+        ]);
+        let multiplier_cnt = b.add_many([
+            cell.is_multiplier().target,
+            p1.multiplier_counter_target(),
+            p2.multiplier_counter_target(),
+        ]);
+
+        // H(p1.H || p2.H || identifier || value)
+        let inputs = p1
+            .node_hash_target()
+            .into_iter()
+            .chain(p2.node_hash_target())
+            .chain(once(cell.identifier))
             .chain(cell.value.to_targets())
             .collect();
-        let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
-
-        // digest_cell = p1.digest_cell + p2.digest_cell + D(identifier || value)
-        let split_digest = cell.split_digest(b);
-        let split_digest = split_digest.accumulate(b, &child_proofs[0].split_digest_target());
-        let split_digest = split_digest.accumulate(b, &child_proofs[1].split_digest_target());
+        let h = b.hash_n_to_hash_no_pad::<H>(inputs);
 
         // Register the public inputs.
         PublicInputs::new(
-            &h,
-            &split_digest.individual.to_targets(),
-            &split_digest.multiplier.to_targets(),
+            &h.to_targets(),
+            &values_digests.individual.to_targets(),
+            &values_digests.multiplier.to_targets(),
+            &individual_cnt,
+            &multiplier_cnt,
         )
         .register(b);
 
@@ -54,7 +66,7 @@ impl FullNodeCircuit {
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &FullNodeWires) {
-        self.0.assign_wires(pw, &wires.0);
+        self.0.assign(pw, &wires.0);
     }
 }
 
@@ -64,7 +76,7 @@ impl CircuitLogicWires<F, D, 2> for FullNodeWires {
 
     type Inputs = FullNodeCircuit;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::total_len();
 
     fn circuit_logic(
         builder: &mut CBuilder,
@@ -85,23 +97,10 @@ impl CircuitLogicWires<F, D, 2> for FullNodeWires {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::primitives::U256;
-    use mp2_common::{
-        group_hashing::{add_curve_point, map_to_curve_point},
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-        C,
-    };
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::random_vector,
-    };
-    use plonky2::{
-        field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS, iop::witness::WitnessWrite,
-        plonk::config::Hasher,
-    };
-    use plonky2_ecgfp5::curve::curve::Point;
-    use rand::{thread_rng, Rng};
+    use itertools::Itertools;
+    use mp2_common::{poseidon::H, utils::ToFields, C};
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::{field::types::Field, iop::witness::WitnessWrite, plonk::config::Hasher};
 
     #[derive(Clone, Debug)]
     struct TestFullNodeCircuit<'a> {
@@ -115,7 +114,7 @@ mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let child_pis =
-                [0; 2].map(|_| b.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN));
+                [0; 2].map(|_| b.add_virtual_targets(PublicInputs::<Target>::total_len()));
 
             let wires = FullNodeCircuit::build(
                 b,
@@ -136,61 +135,101 @@ mod tests {
     }
 
     #[test]
-    fn test_cells_tree_full_node_circuit() {
-        let mut rng = thread_rng();
+    fn test_cells_tree_full_node_individual() {
+        [true, false]
+            .into_iter()
+            .cartesian_product([true, false])
+            .for_each(|(is_left_child_multiplier, is_right_child_multiplier)| {
+                test_cells_tree_full_multiplier(
+                    false,
+                    is_left_child_multiplier,
+                    is_right_child_multiplier,
+                );
+            });
+    }
 
-        let identifier = rng.gen::<u32>().to_field();
-        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
-        let value_fields = value.to_fields();
+    #[test]
+    fn test_cells_tree_full_node_multiplier() {
+        [true, false]
+            .into_iter()
+            .cartesian_product([true, false])
+            .for_each(|(is_left_child_multiplier, is_right_child_multiplier)| {
+                test_cells_tree_full_multiplier(
+                    true,
+                    is_left_child_multiplier,
+                    is_right_child_multiplier,
+                );
+            });
+    }
 
-        // Create the child public inputs.
-        let child_hashs = [0; 2].map(|_| random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields());
-        let child_digests = [0; 2].map(|_| Point::sample(&mut rng));
-        let child_pis = &array::from_fn(|i| {
-            let h = &child_hashs[i];
-            let ind = &child_digests[i].to_weierstrass().to_fields();
-            let neutral = Point::NEUTRAL.to_fields();
+    fn test_cells_tree_full_multiplier(
+        is_multiplier: bool,
+        is_left_child_multiplier: bool,
+        is_right_child_multiplier: bool,
+    ) {
+        let cell = Cell::sample(is_multiplier);
+        let id = cell.identifier;
+        let value = cell.value;
+        let values_digests = cell.split_values_digest();
 
-            PublicInputs {
-                h,
-                ind,
-                mul: &neutral,
-            }
-            .to_vec()
-        });
+        let child_pis = &[
+            PublicInputs::<F>::sample(is_left_child_multiplier),
+            PublicInputs::<F>::sample(is_right_child_multiplier),
+        ];
 
         let test_circuit = TestFullNodeCircuit {
-            c: Cell {
-                identifier,
-                value,
-                is_multiplier: false,
-            }
-            .into(),
+            c: cell.into(),
             child_pis,
         };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        // Check the node Poseidon hash
+
+        let child_pis = child_pis
+            .iter()
+            .map(|pi| PublicInputs::from_slice(pi))
+            .collect_vec();
+
+        let values_digests = child_pis.iter().fold(values_digests, |acc, pi| {
+            acc.accumulate(&pi.split_values_digest_point())
+        });
+
+        // Check the node hash
         {
-            let inputs: Vec<_> = child_hashs[0]
-                .clone()
+            let inputs = child_pis[0]
+                .node_hash()
+                .to_fields()
                 .into_iter()
-                .chain(child_hashs[1].clone())
-                .chain(iter::once(identifier))
-                .chain(value_fields.clone())
-                .collect();
+                .chain(child_pis[1].node_hash().to_fields())
+                .chain(once(id))
+                .chain(value.to_fields())
+                .collect_vec();
             let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
         }
-        // Check the cells digest
-        {
-            let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
-            let exp_digest = map_to_curve_point(&inputs);
-            let exp_digest =
-                add_curve_point(&[exp_digest, child_digests[0], child_digests[1]]).to_weierstrass();
-
-            assert_eq!(pi.individual_digest_point(), exp_digest);
-        }
+        // Check individual values digest
+        assert_eq!(
+            pi.individual_values_digest_point(),
+            values_digests.individual.to_weierstrass(),
+        );
+        // Check multiplier values digest
+        assert_eq!(
+            pi.multiplier_values_digest_point(),
+            values_digests.multiplier.to_weierstrass(),
+        );
+        // Check individual counter
+        let multiplier_cnt = F::from_bool(is_multiplier);
+        assert_eq!(
+            pi.individual_counter(),
+            child_pis.iter().fold(F::ONE - multiplier_cnt, |acc, pi| acc
+                + pi.individual_counter()),
+        );
+        // Check multiplier counter
+        assert_eq!(
+            pi.multiplier_counter(),
+            child_pis
+                .iter()
+                .fold(multiplier_cnt, |acc, pi| acc + pi.multiplier_counter()),
+        );
     }
 }
