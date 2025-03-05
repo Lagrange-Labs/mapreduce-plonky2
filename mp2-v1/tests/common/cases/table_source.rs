@@ -2,6 +2,7 @@ use std::{
     array,
     assert_matches::assert_matches,
     collections::{BTreeSet, HashMap},
+    iter::once,
     marker::PhantomData,
     str::FromStr,
     sync::atomic::{AtomicU64, AtomicUsize},
@@ -11,7 +12,7 @@ use alloy::{
     eips::BlockNumberOrTag,
     primitives::{Address, U256},
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Result};
 use futures::{future::BoxFuture, FutureExt};
 use itertools::Itertools;
 use log::{debug, info};
@@ -21,28 +22,36 @@ use mp2_common::{
     types::HashOutput,
 };
 use mp2_v1::{
-    api::{compute_table_info, merge_metadata_hash, metadata_hash, SlotInput, SlotInputs},
+    api::{
+        compute_table_info, merge_metadata_hash, metadata_hash, no_provable_metadata_hash,
+        SlotInput, SlotInputs,
+    },
+    final_extraction::OffChainRootOfTrust,
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
-        row::{RowTreeKey, ToNonce},
+        row::{CellCollection, RowTreeKey, RowTreeKeyNonce, ToNonce},
+        ColumnID,
     },
     values_extraction::{
         gadgets::{column_gadget::extract_value, column_info::ColumnInfo},
-        identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
-        identifier_for_outer_mapping_key_column, identifier_for_value_column, StorageSlotInfo,
+        identifier_block_column, identifier_for_inner_mapping_key_column,
+        identifier_for_mapping_key_column, identifier_for_outer_mapping_key_column,
+        identifier_for_value_column, identifier_offchain_column, StorageSlotInfo,
     },
 };
 use plonky2::field::types::PrimeField64;
 use rand::{
     distributions::{Alphanumeric, DistString},
     rngs::StdRng,
-    Rng, SeedableRng,
+    thread_rng, Rng, SeedableRng,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    final_extraction::{ExtractionProofInput, ExtractionTableProof, MergeExtractionProof},
+    final_extraction::{
+        ExtractionProofInput, ExtractionTableProof, MergeExtractionProof, OffChainExtractionProof,
+    },
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
@@ -328,39 +337,43 @@ pub(crate) enum TableSource {
     MappingOfStructMappings(MappingExtractionArgs<MappingOfMappingsKey, LargeStruct>),
     /// Test arguments for the merge source of both simple and mapping values
     Merge(MergeSource),
+    OffChain(OffChainTableArgs),
 }
 
 impl TableSource {
     pub async fn generate_extraction_proof_inputs(
         &self,
         ctx: &mut TestContext,
-        contract: &Contract,
-        value_key: ProofKey,
+        contract: &Option<Contract>,
+        proof_key: ProofKey,
     ) -> Result<(ExtractionProofInput, HashOutput)> {
         match self {
             TableSource::Single(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
             TableSource::MappingValues(ref args, _) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
             TableSource::MappingStruct(ref args, _) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
             TableSource::MappingOfSingleValueMappings(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
             TableSource::MappingOfStructMappings(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
             }
             TableSource::Merge(ref args) => {
-                args.generate_extraction_proof_inputs(ctx, contract, value_key)
+                args.generate_extraction_proof_inputs(ctx, contract.as_ref().unwrap(), proof_key)
                     .await
+            }
+            TableSource::OffChain(ref off_chain) => {
+                off_chain.generate_extraction_proof_inputs(ctx, proof_key)
             }
         }
     }
@@ -387,6 +400,7 @@ impl TableSource {
                     args.init_contract_data(ctx, contract).await
                 }
                 TableSource::Merge(ref mut args) => args.init_contract_data(ctx, contract).await,
+                TableSource::OffChain(ref mut off_chain) => off_chain.init_data(),
             }
         }
         .boxed()
@@ -396,38 +410,47 @@ impl TableSource {
     pub fn random_contract_update<'a>(
         &'a mut self,
         ctx: &'a mut TestContext,
-        contract: &'a Contract,
+        contract: &'a Option<Contract>,
         change_type: ChangeType,
     ) -> BoxFuture<Vec<TableRowUpdate<BlockPrimaryIndex>>> {
         async move {
             match self {
                 TableSource::Single(ref args) => {
-                    args.random_contract_update(ctx, contract, change_type)
+                    args.random_contract_update(ctx, contract.as_ref().unwrap(), change_type)
                         .await
                 }
                 TableSource::MappingValues(ref mut args, _) => {
-                    args.random_contract_update(ctx, contract, change_type)
+                    args.random_contract_update(ctx, contract.as_ref().unwrap(), change_type)
                         .await
                 }
                 TableSource::MappingStruct(ref mut args, _) => {
-                    args.random_contract_update(ctx, contract, change_type)
+                    args.random_contract_update(ctx, contract.as_ref().unwrap(), change_type)
                         .await
                 }
                 TableSource::MappingOfSingleValueMappings(ref mut args) => {
-                    args.random_contract_update(ctx, contract, change_type)
+                    args.random_contract_update(ctx, contract.as_ref().unwrap(), change_type)
                         .await
                 }
                 TableSource::MappingOfStructMappings(ref mut args) => {
-                    args.random_contract_update(ctx, contract, change_type)
+                    args.random_contract_update(ctx, contract.as_ref().unwrap(), change_type)
                         .await
                 }
                 TableSource::Merge(ref mut args) => {
-                    args.random_contract_update(ctx, contract, change_type)
+                    args.random_contract_update(ctx, contract.as_ref().unwrap(), change_type)
                         .await
                 }
+                TableSource::OffChain(ref mut off_chain) => off_chain.random_update(change_type),
             }
         }
         .boxed()
+    }
+
+    /// Get the latest epoch for the current source
+    pub(crate) async fn latest_epoch(&self, ctx: &mut TestContext) -> BlockPrimaryIndex {
+        match self {
+            TableSource::OffChain(ref off_chain) => off_chain.last_update_epoch,
+            _ => ctx.block_number().await as BlockPrimaryIndex,
+        }
     }
 }
 
@@ -1435,4 +1458,409 @@ fn evm_word_column_info(table_info: &[ColumnInfo]) -> Vec<SlotEvmWordColumns> {
         // since we need to collect the Struct field in the right order.
         .sorted_by_key(|info| info.evm_word())
         .collect()
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Hash)]
+pub(crate) struct OffChainTableArgs {
+    pub(crate) table_name: String,
+    pub(crate) secondary_index_column: ColumnMetadata,
+    pub(crate) non_indexed_columns: Vec<ColumnMetadata>,
+    // values found in each row of the table
+    pub(crate) row_values: Vec<TableRowValues<BlockPrimaryIndex>>,
+    // Last epoch where `row_values` were updated
+    pub(crate) last_update_epoch: BlockPrimaryIndex,
+}
+
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
+/// Data structure employed to specify information a column of an off-chain table
+pub(crate) enum ColumnMetadata {
+    /// Name for a column which is part of the primary key of the table. Note that the
+    /// primary key for a table is a subset of the columns of the table that uniquely
+    /// identifies each row.
+    PrimaryKey(String),
+    /// Name for a column which is not part of the primary key of the table
+    NoPrimaryKey(String),
+}
+
+impl ColumnMetadata {
+    pub(crate) fn column_name(&self) -> &str {
+        match self {
+            ColumnMetadata::PrimaryKey(name) => name,
+            ColumnMetadata::NoPrimaryKey(name) => name,
+        }
+    }
+}
+
+impl OffChainTableArgs {
+    pub(crate) fn new(
+        table_name: String,
+        secondary_index_column: ColumnMetadata,
+        non_indexed_columns: Vec<ColumnMetadata>,
+    ) -> Self {
+        Self {
+            table_name,
+            secondary_index_column,
+            non_indexed_columns,
+            row_values: vec![], // instantiate with no rows
+            last_update_epoch: 0,
+        }
+    }
+
+    /// Compute the column identifiers of all the columns of the table,
+    /// except for the primary index column (which has a fixed identifier for now)
+    pub(crate) fn column_ids(&self) -> Vec<ColumnID> {
+        once(self.secondary_index_column_id())
+            .chain(self.non_indexed_column_ids())
+            .collect()
+    }
+
+    /// Return the set of columns that are part of the primary key for each row
+    pub(crate) fn primary_key_columns(&self) -> Vec<&ColumnMetadata> {
+        once(&self.secondary_index_column)
+            .chain(&self.non_indexed_columns)
+            .filter(|column| matches!(column, ColumnMetadata::PrimaryKey(_)))
+            .collect()
+    }
+
+    /// Return the columns identifiers of the columns which are part of the primary key
+    /// for each row
+    pub(crate) fn primary_key_column_ids(&self) -> Vec<ColumnID> {
+        self.primary_key_columns()
+            .into_iter()
+            .map(|column_data| self.compute_column_id(column_data))
+            .collect()
+    }
+
+    /// Compute the column identifier of the column of the table corresponding to `column_data`
+    pub(crate) fn compute_column_id(&self, column_data: &ColumnMetadata) -> ColumnID {
+        identifier_offchain_column(&self.table_name, column_data.column_name())
+    }
+
+    /// Compute the generic `ColumnInfo` for the column of the table with id `column_id`
+    pub(crate) fn compute_column_info(&self, column_id: ColumnID) -> ColumnInfo {
+        let slot_input = SlotInput::default();
+        ColumnInfo::new_from_slot_input(column_id, &slot_input)
+    }
+
+    pub(crate) fn primary_index_column_id(&self) -> ColumnID {
+        identifier_block_column()
+    }
+
+    /// Compute the column identifier of secondary index column
+    pub(crate) fn secondary_index_column_id(&self) -> ColumnID {
+        self.compute_column_id(&self.secondary_index_column)
+    }
+
+    /// Compute the identifiers of non-indexed columns
+    pub(crate) fn non_indexed_column_ids(&self) -> Vec<ColumnID> {
+        self.non_indexed_columns
+            .iter()
+            .map(|column_data| self.compute_column_id(column_data))
+            .collect()
+    }
+
+    /// Generate a new row with random values
+    pub(crate) fn generate_new_row(&self) -> TableRowValues<BlockPrimaryIndex> {
+        let rng = &mut thread_rng();
+        // primary key for this row, to be filled with values of columns found included
+        // in the primary key
+        let mut primary_key = vec![];
+        let mut process_column_data = |column_data: &ColumnMetadata, column_value: U256| {
+            // add column value to primary key bytes only if the column is part of the primary key
+            if let ColumnMetadata::PrimaryKey(_) = column_data {
+                if &self.secondary_index_column != column_data {
+                    // we add current column value to primary key only if the current
+                    // column being processed is not the secondary index column, as
+                    // the secondary index column is already part of the `RowTreeKey`
+                    primary_key.extend_from_slice(&column_value.to_be_bytes_trimmed_vec());
+                }
+            }
+            Cell::new(self.compute_column_id(column_data), column_value)
+        };
+        let secondary_index_cell =
+            process_column_data(&self.secondary_index_column, U256::from(rng.gen::<u128>()));
+        let rest_cells = self
+            .non_indexed_columns
+            .iter()
+            .map(|column_data| process_column_data(column_data, U256::from(rng.gen::<u128>())))
+            .collect();
+        let secondary_index_cell = SecondaryIndexCell::new_from(secondary_index_cell, primary_key);
+        TableRowValues {
+            current_cells: rest_cells,
+            current_secondary: Some(secondary_index_cell),
+            primary: self.last_update_epoch,
+        }
+    }
+
+    /// Initialize the rows of the table with random values
+    pub(crate) fn init_data(&mut self) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
+        let rng = &mut thread_rng();
+        // generate the initial primary index. All the rows to initialize the table will have
+        // this value of the primary index, as this is acting as an epoch/block number
+        let primary_index: BlockPrimaryIndex = rng.gen_range(1..=u32::MAX as usize);
+        self.last_update_epoch = primary_index;
+        // number of rows to be added to the table
+        const NUM_ROWS: usize = 10;
+        // for each row, we generate random values.
+        self.row_values = (0..NUM_ROWS).map(|_| self.generate_new_row()).collect();
+        // since the table is not created yet, we are giving an empty table row. When making the
+        // diff with the new updated contract storage, the logic will detect it's an initialization
+        // phase
+        let old_table_values = TableRowValues::default();
+        self.row_values
+            .iter()
+            .flat_map(|row_value| old_table_values.compute_update(row_value))
+            .collect()
+    }
+
+    /// Compute the nonce (i.e., the set of data that makes the row unique in the table) for the row
+    /// at `row_index`
+    fn compute_nonce_for_row(&self, row_index: usize) -> Result<RowTreeKeyNonce> {
+        let row = self.row_values.get(row_index);
+        ensure!(
+            row.is_some(),
+            format!(
+                "Invalid row index provided: {}, num rows is {}",
+                row_index,
+                self.row_values.len()
+            )
+        );
+        Ok(row
+            .unwrap()
+            .current_cells
+            .iter()
+            .zip(&self.non_indexed_columns)
+            .flat_map(|(cell, column)| {
+                // double check that `cell` column identifier
+                // corresponds to column name, which should be
+                // guaranteed by how we construct rows
+                assert_eq!(cell.identifier(), self.compute_column_id(column),);
+                // if current cell is part of primary key, accumulate
+                // its value as bytes, otherwise we return an empty byte string
+                match column {
+                    ColumnMetadata::PrimaryKey(_) => cell.value().to_be_bytes_trimmed_vec(),
+                    ColumnMetadata::NoPrimaryKey(_) => vec![],
+                }
+            })
+            .collect())
+    }
+
+    /// Replace with a random value the value of the non-indexed column identified by `column_data`
+    /// in the row at `row_index`
+    fn update_non_indexed_column(
+        &mut self,
+        row_index: usize,
+        column_data: &ColumnMetadata,
+    ) -> Result<Vec<TableRowUpdate<BlockPrimaryIndex>>> {
+        let rng = &mut thread_rng();
+        let row = self.row_values.get_mut(row_index);
+        ensure!(
+            row.is_some(),
+            format!(
+                "Invalid row index provided: {}, num rows is {}",
+                row_index,
+                self.row_values.len()
+            )
+        );
+        let row = row.unwrap();
+        Ok(match column_data {
+            ColumnMetadata::PrimaryKey(name) => {
+                // in this case, we need to delete the existing row
+                // and insert a new one with only the value of the specific
+                // column being different
+                let current_secondary = row.current_secondary.as_mut().unwrap();
+                let deletion = TableRowUpdate::Deletion(current_secondary.clone().into());
+                // update the specific column in `row` in `self.row_values`
+                let column_id = identifier_offchain_column(&self.table_name, name);
+                row.current_cells
+                    .iter_mut()
+                    .find(|row| column_id == row.identifier())
+                    .map(|cell| *cell = Cell::new(cell.identifier(), U256::from(rng.gen::<u128>())))
+                    .ok_or(anyhow::Error::msg(
+                        "Provided an invalid column to be updated",
+                    ))?;
+                // update row in self.row_values with the recomputed nonce
+                let secondary_cell = current_secondary.cell();
+                let new_nonce = self.compute_nonce_for_row(row_index)?;
+                // redefine reference to make compiler happy with mutable references when calling
+                // `compute_nonce_for_row`
+                let row = &mut self.row_values[row_index];
+                row.current_secondary =
+                    Some(SecondaryIndexCell::new_from(secondary_cell, new_nonce));
+                // update primary index value
+                row.primary = self.last_update_epoch;
+                // generate insertion update
+                let old_table_values = TableRowValues::default();
+                let insertion = old_table_values.compute_update(row);
+                // return deletion + insertion updates
+                once(deletion).chain(insertion).collect_vec()
+            }
+            ColumnMetadata::NoPrimaryKey(name) => {
+                // in this case, we need to update an existing node in the tree
+                let old_row = row.clone();
+                // update the specific column in `row` in `self.row_values`
+                let column_id = identifier_offchain_column(&self.table_name, name);
+                row.current_cells
+                    .iter_mut()
+                    .find(|row| column_id == row.identifier())
+                    .map(|cell| *cell = Cell::new(cell.identifier(), U256::from(rng.gen::<u128>())))
+                    .ok_or(anyhow::Error::msg(
+                        "Provided an invalid column to be updated",
+                    ))?;
+                // update primary index value
+                row.primary = self.last_update_epoch;
+                // compute update w.r.t. old row
+                old_row.compute_update(row)
+            }
+        })
+    }
+
+    /// Update the rows in `self` according to the change type specified as input
+    pub(crate) fn random_update(
+        &mut self,
+        c: ChangeType,
+    ) -> Vec<TableRowUpdate<BlockPrimaryIndex>> {
+        let num_rows = self.row_values.len();
+        let rng = &mut thread_rng();
+        if let ChangeType::Silent = c {
+            // no changes, return empty vector
+            return vec![];
+        }
+
+        self.last_update_epoch += rng.gen_range(1..10);
+        match c {
+            ChangeType::Deletion => {
+                // randomly choose a couple of rows to delete
+                (0..2)
+                    .map(|i| {
+                        let row_to_delete = rng.gen_range(0..(num_rows - i));
+                        let deleted_row = self.row_values.swap_remove(row_to_delete);
+                        TableRowUpdate::Deletion(deleted_row.current_secondary.unwrap().into())
+                    })
+                    .collect()
+            }
+            ChangeType::Insertion => {
+                // add a couple of rows
+                let new_rows: Vec<TableRowValues<BlockPrimaryIndex>> =
+                    (0..2).map(|_| self.generate_new_row()).collect();
+                // generate updates
+                new_rows
+                    .into_iter()
+                    .flat_map(|row| {
+                        // since the table is not created yet, we are giving an empty table row. When making the
+                        // diff with the new updated contract storage, the logic will detect it's an initialization
+                        // phase
+                        let old_table_values = TableRowValues::default();
+                        let update = old_table_values.compute_update(&row);
+                        self.row_values.push(row);
+                        update
+                    })
+                    .collect()
+            }
+            ChangeType::Update(update_type) => {
+                // we choose a couple of rows to update
+                let rows_to_update = [0; 2].map(|_| rng.gen_range(0..num_rows));
+                match update_type {
+                    UpdateType::SecondaryIndex => {
+                        // in this case, we need to delete and insert a new row, since
+                        // the secondary index is part of `RowTreeKey`; the new row
+                        // will have the same values of the old row for all the non-indexed
+                        // columns
+                        rows_to_update
+                            .into_iter()
+                            .flat_map(|row_index| {
+                                let row = &mut self.row_values[row_index];
+                                let current_secondary = row.current_secondary.as_mut().unwrap();
+                                let deletion =
+                                    TableRowUpdate::Deletion(current_secondary.clone().into());
+                                // update row in self.row_values with a randomly generated secondary index cell
+                                let current_nonce = current_secondary.rest();
+                                let secondary_index_column_id =
+                                    self.compute_column_id(&self.secondary_index_column);
+                                let row = &mut self.row_values[row_index];
+                                row.current_secondary = Some(SecondaryIndexCell::new_from(
+                                    Cell::new(
+                                        secondary_index_column_id,
+                                        U256::from(rng.gen::<u128>()),
+                                    ),
+                                    current_nonce,
+                                ));
+                                row.primary = self.last_update_epoch;
+                                let old_table_values = TableRowValues::default();
+                                let insertion = old_table_values.compute_update(row);
+                                once(deletion).chain(insertion).collect_vec()
+                            })
+                            .collect()
+                    }
+                    UpdateType::Rest => {
+                        // in this case, we update one row by changing a non-indexed column
+                        // which is part of the primary key (if any), and another row by
+                        // changing a non-indexed column which is not part of the primary key
+                        let (primary_key_columns, non_primary_key_columns): (Vec<_>, Vec<_>) = self
+                            .non_indexed_columns
+                            .iter()
+                            .partition(|column_data| match column_data {
+                                ColumnMetadata::PrimaryKey(_) => true,
+                                ColumnMetadata::NoPrimaryKey(_) => false,
+                            });
+                        let columns_to_update = if primary_key_columns.is_empty() {
+                            // no primary key columns among non-indexed columns,
+                            // so we update 2 columns at random
+                            [0; 2].map(|_| {
+                                non_primary_key_columns
+                                    [rng.gen_range(0..non_primary_key_columns.len())]
+                                .clone()
+                            })
+                        } else {
+                            [
+                                non_primary_key_columns
+                                    [rng.gen_range(0..non_primary_key_columns.len())]
+                                .clone(),
+                                primary_key_columns[rng.gen_range(0..primary_key_columns.len())]
+                                    .clone(),
+                            ]
+                        };
+                        rows_to_update
+                            .into_iter()
+                            .zip(columns_to_update)
+                            .flat_map(|(row_index, column_data)| {
+                                self.update_non_indexed_column(row_index, &column_data)
+                                    .unwrap()
+                            })
+                            .collect()
+                    }
+                }
+            }
+            ChangeType::Silent => vec![], // no changes
+        }
+    }
+
+    pub(crate) fn generate_extraction_proof_inputs(
+        &self,
+        ctx: &mut TestContext,
+        proof_key: ProofKey,
+    ) -> Result<(ExtractionProofInput, HashOutput)> {
+        // convert current row values to row cells
+        let rows = self
+            .row_values
+            .iter()
+            .map(CellCollection::try_from)
+            .collect::<Result<Vec<_>>>()?;
+        let rng = &mut thread_rng();
+        // This could be computed from the table data according to any logic,
+        // here for simplicity we just generate it at random
+        let hash = HashOutput::from(array::from_fn(|_| rng.gen()));
+        // fetch previous IVC proof, if any
+        let prev_proof = ctx.storage.get_proof_exact(&proof_key).ok();
+
+        let metadata_hash = no_provable_metadata_hash(self.column_ids());
+        let input = ExtractionProofInput::Offchain(OffChainExtractionProof {
+            hash: OffChainRootOfTrust::Hash(hash),
+            prev_proof,
+            primary_index: self.last_update_epoch,
+            rows,
+            primary_key_columns: self.primary_key_column_ids(),
+        });
+        Ok((input, metadata_hash))
+    }
 }

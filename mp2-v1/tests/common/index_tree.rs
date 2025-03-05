@@ -79,7 +79,7 @@ impl TestContext {
                 let ext_pi = mp2_v1::final_extraction::PublicInputs::from_slice(
                     &ext_proof.proof().public_inputs,
                 );
-                let is_merge = ext_pi.merge_flag();
+                let is_merge = ext_pi.is_merge_case();
                 let final_db_digest = compute_final_digest(is_merge, &row_pi).to_weierstrass();
                 assert_eq!(
                     final_db_digest,

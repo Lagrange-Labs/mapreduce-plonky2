@@ -31,7 +31,7 @@ use std::iter::once;
 
 use super::public_inputs::PublicInputs;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PartialNodeCircuit {
     pub(crate) row: SecondaryIndexCell,
     pub(crate) is_child_at_left: bool,

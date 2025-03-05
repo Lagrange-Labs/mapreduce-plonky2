@@ -22,7 +22,7 @@ use super::public_inputs::PublicInputs;
 // Arity not strictly needed now but may be an easy way to increase performance
 // easily down the line with less recursion. Best to provide code which is easily
 // amenable to a different arity rather than hardcoding binary tree only
-#[derive(Clone, Debug, From, Into)]
+#[derive(Clone, Debug, From, Into, Serialize, Deserialize)]
 pub struct FullNodeCircuit(SecondaryIndexCell);
 
 #[derive(Clone, Serialize, Deserialize, From, Into)]

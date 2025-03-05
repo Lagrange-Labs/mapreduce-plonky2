@@ -2,7 +2,9 @@
 use alloy::primitives::Address;
 use anyhow::Result;
 use cases::table_source::TableSource;
-use mp2_v1::api::{merge_metadata_hash, metadata_hash, MetadataHash, SlotInputs};
+use mp2_v1::api::{
+    merge_metadata_hash, metadata_hash, no_provable_metadata_hash, MetadataHash, SlotInputs,
+};
 use serde::{Deserialize, Serialize};
 use table::{TableColumns, TableRowUniqueID};
 pub mod benchmarker;
@@ -139,6 +141,7 @@ impl TableInfo {
                     mapping,
                 )
             }
+            TableSource::OffChain(off_chain) => no_provable_metadata_hash(off_chain.column_ids()),
         }
     }
 }

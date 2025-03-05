@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::{block::BlockPrimaryIndex, cell::CellTreeKey, ColumnID};
 use alloy::primitives::U256;
 use anyhow::Result;
@@ -124,6 +126,12 @@ impl<PrimaryIndex: PartialEq + Eq + Default + Clone> CellCollection<PrimaryIndex
     pub fn find_by_column(&self, id: ColumnID) -> Option<&CellInfo<PrimaryIndex>> {
         self.0.get(&id)
     }
+
+    // Return the set of all the column identifiers for cells in `self`
+    pub fn column_ids(&self) -> HashSet<ColumnID> {
+        self.0.keys().cloned().collect()
+    }
+
     // take all the cells ids on both collections, take the value present in the updated one
     // if it exists, otherwise take from self.
     pub fn merge_with_update(&self, updated_cells: &Self) -> Self {
