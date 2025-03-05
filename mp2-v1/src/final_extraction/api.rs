@@ -33,12 +33,14 @@ use super::{
     SimpleCircuit,
 };
 
+#[derive(Serialize, Deserialize)]
 pub enum CircuitInput {
     Simple(SimpleCircuitInput),
     Lengthed(LengthedCircuitInput),
     MergeTable(MergeCircuitInput),
     NoProvable(DummyCircuit),
 }
+
 #[derive(Clone, Debug)]
 pub struct FinalExtractionBuilderParams {
     pub(crate) block_vk: VerifierCircuitData<F, C, D>,
@@ -189,15 +191,18 @@ impl PublicParameters {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct SimpleCircuitInput {
     base: BaseCircuitInput,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct LengthedCircuitInput {
     base: BaseCircuitInput,
     length_proof: ProofWithVK,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct MergeCircuitInput {
     base: BaseCircuitInput,
     is_table_a_multiplier: bool,

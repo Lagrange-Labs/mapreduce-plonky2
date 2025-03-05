@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::circuit::{DummyCircuit, DummyWires, RecursiveIVCInput, RecursiveIVCWires};
 
+#[derive(Serialize, Deserialize)]
 pub enum CircuitInput {
     FirstProof {
         dummy: DummyCircuit,
