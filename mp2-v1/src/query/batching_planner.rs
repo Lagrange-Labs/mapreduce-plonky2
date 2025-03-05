@@ -8,7 +8,7 @@ use itertools::Itertools;
 use parsil::symbols::ContextProvider;
 use ryhope::{
     storage::{updatetree::UpdateTree, WideLineage},
-    Epoch,
+    UserEpoch,
 };
 use serde::{Deserialize, Serialize};
 use verifiable_db::query::{
@@ -26,7 +26,7 @@ use crate::{
     query::planner::TreeFetcher,
 };
 
-use super::planner::NonExistenceInput;
+use super::planner::NonExistenceInputRow;
 
 async fn compute_input_for_row<T: TreeFetcher<RowTreeKey, RowPayload<BlockPrimaryIndex>>>(
     tree: &T,
@@ -36,12 +36,12 @@ async fn compute_input_for_row<T: TreeFetcher<RowTreeKey, RowPayload<BlockPrimar
     column_ids: &ColumnIDs,
 ) -> RowInput {
     let row_path = tree
-        .compute_path(row_key, index_value as Epoch)
+        .compute_path(row_key, index_value as UserEpoch)
         .await
         .unwrap_or_else(|| panic!("node with key {:?} not found in cache", row_key));
     let path = NodePath::new(row_path, index_path.clone());
     let (_, row_payload) = tree
-        .fetch_ctx_and_payload_at(row_key, index_value as Epoch)
+        .fetch_ctx_and_payload_at(row_key, index_value as UserEpoch)
         .await
         .unwrap_or_else(|| panic!("node with key {:?} not found in cache", row_key));
     // build row cells
@@ -92,8 +92,8 @@ pub async fn generate_chunks_and_update_tree<
     row_cache: WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     index_cache: WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     column_ids: &ColumnIDs,
-    non_existence_inputs: NonExistenceInput<'_, C>,
-    epoch: Epoch,
+    non_existence_inputs: NonExistenceInputRow<'_, C>,
+    epoch: UserEpoch,
 ) -> Result<(
     HashMap<UTKey<NUM_CHUNKS>, Vec<RowInput>>,
     UTForChunks<NUM_CHUNKS>,
@@ -108,12 +108,12 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
     row_cache: WideLineage<RowTreeKey, RowPayload<BlockPrimaryIndex>>,
     index_cache: WideLineage<BlockTreeKey, IndexNode<BlockPrimaryIndex>>,
     column_ids: &ColumnIDs,
-    non_existence_inputs: NonExistenceInput<'_, C>,
+    non_existence_inputs: NonExistenceInputRow<'_, C>,
 ) -> Result<Vec<Vec<RowInput>>> {
     let index_keys_by_epochs = index_cache.keys_by_epochs();
     assert_eq!(index_keys_by_epochs.len(), 1);
     let row_keys_by_epochs = row_cache.keys_by_epochs();
-    let current_epoch = *index_keys_by_epochs.keys().next().unwrap() as Epoch;
+    let current_epoch = *index_keys_by_epochs.keys().next().unwrap() as UserEpoch;
     let sorted_index_values = index_keys_by_epochs[&current_epoch]
         .iter()
         .cloned()
@@ -125,7 +125,7 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
             .await
             .unwrap_or_else(|| panic!("node with key {index_value} not found in index tree cache"));
         let proven_rows = if let Some(matching_rows) =
-            row_keys_by_epochs.get(&(index_value as Epoch))
+            row_keys_by_epochs.get(&(index_value as UserEpoch))
         {
             let sorted_rows = matching_rows.iter().collect::<BTreeSet<_>>();
             stream::iter(sorted_rows.iter())
@@ -137,13 +137,13 @@ async fn generate_chunks<const CHUNK_SIZE: usize, C: ContextProvider>(
                 .await
         } else {
             let proven_node = non_existence_inputs
-                .find_row_node_for_non_existence(index_value)
+                .find_node_for_non_existence(index_value)
                 .await
-                .unwrap_or_else(|_| {
-                    panic!("node for non-existence not found for index value {index_value}")
+                .unwrap_or_else(|e| {
+                    panic!("node for non-existence not found for index value {index_value}: {e:?}")
                 });
             let row_input = compute_input_for_row(
-                non_existence_inputs.row_tree,
+                non_existence_inputs.tree,
                 &proven_node,
                 index_value,
                 &index_path,
@@ -447,7 +447,7 @@ impl<const NUM_CHUNKS: usize> UTForChunksBuilder<NUM_CHUNKS> {
     /// to the proving task for that chunk
     fn build_update_tree_with_base_chunks(
         self,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> (
         HashMap<UTKey<NUM_CHUNKS>, Vec<RowInput>>,
         UTForChunks<NUM_CHUNKS>,

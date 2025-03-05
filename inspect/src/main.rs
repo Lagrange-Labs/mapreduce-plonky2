@@ -5,7 +5,7 @@ use repl::Repl;
 use rows::{RowDb, RowPayloadFormatter};
 use ryhope::{
     storage::pgsql::{SqlServerConnection, SqlStorageSettings, ToFromBytea},
-    Epoch, InitSettings,
+    InitSettings, UserEpoch,
 };
 use serde::Serialize;
 
@@ -26,7 +26,7 @@ struct Args {
 
     #[arg(short = 'E', long = "at")]
     /// If set, try to view the tree at this epoch
-    epoch: Option<Epoch>,
+    epoch: Option<UserEpoch>,
 
     #[command(subcommand)]
     /// The type of tree to load from the database
@@ -77,6 +77,8 @@ async fn main() -> Result<()> {
                 SqlStorageSettings {
                     source: SqlServerConnection::NewConnection(args.db_uri.clone()),
                     table: args.db_table,
+                    external_mapper: None, // not necessary even if there is an external epoch mapper,
+                                           // since we are initializing the tree with `InitSettings::MustExist`
                 },
             )
             .await?;
@@ -101,6 +103,7 @@ async fn main() -> Result<()> {
                 SqlStorageSettings {
                     source: SqlServerConnection::NewConnection(args.db_uri.clone()),
                     table: args.db_table,
+                    external_mapper: None,
                 },
             )
             .await?;

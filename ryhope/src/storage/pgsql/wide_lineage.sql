@@ -80,11 +80,16 @@ WITH RECURSIVE descendance (is_core, {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD
    MAX(is_core) AS is_core,
    -- Expand the epoch ranges [[{VALID_FROM}, {VALID_UNTIL}]] into
    -- ({VALID_UNTIL} - {VALID_FROM}) individual rows, clamped within
-   -- [[min_block, max_block]]
-   generate_series(GREATEST({VALID_FROM}, $1), LEAST({VALID_UNTIL}, $2)) AS {EPOCH},
+   -- [[min_epoch, max_epoch]]
+   generate_series(GREATEST({VALID_FROM}, mapper_range.min_epoch), LEAST({VALID_UNTIL}, mapper_range.max_epoch)) AS {EPOCH},
    -- Normal columns
    {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD}, {SUBTREE_SIZE}, {PAYLOAD}
    FROM
-     descendance
+     descendance JOIN (
+          SELECT MIN({INCREMENTAL_EPOCH}) as min_epoch, MAX({INCREMENTAL_EPOCH}) as max_epoch 
+          FROM {mapper_table_name} 
+          WHERE {USER_EPOCH} >= $1 AND {USER_EPOCH} <= $2
+        ) AS mapper_range 
+        ON {VALID_FROM} <= mapper_range.max_epoch AND {VALID_UNTIL} >= mapper_range.min_epoch
    -- Results must be deduplicated according to this tuple of attributes
-   GROUP BY (is_core, {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD}, {SUBTREE_SIZE}, {VALID_FROM}, {VALID_UNTIL}, {PAYLOAD})
+   GROUP BY (is_core, {KEY}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD}, {SUBTREE_SIZE}, {VALID_FROM}, {VALID_UNTIL}, min_epoch, max_epoch, {PAYLOAD})

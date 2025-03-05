@@ -5,10 +5,16 @@ mod sbbst {
         tree::{sbbst, MutableTree, TreeTopology},
     };
 
-    fn sbbst_in_memory(shift: usize, n: usize) -> (sbbst::Tree, InMemory<sbbst::Tree, ()>) {
+    fn sbbst_in_memory(
+        shift: usize,
+        n: usize,
+    ) -> (
+        sbbst::IncrementalTree,
+        InMemory<sbbst::IncrementalTree, (), false>,
+    ) {
         (
-            sbbst::Tree,
-            InMemory::new(sbbst::Tree::with_shift_and_capacity(shift, n)),
+            sbbst::IncrementalTree::default(),
+            InMemory::new_with_epoch(sbbst::IncrementalTree::with_shift_and_capacity(shift, n), 0),
         )
     }
 
@@ -47,7 +53,7 @@ mod sbbst {
         let (mut t, mut s) = sbbst_in_memory(1000, 6);
         assert_eq!(t.size(&s).await.unwrap(), 6);
 
-        s.start_transaction().unwrap();
+        s.start_transaction().await.unwrap();
         t.insert(1007, &mut s).await.unwrap();
         s.commit_transaction().await.unwrap();
         assert_eq!(t.size(&s).await.unwrap(), 7);
@@ -91,10 +97,10 @@ mod scapegoat {
             + Send,
     >(
         a: Alpha,
-    ) -> (scapegoat::Tree<K>, InMemory<scapegoat::Tree<K>, ()>) {
+    ) -> (scapegoat::Tree<K>, InMemory<scapegoat::Tree<K>, (), false>) {
         (
             Default::default(),
-            InMemory::new(scapegoat::Tree::empty(a, MAX_TREE_DEPTH)),
+            InMemory::new_with_epoch(scapegoat::Tree::empty(a, MAX_TREE_DEPTH), 0),
         )
     }
 
@@ -106,7 +112,7 @@ mod scapegoat {
 
         assert_eq!(t.size(&s).await.unwrap(), 0);
 
-        s.start_transaction()?;
+        s.start_transaction().await?;
         t.insert("adsfda".into(), &mut s).await?;
         assert_eq!(t.size(&s).await.unwrap(), 1);
 
@@ -134,8 +140,8 @@ mod scapegoat {
         let (mut bbst, mut bs) = scapegaot_in_memory::<K>(Alpha::fully_balanced());
         let (mut list, mut ls) = scapegaot_in_memory::<K>(Alpha::never_balanced());
 
-        bs.start_transaction().unwrap();
-        ls.start_transaction().unwrap();
+        bs.start_transaction().await.unwrap();
+        ls.start_transaction().await.unwrap();
         for i in 0..128 {
             bbst.insert(i, &mut bs).await.unwrap();
             list.insert(i, &mut ls).await.unwrap();
@@ -154,7 +160,7 @@ mod scapegoat {
 
         let (mut t, mut s) = scapegaot_in_memory::<K>(Alpha::new(0.5));
 
-        s.start_transaction()?;
+        s.start_transaction().await?;
         for i in 0..20 {
             t.insert("A".repeat(i), &mut s).await.unwrap();
             t.print(&s).await;

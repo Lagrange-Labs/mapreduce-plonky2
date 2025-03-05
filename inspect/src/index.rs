@@ -14,7 +14,7 @@ use crate::repl::PayloadFormatter;
 pub(crate) type IndexDb = MerkleTreeKvDb<
     BlockTree,
     IndexNode<BlockPrimaryIndex>,
-    PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>>,
+    PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>, false>,
 >;
 
 struct IndexPayloadFormatterDisplay {
