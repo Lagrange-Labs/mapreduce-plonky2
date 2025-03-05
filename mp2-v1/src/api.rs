@@ -104,6 +104,11 @@ impl<const MAX_COLUMNS: usize> PublicParameters<MAX_COLUMNS> {
 pub fn build_circuits_params<const MAX_COLUMNS: usize>() -> PublicParameters<MAX_COLUMNS> {
     sanity_check();
 
+    assert!(MAX_COLUMNS >= MAX_FIELD_PER_EVM,
+        "MAX_COLUMNS must be greater than the maximum number of fields extarcted per evm word, which is 
+        {MAX_FIELD_PER_EVM}; please, instantiate the `PublicParameters` with a big enough value"
+    );
+
     log::info!("Building contract_extraction parameters...");
     let contract_extraction = contract_extraction::build_circuits_params();
     log::info!("Building length_extraction parameters...");
@@ -445,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_deterministic_serialisation() {
-        const MAX_COLUMNS: usize = 5;
+        const MAX_COLUMNS: usize = 20;
         let params_1 = build_circuits_params::<MAX_COLUMNS>();
         let serialised_1 = bincode::serialize(&params_1).unwrap();
 
