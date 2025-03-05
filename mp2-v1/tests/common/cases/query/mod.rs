@@ -105,9 +105,12 @@ pub(crate) struct QueryPlanner<'a> {
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
     match &t.source {
-        TableSource::Mapping(_) | TableSource::Merge(_) | TableSource::SingleValues(_) => {
-            query_mapping(ctx, &table, &t).await?
-        }
+        TableSource::MappingValues(_, _)
+        | TableSource::Merge(_)
+        | TableSource::MappingStruct(_, _)
+        | TableSource::MappingOfSingleValueMappings(_)
+        | TableSource::MappingOfStructMappings(_)
+        | TableSource::Single(_) => query_mapping(ctx, &table, &t).await?,
     }
     Ok(())
 }

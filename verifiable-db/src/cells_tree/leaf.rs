@@ -3,8 +3,11 @@
 use super::{public_inputs::PublicInputs, Cell, CellWire};
 use derive_more::{From, Into};
 use mp2_common::{
-    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, types::CBuilder,
-    utils::ToTargets, CHasher, D, F,
+    poseidon::{empty_poseidon_hash, H},
+    public_inputs::PublicInputCommon,
+    types::CBuilder,
+    utils::ToTargets,
+    D, F,
 };
 use plonky2::{
     iop::witness::PartialWitness,
@@ -12,7 +15,7 @@ use plonky2::{
 };
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
-use std::iter;
+use std::iter::once;
 
 #[derive(Clone, Debug, Serialize, Deserialize, From, Into)]
 pub struct LeafWires(CellWire);
@@ -23,28 +26,28 @@ pub struct LeafCircuit(Cell);
 impl LeafCircuit {
     fn build(b: &mut CBuilder) -> LeafWires {
         let cell = CellWire::new(b);
+        let values_digests = cell.split_values_digest(b);
+        let individual_cnt = cell.is_individual(b).target;
+        let multiplier_cnt = cell.is_multiplier().target;
 
-        // h = Poseidon(Poseidon("") || Poseidon("") || identifier || value)
-        let empty_hash = empty_poseidon_hash();
-        let empty_hash = b.constant_hash(*empty_hash);
-        let inputs: Vec<_> = empty_hash
-            .elements
-            .iter()
-            .cloned()
-            .chain(empty_hash.elements)
-            .chain(iter::once(cell.identifier))
+        // H(H("") || H("") || identifier || pack_u32(value))
+        let empty_hash = b.constant_hash(*empty_poseidon_hash()).to_targets();
+        let inputs = empty_hash
+            .clone()
+            .into_iter()
+            .chain(empty_hash)
+            .chain(once(cell.identifier))
             .chain(cell.value.to_targets())
             .collect();
-        let h = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
-
-        // digest_cell = D(identifier || value)
-        let split_digest = cell.split_digest(b);
+        let h = b.hash_n_to_hash_no_pad::<H>(inputs);
 
         // Register the public inputs.
         PublicInputs::new(
-            &h,
-            &split_digest.individual.to_targets(),
-            &split_digest.multiplier.to_targets(),
+            &h.to_targets(),
+            &values_digests.individual.to_targets(),
+            &values_digests.multiplier.to_targets(),
+            &individual_cnt,
+            &multiplier_cnt,
         )
         .register(b);
 
@@ -53,7 +56,7 @@ impl LeafCircuit {
 
     /// Assign the wires.
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
-        self.0.assign_wires(pw, &wires.0);
+        self.0.assign(pw, &wires.0);
     }
 }
 
@@ -63,7 +66,7 @@ impl CircuitLogicWires<F, D, 0> for LeafWires {
 
     type Inputs = LeafCircuit;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::total_len();
 
     fn circuit_logic(
         builder: &mut CircuitBuilder<F, D>,
@@ -82,16 +85,10 @@ impl CircuitLogicWires<F, D, 0> for LeafWires {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::primitives::U256;
-    use mp2_common::{
-        group_hashing::map_to_curve_point,
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-        C,
-    };
+    use itertools::Itertools;
+    use mp2_common::{poseidon::H, utils::ToFields, C};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::plonk::config::Hasher;
-    use rand::{thread_rng, Rng};
+    use plonky2::{field::types::Field, plonk::config::Hasher};
 
     impl UserCircuit<F, D> for LeafCircuit {
         type Wires = LeafWires;
@@ -112,44 +109,44 @@ mod tests {
     }
 
     fn test_cells_tree_leaf_multiplier(is_multiplier: bool) {
-        let mut rng = thread_rng();
+        let cell = Cell::sample(is_multiplier);
+        let id = cell.identifier;
+        let value = cell.value;
+        let values_digests = cell.split_values_digest();
 
-        let identifier = rng.gen::<u32>().to_field();
-        let value = U256::from_limbs(rng.gen::<[u64; 4]>());
-        let value_fields = value.to_fields();
-
-        let test_circuit: LeafCircuit = Cell {
-            identifier,
-            value,
-            is_multiplier,
-        }
-        .into();
-
+        let test_circuit: LeafCircuit = cell.into();
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
-        // Check the node Poseidon hash
+
+        // Check the node hash
         {
             let empty_hash = empty_poseidon_hash();
-            let inputs: Vec<_> = empty_hash
+            let inputs = empty_hash
                 .elements
                 .iter()
                 .cloned()
                 .chain(empty_hash.elements)
-                .chain(iter::once(identifier))
-                .chain(value_fields.clone())
-                .collect();
+                .chain(once(id))
+                .chain(value.to_fields())
+                .collect_vec();
             let exp_hash = H::hash_no_pad(&inputs);
 
             assert_eq!(pi.h, exp_hash.elements);
         }
-        // Check the cells digest
-        {
-            let inputs: Vec<_> = iter::once(identifier).chain(value_fields).collect();
-            let exp_digest = map_to_curve_point(&inputs).to_weierstrass();
-            match is_multiplier {
-                true => assert_eq!(pi.multiplier_digest_point(), exp_digest),
-                false => assert_eq!(pi.individual_digest_point(), exp_digest),
-            }
-        }
+        // Check individual values digest
+        assert_eq!(
+            pi.individual_values_digest_point(),
+            values_digests.individual.to_weierstrass(),
+        );
+        // Check multiplier values digest
+        assert_eq!(
+            pi.multiplier_values_digest_point(),
+            values_digests.multiplier.to_weierstrass(),
+        );
+        // Check individual counter
+        let multiplier_cnt = F::from_bool(is_multiplier);
+        assert_eq!(pi.individual_counter(), F::ONE - multiplier_cnt);
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), multiplier_cnt);
     }
 }

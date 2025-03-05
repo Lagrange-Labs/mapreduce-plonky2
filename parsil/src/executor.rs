@@ -263,12 +263,26 @@ pub fn convert_number_string(expr: &mut Expr) -> Result<()> {
     Ok(())
 }
 
-/// When a function that may return a float is encountered, it is wrapped in a
-/// call to `FLOOR`.
+/// When a function that may return a float is encountered, (i.e., AVG), it is replaced
+/// with a call to integer division DIV.
 fn convert_funcalls(expr: &mut Expr) -> Result<()> {
     if let Some(replacement) = match expr {
         Expr::Function(Function { name, .. }) => match name.to_string().to_uppercase().as_str() {
-            "AVG" => funcall("FLOOR", vec![expr.clone()]).into(),
+            "AVG" => {
+                // Replace AVG(expr) with DIV(SUM(expr)/COUNT(expr))
+                // replace AVG in `expr` with `SUM`
+                let mut sum_expr = expr.clone();
+                if let Expr::Function(Function { name, .. }) = &mut sum_expr {
+                    *name = ObjectName(vec![Ident::from("SUM")]);
+                }
+                // replace AVG in `expr` with `COUNT`
+                let mut count_expr = expr.clone();
+                if let Expr::Function(Function { name, .. }) = &mut count_expr {
+                    *name = ObjectName(vec![Ident::from("COUNT")]);
+                }
+                // Add DIV operation
+                funcall("DIV", vec![sum_expr, count_expr]).into()
+            }
             _ => None,
         },
         _ => None,
