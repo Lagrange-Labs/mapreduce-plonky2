@@ -284,8 +284,8 @@ impl<
                         .unwrap_or(empty_poseidon_hash().to_bytes().try_into().unwrap())
                 ).to_fields())
                 .collect::<Vec<_>>();
-        tracing::info!(
-            "\n--RYHOPE aggregate() Row : id {:?}, value {:?} (empty hash{}) left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
+        tracing::trace!(
+            "\nRYHOPE aggregate() Row: id {:?}, value {:?} (empty hash{}) left_hash {:?}, right_hash {:?} min {:?}, max {:?}, tree_root_hash {:?}",
             self.secondary_index_column,
             self.secondary_index_value(),
             left_hash == *empty_poseidon_hash(),

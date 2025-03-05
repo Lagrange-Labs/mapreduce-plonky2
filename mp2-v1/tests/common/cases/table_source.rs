@@ -46,7 +46,7 @@ use crate::common::{
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
     table::CellsUpdate,
-    TestContext, TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM,
+    TestContext, TEST_MAX_COLUMNS,
 };
 
 use super::{
@@ -486,7 +486,7 @@ impl MergeSource {
             };
 
             // add the metadata hashes together - this is mostly for debugging
-            let md = merge_metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+            let md = merge_metadata_hash::<TEST_MAX_COLUMNS>(
                 contract.address,
                 contract.chain_id,
                 vec![],
@@ -762,7 +762,7 @@ impl SingleExtractionArgs {
             }
         };
         let slot_inputs = SlotInputs::Simple(self.slot_inputs.clone());
-        let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+        let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS>(
             slot_inputs,
             &contract.address,
             contract.chain_id,
@@ -1230,7 +1230,7 @@ where
                 mapping_values_proof
             }
         };
-        let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>(
+        let metadata_hash = metadata_hash::<TEST_MAX_COLUMNS>(
             K::slot_inputs(self.slot_inputs.clone()),
             &contract.address,
             contract.chain_id,

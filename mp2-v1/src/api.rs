@@ -54,7 +54,7 @@ fn sanity_check() {
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the
 /// pre-processing stage of LPN
-pub enum CircuitInput<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
+pub enum CircuitInput<const MAX_COLUMNS: usize> {
     /// Contract extraction input
     ContractExtraction(contract_extraction::CircuitInput),
     /// Length extraction input
@@ -75,9 +75,11 @@ pub enum CircuitInput<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> 
     IVC(verifiable_db::ivc::CircuitInput),
 }
 
+pub const MAX_FIELD_PER_EVM: usize = 16;
+
 #[derive(Serialize, Deserialize)]
 /// Parameters defining all the circuits employed for the pre-processing stage of LPN
-pub struct PublicParameters<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize> {
+pub struct PublicParameters<const MAX_COLUMNS: usize> {
     contract_extraction: contract_extraction::PublicParameters,
     length_extraction: length_extraction::PublicParameters,
     values_extraction: ValuesExtractionParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
@@ -86,9 +88,7 @@ pub struct PublicParameters<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: u
     tree_creation:
         verifiable_db::api::PublicParameters<final_extraction::PublicInputs<'static, Target>>,
 }
-impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
-    PublicParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM>
-{
+impl<const MAX_COLUMNS: usize> PublicParameters<MAX_COLUMNS> {
     pub fn get_params_info(&self) -> Result<Vec<u8>> {
         self.tree_creation.get_params_info()
     }
@@ -101,8 +101,7 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
 
 /// Instantiate the circuits employed for the pre-processing stage of LPN,
 /// returning their corresponding parameters
-pub fn build_circuits_params<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-) -> PublicParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM> {
+pub fn build_circuits_params<const MAX_COLUMNS: usize>() -> PublicParameters<MAX_COLUMNS> {
     sanity_check();
 
     log::info!("Building contract_extraction parameters...");
@@ -137,9 +136,9 @@ pub fn build_circuits_params<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: 
 /// Generate a proof for a circuit in the set of circuits employed in the
 /// pre-processing stage of LPN, employing `CircuitInput` to specify for which
 /// circuit the proof should be generated
-pub fn generate_proof<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
-    params: &PublicParameters<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
-    input: CircuitInput<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+pub fn generate_proof<const MAX_COLUMNS: usize>(
+    params: &PublicParameters<MAX_COLUMNS>,
+    input: CircuitInput<MAX_COLUMNS>,
 ) -> Result<Vec<u8>> {
     match input {
         CircuitInput::ContractExtraction(input) => {
@@ -269,7 +268,7 @@ impl SlotInput {
 
 /// Compute metadata hash for a "merge" table. Right now it supports only merging tables from the
 /// same address.
-pub fn merge_metadata_hash<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+pub fn merge_metadata_hash<const MAX_COLUMNS: usize>(
     contract: Address,
     chain_id: u64,
     extra: Vec<u8>,
@@ -413,7 +412,7 @@ fn combine_digest_and_block(digest: Digest) -> HashOutput {
 }
 /// Compute metadata hash for a table related to the provided inputs slots of the contract with
 /// address `contract_address`
-pub fn metadata_hash<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
+pub fn metadata_hash<const MAX_COLUMNS: usize>(
     slot_input: SlotInputs,
     contract_address: &Address,
     chain_id: u64,
@@ -438,4 +437,30 @@ pub fn metadata_hash<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>(
     );
     // compute final hash
     combine_digest_and_block(contract_digest + value_digest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deterministic_serialisation() {
+        const MAX_COLUMNS: usize = 5;
+        let params_1 = build_circuits_params::<MAX_COLUMNS>();
+        let serialised_1 = bincode::serialize(&params_1).unwrap();
+
+        let params_2 = build_circuits_params::<MAX_COLUMNS>();
+        let serialised_2 = bincode::serialize(&params_2).unwrap();
+
+        serialised_1
+            .iter()
+            .zip(serialised_2.iter())
+            .enumerate()
+            .for_each(|(index, (&byte_1, &byte_2))| {
+                assert_eq!(
+                    byte_1, byte_2,
+                    "Parameter serialisations not the same, discrepancy occurs at index: {index}"
+                )
+            })
+    }
 }

@@ -108,6 +108,7 @@ where
                 wrap_step + 1,
                 cd.degree_bits()
             );
+
             if circuit_data.common.degree_bits() == RECURSION_THRESHOLD {
                 break;
             }

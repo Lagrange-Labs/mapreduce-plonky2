@@ -1,6 +1,6 @@
 [package]
 name = "mp2_v1"   # TODO: fix the name to a meaningful one.
-version = "0.1.0"
+version = "1.2.2"
 edition = "2021"
 
 [dependencies]
@@ -28,11 +28,11 @@ serde_json.workspace = true
 tokio-postgres.workspace = true
 tracing.workspace = true
 
-mp2_common = { path = "../mp2-common" }
-recursion_framework = { path = "../recursion-framework" }
-ryhope = { path = "../ryhope" }
-parsil = { path = "../parsil" }
-verifiable-db = { path = "../verifiable-db" }
+mp2_common = { path = "../mp2-common" , version = "1.2.2" }
+recursion_framework = { path = "../recursion-framework" , version = "1.2.2" }
+ryhope = { path = "../ryhope" , version = "1.2.2" }
+parsil = { path = "../parsil" , version = "1.2.2" }
+verifiable-db = { path = "../verifiable-db" , version = "1.2.2" }
 
 [dev-dependencies]
 alloy.workspace = true
@@ -55,8 +55,8 @@ testfile.workspace = true
 tokio-postgres.workspace = true
 tokio.workspace = true
 
-mp2_test = { path = "../mp2-test" }
-parsil = { path = "../parsil" }
+mp2_test = { path = "../mp2-test" , version = "1.2.2" }
+parsil = { path = "../parsil" , version = "1.2.2" }
 
 [features]
 original_poseidon = ["mp2_common/original_poseidon"]
