@@ -55,12 +55,17 @@ impl<'a, const MAX_FIELD_PER_EVM: usize> ColumnGadget<'a, MAX_FIELD_PER_EVM> {
         // as a big-endian integer.
         let bytes = &(0..=u8::MAX as u16).collect_vec();
         let mut lookup_inputs = [bytes; NUM_BITS_LOOKUP_TABLES];
-        let last_bits_lookup_indexes = add_last_bits_lookup_tables(b, lookup_inputs);
-        // The maxiumn lookup value is `u8::MAX + 8`, since the maxiumn `info.length` is 256,
+        // This maxiumn lookup value is `u8::MAX + 8`, since the maxiumn `info.length` is 256,
         // and we need to compute `first_bits_5(info.length + 7)`.
         let first_bits_5_input = (0..=u8::MAX as u16 + 8).collect_vec();
         lookup_inputs[4] = &first_bits_5_input;
         let first_bits_lookup_indexes = add_first_bits_lookup_tables(b, lookup_inputs);
+        lookup_inputs[4] = bytes;
+        // This maxiumn lookup value is `256`, since the maxiumn `info.length` is 256,
+        // and we need to compute `last_bits_3(info.length)`.
+        let last_bits_3_input = (0..=u8::MAX as u16 + 1).collect_vec();
+        lookup_inputs[2] = &last_bits_3_input;
+        let last_bits_lookup_indexes = add_last_bits_lookup_tables(b, lookup_inputs);
 
         // Accumulate to compute the value digest.
         let mut value_digest = b.curve_zero();
@@ -71,7 +76,7 @@ impl<'a, const MAX_FIELD_PER_EVM: usize> ColumnGadget<'a, MAX_FIELD_PER_EVM> {
             let is_extracted = self.is_extracted_columns[i];
 
             // Extract the value by column info.
-            let extracted_value = extract_value(
+            let extracted_value = extract_value_target(
                 b,
                 info,
                 self.value,
@@ -149,7 +154,7 @@ fn add_last_bits_lookup_tables(
 }
 
 /// Extract the value by the column info.
-fn extract_value(
+fn extract_value_target(
     b: &mut CBuilder,
     info: &ColumnInfoTarget,
     value_bytes: &[Target; MAPPING_LEAF_VALUE_LEN],
@@ -294,65 +299,93 @@ impl<const MAX_FIELD_PER_EVM: usize> ColumnGadgetData<MAX_FIELD_PER_EVM> {
 
     /// Compute the values digest.
     pub fn digest(&self) -> Point {
+        let value = self
+            .value
+            .map(|f| u8::try_from(f.to_canonical_u64()).unwrap());
         self.table_info[..self.num_extracted_columns]
             .iter()
             .fold(Point::NEUTRAL, |acc, info| {
-                let extracted_value = self.extract_value(info);
+                let extracted_value = extract_value(&value, info);
 
                 // digest = D(info.identifier || pack(extracted_value))
                 let inputs = once(info.identifier)
-                    .chain(extracted_value.pack(Endianness::Big))
+                    .chain(
+                        extracted_value
+                            .pack(Endianness::Big)
+                            .into_iter()
+                            .map(F::from_canonical_u32),
+                    )
                     .collect_vec();
                 let digest = map_to_curve_point(&inputs);
 
                 acc + digest
             })
     }
+}
 
-    fn extract_value(&self, info: &ColumnInfo) -> [F; MAPPING_LEAF_VALUE_LEN] {
-        let bit_offset = u8::try_from(info.bit_offset.to_canonical_u64()).unwrap();
-        assert!(bit_offset <= 8);
-        let [byte_offset, length] =
-            [info.byte_offset, info.length].map(|f| usize::try_from(f.to_canonical_u64()).unwrap());
+pub fn extract_value(
+    value_bytes: &[u8; MAPPING_LEAF_VALUE_LEN],
+    info: &ColumnInfo,
+) -> [u8; MAPPING_LEAF_VALUE_LEN] {
+    let bit_offset = u8::try_from(info.bit_offset.to_canonical_u64()).unwrap();
+    assert!(bit_offset <= 8);
+    let [byte_offset, length] =
+        [info.byte_offset, info.length].map(|f| usize::try_from(f.to_canonical_u64()).unwrap());
 
-        let value_bytes = self
-            .value
-            .map(|f| u8::try_from(f.to_canonical_u64()).unwrap());
+    // last_byte_offset = info.byte_offset + ceil(info.length / 8) - 1
+    let last_byte_offset = byte_offset + length.div_ceil(8) - 1;
 
-        // last_byte_offset = info.byte_offset + ceil(info.length / 8) - 1
-        let last_byte_offset = byte_offset + length.div_ceil(8) - 1;
+    // Extract all the bits of the field aligined with bytes.
+    let mut result_bytes = Vec::with_capacity(last_byte_offset - byte_offset + 1);
+    for i in byte_offset..=last_byte_offset {
+        // Get the current and next bytes.
+        let current_byte = u16::from(value_bytes[i]);
+        let next_byte = if i < MAPPING_LEAF_VALUE_LEN - 1 {
+            u16::from(value_bytes[i + 1])
+        } else {
+            0
+        };
 
-        // Extract all the bits of the field aligined with bytes.
-        let mut result_bytes = Vec::with_capacity(last_byte_offset - byte_offset + 1);
-        for i in byte_offset..=last_byte_offset {
-            // Get the current and next bytes.
-            let current_byte = u16::from(value_bytes[i]);
-            let next_byte = if i < MAPPING_LEAF_VALUE_LEN - 1 {
-                u16::from(value_bytes[i + 1])
-            } else {
-                0
-            };
+        // actual_byte = last_bits(current_byte, 8 - bit_offset) * 2^bit_offset + first_bits(next_byte, bit_offset)
+        let actual_byte = (last_bits(current_byte, 8 - bit_offset) << bit_offset)
+            + first_bits(next_byte, bit_offset);
 
-            // actual_byte = last_bits(current_byte, 8 - bit_offset) * 2^bit_offset + first_bits(next_byte, bit_offset)
-            let actual_byte = (last_bits(current_byte, 8 - bit_offset) << bit_offset)
-                + first_bits(next_byte, bit_offset);
-
-            result_bytes.push(u8::try_from(actual_byte).unwrap());
-        }
-
-        // At last we need to retain only the first `info.length % 8` bits for
-        // the last byte of result.
-        let mut last_byte = u16::from(*result_bytes.last().unwrap());
-        let length_mod_8 = length % 8;
-        if length_mod_8 > 0 {
-            // If length_mod_8 == 0, we don't need to cut any bit.
-            last_byte = first_bits(last_byte, u8::try_from(length_mod_8).unwrap());
-        }
-        *result_bytes.last_mut().unwrap() = u8::try_from(last_byte).unwrap();
-
-        // Normalize left.
-        left_pad32(&result_bytes).map(F::from_canonical_u8)
+        result_bytes.push(u8::try_from(actual_byte).unwrap());
     }
+
+    // At last we need to retain only the first `info.length % 8` bits for
+    // the last byte of result.
+    let mut last_byte = u16::from(*result_bytes.last().unwrap());
+    let length_mod_8 = length % 8;
+    if length_mod_8 > 0 {
+        // If length_mod_8 == 0, we don't need to cut any bit.
+        last_byte = first_bits(last_byte, u8::try_from(length_mod_8).unwrap());
+    }
+    *result_bytes.last_mut().unwrap() = u8::try_from(last_byte).unwrap();
+
+    // Normalize left.
+    left_pad32(&result_bytes)
+}
+
+/// Filter to get the column identifiers of one table by the slot and EVM word.
+/// We save multiple simple slots in one table, and only one mapping slot in one table.
+pub fn filter_table_column_identifiers(
+    table_info: &[ColumnInfo],
+    slot: u8,
+    evm_word: u32,
+) -> Vec<u64> {
+    table_info
+        .iter()
+        .filter_map(|col_info| {
+            if col_info.slot() == F::from_canonical_u8(slot)
+                && col_info.evm_word() == F::from_canonical_u32(evm_word)
+            {
+                Some(col_info.identifier().to_canonical_u64())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

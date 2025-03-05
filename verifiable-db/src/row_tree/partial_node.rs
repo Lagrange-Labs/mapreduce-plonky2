@@ -108,9 +108,12 @@ impl PartialNodeCircuit {
             &rest,
         );
 
+        let individual_vd =
+            b.add_curve_point(&[digest.individual_vd, child_pi.individual_digest_target()]);
+
         PublicInputs::new(
             &node_hash,
-            &digest.individual_vd.to_targets(),
+            &individual_vd.to_targets(),
             &digest.multiplier_vd.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
@@ -183,6 +186,7 @@ pub mod test {
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
+        group_hashing::weierstrass_to_point,
         poseidon::{empty_poseidon_hash, H},
         types::CBuilder,
         utils::ToFields,
@@ -332,7 +336,8 @@ pub mod test {
         // Check individual digest
         assert_eq!(
             pi.individual_digest_point(),
-            row_digest.individual_vd.to_weierstrass()
+            (row_digest.individual_vd + weierstrass_to_point(&child_pi.individual_digest_point()))
+                .to_weierstrass()
         );
         // Check multiplier digest
         assert_eq!(

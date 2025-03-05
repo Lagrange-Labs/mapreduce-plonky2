@@ -3,7 +3,7 @@
 use crate::values_extraction::{
     gadgets::{
         column_gadget::ColumnGadget,
-        metadata_gadget::{MetadataGadget, MetadataTarget},
+        metadata_gadget::{ColumnsMetadata, MetadataTarget},
     },
     public_inputs::{PublicInputs, PublicInputsArgs},
     KEY_ID_PREFIX,
@@ -37,6 +37,8 @@ use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::{iter, iter::once};
+
+use super::gadgets::metadata_gadget::MetadataGadget;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafMappingWires<
@@ -72,7 +74,7 @@ pub struct LeafMappingCircuit<
     pub(crate) node: Vec<u8>,
     pub(crate) slot: MappingSlot,
     pub(crate) key_id: F,
-    pub(crate) metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    pub(crate) metadata: ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
 }
 
 impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
@@ -150,9 +152,9 @@ where
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         let row_id = hash_to_int_target(b, hash);
-        let row_id = b.biguint_to_nonnative(&row_id);
 
         // values_digest = values_digest * row_id
+        let row_id = b.biguint_to_nonnative(&row_id);
         let values_digest = b.curve_scalar_mul(values_digest, &row_id);
 
         // Only one leaf in this node.
@@ -194,7 +196,7 @@ where
         pw.set_target(wires.key_id, self.key_id);
         self.slot
             .assign_struct(pw, &wires.slot, self.metadata.evm_word);
-        self.metadata.assign(pw, &wires.metadata);
+        MetadataGadget::assign(pw, &self.metadata, &wires.metadata);
     }
 }
 
@@ -301,7 +303,7 @@ mod tests {
         let evm_word = storage_slot.evm_offset();
         let key_id = rng.gen();
         let metadata =
-            MetadataGadget::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
+            ColumnsMetadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
         let table_info = metadata.actual_table_info().to_vec();
         let extracted_column_identifiers = metadata.extracted_column_identifiers();

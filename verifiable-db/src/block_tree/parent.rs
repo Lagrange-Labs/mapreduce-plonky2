@@ -270,8 +270,9 @@ where
 #[cfg(test)]
 mod tests {
     use crate::block_tree::{
+        compute_final_digest,
         leaf::tests::{compute_expected_hash, compute_expected_set_digest},
-        tests::{compute_final_digest, TestPIField, TestPITargets},
+        tests::{TestPIField, TestPITargets},
     };
 
     use super::{

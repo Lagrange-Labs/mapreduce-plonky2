@@ -1,14 +1,14 @@
-use alloy::{eips::BlockNumberOrTag, primitives::Address};
+use alloy::{eips::BlockNumberOrTag, primitives::Address, providers::Provider};
 use log::info;
 use mp2_common::{
     eth::StorageSlot, mpt_sequential::utils::bytes_to_nibbles, proof::ProofWithVK, types::GFp,
 };
-use mp2_v1::length_extraction::PublicInputs;
+use mp2_v1::{length_extraction::PublicInputs, values_extraction::StorageSlotInfo};
 use plonky2::field::types::Field;
 
 use crate::common::storage_trie::TestStorageTrie;
 
-use super::{StorageSlotInfo, TestContext};
+use super::TestContext;
 
 impl TestContext {
     /// Generate the Values Extraction (C.2) proof for single variables.
@@ -29,7 +29,8 @@ impl TestContext {
         // Query the slot and add the node path to the trie.
         trie.query_proof_and_add_slot(self, contract_address, bn, slot_info)
             .await;
-        let proof = trie.prove_length(value, self.params(), &self.b);
+        let chain_id = self.rpc.get_chain_id().await.unwrap();
+        let proof = trie.prove_length(contract_address, chain_id, value, self.params(), &self.b);
 
         // Check the public inputs.
         let pi = PublicInputs::from_slice(&proof.proof().public_inputs);

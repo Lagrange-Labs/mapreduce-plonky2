@@ -122,10 +122,10 @@ impl SecondaryIndexCellWire {
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
         let row_id_individual = hash_to_int_target(b, hash);
-        let row_id_individual = b.biguint_to_nonnative(&row_id_individual);
 
         // Multiply row ID to individual value digest:
         // individual_vd = row_id_individual * individual_vd
+        let row_id_individual = b.biguint_to_nonnative(&row_id_individual);
         let individual_vd = b.curve_scalar_mul(values_digests.individual, &row_id_individual);
 
         let multiplier_vd = values_digests.multiplier;
@@ -156,14 +156,6 @@ pub(crate) mod tests {
     use rand::{thread_rng, Rng};
 
     impl SecondaryIndexCell {
-        pub(crate) fn is_individual(&self) -> bool {
-            self.cell.is_individual()
-        }
-
-        pub(crate) fn is_multiplier(&self) -> bool {
-            self.cell.is_multiplier()
-        }
-
         pub(crate) fn sample(is_multiplier: bool) -> Self {
             let cell = Cell::sample(is_multiplier);
             let row_unique_data = HashOut::rand();
@@ -177,10 +169,12 @@ pub(crate) mod tests {
                 .split_and_accumulate_values_digest(cells_pi.split_values_digest_point());
 
             // individual_counter = p.individual_counter + is_individual
-            let individual_cnt = cells_pi.individual_counter() + F::from_bool(self.is_individual());
+            let individual_cnt =
+                cells_pi.individual_counter() + F::from_bool(self.cell.is_individual());
 
             // multiplier_counter = p.multiplier_counter + not is_individual
-            let multiplier_cnt = cells_pi.multiplier_counter() + F::from_bool(self.is_multiplier());
+            let multiplier_cnt =
+                cells_pi.multiplier_counter() + F::from_bool(self.cell.is_multiplier());
 
             // Compute row ID for individual cells:
             // row_id_individual = H2Int(row_unique_data || individual_counter)

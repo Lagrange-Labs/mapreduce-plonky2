@@ -112,6 +112,12 @@ impl From<HashOut<F>> for HashOutput {
     }
 }
 
+impl From<&HashOut<F>> for HashOutput {
+    fn from(value: &HashOut<F>) -> Self {
+        value.to_bytes().try_into().unwrap()
+    }
+}
+
 impl From<HashOutput> for HashOut<F> {
     fn from(value: HashOutput) -> Self {
         Self::from_bytes(&value.0)
