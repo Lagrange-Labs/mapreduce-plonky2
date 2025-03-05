@@ -1,6 +1,6 @@
 [package]
 name = "recursion_framework"
-version = "0.1.0"
+version = "1.2.2"
 edition = "2021"
 
 [dependencies]
@@ -9,7 +9,7 @@ log.workspace = true
 plonky2.workspace = true
 serde.workspace = true
 
-mp2_common = { path = "../mp2-common" }
+mp2_common = { path = "../mp2-common" , version = "1.2.2" }
 
 [dev-dependencies]
 bincode.workspace = true
