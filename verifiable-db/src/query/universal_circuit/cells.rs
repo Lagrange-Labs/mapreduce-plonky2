@@ -16,7 +16,7 @@ use ryhope::tree::{
     TreeTopology,
 };
 use std::iter::once;
-type CellTree = sbbst::Tree;
+type CellTree = sbbst::IncrementalTree;
 type CellTreeKey = <CellTree as TreeTopology>::Key;
 
 /// Re-compute the root hash of the cells tree by the column identifiers and values
@@ -47,7 +47,7 @@ pub(crate) fn build_cells_tree(
     assert_eq!(input_len, input_values.len());
     assert_eq!(input_len, is_real_value.len());
 
-    let sbbst_state = sbbst::Tree::with_capacity(input_len);
+    let sbbst_state = sbbst::IncrementalTree::with_capacity(input_len);
 
     let root_key = sbbst_state.root();
     build_cells_subtree_at_key(

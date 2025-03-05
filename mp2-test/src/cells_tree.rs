@@ -22,15 +22,15 @@ use plonky2::{
 use rand::{thread_rng, Rng};
 use ryhope::{
     storage::{memory::InMemory, updatetree::UpdateTree, EpochKvStorage, TreeTransactionalStorage},
-    tree::{sbbst, TreeTopology},
+    tree::{sbbst::IncrementalTree, TreeTopology},
     InitSettings, MerkleTreeKvDb, NodePayload,
 };
 use serde::{Deserialize, Serialize};
 use std::iter;
 
-pub type CellTree = sbbst::Tree;
+pub type CellTree = IncrementalTree;
 pub type CellTreeKey = <CellTree as TreeTopology>::Key;
-type CellStorage = InMemory<CellTree, TestCell>;
+type CellStorage = InMemory<CellTree, TestCell, false>;
 pub type MerkleCellTree = MerkleTreeKvDb<CellTree, TestCell, CellStorage>;
 
 /// Test node of the cells tree
@@ -116,7 +116,7 @@ impl NodePayload for TestCell {
 pub async fn build_cell_tree(
     row: Vec<TestCell>,
 ) -> Result<(MerkleCellTree, UpdateTree<<CellTree as TreeTopology>::Key>)> {
-    let mut cell_tree = MerkleCellTree::new(InitSettings::Reset(sbbst::Tree::empty()), ())
+    let mut cell_tree = MerkleCellTree::new(InitSettings::Reset(IncrementalTree::empty()), ())
         .await
         .unwrap();
     let update_tree = cell_tree
