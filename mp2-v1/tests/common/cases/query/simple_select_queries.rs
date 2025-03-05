@@ -19,7 +19,7 @@ use parsil::{
 };
 use ryhope::{
     storage::{pgsql::ToFromBytea, RoEpochKvStorage},
-    Epoch, NodePayload,
+    NodePayload, UserEpoch,
 };
 use sqlparser::ast::Query;
 use std::{fmt::Debug, hash::Hash};
@@ -69,7 +69,7 @@ pub(crate) async fn prove_query(
         .iter()
         .map(|row| {
             let key = RowTreeKey::from_bytea(row.try_get::<_, &[u8]>(0)?.to_vec());
-            let epoch = row.try_get::<_, Epoch>(1)?;
+            let epoch = row.try_get::<_, UserEpoch>(1)?;
             // all the other items are query results
             let result = (2..row.len())
                 .filter_map(|i| {
@@ -82,7 +82,7 @@ pub(crate) async fn prove_query(
         })
         .collect::<Result<Vec<_>>>()?;
     // compute input for each matching row
-    let current_epoch = planner.table.index.current_epoch();
+    let current_epoch = planner.table.index.current_epoch().await?;
     let mut matching_rows_input = vec![];
     for (key, epoch, result) in matching_rows.into_iter() {
         let row_proof = prove_single_row(
@@ -157,7 +157,7 @@ pub(crate) async fn prove_query(
 async fn get_path_info<K, V, T: TreeFetcher<K, V>>(
     key: &K,
     tree_info: &T,
-    epoch: Epoch,
+    epoch: UserEpoch,
 ) -> Result<(Vec<(NodeInfo, ChildPosition)>, Vec<Option<HashOutput>>)>
 where
     K: Debug + Hash + Clone + Send + Sync + Eq,
@@ -253,7 +253,7 @@ pub(crate) async fn prove_single_row<T: TreeFetcher<RowTreeKey, RowPayload<Block
     // 1. Get the all the cells including primary and secondary index
     // Note we can use the primary as epoch since now epoch == primary in the storage
     let (row_ctx, row_payload) = tree
-        .fetch_ctx_and_payload_at(row_key, primary as Epoch)
+        .fetch_ctx_and_payload_at(row_key, primary as UserEpoch)
         .await
         .expect("cache not full");
 
@@ -444,8 +444,8 @@ pub(crate) async fn cook_query_no_matching_rows(
     table: &Table,
     info: &TableInfo,
 ) -> Result<QueryCooking> {
-    let initial_epoch = table.index.initial_epoch();
-    let current_epoch = table.index.current_epoch();
+    let initial_epoch = table.index.initial_epoch().await;
+    let current_epoch = table.index.current_epoch().await?;
     let min_block = initial_epoch as BlockPrimaryIndex;
     let max_block = current_epoch as BlockPrimaryIndex;
 
