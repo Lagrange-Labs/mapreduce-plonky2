@@ -27,7 +27,7 @@ use std::iter::once;
 
 // new type to implement the circuit logic on each differently
 // deref to access directly the same members - read only so it's ok
-#[derive(Clone, Debug, From, Into)]
+#[derive(Clone, Debug, From, Into, Serialize, Deserialize)]
 pub struct LeafCircuit(SecondaryIndexCell);
 
 #[derive(Clone, Serialize, Deserialize, From, Into)]

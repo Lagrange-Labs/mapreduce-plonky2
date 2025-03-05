@@ -127,7 +127,7 @@ impl CircuitLogicWires<F, D, 1> for RecursiveIVCWires {
 /// Dummy circuit holding the values that are given to the first block proof created.
 /// The circuit takes care of exporting the right values such that when the proof is verified
 /// inside the regular IVC circuits, the checks matches.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DummyCircuit {
     pub(crate) metadata_hash: HashOut<F>,
     pub(crate) z0: U256,

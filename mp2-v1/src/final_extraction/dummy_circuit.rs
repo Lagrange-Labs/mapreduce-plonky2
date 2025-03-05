@@ -20,6 +20,7 @@ use mp2_common::{
     D, F,
 };
 use plonky2::{
+    field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},
     iop::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
@@ -28,10 +29,25 @@ use plonky2::{
 };
 use plonky2_ecgfp5::gadgets::curve::{CircuitBuilderEcGFp5, CurveTarget, PartialWitnessCurve};
 use recursion_framework::circuit_builder::CircuitLogicWires;
-use serde::{Deserialize, Serialize};
+use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 use std::array;
 
-#[derive(Clone, Debug, Constructor)]
+fn to_quintic<S>(digest: &Digest, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    digest.encode().serialize(serializer)
+}
+
+fn from_quintic<'de, D>(deserializer: D) -> Result<Digest, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let quintic = QuinticExtension::<GoldilocksField>::deserialize(deserializer)?;
+    Digest::decode(quintic).ok_or(D::Error::custom("Invalid quintic"))
+}
+
+#[derive(Clone, Debug, Constructor, Serialize, Deserialize)]
 pub struct DummyCircuit {
     /// Block number
     primary_index: U256,
@@ -43,10 +59,12 @@ pub struct DummyCircuit {
     /// This value can be computed outside of the circuit depending on the data source,
     /// the circuits don’t care how it is computed given that we are not proving the
     /// provenance of the data.
+    #[serde(serialize_with = "to_quintic", deserialize_with = "from_quintic")]
     metadata_digest: Digest,
     /// Row values digest of all the rows extracted
     /// This must corresponds to the value digest that will be re-computed when
     /// constructing the rows tree for the current block.
+    #[serde(serialize_with = "to_quintic", deserialize_with = "from_quintic")]
     row_digest: Digest,
 }
 
