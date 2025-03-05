@@ -87,7 +87,7 @@ impl LeafLengthCircuit {
         // we don't range check the variable and length slots as they are part of the DM public
         // commitment
         let variable_slot = cb.add_virtual_target();
-        let length_slot = SimpleSlot::build(cb);
+        let length_slot = SimpleSlot::build_single(cb);
 
         let length_mpt = MPTLeafOrExtensionNode::build_and_advance_key::<
             _,
@@ -124,7 +124,7 @@ impl LeafLengthCircuit {
             GFp::from_canonical_u8(self.variable_slot),
         );
 
-        self.length_slot.assign(pw, &wires.length_slot);
+        self.length_slot.assign_single(pw, &wires.length_slot);
         wires.length_mpt.assign(
             pw,
             &Vector::from_vec(&self.length_node).expect("invalid node length"),
