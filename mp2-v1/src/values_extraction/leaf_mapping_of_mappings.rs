@@ -5,7 +5,7 @@
 use crate::values_extraction::{
     gadgets::{
         column_gadget::ColumnGadget,
-        metadata_gadget::{MetadataGadget, MetadataTarget},
+        metadata_gadget::{ColumnsMetadata, MetadataTarget},
     },
     public_inputs::{PublicInputs, PublicInputsArgs},
     INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
@@ -39,6 +39,8 @@ use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{Deserialize, Serialize};
 use std::{iter, iter::once};
+
+use super::gadgets::metadata_gadget::MetadataGadget;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LeafMappingOfMappingsWires<
@@ -79,7 +81,7 @@ pub struct LeafMappingOfMappingsCircuit<
     pub(crate) inner_key: Vec<u8>,
     pub(crate) outer_key_id: F,
     pub(crate) inner_key_id: F,
-    pub(crate) metadata: MetadataGadget<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
+    pub(crate) metadata: ColumnsMetadata<MAX_COLUMNS, MAX_FIELD_PER_EVM>,
 }
 
 impl<const NODE_LEN: usize, const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
@@ -91,6 +93,7 @@ where
         b: &mut CBuilder,
     ) -> LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM> {
         let zero = b.zero();
+        let two = b.two();
 
         let [outer_key_id, inner_key_id] = b.add_virtual_target_arr();
         let metadata = MetadataGadget::build(b);
@@ -108,8 +111,10 @@ where
         // Left pad the leaf value.
         let value: Array<Target, MAPPING_LEAF_VALUE_LEN> = left_pad_leaf_value(b, &wires.value);
 
-        // Compute the metadata digest.
-        let metadata_digest = metadata.digest(b, slot.mapping_slot);
+        // Compute the metadata digest and number of actual columns.
+        let (metadata_digest, num_actual_columns) = metadata.digest_info(b, slot.mapping_slot);
+        // Add inner key and outer key columns to the number of actual columns.
+        let num_actual_columns = b.add(num_actual_columns, two);
 
         // Compute the outer and inner key metadata digests.
         let [outer_key_digest, inner_key_digest] = [
@@ -173,17 +178,17 @@ where
             .chain(packed_inner_key)
             .collect();
         let row_unique_data = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
-        // row_id = H2int(row_unique_data || metadata_digest)
+        // row_id = H2int(row_unique_data || num_actual_columns)
         let inputs = row_unique_data
             .to_targets()
             .into_iter()
-            .chain(metadata_digest.to_targets())
+            .chain(once(num_actual_columns))
             .collect();
         let hash = b.hash_n_to_hash_no_pad::<CHasher>(inputs);
         let row_id = hash_to_int_target(b, hash);
-        let row_id = b.biguint_to_nonnative(&row_id);
 
         // values_digest = values_digest * row_id
+        let row_id = b.biguint_to_nonnative(&row_id);
         let values_digest = b.curve_scalar_mul(values_digest, &row_id);
 
         // Only one leaf in this node.
@@ -231,7 +236,7 @@ where
             &self.inner_key,
             self.metadata.evm_word,
         );
-        self.metadata.assign(pw, &wires.metadata);
+        MetadataGadget::assign(pw, &self.metadata, &wires.metadata);
     }
 }
 
@@ -346,7 +351,7 @@ mod tests {
         let evm_word = storage_slot.evm_offset();
         let [outer_key_id, inner_key_id] = array::from_fn(|_| rng.gen());
         let metadata =
-            MetadataGadget::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
+            ColumnsMetadata::<TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM>::sample(slot, evm_word);
         // Compute the metadata digest.
         let table_info = metadata.actual_table_info().to_vec();
         let extracted_column_identifiers = metadata.extracted_column_identifiers();
@@ -356,7 +361,6 @@ mod tests {
         >(table_info.clone(), slot, outer_key_id, inner_key_id);
         // Compute the values digest.
         let values_digest = compute_leaf_mapping_of_mappings_values_digest::<TEST_MAX_FIELD_PER_EVM>(
-            &metadata_digest,
             table_info,
             &extracted_column_identifiers,
             value.clone().try_into().unwrap(),

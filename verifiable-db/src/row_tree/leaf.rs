@@ -36,10 +36,10 @@ pub(crate) struct LeafWires(SecondaryIndexCellWire);
 impl LeafCircuit {
     pub(crate) fn build(b: &mut CircuitBuilder<F, D>, cells_pis: &[Target]) -> LeafWires {
         let cells_pis = cells_tree::PublicInputs::from_slice(cells_pis);
-        let row = SecondaryIndexCellWire::new(b);
-        let id = row.identifier();
-        let value = row.value().to_targets();
-        let digest = row.digest(b, &cells_pis);
+        let secondary_index_cell = SecondaryIndexCellWire::new(b);
+        let id = secondary_index_cell.identifier();
+        let value = secondary_index_cell.value().to_targets();
+        let digest = secondary_index_cell.digest(b, &cells_pis);
 
         // H(left_child_hash,right_child_hash,min,max,index_identifier,index_value,cells_tree_hash)
         // in our case, min == max == index_value
@@ -60,13 +60,13 @@ impl LeafCircuit {
             &row_hash.elements,
             &digest.individual_vd.to_targets(),
             &digest.multiplier_vd.to_targets(),
-            &digest.row_id_multiplier.to_targets(),
             &value,
             &value,
+            &digest.multiplier_cnt,
         )
         .register(b);
 
-        LeafWires(row)
+        LeafWires(secondary_index_cell)
     }
 
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &LeafWires) {
@@ -163,12 +163,12 @@ mod test {
     fn test_row_tree_leaf_circuit(is_multiplier: bool, cells_multiplier: bool) {
         let cells_pi = CellsPublicInputs::sample(cells_multiplier);
 
-        let row = SecondaryIndexCell::sample(is_multiplier);
-        let id = row.cell.identifier;
-        let value = row.cell.value;
-        let row_digest = row.digest(&CellsPublicInputs::from_slice(&cells_pi));
+        let secondary_index_cell = SecondaryIndexCell::sample(is_multiplier);
+        let id = secondary_index_cell.cell.identifier;
+        let value = secondary_index_cell.cell.value;
+        let row_digest = secondary_index_cell.digest(&CellsPublicInputs::from_slice(&cells_pi));
 
-        let circuit = LeafCircuit::from(row);
+        let circuit = LeafCircuit::from(secondary_index_cell);
         let test_circuit = TestLeafCircuit {
             circuit,
             cells_pi: cells_pi.clone(),
@@ -206,7 +206,7 @@ mod test {
             row_digest.multiplier_vd.to_weierstrass()
         );
         // Check row ID multiplier
-        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
         // Check minimum value
         assert_eq!(pi.min_value(), value);
         // Check maximum value

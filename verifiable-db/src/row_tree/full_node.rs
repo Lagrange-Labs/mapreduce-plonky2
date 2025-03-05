@@ -9,7 +9,6 @@ use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::{circuit_builder::CircuitBuilder, proof::ProofWithPublicInputsTarget},
 };
-use plonky2_ecdsa::gadgets::biguint::CircuitBuilderBiguint;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
     framework::{
@@ -39,24 +38,18 @@ impl FullNodeCircuit {
         let min_child = PublicInputs::from_slice(left_pi);
         let max_child = PublicInputs::from_slice(right_pi);
         let cells_pi = cells_tree::PublicInputs::from_slice(cells_pi);
-        let row = SecondaryIndexCellWire::new(b);
-        let id = row.identifier();
-        let value = row.value();
-        let digest = row.digest(b, &cells_pi);
+        let secondary_index_cell = SecondaryIndexCellWire::new(b);
+        let id = secondary_index_cell.identifier();
+        let value = secondary_index_cell.value();
+        let digest = secondary_index_cell.digest(b, &cells_pi);
 
-        // Check multiplier_vd and row_id_multiplier are the same as children proofs.
+        // Check multiplier_vd and multiplier_counter are the same as children proofs.
         // assert multiplier_vd == p1.multiplier_vd == p2.multiplier_vd
         b.connect_curve_points(digest.multiplier_vd, min_child.multiplier_digest_target());
         b.connect_curve_points(digest.multiplier_vd, max_child.multiplier_digest_target());
-        // assert row_id_multiplier == p1.row_id_multiplier == p2.row_id_multiplier
-        b.connect_biguint(
-            &digest.row_id_multiplier,
-            &min_child.row_id_multiplier_target(),
-        );
-        b.connect_biguint(
-            &digest.row_id_multiplier,
-            &max_child.row_id_multiplier_target(),
-        );
+        // assert multiplier_counter == p1.multiplier_counter == p2.multiplier_counter
+        b.connect(digest.multiplier_cnt, min_child.multiplier_counter_target());
+        b.connect(digest.multiplier_cnt, max_child.multiplier_counter_target());
 
         let node_min = min_child.min_value_target();
         let node_max = max_child.max_value_target();
@@ -81,16 +74,22 @@ impl FullNodeCircuit {
             .collect::<Vec<_>>();
         let hash = b.hash_n_to_hash_no_pad::<H>(inputs);
 
+        let individual_vd = b.add_curve_point(&[
+            digest.individual_vd,
+            min_child.individual_digest_target(),
+            max_child.individual_digest_target(),
+        ]);
+
         PublicInputs::new(
             &hash.to_targets(),
-            &digest.individual_vd.to_targets(),
+            &individual_vd.to_targets(),
             &digest.multiplier_vd.to_targets(),
-            &digest.row_id_multiplier.to_targets(),
             &node_min.to_targets(),
             &node_max.to_targets(),
+            &digest.multiplier_cnt,
         )
         .register(b);
-        FullNodeWires(row)
+        FullNodeWires(secondary_index_cell)
     }
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &FullNodeWires) {
         self.0.assign(pw, &wires.0);
@@ -152,9 +151,9 @@ pub(crate) mod test {
     use super::*;
     use alloy::primitives::U256;
     use itertools::Itertools;
-    use mp2_common::{utils::ToFields, C, D, F};
+    use mp2_common::{group_hashing::weierstrass_to_point, utils::ToFields, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{iop::witness::WitnessWrite, plonk::config::Hasher};
+    use plonky2::{field::types::PrimeField64, iop::witness::WitnessWrite, plonk::config::Hasher};
 
     #[derive(Clone, Debug)]
     struct TestFullNodeCircuit {
@@ -199,17 +198,14 @@ pub(crate) mod test {
         let (left_min, left_max) = (10, 15);
         // this should work since we allow multipleicities of indexes in the row tree
         let (right_min, right_max) = (18, 30);
-        let left_pi = PublicInputs::sample(
-            row_digest.multiplier_vd,
-            row_digest.row_id_multiplier.clone(),
-            left_min,
-            left_max,
-        );
+        let multiplier_cnt = row_digest.multiplier_cnt.to_canonical_u64();
+        let left_pi =
+            PublicInputs::sample(row_digest.multiplier_vd, left_min, left_max, multiplier_cnt);
         let right_pi = PublicInputs::sample(
             row_digest.multiplier_vd,
-            row_digest.row_id_multiplier.clone(),
             right_min,
             right_max,
+            multiplier_cnt,
         );
         let test_circuit = TestFullNodeCircuit {
             circuit: node_circuit,
@@ -243,19 +239,22 @@ pub(crate) mod test {
         // Check individual digest
         assert_eq!(
             pi.individual_digest_point(),
-            row_digest.individual_vd.to_weierstrass()
+            (row_digest.individual_vd
+                + weierstrass_to_point(&left_pi.individual_digest_point())
+                + weierstrass_to_point(&right_pi.individual_digest_point()))
+            .to_weierstrass()
         );
         // Check multiplier digest
         assert_eq!(
             pi.multiplier_digest_point(),
             row_digest.multiplier_vd.to_weierstrass()
         );
-        // Check row ID multiplier
-        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
         // Check minimum value
         assert_eq!(pi.min_value(), U256::from(left_min));
         // Check maximum value
         assert_eq!(pi.max_value(), U256::from(right_max));
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
     }
 
     #[test]

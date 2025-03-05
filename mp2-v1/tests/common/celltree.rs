@@ -11,7 +11,7 @@ use mp2_v1::{
         row::{CellCollection, Row, RowPayload, RowTreeKey},
     },
 };
-use plonky2::{field::types::Sample, hash::hash_types::HashOut, plonk::config::GenericHashOut};
+use plonky2::plonk::config::GenericHashOut;
 use ryhope::storage::{
     updatetree::{Next, UpdateTree},
     RoEpochKvStorage,
@@ -70,8 +70,6 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
-                        // TODO:
-                        HashOut::rand(),
                     ));
                 self.b.bench("indexing::cell_tree::leaf", || {
                     api::generate_proof(self.params(), inputs)
@@ -96,8 +94,6 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
-                        // TODO:
-                        HashOut::rand(),
                         left_proof.clone(),
                     ));
                 debug!(
@@ -152,8 +148,6 @@ impl TestContext {
                         cell.identifier(),
                         cell.value(),
                         column.multiplier,
-                        // TODO:
-                        HashOut::rand(),
                         [left_proof, right_proof],
                     ));
 
@@ -262,7 +256,7 @@ impl TestContext {
                     // only move the cells tree proof of the actual cells, not the secondary index !
                     // CellsCollection is a bit weird because it has to contain as well the secondary
                     // index to be able to search in it in JSON
-                    if *id == table.columns.secondary_column().identifier {
+                    if *id == table.columns.secondary_column().identifier() {
                         return (*id, new_cell);
                     }
 
@@ -271,7 +265,7 @@ impl TestContext {
                         " --- CELL TREE key {} index of {id} vs secondary id {} vs table.secondary_id {}",
                         tree_key,
                         previous_row.payload.secondary_index_column,
-                        table.columns.secondary.identifier
+                        table.columns.secondary.identifier()
                     );
                     // we need to update the primary on the impacted cells at least, OR on all the cells if
                     // we are moving all the proofs to a new row key which happens when doing an DELETE +
@@ -315,7 +309,7 @@ impl TestContext {
         );
 
         Ok(RowPayload {
-            secondary_index_column: table.columns.secondary_column().identifier,
+            secondary_index_column: table.columns.secondary_column().identifier(),
             cell_root_key: Some(root_key),
             cell_root_hash: Some(tree_hash),
             cell_root_column: Some(

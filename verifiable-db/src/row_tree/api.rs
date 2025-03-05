@@ -1,6 +1,6 @@
 use alloy::primitives::U256;
 use anyhow::Result;
-use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
+use mp2_common::{default_config, proof::ProofWithVK, types::HashOutput, C, D, F};
 use plonky2::{field::types::Field, hash::hash_types::HashOut};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -185,19 +185,13 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
-        mpt_metadata: HashOut<F>,
-        row_unique_data: HashOut<F>,
+        row_unique_data: HashOutput,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let cell = Cell::new(
-            F::from_canonical_u64(identifier),
-            value,
-            is_multiplier,
-            mpt_metadata,
-        );
-        let row = SecondaryIndexCell::new(cell, row_unique_data);
+        let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
+        let secondary_index_cell = SecondaryIndexCell::new(cell, row_unique_data.into());
         Ok(CircuitInput::Leaf {
-            witness: row.into(),
+            witness: secondary_index_cell.into(),
             cells_proof,
         })
     }
@@ -206,45 +200,33 @@ impl CircuitInput {
         identifier: u64,
         value: U256,
         is_multiplier: bool,
-        mpt_metadata: HashOut<F>,
-        row_unique_data: HashOut<F>,
-        child_proofs: (Vec<u8>, Vec<u8>),
+        row_unique_data: HashOutput,
+        left_proof: Vec<u8>,
+        right_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let cell = Cell::new(
-            F::from_canonical_u64(identifier),
-            value,
-            is_multiplier,
-            mpt_metadata,
-        );
-        let row = SecondaryIndexCell::new(cell, row_unique_data);
+        let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
+        let secondary_index_cell = SecondaryIndexCell::new(cell, row_unique_data.into());
         Ok(CircuitInput::Full {
-            witness: row.into(),
-            left_proof: child_proofs.0,
-            right_proof: child_proofs.1,
+            witness: secondary_index_cell.into(),
+            left_proof,
+            right_proof,
             cells_proof,
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn partial(
         identifier: u64,
         value: U256,
         is_multiplier: bool,
         is_child_left: bool,
-        mpt_metadata: HashOut<F>,
-        row_unique_data: HashOut<F>,
+        row_unique_data: HashOutput,
         child_proof: Vec<u8>,
         cells_proof: Vec<u8>,
     ) -> Result<Self> {
-        let cell = Cell::new(
-            F::from_canonical_u64(identifier),
-            value,
-            is_multiplier,
-            mpt_metadata,
-        );
-        let row = SecondaryIndexCell::new(cell, row_unique_data);
-        let witness = PartialNodeCircuit::new(row, is_child_left);
+        let cell = Cell::new(F::from_canonical_u64(identifier), value, is_multiplier);
+        let secondary_index_cell = SecondaryIndexCell::new(cell, row_unique_data.into());
+        let witness = PartialNodeCircuit::new(secondary_index_cell, is_child_left);
         Ok(CircuitInput::Partial {
             witness,
             child_proof,
@@ -264,6 +246,7 @@ mod test {
     use crate::cells_tree;
     use itertools::Itertools;
     use mp2_common::{
+        group_hashing::weierstrass_to_point,
         poseidon::{empty_poseidon_hash, H},
         utils::ToFields,
         F,
@@ -321,20 +304,14 @@ mod test {
                 params,
                 cells_proof: cells_proof[0].clone(),
                 cells_vk,
-                leaf1: SecondaryIndexCell::new(
-                    Cell::new(identifier, v1, false, HashOut::rand()),
-                    HashOut::rand(),
-                ),
-                leaf2: SecondaryIndexCell::new(
-                    Cell::new(identifier, v2, false, HashOut::rand()),
-                    HashOut::rand(),
-                ),
+                leaf1: SecondaryIndexCell::new(Cell::new(identifier, v1, false), HashOut::rand()),
+                leaf2: SecondaryIndexCell::new(Cell::new(identifier, v2, false), HashOut::rand()),
                 full: SecondaryIndexCell::new(
-                    Cell::new(identifier, v_full, false, HashOut::rand()),
+                    Cell::new(identifier, v_full, false),
                     HashOut::rand(),
                 ),
                 partial: SecondaryIndexCell::new(
-                    Cell::new(identifier, v_partial, false, HashOut::rand()),
+                    Cell::new(identifier, v_partial, false),
                     HashOut::rand(),
                 ),
             })
@@ -371,12 +348,11 @@ mod test {
         is_left: bool,
         child_proof_buff: Vec<u8>,
     ) -> Result<Vec<u8>> {
-        let row = &p.partial;
-        let id = row.cell.identifier;
-        let value = row.cell.value;
-        let mpt_metadata = row.cell.mpt_metadata;
-        let row_unique_data = row.row_unique_data;
-        let row_digest = row.digest(&p.cells_pi());
+        let secondary_index_cell = &p.partial;
+        let id = secondary_index_cell.cell.identifier;
+        let value = secondary_index_cell.cell.value;
+        let row_unique_data = secondary_index_cell.row_unique_data.into();
+        let row_digest = secondary_index_cell.digest(&p.cells_pi());
 
         let child_proof = ProofWithVK::deserialize(&child_proof_buff)?;
         let child_pi = PublicInputs::from_slice(&child_proof.proof.public_inputs);
@@ -390,7 +366,6 @@ mod test {
             value,
             false,
             is_left,
-            mpt_metadata,
             row_unique_data,
             child_proof_buff.clone(),
             p.cells_proof_vk().serialize()?,
@@ -430,38 +405,38 @@ mod test {
         // Check individual digest
         assert_eq!(
             pi.individual_digest_point(),
-            row_digest.individual_vd.to_weierstrass()
+            (row_digest.individual_vd + weierstrass_to_point(&child_pi.individual_digest_point()))
+                .to_weierstrass()
         );
         // Check multiplier digest
         assert_eq!(
             pi.multiplier_digest_point(),
             row_digest.multiplier_vd.to_weierstrass()
         );
-        // Check row ID multiplier
-        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
         // Check minimum value
         assert_eq!(pi.min_value(), value.min(child_min));
         // Check maximum value
         assert_eq!(pi.max_value(), value.max(child_max));
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
 
         Ok(vec![])
     }
 
     fn generate_full_proof(p: &TestParams, child_proof: [Vec<u8>; 2]) -> Result<Vec<u8>> {
-        let row = &p.full;
-        let id = row.cell.identifier;
-        let value = row.cell.value;
-        let mpt_metadata = row.cell.mpt_metadata;
-        let row_unique_data = row.row_unique_data;
-        let row_digest = row.digest(&p.cells_pi());
+        let secondary_index_cell = &p.full;
+        let id = secondary_index_cell.cell.identifier;
+        let value = secondary_index_cell.cell.value;
+        let row_unique_data = secondary_index_cell.row_unique_data.into();
+        let row_digest = secondary_index_cell.digest(&p.cells_pi());
 
         let input = CircuitInput::full(
             id.to_canonical_u64(),
             value,
             false,
-            mpt_metadata,
             row_unique_data,
-            (child_proof[0].to_vec(), child_proof[1].to_vec()),
+            child_proof[0].to_vec(),
+            child_proof[1].to_vec(),
             p.cells_proof_vk().serialize()?,
         )?;
         let left_proof = ProofWithVK::deserialize(&child_proof[0])?;
@@ -496,15 +471,18 @@ mod test {
         // Check individual digest
         assert_eq!(
             pi.individual_digest_point(),
-            row_digest.individual_vd.to_weierstrass()
+            (row_digest.individual_vd
+                + weierstrass_to_point(&left_pi.individual_digest_point())
+                + weierstrass_to_point(&right_pi.individual_digest_point()))
+            .to_weierstrass()
         );
         // Check multiplier digest
         assert_eq!(
             pi.multiplier_digest_point(),
             row_digest.multiplier_vd.to_weierstrass()
         );
-        // Check row ID multiplier
-        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
 
         Ok(proof)
     }
@@ -512,8 +490,7 @@ mod test {
     fn generate_leaf_proof(p: &TestParams, row: &SecondaryIndexCell) -> Result<Vec<u8>> {
         let id = row.cell.identifier;
         let value = row.cell.value;
-        let mpt_metadata = row.cell.mpt_metadata;
-        let row_unique_data = row.row_unique_data;
+        let row_unique_data = row.row_unique_data.into();
         let row_digest = row.digest(&p.cells_pi());
 
         //  generate row leaf proof
@@ -521,7 +498,6 @@ mod test {
             id.to_canonical_u64(),
             value,
             false,
-            mpt_metadata,
             row_unique_data,
             p.cells_proof_vk().serialize()?,
         )?;
@@ -562,12 +538,12 @@ mod test {
             pi.multiplier_digest_point(),
             row_digest.multiplier_vd.to_weierstrass()
         );
-        // Check row ID multiplier
-        assert_eq!(pi.row_id_multiplier(), row_digest.row_id_multiplier);
         // Check minimum value
         assert_eq!(pi.min_value(), value);
         // Check maximum value
         assert_eq!(pi.max_value(), value);
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), row_digest.multiplier_cnt);
 
         Ok(proof)
     }
