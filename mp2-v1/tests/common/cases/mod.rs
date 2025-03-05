@@ -9,7 +9,7 @@ use super::table::Table;
 pub mod contract;
 pub mod indexing;
 pub mod query;
-pub mod storage_slot_value;
+pub mod slot_info;
 pub mod table_source;
 
 /// Test case definition
