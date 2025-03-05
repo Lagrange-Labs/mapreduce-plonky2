@@ -5,11 +5,10 @@ mod leaf;
 mod partial_node;
 mod public_inputs;
 
-use serde::{Deserialize, Serialize};
-
 use alloy::primitives::U256;
 pub use api::{build_circuits_params, extract_hash_from_proof, CircuitInput, PublicParameters};
 use derive_more::Constructor;
+use itertools::Itertools;
 use mp2_common::{
     digest::{Digest, SplitDigestPoint, SplitDigestTarget},
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
@@ -17,15 +16,14 @@ use mp2_common::{
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{ToFields, ToTargets},
-    D, F,
+    F,
 };
+use serde::{Deserialize, Serialize};
+use std::iter::once;
 
-use plonky2::{
-    iop::{
-        target::{BoolTarget, Target},
-        witness::{PartialWitness, WitnessWrite},
-    },
-    plonk::circuit_builder::CircuitBuilder,
+use plonky2::iop::{
+    target::{BoolTarget, Target},
+    witness::{PartialWitness, WitnessWrite},
 };
 use plonky2_ecgfp5::gadgets::curve::CurveTarget;
 pub use public_inputs::PublicInputs;
@@ -43,36 +41,41 @@ pub struct Cell {
 }
 
 impl Cell {
-    pub(crate) fn assign_wires(&self, pw: &mut PartialWitness<F>, wires: &CellWire) {
+    pub(crate) fn assign(&self, pw: &mut PartialWitness<F>, wires: &CellWire) {
         pw.set_u256_target(&wires.value, self.value);
         pw.set_target(wires.identifier, self.identifier);
         pw.set_bool_target(wires.is_multiplier, self.is_multiplier);
     }
-    pub fn digest(&self) -> Digest {
-        map_to_curve_point(&self.to_fields())
+    pub fn is_multiplier(&self) -> bool {
+        self.is_multiplier
     }
-    pub fn split_digest(&self) -> SplitDigestPoint {
-        let digest = self.digest();
+    pub fn is_individual(&self) -> bool {
+        !self.is_multiplier
+    }
+    pub fn split_values_digest(&self) -> SplitDigestPoint {
+        let digest = self.values_digest();
         SplitDigestPoint::from_single_digest_point(digest, self.is_multiplier)
     }
-    pub fn split_and_accumulate_digest(&self, child_digest: SplitDigestPoint) -> SplitDigestPoint {
-        let sd = self.split_digest();
-        sd.accumulate(&child_digest)
+    pub fn split_and_accumulate_values_digest(
+        &self,
+        child_digest: SplitDigestPoint,
+    ) -> SplitDigestPoint {
+        let split_digest = self.split_values_digest();
+        split_digest.accumulate(&child_digest)
     }
-}
-
-impl ToFields<F> for Cell {
-    fn to_fields(&self) -> Vec<F> {
-        [self.identifier]
-            .into_iter()
+    fn values_digest(&self) -> Digest {
+        // D(identifier || pack_u32(value))
+        let inputs = once(self.identifier)
             .chain(self.value.to_fields())
-            .collect()
+            .collect_vec();
+
+        map_to_curve_point(&inputs)
     }
 }
 
 /// The basic wires generated for each circuit of the row tree
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct CellWire {
+pub struct CellWire {
     pub(crate) value: UInt256Target,
     pub(crate) identifier: Target,
     #[serde(serialize_with = "serialize", deserialize_with = "deserialize")]
@@ -80,41 +83,138 @@ pub(crate) struct CellWire {
 }
 
 impl CellWire {
-    pub(crate) fn new(b: &mut CircuitBuilder<F, D>) -> Self {
+    pub fn new(b: &mut CBuilder) -> Self {
         Self {
             value: b.add_virtual_u256(),
             identifier: b.add_virtual_target(),
             is_multiplier: b.add_virtual_bool_target_safe(),
         }
     }
-    /// Returns the digest of the cell
-    pub(crate) fn digest(&self, b: &mut CircuitBuilder<F, D>) -> CurveTarget {
-        b.map_to_curve_point(&self.to_targets())
+    pub fn is_multiplier(&self) -> BoolTarget {
+        self.is_multiplier
     }
-    /// Returns the different digest, multiplier or individual
-    pub(crate) fn split_digest(&self, c: &mut CBuilder) -> SplitDigestTarget {
-        let d = self.digest(c);
-        SplitDigestTarget::from_single_digest_target(c, d, self.is_multiplier)
+    pub fn is_individual(&self, b: &mut CBuilder) -> BoolTarget {
+        b.not(self.is_multiplier)
     }
-    /// Returns the split digest from this cell added with the one from the proof.
-    /// NOTE: it calls agains split_digest, so call that first if you need the individual
-    /// SplitDigestTarget
-    pub(crate) fn split_and_accumulate_digest(
+    pub fn split_values_digest(&self, b: &mut CBuilder) -> SplitDigestTarget {
+        let digest = self.values_digest(b);
+        SplitDigestTarget::from_single_digest_target(b, digest, self.is_multiplier)
+    }
+    pub fn split_and_accumulate_values_digest(
         &self,
-        c: &mut CBuilder,
-        child_digest: SplitDigestTarget,
+        b: &mut CBuilder,
+        child_digest: &SplitDigestTarget,
     ) -> SplitDigestTarget {
-        let sd = self.split_digest(c);
-        sd.accumulate(c, &child_digest)
+        let split_digest = self.split_values_digest(b);
+        split_digest.accumulate(b, child_digest)
+    }
+    fn values_digest(&self, b: &mut CBuilder) -> CurveTarget {
+        // D(identifier || pack_u32(value))
+        let inputs = once(self.identifier)
+            .chain(self.value.to_targets())
+            .collect_vec();
+
+        b.map_to_curve_point(&inputs)
     }
 }
 
-impl ToTargets for CellWire {
-    fn to_targets(&self) -> Vec<Target> {
-        self.identifier
-            .to_targets()
-            .into_iter()
-            .chain(self.value.to_targets())
-            .collect::<Vec<_>>()
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use mp2_common::{
+        types::CURVE_TARGET_LEN,
+        utils::{Fieldable, FromFields},
+        C, D, F,
+    };
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::field::types::Sample;
+    use plonky2_ecgfp5::{
+        curve::curve::Point,
+        gadgets::curve::{CircuitBuilderEcGFp5, PartialWitnessCurve},
+    };
+    use rand::{thread_rng, Rng};
+    use std::array;
+
+    impl Cell {
+        pub(crate) fn sample(is_multiplier: bool) -> Self {
+            let rng = &mut thread_rng();
+
+            let identifier = rng.gen::<u32>().to_field();
+            let value = U256::from_limbs(rng.gen());
+
+            Cell::new(identifier, value, is_multiplier)
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestCellCircuit<'a> {
+        cell: &'a Cell,
+        child_values_digest: &'a SplitDigestPoint,
+    }
+
+    impl UserCircuit<F, D> for TestCellCircuit<'_> {
+        // Cell wire + child values digest + child metadata digest
+        type Wires = (CellWire, SplitDigestTarget);
+
+        fn build(b: &mut CBuilder) -> Self::Wires {
+            let [values_individual, values_multiplier] =
+                array::from_fn(|_| b.add_virtual_curve_target());
+
+            let child_values_digest = SplitDigestTarget {
+                individual: values_individual,
+                multiplier: values_multiplier,
+            };
+
+            let cell = CellWire::new(b);
+            let values_digest = cell.split_and_accumulate_values_digest(b, &child_values_digest);
+
+            b.register_curve_public_input(values_digest.individual);
+            b.register_curve_public_input(values_digest.multiplier);
+
+            (cell, child_values_digest)
+        }
+
+        fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
+            self.cell.assign(pw, &wires.0);
+            pw.set_curve_target(
+                wires.1.individual,
+                self.child_values_digest.individual.to_weierstrass(),
+            );
+            pw.set_curve_target(
+                wires.1.multiplier,
+                self.child_values_digest.multiplier.to_weierstrass(),
+            );
+        }
+    }
+
+    #[test]
+    fn test_cells_tree_cell_circuit() {
+        let rng = &mut thread_rng();
+
+        let [values_individual, values_multiplier] = array::from_fn(|_| Point::sample(rng));
+        let child_values_digest = &SplitDigestPoint {
+            individual: values_individual,
+            multiplier: values_multiplier,
+        };
+
+        let cell = &Cell::sample(rng.gen());
+        let values_digests = cell.split_values_digest();
+        let exp_values_digests = values_digests.accumulate(child_values_digest);
+
+        let test_circuit = TestCellCircuit {
+            cell,
+            child_values_digest,
+        };
+
+        let proof = run_circuit::<F, D, C, _>(test_circuit);
+
+        let [values_individual, values_multiplier] = array::from_fn(|i| {
+            Point::from_fields(
+                &proof.public_inputs[i * CURVE_TARGET_LEN..(i + 1) * CURVE_TARGET_LEN],
+            )
+        });
+
+        assert_eq!(values_individual, exp_values_digests.individual);
+        assert_eq!(values_multiplier, exp_values_digests.multiplier);
     }
 }

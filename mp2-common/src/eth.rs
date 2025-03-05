@@ -2,15 +2,17 @@
 //! such as fetching blocks, transactions, creating MPTs, getting proofs, etc.
 use alloy::{
     eips::BlockNumberOrTag,
-    primitives::{Address, B256},
+    primitives::{Address, B256, U256},
     providers::{Provider, RootProvider},
     rlp::Encodable as AlloyEncodable,
     rpc::types::{Block, EIP1186AccountProofResponse},
     transports::Transport,
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use eth_trie::{EthTrie, MemoryDB, Trie};
 use ethereum_types::H256;
+use itertools::Itertools;
+use log::debug;
 use log::warn;
 use rlp::Rlp;
 use serde::{Deserialize, Serialize};
@@ -49,6 +51,43 @@ pub fn extract_child_hashes(rlp_data: &[u8]) -> Vec<Vec<u8>> {
         }
     }
     hashes
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
+pub enum NodeType {
+    Branch,
+    Extension,
+    Leaf,
+}
+
+/// Function that returns the [`NodeType`] of an RLP encoded MPT node
+pub fn node_type(rlp_data: &[u8]) -> Result<NodeType> {
+    let rlp = Rlp::new(rlp_data);
+
+    let item_count = rlp.item_count()?;
+
+    if item_count == 17 {
+        Ok(NodeType::Branch)
+    } else if item_count == 2 {
+        // The first item is the encoded path, if it begins with a 2 or 3 it is a leaf, else it is an extension node
+        let first_item = rlp.at(0)?;
+
+        // We want the first byte
+        let first_byte = first_item.as_raw()[0];
+
+        // The we divide by 16 to get the first nibble
+        match first_byte / 16 {
+            0 | 1 => Ok(NodeType::Extension),
+            2 | 3 => Ok(NodeType::Leaf),
+            _ => Err(anyhow!(
+                "Expected compact encoding beginning with 0,1,2 or 3".to_string(),
+            )),
+        }
+    } else {
+        Err(anyhow!(
+            "RLP encoded Node item count was {item_count}, expected either 17 or 2"
+        ))
+    }
 }
 
 pub fn left_pad32(slice: &[u8]) -> [u8; 32] {
@@ -111,7 +150,50 @@ pub struct ProofQuery {
     pub(crate) slot: StorageSlot,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Represent an intermediate or leaf node of a storage slot in contract.
+///
+/// It has a `parent` node, and its ancestor (root) must be a simple or mapping slot.
+/// Any intermediate nodes could be represented as:
+/// - For mapping entry, it has a parent node and the mapping key.
+/// - For Struct entry, it has a parent node and the EVM offset.
+// NOTE: This is not strict, since the parent of a Slot mapping entry must type of
+// mapping (cannot be a Struct).
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum StorageSlotNode {
+    /// Mapping entry including a parent node and the mapping key
+    Mapping(Box<StorageSlot>, Vec<u8>),
+    /// Struct entry including a parent node and EVM offset
+    Struct(Box<StorageSlot>, u32),
+}
+
+impl StorageSlotNode {
+    pub fn new_mapping(parent: StorageSlot, mapping_key: Vec<u8>) -> Result<Self> {
+        let parent = Box::new(parent);
+        if !matches!(
+            *parent,
+            StorageSlot::Mapping(_, _) | StorageSlot::Node(Self::Mapping(_, _))
+        ) {
+            bail!("The parent of a Slot mapping entry must be type of mapping");
+        }
+
+        Ok(Self::Mapping(parent, mapping_key))
+    }
+
+    pub fn new_struct(parent: StorageSlot, evm_offset: u32) -> Self {
+        let parent = Box::new(parent);
+
+        Self::Struct(parent, evm_offset)
+    }
+
+    pub fn parent(&self) -> &StorageSlot {
+        match self {
+            Self::Mapping(parent, _) => parent,
+            Self::Struct(parent, _) => parent,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum StorageSlot {
     /// simple storage slot like a uin256 etc that fits in 32bytes
     /// Argument is the slot location in the contract
@@ -121,12 +203,26 @@ pub enum StorageSlot {
     /// Second argument is the slot location inthe contract
     /// (mapping_key, mapping_slot)
     Mapping(Vec<u8>, usize),
+    /// Represent an intermediate or leaf node of a storage slot in contract.
+    /// It has a `parent` node, and its ancestor (root) must be a simple or mapping slot.
+    Node(StorageSlotNode),
 }
+
 impl StorageSlot {
     pub fn slot(&self) -> u8 {
         match self {
             StorageSlot::Simple(slot) => *slot as u8,
             StorageSlot::Mapping(_, slot) => *slot as u8,
+            StorageSlot::Node(node) => node.parent().slot(),
+        }
+    }
+    pub fn evm_offset(&self) -> u32 {
+        match self {
+            // Only the Struct storage has the EVM offset.
+            StorageSlot::Node(StorageSlotNode::Struct(_, evm_offset)) => *evm_offset,
+            StorageSlot::Simple(_)
+            | StorageSlot::Mapping(_, _)
+            | StorageSlot::Node(StorageSlotNode::Mapping(_, _)) => 0,
         }
     }
     pub fn location(&self) -> B256 {
@@ -136,11 +232,31 @@ impl StorageSlot {
                 // H( pad32(address), pad32(mapping_slot))
                 let padded_mkey = left_pad32(mapping_key);
                 let padded_slot = left_pad32(&[*mapping_slot as u8]);
-                let concat = padded_mkey
+                let inputs = padded_mkey.into_iter().chain(padded_slot).collect_vec();
+                B256::from_slice(&keccak256(&inputs))
+            }
+            StorageSlot::Node(StorageSlotNode::Mapping(parent, mapping_key)) => {
+                // location = keccak256(left_pad32(mapping_key) || parent_location)
+                let padded_mapping_key = left_pad32(mapping_key);
+                let parent_location = parent.location();
+                let inputs = padded_mapping_key
                     .into_iter()
-                    .chain(padded_slot)
-                    .collect::<Vec<_>>();
-                B256::from_slice(&keccak256(&concat))
+                    .chain(parent_location.0)
+                    .collect_vec();
+                B256::from_slice(&keccak256(&inputs))
+            }
+            StorageSlot::Node(StorageSlotNode::Struct(parent, evm_offset)) => {
+                // location = parent_location + evm_offset
+                let parent_location = U256::from_be_slice(parent.location().as_slice());
+                let location: [_; U256::BYTES] = parent_location
+                    .checked_add(U256::from(*evm_offset))
+                    .unwrap()
+                    .to_be_bytes();
+                debug!(
+                    "Storage slot struct: parent_location = {}, evm_offset = {}",
+                    parent_location, evm_offset,
+                );
+                B256::from_slice(&location)
             }
         }
     }
@@ -158,10 +274,31 @@ impl StorageSlot {
         match self {
             StorageSlot::Simple(_) => true,
             StorageSlot::Mapping(_, _) => false,
+            StorageSlot::Node(node) => node.parent().is_simple_slot(),
+        }
+    }
+    /// Get the mapping key path from the outer key to the inner.
+    pub fn mapping_keys(&self) -> Vec<Vec<u8>> {
+        match self {
+            StorageSlot::Simple(_) => vec![],
+            StorageSlot::Mapping(mapping_key, _) => {
+                vec![mapping_key.clone()]
+            }
+            StorageSlot::Node(StorageSlotNode::Mapping(parent, mapping_key)) => {
+                // [parent_mapping_keys || mapping_key]
+                let mut mapping_keys = parent.mapping_keys();
+                mapping_keys.push(mapping_key.clone());
+
+                mapping_keys
+            }
+            StorageSlot::Node(StorageSlotNode::Struct(parent, _)) => parent.mapping_keys(),
         }
     }
 }
 impl ProofQuery {
+    pub fn new(contract: Address, slot: StorageSlot) -> Self {
+        Self { contract, slot }
+    }
     pub fn new_simple_slot(address: Address, slot: usize) -> Self {
         Self {
             contract: address,
@@ -181,8 +318,14 @@ impl ProofQuery {
     ) -> Result<EIP1186AccountProofResponse> {
         // Query the MPT proof with retries.
         for i in 0..RETRY_NUM {
+            let location = self.slot.location();
+            debug!(
+                "Querying MPT proof:\n\tslot = {:?}, location = {:?}",
+                self.slot,
+                U256::from_be_slice(location.as_slice()),
+            );
             match provider
-                .get_proof(self.contract, vec![self.slot.location()])
+                .get_proof(self.contract, vec![location])
                 .block_id(block.into())
                 .await
             {
@@ -281,7 +424,7 @@ mod test {
         types::MAX_BLOCK_LEN,
         utils::{Endianness, Packer},
     };
-    use mp2_test::eth::get_sepolia_url;
+    use mp2_test::eth::{get_mainnet_url, get_sepolia_url};
 
     #[tokio::test]
     #[ignore]
@@ -418,6 +561,39 @@ mod test {
         let state_sizes = analyze(res.account_proof.clone());
         println!("storage_sizes = {:?}", storage_sizes);
         println!("state_sizes = {:?}", state_sizes);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_pidgy_pinguin_mapping_slot() -> Result<()> {
+        // first pinguin holder https://dune.com/queries/2450476/4027653
+        // holder: 0x188b264aa1456b869c3a92eeed32117ebb835f47
+        // NFT id https://opensea.io/assets/ethereum/0xbd3531da5cf5857e7cfaa92426877b022e612cf8/1116
+        let mapping_value =
+            Address::from_str("0xee5ac9c6db07c26e71207a41e64df42e1a2b05cf").unwrap();
+        let nft_id: u32 = 1116;
+        let mapping_key = left_pad32(&nft_id.to_be_bytes());
+        let url = get_mainnet_url();
+        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+
+        // extracting from
+        // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol
+        // assuming it's using ERC731Enumerable that inherits ERC721
+        let mapping_slot = 2;
+        // pudgy pinguins
+        let pudgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
+        let query = ProofQuery::new_mapping_slot(pudgy_address, mapping_slot, mapping_key.to_vec());
+        let res = query
+            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .await?;
+        let raw_address = ProofQuery::verify_storage_proof(&res)?;
+        // the value is actually RLP encoded !
+        let decoded_address: Vec<u8> = rlp::decode(&raw_address).unwrap();
+        let leaf_node: Vec<Vec<u8>> = rlp::decode_list(res.storage_proof[0].proof.last().unwrap());
+        println!("leaf_node[1].len() = {}", leaf_node[1].len());
+        // this is read in the same order
+        let found_address = Address::from_slice(&decoded_address.into_iter().collect::<Vec<u8>>());
+        assert_eq!(found_address, mapping_value);
         Ok(())
     }
 
