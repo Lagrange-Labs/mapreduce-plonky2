@@ -838,6 +838,15 @@ impl From<Array<U32Target, NUM_LIMBS>> for UInt256Target {
     }
 }
 
+impl From<UInt256Target> for Array<U32Target, NUM_LIMBS> {
+    fn from(value: UInt256Target) -> Self {
+        let mut arr = value.0;
+        arr.reverse();
+
+        Self::from_array(arr)
+    }
+}
+
 impl<'a> From<&'a UInt256Target> for Vec<Target> {
     fn from(value: &'a UInt256Target) -> Self {
         value.0.iter().map(|u32_t| u32_t.0).rev().collect_vec()

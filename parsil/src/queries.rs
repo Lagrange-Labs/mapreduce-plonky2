@@ -3,42 +3,48 @@
 
 use crate::{keys_in_index_boundaries, symbols::ContextProvider, ParsilSettings};
 use anyhow::*;
-use ryhope::{tree::sbbst::NodeIdx, Epoch, EPOCH, KEY, VALID_FROM, VALID_UNTIL};
+use ryhope::{
+    mapper_table_name, tree::sbbst::NodeIdx, UserEpoch, EPOCH, INCREMENTAL_EPOCH, KEY, USER_EPOCH,
+};
 use verifiable_db::query::{
     universal_circuit::universal_circuit_inputs::Placeholders, utils::QueryBounds,
 };
 
-/// Return a query read to be injected in the wide lineage computation for the
+/// Return a query ready to be injected in the wide lineage computation for the
 /// index tree.
 ///
 ///  * execution_epoch: the epoch (block number) at which the query is executed;
 ///  * query_epoch_bounds: the min. and max. block numbers onto which the query
-///    is executed.
+///    is executed;
+///  * table_name: the name of the index tree table over which the query is executed;
 pub fn core_keys_for_index_tree(
-    execution_epoch: Epoch,
+    execution_epoch: UserEpoch,
     query_epoch_bounds: (NodeIdx, NodeIdx),
+    table_name: &str,
 ) -> Result<String> {
     let (query_min_block, query_max_block) = query_epoch_bounds;
-    ensure!(
-        query_max_block as i64 <= execution_epoch,
-        "query can not be executed in the past ({} < {})",
-        execution_epoch,
-        query_max_block
-    );
 
-    // Integer default to i32 in PgSQL, they must be cast to i64, a.k.a. BIGINT.
-    Ok(format!(
-        "SELECT {}::BIGINT as {EPOCH},
-                generate_series(
-                    GREATEST((SELECT MIN({VALID_FROM}))::BIGINT, {}::BIGINT),
-                    LEAST((SELECT MAX({VALID_UNTIL}))::BIGINT, {}::BIGINT)) AS {KEY}",
-        execution_epoch,
+    let mapper_table_name = mapper_table_name(table_name);
+
+    let (lower_epoch, higher_epoch) = (
         query_min_block,
         query_max_block.min(
             execution_epoch
                 .try_into()
-                .with_context(|| format!("unable to convert {} to i64", execution_epoch))?
-        )
+                .with_context(|| format!("unable to convert {} to i64", execution_epoch))?,
+        ),
+    );
+
+    // Integer default to i32 in PgSQL, they must be cast to i64, a.k.a. BIGINT.
+    Ok(format!(
+        "
+            SELECT {execution_epoch}::BIGINT as {EPOCH},
+            {USER_EPOCH} as {KEY}
+            FROM {mapper_table_name}
+            WHERE {USER_EPOCH} >= {lower_epoch}::BIGINT AND {USER_EPOCH} <= {higher_epoch}::BIGINT
+                AND NOT {INCREMENTAL_EPOCH} = 0  
+            ORDER BY {USER_EPOCH}
+        "
     ))
 }
 

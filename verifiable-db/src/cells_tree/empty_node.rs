@@ -23,11 +23,14 @@ impl EmptyNodeCircuit {
         let empty_hash = empty_poseidon_hash();
         let h = b.constant_hash(*empty_hash).elements;
 
-        // dc = CURVE_ZERO
-        let dc = b.curve_zero().to_targets();
+        // ZERO
+        let zero = b.zero();
+
+        // CURVE_ZERO
+        let curve_zero = b.curve_zero().to_targets();
 
         // Register the public inputs.
-        PublicInputs::new(&h, &dc, &dc).register(b);
+        PublicInputs::new(&h, &curve_zero, &curve_zero, &zero, &zero).register(b);
 
         EmptyNodeWires
     }
@@ -39,7 +42,7 @@ impl CircuitLogicWires<F, D, 0> for EmptyNodeWires {
 
     type Inputs = EmptyNodeCircuit;
 
-    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
+    const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::total_len();
 
     fn circuit_logic(
         builder: &mut CBuilder,
@@ -59,6 +62,7 @@ mod tests {
     use super::*;
     use mp2_common::C;
     use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::field::types::Field;
     use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
 
     impl UserCircuit<F, D> for EmptyNodeCircuit {
@@ -81,9 +85,19 @@ mod tests {
             let empty_hash = empty_poseidon_hash();
             assert_eq!(pi.h, empty_hash.elements);
         }
-        // Check the cells digest
-        {
-            assert_eq!(pi.individual_digest_point(), WeierstrassPoint::NEUTRAL);
-        }
+        // Check individual values digest
+        assert_eq!(
+            pi.individual_values_digest_point(),
+            WeierstrassPoint::NEUTRAL
+        );
+        // Check multiplier values digest
+        assert_eq!(
+            pi.multiplier_values_digest_point(),
+            WeierstrassPoint::NEUTRAL
+        );
+        // Check individual counter
+        assert_eq!(pi.individual_counter(), F::ZERO);
+        // Check multiplier counter
+        assert_eq!(pi.multiplier_counter(), F::ZERO);
     }
 }

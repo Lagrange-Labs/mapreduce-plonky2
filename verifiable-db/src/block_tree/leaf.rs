@@ -2,7 +2,7 @@
 //! an existing node (or if there is no existing node, which happens for the
 //! first block number).
 
-use super::{compute_index_digest, public_inputs::PublicInputs};
+use super::{compute_final_digest_target, compute_index_digest, public_inputs::PublicInputs};
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
@@ -10,7 +10,6 @@ use crate::{
 use anyhow::Result;
 use mp2_common::{
     default_config,
-    group_hashing::CircuitBuilderGroupHashing,
     poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -55,14 +54,11 @@ impl LeafCircuit {
 
         let extraction_pi = E::PI::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
+        let final_digest = compute_final_digest_target::<E>(b, &extraction_pi, &rows_tree_pi);
 
         // in our case, the extraction proofs extracts from the blockchain and sets
         // the block number as the primary index
         let index_value = extraction_pi.primary_index_value();
-
-        // Enforce that the data extracted from the blockchain is the same as the data
-        // employed to build the rows tree for this node.
-        b.connect_curve_points(extraction_pi.value_set_digest(), rows_tree_pi.rows_digest());
 
         // Compute the hash of table metadata, to be exposed as public input to prove to
         // the verifier that we extracted the correct storage slots and we place the data
@@ -82,7 +78,7 @@ impl LeafCircuit {
         let inputs = iter::once(index_identifier)
             .chain(index_value.iter().cloned())
             .collect();
-        let node_digest = compute_index_digest(b, inputs, rows_tree_pi.rows_digest());
+        let node_digest = compute_index_digest(b, inputs, final_digest);
 
         // Compute hash of the inserted node
         // node_min = block_number
@@ -100,12 +96,6 @@ impl LeafCircuit {
             .cloned()
             .collect();
         let h_new = b.hash_n_to_hash_no_pad::<CHasher>(inputs).to_targets();
-
-        // check that the rows tree built is for a merged table iff we extract data from MPT for a merged table
-        b.connect(
-            rows_tree_pi.is_merge_case().target,
-            extraction_pi.is_merge_case().target,
-        );
 
         // Register the public inputs.
         PublicInputs::new(
@@ -170,7 +160,7 @@ where
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::TOTAL_LEN;
+        const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::total_len();
 
         let extraction_verifier =
             RecursiveCircuitsVerifierGagdet::<F, C, D, { E::PI::TOTAL_LEN }>::new(
@@ -212,29 +202,24 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{
-        block_tree::tests::{TestPIField, TestPITargets},
-        extraction,
-    };
-
     use super::{
         super::tests::{random_extraction_pi, random_rows_tree_pi},
         *,
+    };
+    use crate::{
+        block_tree::{
+            compute_final_digest,
+            tests::{TestPIField, TestPITargets},
+        },
+        extraction,
     };
     use alloy::primitives::U256;
     use mp2_common::{
         poseidon::{hash_to_int_value, H},
         utils::{Fieldable, ToFields},
     };
-    use mp2_test::{
-        circuit::{run_circuit, UserCircuit},
-        utils::weierstrass_to_point,
-    };
-    use plonky2::{
-        field::types::{Field, Sample},
-        hash::hash_types::HashOut,
-        plonk::config::Hasher,
-    };
+    use mp2_test::circuit::{run_circuit, UserCircuit};
+    use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
     use rand::{thread_rng, Rng};
 
@@ -252,6 +237,7 @@ pub mod tests {
     }
 
     pub fn compute_expected_set_digest(
+        is_merge_case: bool,
         identifier: F,
         value: Vec<F>,
         rows_tree_pi: row_tree::PublicInputs<F>,
@@ -262,8 +248,7 @@ pub mod tests {
         let hash = H::hash_no_pad(&inputs);
         let int = hash_to_int_value(hash);
         let scalar = Scalar::from_noncanonical_biguint(int);
-        let point = rows_tree_pi.rows_digest_field();
-        let point = weierstrass_to_point(&point);
+        let point = compute_final_digest(is_merge_case, &rows_tree_pi);
         point * scalar
     }
     #[derive(Clone, Debug)]
@@ -279,7 +264,7 @@ pub mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let extraction_pi = b.add_virtual_targets(TestPITargets::TOTAL_LEN);
-            let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::TOTAL_LEN);
+            let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::total_len());
 
             let leaf_wires = LeafCircuit::build::<TestPITargets>(b, &extraction_pi, &rows_tree_pi);
 
@@ -292,21 +277,34 @@ pub mod tests {
             assert_eq!(wires.1.len(), TestPITargets::TOTAL_LEN);
             pw.set_target_arr(&wires.1, self.extraction_pi);
 
-            assert_eq!(wires.2.len(), row_tree::PublicInputs::<Target>::TOTAL_LEN);
+            assert_eq!(wires.2.len(), row_tree::PublicInputs::<Target>::total_len());
             pw.set_target_arr(&wires.2, self.rows_tree_pi);
         }
     }
 
     #[test]
     fn test_block_index_leaf_circuit() {
+        test_leaf_circuit(true);
+        test_leaf_circuit(false);
+    }
+
+    fn test_leaf_circuit(is_merge_case: bool) {
         let mut rng = thread_rng();
 
         let block_id = rng.gen::<u32>().to_field();
         let block_number = U256::from_limbs(rng.gen::<[u64; 4]>());
 
-        let row_digest = Point::sample(&mut rng).to_weierstrass().to_fields();
-        let extraction_pi = &random_extraction_pi(&mut rng, block_number, &row_digest, false);
-        let rows_tree_pi = &random_rows_tree_pi(&mut rng, &row_digest, false);
+        let rows_tree_pi = &random_rows_tree_pi(&mut rng, is_merge_case);
+        let final_digest = compute_final_digest(
+            is_merge_case,
+            &row_tree::PublicInputs::from_slice(rows_tree_pi),
+        );
+        let extraction_pi = &random_extraction_pi(
+            &mut rng,
+            block_number,
+            &final_digest.to_fields(),
+            is_merge_case,
+        );
 
         let test_circuit = TestLeafCircuit {
             c: LeafCircuit {
@@ -372,8 +370,12 @@ pub mod tests {
         }
         // Check new node digest
         {
-            let exp_digest =
-                compute_expected_set_digest(block_id, block_number.to_vec(), rows_tree_pi);
+            let exp_digest = compute_expected_set_digest(
+                is_merge_case,
+                block_id,
+                block_number.to_vec(),
+                rows_tree_pi,
+            );
             assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
         }
     }

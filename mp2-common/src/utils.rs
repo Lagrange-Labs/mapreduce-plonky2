@@ -12,15 +12,20 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::VerifierCircuitData;
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher};
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
+use plonky2_ecdsa::gadgets::biguint::BigUintTarget;
 
 use plonky2_ecgfp5::gadgets::{base_field::QuinticExtensionTarget, curve::CurveTarget};
 use sha3::Digest;
 use sha3::Keccak256;
 
-use crate::array::Targetable;
-use crate::poseidon::{HashableField, H};
 use crate::serialization::circuit_data_serialization::SerializableRichField;
-use crate::{group_hashing::EXTENSION_DEGREE, types::HashOutput, ProofTuple};
+use crate::{
+    array::Targetable,
+    group_hashing::EXTENSION_DEGREE,
+    poseidon::{HashableField, H},
+    types::HashOutput,
+    ProofTuple,
+};
 
 const TWO_POWER_8: usize = 256;
 const TWO_POWER_16: usize = 65536;
@@ -398,6 +403,7 @@ impl<F: RichField> ToFields<F> for HashOut<F> {
         self.elements.to_vec()
     }
 }
+
 pub trait Fieldable<F: RichField> {
     fn to_field(&self) -> F;
 }
@@ -468,6 +474,12 @@ impl ToTargets for Vec<Target> {
 impl ToTargets for &[Target] {
     fn to_targets(&self) -> Vec<Target> {
         self.to_vec()
+    }
+}
+
+impl ToTargets for BigUintTarget {
+    fn to_targets(&self) -> Vec<Target> {
+        self.limbs.iter().map(|u| u.0).collect()
     }
 }
 
@@ -552,6 +564,7 @@ pub trait PackableRichField: RichField {}
 
 impl PackableRichField for GoldilocksField {}
 
+#[derive(Clone, Copy, Debug)]
 pub enum Endianness {
     Big,
     Little,
@@ -793,7 +806,6 @@ impl<F: RichField + Extendable<D>, const D: usize> SliceConnector for CircuitBui
 
 #[cfg(test)]
 mod test {
-
     use super::{bits_to_num, Packer, ToFields};
     use crate::utils::{
         greater_than, greater_than_or_equal_to, less_than, less_than_or_equal_to, num_to_bits,
@@ -808,7 +820,6 @@ mod test {
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
-
     use rand::{thread_rng, Rng, RngCore};
 
     #[test]

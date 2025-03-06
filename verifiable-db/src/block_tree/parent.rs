@@ -1,7 +1,7 @@
 //! This circuit is employed when the new node is inserted as parent of an existing node,
 //! referred to as old node.
 
-use super::{compute_index_digest, public_inputs::PublicInputs};
+use super::{compute_final_digest_target, compute_index_digest, public_inputs::PublicInputs};
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
@@ -10,7 +10,6 @@ use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     default_config,
-    group_hashing::CircuitBuilderGroupHashing,
     poseidon::{empty_poseidon_hash, H},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
@@ -84,12 +83,9 @@ impl ParentCircuit {
 
         let extraction_pi = E::PI::from_slice(extraction_pi);
         let rows_tree_pi = row_tree::PublicInputs::<Target>::from_slice(rows_tree_pi);
+        let final_digest = compute_final_digest_target::<E>(b, &extraction_pi, &rows_tree_pi);
 
         let block_number = extraction_pi.primary_index_value();
-
-        // Enforce that the data extracted from the blockchain is the same as the data
-        // employed to build the rows tree for this node.
-        b.connect_curve_points(extraction_pi.value_set_digest(), rows_tree_pi.rows_digest());
 
         // Compute the hash of table metadata, to be exposed as public input to prove to
         // the verifier that we extracted the correct storage slots and we place the data
@@ -110,7 +106,7 @@ impl ParentCircuit {
         let inputs = iter::once(index_identifier)
             .chain(block_number.iter().cloned())
             .collect();
-        let node_digest = compute_index_digest(b, inputs, rows_tree_pi.rows_digest());
+        let node_digest = compute_index_digest(b, inputs, final_digest);
 
         // We recompute the hash of the old node to bind the `old_min` and `old_max`
         // values to the hash of the old tree.
@@ -151,12 +147,6 @@ impl ParentCircuit {
             .chain(rows_tree_pi.h.iter().cloned())
             .collect();
         let h_new = b.hash_n_to_hash_no_pad::<CHasher>(inputs).elements;
-
-        // check that the rows tree built is for a merged table iff we extract data from MPT for a merged table
-        b.connect(
-            rows_tree_pi.is_merge_case().target,
-            extraction_pi.is_merge_case().target,
-        );
 
         // Register the public inputs.
         PublicInputs::new(
@@ -236,7 +226,7 @@ where
         _verified_proofs: [&ProofWithPublicInputsTarget<D>; 0],
         builder_parameters: Self::CircuitBuilderParams,
     ) -> Self {
-        const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::TOTAL_LEN;
+        const ROWS_TREE_IO: usize = row_tree::PublicInputs::<Target>::total_len();
 
         let extraction_verifier =
             RecursiveCircuitsVerifierGagdet::<F, C, D, { E::PI::TOTAL_LEN }>::new(
@@ -280,6 +270,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::block_tree::{
+        compute_final_digest,
         leaf::tests::{compute_expected_hash, compute_expected_set_digest},
         tests::{TestPIField, TestPITargets},
     };
@@ -296,10 +287,7 @@ mod tests {
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
-    use plonky2::{
-        field::types::Sample, hash::hash_types::NUM_HASH_OUT_ELTS, plonk::config::Hasher,
-    };
-    use plonky2_ecgfp5::curve::curve::Point;
+    use plonky2::{hash::hash_types::NUM_HASH_OUT_ELTS, plonk::config::Hasher};
     use rand::{thread_rng, Rng};
 
     #[derive(Clone, Debug)]
@@ -315,7 +303,7 @@ mod tests {
 
         fn build(b: &mut CBuilder) -> Self::Wires {
             let extraction_pi = b.add_virtual_targets(TestPITargets::TOTAL_LEN);
-            let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::TOTAL_LEN);
+            let rows_tree_pi = b.add_virtual_targets(row_tree::PublicInputs::<Target>::total_len());
 
             let parent_wires =
                 ParentCircuit::build::<TestPITargets>(b, &extraction_pi, &rows_tree_pi);
@@ -329,25 +317,36 @@ mod tests {
             assert_eq!(wires.1.len(), TestPITargets::TOTAL_LEN);
             pw.set_target_arr(&wires.1, self.extraction_pi);
 
-            assert_eq!(wires.2.len(), row_tree::PublicInputs::<Target>::TOTAL_LEN);
+            assert_eq!(wires.2.len(), row_tree::PublicInputs::<Target>::total_len());
             pw.set_target_arr(&wires.2, self.rows_tree_pi);
         }
     }
 
     #[test]
     fn test_block_index_parent_circuit() {
+        test_parent_circuit(true);
+        test_parent_circuit(false);
+    }
+
+    fn test_parent_circuit(is_merge_case: bool) {
         let mut rng = thread_rng();
 
         let index_identifier = rng.gen::<u32>().to_field();
-        let [old_index_value, old_min, old_max] =
-            [0; 3].map(|_| U256::from_limbs(rng.gen::<[u64; 4]>()));
+        let [old_index_value, old_min, old_max] = [0; 3].map(|_| U256::from_limbs(rng.gen()));
         let [left_child, right_child, old_rows_tree_hash] =
             [0; 3].map(|_| HashOut::from_vec(random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields()));
 
-        let row_digest = Point::sample(&mut rng).to_weierstrass().to_fields();
-        let extraction_pi =
-            &random_extraction_pi(&mut rng, old_max + U256::from(1), &row_digest, true);
-        let rows_tree_pi = &random_rows_tree_pi(&mut rng, &row_digest, true);
+        let rows_tree_pi = &random_rows_tree_pi(&mut rng, is_merge_case);
+        let final_digest = compute_final_digest(
+            is_merge_case,
+            &row_tree::PublicInputs::from_slice(rows_tree_pi),
+        );
+        let extraction_pi = &random_extraction_pi(
+            &mut rng,
+            old_max + U256::from(1),
+            &final_digest.to_fields(),
+            is_merge_case,
+        );
 
         let test_circuit = TestParentCircuit {
             c: ParentCircuit {
@@ -433,8 +432,12 @@ mod tests {
         }
         // Check new node digest
         {
-            let exp_digest =
-                compute_expected_set_digest(index_identifier, block_number.to_vec(), rows_tree_pi);
+            let exp_digest = compute_expected_set_digest(
+                is_merge_case,
+                index_identifier,
+                block_number.to_vec(),
+                rows_tree_pi,
+            );
 
             assert_eq!(pi.new_value_set_digest_point(), exp_digest.to_weierstrass());
         }

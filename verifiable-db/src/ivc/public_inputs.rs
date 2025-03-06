@@ -1,13 +1,15 @@
 use alloy::primitives::U256;
+use itertools::Itertools;
 use mp2_common::{
     keccak::PACKED_HASH_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::CURVE_TARGET_LEN,
+    types::{HashOutput, CURVE_TARGET_LEN},
     u256::{self, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
     F,
 };
 use plonky2::{
+    field::types::PrimeField64,
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
     iop::target::Target,
 };
@@ -143,6 +145,15 @@ impl PublicInputs<'_, F> {
 
     pub fn block_hash_fields(&self) -> [F; PACKED_HASH_LEN] {
         create_array(|i| self.o[i])
+    }
+
+    pub fn block_hash_output(&self) -> HashOutput {
+        let hash_bytes = self
+            .block_hash_fields()
+            .into_iter()
+            .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
+            .collect_vec();
+        HashOutput::try_from(hash_bytes).unwrap()
     }
 
     pub fn to_vec(&self) -> Vec<F> {
