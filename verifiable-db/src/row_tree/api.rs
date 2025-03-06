@@ -162,6 +162,7 @@ type CellsProof = (Vec<u8>, RecursiveCircuits<F, C, D>);
 
 /// Enum holding all the inputs necessary to generate
 /// rows tree related proofs
+#[derive(Serialize, Deserialize)]
 pub enum CircuitInput {
     Leaf {
         witness: leaf::LeafCircuit,

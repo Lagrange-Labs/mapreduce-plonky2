@@ -80,6 +80,7 @@ pub enum TableRowUniqueID {
     Single,
     Mapping(ColumnID),
     MappingOfMappings(ColumnID, ColumnID),
+    OffChain(Vec<ColumnID>),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

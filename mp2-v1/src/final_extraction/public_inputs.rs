@@ -110,8 +110,7 @@ impl PublicInputs<'_, F> {
     pub fn block_number(&self) -> u64 {
         U256::from_fields(self.bn).to()
     }
-    /// Get the merge flag
-    pub fn merge_flag(&self) -> bool {
+    pub fn is_merge_case(&self) -> bool {
         self.merge[0].try_into_bool().unwrap()
     }
 }
