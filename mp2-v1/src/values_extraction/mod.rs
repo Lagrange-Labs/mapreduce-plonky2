@@ -1,5 +1,6 @@
 use crate::api::SlotInput;
 use alloy::primitives::Address;
+use anyhow::{ensure, Result};
 use gadgets::{
     column_gadget::{filter_table_column_identifiers, ColumnGadgetData},
     column_info::ColumnInfo,
@@ -9,7 +10,7 @@ use itertools::Itertools;
 use mp2_common::{
     eth::{left_pad32, StorageSlot},
     group_hashing::map_to_curve_point,
-    poseidon::{empty_poseidon_hash, hash_to_int_value, H},
+    poseidon::{hash_to_int_value, H},
     types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
     F,
@@ -21,7 +22,7 @@ use plonky2::{
 };
 use plonky2_ecgfp5::curve::{curve::Point as Digest, scalar_field::Scalar};
 use serde::{Deserialize, Serialize};
-use std::iter::once;
+use std::{fmt::Debug, iter::once};
 
 pub mod api;
 mod branch;
@@ -35,6 +36,8 @@ pub mod public_inputs;
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
 pub use public_inputs::PublicInputs;
 
+use crate::indexing::row::CellCollection;
+
 /// Constant prefixes for the mapping key ID. Restrict to 4-bytes (Uint32).
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"\0KEY";
 
@@ -44,6 +47,16 @@ pub(crate) const INNER_KEY_ID_PREFIX: &[u8] = b"\0\0IN_KEY";
 pub(crate) const OUTER_KEY_ID_PREFIX: &[u8] = b"\0OUT_KEY";
 
 pub(crate) const BLOCK_ID_DST: &[u8] = b"BLOCK_NUMBER";
+pub(crate) const OFFCHAIN_TABLE_DST: &str = "OFFCHAIN_TABLE";
+
+/// Compute the identifier for a column of a table containing off-chain data
+pub fn identifier_offchain_column(table_name: &str, column_name: &str) -> u64 {
+    let inputs: Vec<F> = vec![OFFCHAIN_TABLE_DST, table_name, column_name]
+        .into_iter()
+        .flat_map(|name| name.as_bytes().to_fields())
+        .collect_vec();
+    H::hash_no_pad(&inputs).elements[0].to_canonical_u64()
+}
 
 /// Storage slot information for generating the extraction proof
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -284,18 +297,12 @@ fn compute_id_with_prefix_raw(prefix: &[u8], slot: u8, extra: Vec<u8>) -> Column
 
 /// Compute the row unique data for single leaf.
 pub fn row_unique_data_for_single_leaf() -> HashOutput {
-    empty_poseidon_hash().into()
+    row_unique_data(vec![])
 }
 
 /// Compute the row unique data for mapping leaf.
 pub fn row_unique_data_for_mapping_leaf(mapping_key: &[u8]) -> HashOutput {
-    // row_unique_data = H(pack(left_pad32(key))
-    let packed_mapping_key = left_pad32(mapping_key)
-        .pack(Endianness::Big)
-        .into_iter()
-        .map(F::from_canonical_u32)
-        .collect_vec();
-    H::hash_no_pad(&packed_mapping_key).into()
+    row_unique_data(vec![mapping_key])
 }
 
 /// Compute the row unique data for mapping of mappings leaf.
@@ -303,16 +310,7 @@ pub fn row_unique_data_for_mapping_of_mappings_leaf(
     outer_mapping_key: &[u8],
     inner_mapping_key: &[u8],
 ) -> HashOutput {
-    let [packed_outer_key, packed_inner_key] = [outer_mapping_key, inner_mapping_key].map(|key| {
-        left_pad32(key)
-            .pack(Endianness::Big)
-            .into_iter()
-            .map(F::from_canonical_u32)
-    });
-    // Compute the unique data to identify a row is the mapping key:
-    // row_unique_data = H(outer_key || inner_key)
-    let inputs = packed_outer_key.chain(packed_inner_key).collect_vec();
-    H::hash_no_pad(&inputs).into()
+    row_unique_data(vec![outer_mapping_key, inner_mapping_key])
 }
 
 /// Compute the metadata digest for single variable leaf.
@@ -332,22 +330,13 @@ pub fn compute_leaf_single_values_digest<const MAX_FIELD_PER_EVM: usize>(
     extracted_column_identifiers: &[ColumnId],
     value: [u8; MAPPING_LEAF_VALUE_LEN],
 ) -> Digest {
-    let num_actual_columns = F::from_canonical_usize(table_info.len());
+    let num_actual_columns = table_info.len();
     let values_digest =
         ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
             .digest();
 
-    // row_id = H2int(H("") || num_actual_columns)
-    let inputs = HashOut::from(row_unique_data_for_single_leaf())
-        .to_fields()
-        .into_iter()
-        .chain(once(num_actual_columns))
-        .collect_vec();
-    let hash = H::hash_no_pad(&inputs);
-    let row_id = hash_to_int_value(hash);
-
     // value_digest * row_id
-    let row_id = Scalar::from_noncanonical_biguint(row_id);
+    let row_id = compute_row_id(row_unique_data_for_single_leaf(), num_actual_columns);
     values_digest * row_id
 }
 
@@ -392,7 +381,7 @@ pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
     key_id: ColumnId,
 ) -> Digest {
     // We add key column to number of actual columns.
-    let num_actual_columns = F::from_canonical_usize(table_info.len() + 1);
+    let num_actual_columns = table_info.len() + 1;
     let mut values_digest =
         ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
             .digest();
@@ -409,18 +398,10 @@ pub fn compute_leaf_mapping_values_digest<const MAX_FIELD_PER_EVM: usize>(
         let values_key_digest = map_to_curve_point(&inputs);
         values_digest += values_key_digest;
     }
-    let row_unique_data = HashOut::from(row_unique_data_for_mapping_leaf(&mapping_key));
-    // row_id = H2int(row_unique_data || num_actual_columns)
-    let inputs = row_unique_data
-        .to_fields()
-        .into_iter()
-        .chain(once(num_actual_columns))
-        .collect_vec();
-    let hash = H::hash_no_pad(&inputs);
-    let row_id = hash_to_int_value(hash);
+    let row_unique_data = row_unique_data_for_mapping_leaf(&mapping_key);
 
     // value_digest * row_id
-    let row_id = Scalar::from_noncanonical_biguint(row_id);
+    let row_id = compute_row_id(row_unique_data, num_actual_columns);
     values_digest * row_id
 }
 
@@ -477,7 +458,7 @@ pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: u
     inner_mapping_data: (MappingKey, ColumnId),
 ) -> Digest {
     // Add inner key and outer key columns to the number of actual columns.
-    let num_actual_columns = F::from_canonical_usize(table_info.len() + 2);
+    let num_actual_columns = table_info.len() + 2;
     let mut values_digest =
         ColumnGadgetData::<MAX_FIELD_PER_EVM>::new(table_info, extracted_column_identifiers, value)
             .digest();
@@ -506,20 +487,89 @@ pub fn compute_leaf_mapping_of_mappings_values_digest<const MAX_FIELD_PER_EVM: u
         values_digest += inner_key_digest + outer_key_digest;
     }
 
-    let row_unique_data = HashOut::from(row_unique_data_for_mapping_of_mappings_leaf(
-        &outer_mapping_data.0,
-        &inner_mapping_data.0,
-    ));
+    let row_unique_data =
+        row_unique_data_for_mapping_of_mappings_leaf(&outer_mapping_data.0, &inner_mapping_data.0);
+
+    // values_digest = values_digest * row_id
+    let row_id = compute_row_id(row_unique_data, num_actual_columns);
+    values_digest * row_id
+}
+
+/// Compute the row unique data using the set of column values provided as input
+pub fn row_unique_data<'a, I: IntoIterator<Item = &'a [u8]>>(columns: I) -> HashOutput {
+    let packed_columns = columns
+        .into_iter()
+        .flat_map(|column| {
+            left_pad32(column)
+                .pack(Endianness::Big)
+                .into_iter()
+                .map(F::from_canonical_u32)
+        })
+        .collect_vec();
+    H::hash_no_pad(&packed_columns).into()
+}
+
+fn compute_row_id(row_unique_data: HashOutput, num_actual_columns: usize) -> Scalar {
     // row_id = H2int(row_unique_data || num_actual_columns)
-    let inputs = row_unique_data
+    let inputs = HashOut::from(row_unique_data)
         .to_fields()
         .into_iter()
-        .chain(once(num_actual_columns))
+        .chain(once(F::from_canonical_usize(num_actual_columns)))
         .collect_vec();
     let hash = H::hash_no_pad(&inputs);
     let row_id = hash_to_int_value(hash);
 
-    // values_digest = values_digest * row_id
-    let row_id = Scalar::from_noncanonical_biguint(row_id);
-    values_digest * row_id
+    Scalar::from_noncanonical_biguint(row_id)
+}
+
+/// Compute the row value digest of one table, taking as input the rows of the
+/// table and the identifiers of columns employed to compute the row unique data
+pub fn compute_table_row_digest<PrimaryIndex: PartialEq + Eq + Default + Clone + Debug>(
+    table_rows: &[CellCollection<PrimaryIndex>],
+    row_unique_columns: &[ColumnId],
+) -> Result<Digest> {
+    let column_ids = table_rows[0].column_ids();
+    let num_actual_columns = column_ids.len();
+    // check that the identifiers of row unique columns are actual identifiers of the columns
+    // of the table
+    ensure!(row_unique_columns.iter().all(|id| column_ids.contains(id)));
+    Ok(table_rows
+        .iter()
+        .enumerate()
+        .fold(Digest::NEUTRAL, |acc, (i, row)| {
+            let current_column_ids = row.column_ids();
+            // check that column ids are the same for each row
+            assert_eq!(
+                current_column_ids, column_ids,
+                "row {i} has different column ids than other rows"
+            );
+            let current_row_digest =
+                current_column_ids
+                    .into_iter()
+                    .fold(Digest::NEUTRAL, |acc, id| {
+                        let current = map_to_curve_point(
+                            &once(F::from_canonical_u64(id))
+                                .chain(row.find_by_column(id).unwrap().value.to_fields())
+                                .collect_vec(),
+                        );
+                        acc + current
+                    });
+            // compute row unique data for current row
+            let row_unique_data = {
+                let column_values = row_unique_columns
+                    .iter()
+                    .map(|&id| {
+                        row.find_by_column(id)
+                            .unwrap()
+                            .value
+                            .to_be_bytes_trimmed_vec()
+                    })
+                    .collect_vec();
+                row_unique_data(column_values.iter().map(|v| v.as_slice()))
+            };
+            // compute row_id to be multiplied to `current_row_digest`
+            let row_id = compute_row_id(row_unique_data, num_actual_columns);
+            // accumulate with digest of previous rows
+            acc + row_id * current_row_digest
+        }))
 }

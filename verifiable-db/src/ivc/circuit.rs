@@ -18,7 +18,6 @@ use plonky2::{
     },
     plonk::circuit_builder::CircuitBuilder,
 };
-use plonky2_crypto::u32::arithmetic_u32::CircuitBuilderU32;
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
 use recursion_framework::{
     circuit_builder::CircuitLogicWires,
@@ -44,13 +43,6 @@ impl IVCCircuit {
 
         // assert prev_proof.H_i == new_block_proof.H_old
         c.connect_targets(prev_pi.merkle_hash(), block_pi.old_merkle_hash());
-        // assert prev_proof.z_i + 1 == new_block_proof.block_number
-        let big_one = c.one_u256();
-        let (expected_zi, carry) = c.add_u256(&prev_pi.zi(), &big_one);
-        // make sure there is no carry
-        let small_zero = c.zero_u32();
-        c.connect_u32(small_zero, carry);
-        c.enforce_equal_u256(&expected_zi, &block_pi.index_value());
         // assert prev_proof.z_0 == new_block_proof.min
         c.enforce_equal_u256(&prev_pi.z0(), &block_pi.min_value());
         //assert prev_proof.M == new_block_proof.M
@@ -135,7 +127,7 @@ impl CircuitLogicWires<F, D, 1> for RecursiveIVCWires {
 /// Dummy circuit holding the values that are given to the first block proof created.
 /// The circuit takes care of exporting the right values such that when the proof is verified
 /// inside the regular IVC circuits, the checks matches.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DummyCircuit {
     pub(crate) metadata_hash: HashOut<F>,
     pub(crate) z0: U256,

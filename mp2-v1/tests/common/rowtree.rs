@@ -1,4 +1,5 @@
 use alloy::primitives::U256;
+use anyhow::anyhow;
 use log::debug;
 use mp2_common::{proof::ProofWithVK, types::MAPPING_KEY_LEN};
 use mp2_v1::{
@@ -10,8 +11,8 @@ use mp2_v1::{
         row::{RowTreeKey, ToNonce},
     },
     values_extraction::{
-        row_unique_data_for_mapping_leaf, row_unique_data_for_mapping_of_mappings_leaf,
-        row_unique_data_for_single_leaf,
+        row_unique_data, row_unique_data_for_mapping_leaf,
+        row_unique_data_for_mapping_of_mappings_leaf, row_unique_data_for_single_leaf,
     },
 };
 use plonky2::plonk::config::GenericHashOut;
@@ -19,6 +20,7 @@ use ryhope::storage::{
     updatetree::{Next, UpdateTree},
     RoEpochKvStorage,
 };
+use serde::{Deserialize, Serialize};
 use verifiable_db::{
     cells_tree,
     row_tree::{self, extract_hash_from_proof},
@@ -36,7 +38,7 @@ pub type RowTreeKeyNonce = Vec<u8>;
 
 /// Simply a struct useful to transmit around when dealing with the secondary index value, since
 /// the unique nonce must be kept around as well. It is not saved anywhere nor proven.
-#[derive(PartialEq, Eq, Default, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Default, Debug, Clone, Hash)]
 pub struct SecondaryIndexCell(Cell, RowTreeKeyNonce);
 impl SecondaryIndexCell {
     pub fn new_from<T: ToNonce>(c: Cell, nonce: T) -> Self {
@@ -92,9 +94,9 @@ impl TestContext {
             let value = row.secondary_index_value();
             let column_info = table.columns.column_info(id);
             let multiplier = column_info.multiplier;
-            let row_unique_data = match table.row_unique_id {
+            let row_unique_data = match &table.row_unique_id {
                 TableRowUniqueID::Single => row_unique_data_for_single_leaf(),
-                TableRowUniqueID::Mapping(key_column_id) => {
+                &TableRowUniqueID::Mapping(key_column_id) => {
                     let mapping_key: [_; MAPPING_KEY_LEN] = row
                         .column_value(key_column_id)
                         .unwrap_or_else(|| {
@@ -107,7 +109,7 @@ impl TestContext {
                     );
                     row_unique_data_for_mapping_leaf(&mapping_key)
                 }
-                TableRowUniqueID::MappingOfMappings(outer_key_column_id, inner_key_column_id) => {
+                &TableRowUniqueID::MappingOfMappings(outer_key_column_id, inner_key_column_id) => {
                     let [outer_mapping_key, inner_mapping_key]: [[_; MAPPING_KEY_LEN]; 2] = [outer_key_column_id, inner_key_column_id].map(|key_column_id| {
                         row.column_value(key_column_id)
                         .unwrap_or_else(|| {
@@ -125,6 +127,18 @@ impl TestContext {
                         &outer_mapping_key,
                         &inner_mapping_key,
                     )
+                }
+                TableRowUniqueID::OffChain(primary_key_columns) => {
+                    let column_values = primary_key_columns
+                        .iter()
+                        .map(|&id| {
+                            Ok(row
+                                .column_value(id)
+                                .ok_or(anyhow!("Primary key column {id} not found in the row"))?
+                                .to_be_bytes_trimmed_vec())
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()?;
+                    row_unique_data(column_values.iter().map(|v| v.as_slice()))
                 }
             };
             // NOTE remove that when playing more with sec. index

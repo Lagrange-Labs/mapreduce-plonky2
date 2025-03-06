@@ -115,7 +115,7 @@ pub(crate) struct BaseCircuitProofWires {
 pub(crate) const CONTRACT_SET_NUM_IO: usize = contract_extraction::PublicInputs::<F>::TOTAL_LEN;
 pub(crate) const VALUE_SET_NUM_IO: usize = values_extraction::PublicInputs::<F>::TOTAL_LEN;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BaseCircuitInput {
     block_proof: ProofWithPublicInputs<F, C, D>,
     contract_proof: ProofWithVK,
