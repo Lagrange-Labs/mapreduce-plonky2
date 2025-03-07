@@ -1,3 +1,4 @@
+use crate::Epoch;
 use thiserror::Error;
 use tokio_postgres::error::Error as PgError;
 
@@ -34,6 +35,12 @@ pub enum RyhopeError {
 
     #[error("key not found in tree")]
     KeyNotFound,
+
+    #[error("epoch {0} is out of bounds of the persisted states")]
+    EpochOutOfBounds(Epoch),
+
+    #[error("no state for epoch {0} found")]
+    NoStateForEpoch(Epoch),
 }
 impl RyhopeError {
     pub fn from_db<S: AsRef<str>>(msg: S, err: PgError) -> Self {
