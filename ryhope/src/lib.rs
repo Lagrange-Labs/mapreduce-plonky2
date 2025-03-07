@@ -213,7 +213,7 @@ where
     /// defined in the current transactions.
     ///
     /// The set will be empty if their is no transaction active.
-    pub async fn touched(&mut self) -> HashSet<T::Key> {
+    pub async fn touched(&self) -> HashSet<T::Key> {
         stream::iter(self.dirty.iter())
             .filter_map(|k| async { self.tree.lineage(k, &self.storage).await.unwrap() })
             .flat_map(|p| stream::iter(p.into_full_path()))
