@@ -83,7 +83,7 @@ where
 
     async fn fetch_at(&self, epoch: Epoch) -> Result<T, RyhopeError> {
         let epoch = epoch - self.epoch_offset;
-        assert!(epoch >= 0);
+        assert!(epoch >= 0, "Epoch must be non-negative, got {}", epoch);
         self.ts
             .get(epoch as usize)
             .ok_or_else(|| RyhopeError::EpochOutOfBounds(epoch))?
