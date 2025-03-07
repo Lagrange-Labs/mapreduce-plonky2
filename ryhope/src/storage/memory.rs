@@ -116,9 +116,7 @@ where
             .epoch_mapper
             .try_to_incremental_epoch(epoch)
             .await
-            .ok_or(RyhopeError::epoch_error(format!(
-                "IncrementalEpoch not found for epoch {epoch}"
-            )))?;
+            .ok_or_else(|| RyhopeError::NoStateForEpoch(epoch))?;
         self.fetch_at_incremental_epoch(epoch)
     }
 
