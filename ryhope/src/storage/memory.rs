@@ -84,7 +84,11 @@ where
     async fn fetch_at(&self, epoch: Epoch) -> Result<T, RyhopeError> {
         let epoch = epoch - self.epoch_offset;
         assert!(epoch >= 0);
-        Ok(self.ts[epoch as usize].clone().unwrap())
+        self.ts
+            .get(epoch as usize)
+            .ok_or_else(|| RyhopeError::EpochOutOfBounds(epoch))?
+            .clone()
+            .ok_or_else(|| RyhopeError::NoStateForEpoch(epoch))
     }
 
     async fn store(&mut self, t: T) -> Result<(), RyhopeError> {
