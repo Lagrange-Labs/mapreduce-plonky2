@@ -56,7 +56,7 @@ fn sanity_check() {
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the
 /// pre-processing stage of LPN
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CircuitInput<const MAX_COLUMNS: usize> {
     /// Contract extraction input
     ContractExtraction(contract_extraction::CircuitInput),

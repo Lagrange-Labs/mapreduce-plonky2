@@ -31,6 +31,7 @@ use recursion_framework::framework::{
 use serde::{Deserialize, Serialize};
 
 /// Set of inputs necessary to generate proofs for each circuit employed in the verifiable DB stage of LPN
+#[derive(Clone, Debug)]
 pub enum CircuitInput {
     /// Cells tree construction input
     CellsTree(cells_tree::CircuitInput),
@@ -264,7 +265,7 @@ pub struct QueryParameters<
         WrapCircuitParams<MAX_NUM_OUTPUTS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_PLACEHOLDERS>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum QueryCircuitInput<
     const NUM_CHUNKS: usize,

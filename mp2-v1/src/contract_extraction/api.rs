@@ -29,7 +29,7 @@ type ChildInput = ProofInputSerialized<InputNode>;
 
 /// CircuitInput is a wrapper around the different specialized circuits that can
 /// be used to prove a MPT node recursively.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CircuitInput {
     Leaf(LeafInput),
     Extension(ChildInput),

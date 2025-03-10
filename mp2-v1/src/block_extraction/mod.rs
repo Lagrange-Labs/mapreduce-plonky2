@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 pub use public_inputs::PublicInputs;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CircuitInput(Vec<u8>);
 
 impl CircuitInput {
