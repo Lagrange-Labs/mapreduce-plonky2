@@ -33,7 +33,7 @@ use super::{
     SimpleCircuit,
 };
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CircuitInput {
     Simple(SimpleCircuitInput),
     Lengthed(LengthedCircuitInput),
@@ -191,18 +191,18 @@ impl PublicParameters {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SimpleCircuitInput {
     base: BaseCircuitInput,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LengthedCircuitInput {
     base: BaseCircuitInput,
     length_proof: ProofWithVK,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MergeCircuitInput {
     base: BaseCircuitInput,
     is_table_a_multiplier: bool,

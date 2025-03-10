@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 /// CircuitInput is a wrapper around the different specialized circuits that can
 /// be used to prove a node recursively.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CircuitInput {
     Leaf {
         witness: LeafCircuit,
