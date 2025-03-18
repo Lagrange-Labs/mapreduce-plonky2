@@ -161,13 +161,13 @@ pub struct RowPayload<PrimaryIndex: PartialEq + Eq + Default> {
     /// Storing the hash of the root of the cells tree. One could get it as well from the proof
     /// but it requires loading the proof, so when building the hashing structure it's best
     /// to keep it at hand directly.
-    pub cell_root_hash: Option<HashOutput>,
+    pub(crate) cell_root_hash: Option<HashOutput>,
     /// Information needed to retrieve the cells root proof belonging to this row
     /// From the column ID, one can search in the cell collection to find the corresponding
     /// value and primary index, necessary to fetch the corresponding proof.
-    pub cell_root_column: Option<ColumnID>,
+    pub(crate) cell_root_column: Option<ColumnID>,
     /// Information needed to retrieve the cells root proof belonging to this row
-    pub cell_root_key: Option<CellTreeKey>,
+    pub cell_root_key: CellTreeKey,
     /// Min sec. index value of the subtree below this node
     pub min: U256,
     /// Max sec. index value "  "   "       "     "    "
@@ -189,7 +189,7 @@ impl<PrimaryIndex: std::fmt::Debug + Clone + Default + PartialEq + Eq> RowPayloa
         secondary_index: ColumnID,
         cell_tree_hash: Option<HashOutput>,
         cell_root_column: Option<ColumnID>,
-        cell_root_key: Option<CellTreeKey>,
+        cell_root_key: CellTreeKey,
     ) -> Self {
         RowPayload {
             cells,

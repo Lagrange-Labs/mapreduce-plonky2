@@ -67,6 +67,7 @@ pub(crate) mod common;
 //
 
 const PROOF_STORE_FILE: &str = "test_proofs.store";
+const SINGLE_TABLE_INFO_FILE: &str = "single_column_info.json";
 const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
 const MERGE_TABLE_INFO_FILE: &str = "merge_column_info.json";
 
@@ -86,13 +87,21 @@ async fn integrated_indexing() -> Result<()> {
 
     info!("Params built");
     // NOTE: to comment to avoid very long tests...
-    let (mut single, genesis) = TableIndexing::single_value_test_case(&mut ctx).await?;
+    let (mut single, genesis) = TableIndexing::single_value_test_case(&mut ctx, true).await?;
     let changes = vec![
         ChangeType::Update(UpdateType::Rest),
         ChangeType::Silent,
         ChangeType::Update(UpdateType::SecondaryIndex),
     ];
     single.run(&mut ctx, genesis, changes.clone()).await?;
+    let (mut single, genesis) = TableIndexing::single_value_test_case(&mut ctx, false).await?;
+    let changes = vec![
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
+        ChangeType::Update(UpdateType::SecondaryIndex),
+    ];
+    single.run(&mut ctx, genesis, changes.clone()).await?;
+
     let (mut mapping, genesis) = TableIndexing::mapping_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Insertion,
@@ -114,6 +123,7 @@ async fn integrated_indexing() -> Result<()> {
     merged.run(&mut ctx, genesis, changes).await?;
 
     // save columns information and table information in JSON so querying test can pick up
+    write_table_info(SINGLE_TABLE_INFO_FILE, single.table_info())?;
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
     write_table_info(MERGE_TABLE_INFO_FILE, merged.table_info())?;
     Ok(())
@@ -130,6 +140,15 @@ async fn integrated_querying(table_info: TableInfo) -> Result<()> {
     dbg!(&table.public_name);
     test_query(&mut ctx, table, table_info).await?;
     Ok(())
+}
+
+#[test(tokio::test)]
+#[ignore]
+async fn integrated_querying_single_slot_table() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test for single slot table");
+    let table_info = read_table_info(SINGLE_TABLE_INFO_FILE)?;
+    integrated_querying(table_info).await
 }
 
 #[test(tokio::test)]

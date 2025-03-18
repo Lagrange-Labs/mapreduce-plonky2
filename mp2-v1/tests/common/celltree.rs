@@ -7,7 +7,7 @@ use mp2_v1::{
     api::{self, CircuitInput},
     indexing::{
         block::BlockPrimaryIndex,
-        cell::{CellTreeKey, MerkleCellTree},
+        cell::{CellTreeKey, MerkleCell, MerkleCellTree},
         row::{CellCollection, Row, RowPayload, RowTreeKey},
     },
 };
@@ -188,17 +188,42 @@ impl TestContext {
             workplan.done(&wk).unwrap();
         }
         let root = tree.root().await?.unwrap();
-        let root_data = tree.root_data().await?.unwrap();
-        let root_proof_key = CellProofIdentifier {
-            table: table_id.clone(),
-            secondary: new_row_key.clone(),
-            primary: root_data.primary,
-            tree_key: root,
-        };
+        let root_proof_key = if let Some(data) = tree.root_data().await? {
+            let root_proof_key = CellProofIdentifier {
+                table: table_id.clone(),
+                secondary: new_row_key.clone(),
+                primary: data.primary,
+                tree_key: root,
+            };
 
-        if root_data.primary != primary {
-            debug!("Cells Tree UNTOUCHED for row  {new_row_key:?} at block {primary} (root_data.primary{:?})",root_data.primary);
-        }
+            if data.primary != primary {
+                debug!("Cells Tree UNTOUCHED for row  {new_row_key:?} at block {primary} (root_data.primary{:?})", data.primary);
+            }
+
+            root_proof_key
+        } else {
+            // empty tree, we need also to generate a proof
+            let root_proof_key = CellProofIdentifier {
+                table: table_id.clone(),
+                secondary: new_row_key.clone(),
+                primary,
+                tree_key: root,
+            };
+            let proof = self.params().empty_cell_tree_proof()?;
+            self.storage
+                .store_proof(ProofKey::Cell(root_proof_key.clone()), proof.clone())
+                .expect("storing should work");
+            debug!(
+                "STORING CELL PROOF at  {:?} -- hash {:?}",
+                root_proof_key,
+                hex::encode(
+                    cells_tree::extract_hash_from_proof(&proof)
+                        .map(|c| c.to_bytes())
+                        .unwrap()
+                )
+            );
+            root_proof_key
+        };
 
         // just checking the storage is there
         assert!(self
@@ -280,7 +305,12 @@ impl TestContext {
         );
         // (c) reconstruct key with those new updated cell info
         let updated_cell_tree = table.construct_cell_tree(&updated_cells).await;
-        let tree_hash = cells_update.latest.root_data().await?.unwrap().hash;
+        let tree_hash = cells_update
+            .latest
+            .root_data()
+            .await?
+            .unwrap_or(MerkleCell::new_empty())
+            .hash;
         let root_key = self
             .prove_cell_tree(
                 table,
@@ -308,19 +338,13 @@ impl TestContext {
             "mismatch between cell tree root hash as computed by ryhope and mp2",
         );
 
-        Ok(RowPayload {
-            secondary_index_column: table.columns.secondary_column().identifier,
-            cell_root_key: Some(root_key),
-            cell_root_hash: Some(tree_hash),
-            cell_root_column: Some(
-                table
-                    .columns
-                    .column_id_of_cells_index(root_key)
-                    .expect("unable to find column id of root cells"),
-            ),
-            cells: updated_cells,
-            ..Default::default()
-        })
+        Ok(RowPayload::new(
+            updated_cells,
+            table.columns.secondary_column().identifier,
+            Some(tree_hash),
+            table.columns.column_id_of_cells_index(root_key),
+            root_key,
+        ))
     }
 
     /// Traverse the new cells tree, look at all the proofs already existing and move them to the
@@ -338,6 +362,11 @@ impl TestContext {
         }
         if cells_update.is_new_row() {
             info!("NOT moving cells tree since it is a first time insertion");
+            return Ok(());
+        }
+
+        if cells_update.latest.root_data().await?.is_none() {
+            // cells tree is empty, so no proof to be moved
             return Ok(());
         }
 

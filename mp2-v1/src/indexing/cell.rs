@@ -101,6 +101,13 @@ impl<PrimaryIndex: Default> MerkleCell<PrimaryIndex> {
             ..Default::default()
         }
     }
+
+    pub fn new_empty() -> Self {
+        Self {
+            hash: HashOutput::from(*empty_poseidon_hash()),
+            ..Default::default()
+        }
+    }
 }
 
 impl<
