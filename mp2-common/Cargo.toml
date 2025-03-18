@@ -1,6 +1,6 @@
 [package]
 name = "mp2_common"
-version = "1.2.2"
+version = "1.2.3"
 edition = "2021"
 
 [dependencies]
@@ -32,7 +32,7 @@ rand.workspace = true
 rstest.workspace = true
 tokio.workspace = true
 
-mp2_test = { path = "../mp2-test" , version = "1.2.2" }
+mp2_test = { path = "../mp2-test" , version = "1.2.3" }
 
 [features]
 ci = ["mp2_test/ci"]

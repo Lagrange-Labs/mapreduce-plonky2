@@ -3036,7 +3036,7 @@ dependencies = [
 
 [[package]]
 name = "gnark-utils"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3073,27 +3073,27 @@ dependencies = [
 
 [[package]]
 name = "groth16_framework"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "alloy",
  "anyhow",
  "env_logger 0.11.6",
- "gnark-utils 1.2.2",
+ "gnark-utils 1.2.3",
  "hex",
  "itertools 0.14.0",
  "log",
- "mp2_common 1.2.2",
- "mp2_test 1.2.2",
+ "mp2_common 1.2.3",
+ "mp2_test 1.2.3",
  "plonky2",
  "plonky2x",
  "rand 0.8.5",
- "recursion_framework 1.2.2",
+ "recursion_framework 1.2.3",
  "revm",
  "serde",
  "serde_json",
  "serial_test 3.2.0",
  "sha2",
- "verifiable-db 1.2.2",
+ "verifiable-db 1.2.3",
 ]
 
 [[package]]
@@ -3692,7 +3692,7 @@ dependencies = [
 
 [[package]]
 name = "inspect"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "clap 4.5.29",
@@ -3700,8 +3700,8 @@ dependencies = [
  "dialoguer",
  "hex",
  "itertools 0.14.0",
- "mp2_v1 1.2.2",
- "ryhope 1.2.2",
+ "mp2_v1 1.2.3",
+ "ryhope 1.2.3",
  "serde",
  "tabled",
  "tokio",
@@ -4150,7 +4150,7 @@ dependencies = [
 
 [[package]]
 name = "mp2_common"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "alloy",
  "anyhow",
@@ -4163,7 +4163,7 @@ dependencies = [
  "hex",
  "itertools 0.14.0",
  "log",
- "mp2_test 1.2.2",
+ "mp2_test 1.2.3",
  "num",
  "plonky2",
  "plonky2_crypto",
@@ -4199,19 +4199,19 @@ dependencies = [
 
 [[package]]
 name = "mp2_test"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "alloy",
  "anyhow",
  "env_logger 0.11.6",
  "eth_trie",
  "log",
- "mp2_common 1.2.2",
+ "mp2_common 1.2.3",
  "plonky2",
  "plonky2_ecgfp5",
  "rand 0.8.5",
- "recursion_framework 1.2.2",
- "ryhope 1.2.2",
+ "recursion_framework 1.2.3",
+ "ryhope 1.2.3",
  "serde",
 ]
 
@@ -4251,7 +4251,7 @@ dependencies = [
 
 [[package]]
 name = "mp2_v1"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "alloy",
  "anyhow",
@@ -4270,18 +4270,18 @@ dependencies = [
  "jammdb",
  "lazy_static",
  "log",
- "mp2_common 1.2.2",
- "mp2_test 1.2.2",
- "parsil 1.2.2",
+ "mp2_common 1.2.3",
+ "mp2_test 1.2.3",
+ "parsil 1.2.3",
  "paste",
  "plonky2",
  "plonky2_crypto",
  "plonky2_ecgfp5",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
- "recursion_framework 1.2.2",
+ "recursion_framework 1.2.3",
  "rlp",
- "ryhope 1.2.2",
+ "ryhope 1.2.3",
  "serde",
  "serde_json",
  "serial_test 3.2.0",
@@ -4291,7 +4291,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tracing",
- "verifiable-db 1.2.2",
+ "verifiable-db 1.2.3",
 ]
 
 [[package]]
@@ -4677,20 +4677,20 @@ dependencies = [
 
 [[package]]
 name = "parsil"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "alloy",
  "anyhow",
  "camelpaste",
  "clap 4.5.29",
  "log",
- "ryhope 1.2.2",
+ "ryhope 1.2.3",
  "serde",
  "serde_json",
  "sqlparser",
  "stderrlog",
  "thiserror 2.0.11",
- "verifiable-db 1.2.2",
+ "verifiable-db 1.2.3",
 ]
 
 [[package]]
@@ -5364,13 +5364,13 @@ dependencies = [
 
 [[package]]
 name = "recursion_framework"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "bincode",
  "env_logger 0.11.6",
  "log",
- "mp2_common 1.2.2",
+ "mp2_common 1.2.3",
  "plonky2",
  "plonky2_monolith",
  "rstest 0.23.0",
@@ -5916,7 +5916,7 @@ dependencies = [
 
 [[package]]
 name = "ryhope"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "anyhow",
  "bb8 0.9.0",
@@ -7170,18 +7170,18 @@ dependencies = [
 
 [[package]]
 name = "tools"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "bincode",
  "blake3",
  "clap 4.5.29",
- "groth16_framework 1.2.2",
+ "groth16_framework 1.2.3",
  "lgn-messages",
  "lgn-provers",
- "mp2_v1 1.2.2",
+ "mp2_v1 1.2.3",
  "semver 1.0.25",
  "tokio",
- "verifiable-db 1.2.2",
+ "verifiable-db 1.2.3",
  "walkdir",
 ]
 
@@ -7502,7 +7502,7 @@ dependencies = [
 
 [[package]]
 name = "verifiable-db"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "alloy",
  "anyhow",
@@ -7511,15 +7511,15 @@ dependencies = [
  "futures 0.3.31",
  "itertools 0.14.0",
  "log",
- "mp2_common 1.2.2",
- "mp2_test 1.2.2",
+ "mp2_common 1.2.3",
+ "mp2_test 1.2.3",
  "plonky2",
  "plonky2_crypto",
  "plonky2_ecdsa",
  "plonky2_ecgfp5",
  "rand 0.8.5",
- "recursion_framework 1.2.2",
- "ryhope 1.2.2",
+ "recursion_framework 1.2.3",
+ "ryhope 1.2.3",
  "serde",
  "serial_test 3.2.0",
  "tokio",
