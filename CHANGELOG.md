@@ -1,8 +1,25 @@
 # Changelog
 
+## [1.2.3] - 2025-03-18
+
+[Compare f13b976 ... f5bcb44](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/f13b97656f4ac86b69d2a0a0be056673d207e932...f5bcb4454bc42b43714db44ef355336d655077d7)
+
+### Bug Fixes
+
+
+
+- Do not crash on queries without cell tree - in [PR #466](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/466)
+
+
+### Miscellaneous Tasks
+
+
+
+- Add README - in [PR #457](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/457)
+
 ## [1.2.2] - 2025-02-13
 
-[Compare 196952f ... f8d604f](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/196952fe435d637757dda2c02ac3f694eb57cd18...f8d604faf547613c3b0f773486249583810823c5)
+[Compare 196952f ... f13b976](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/196952fe435d637757dda2c02ac3f694eb57cd18...f13b97656f4ac86b69d2a0a0be056673d207e932)
 
 ### Bug Fixes
 
@@ -22,6 +39,13 @@
 - Automatize PPs generation on major version bumps - in [PR #450](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/450)
 
 - Update dependencies - in [PR #455](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/455)
+
+
+### Release
+
+
+
+- V1.2.2 - in [PR #456](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/456)
 
 ## [1.2.1] - 2025-01-28
 
