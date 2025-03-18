@@ -1,6 +1,6 @@
 use crate::indexing::{index::IndexNode, row::RowPayload};
 use alloy::primitives::U256;
-use mp2_common::types::HashOutput;
+use mp2_common::{poseidon::empty_poseidon_hash, types::HashOutput};
 
 pub mod block;
 pub mod cell;
@@ -37,7 +37,8 @@ impl<T: Eq + Default + std::fmt::Debug + Clone> LagrangeNode for RowPayload<T> {
     }
 
     fn embedded_hash(&self) -> HashOutput {
-        self.cell_root_hash.unwrap()
+        self.cell_root_hash
+            .unwrap_or(HashOutput::from(*empty_poseidon_hash()))
     }
 }
 

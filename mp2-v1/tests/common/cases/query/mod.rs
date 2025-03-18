@@ -5,7 +5,7 @@ use aggregated_queries::{
     cook_query_unique_secondary_index, prove_query as prove_aggregation_query,
 };
 use alloy::primitives::U256;
-use anyhow::{Context, Result};
+use anyhow::{Context, Ok, Result};
 use itertools::Itertools;
 use log::info;
 use mp2_v1::{
@@ -105,8 +105,9 @@ pub(crate) struct QueryPlanner<'a> {
 
 pub async fn test_query(ctx: &mut TestContext, table: Table, t: TableInfo) -> Result<()> {
     match &t.source {
-        TableSource::Mapping(_) | TableSource::Merge(_) => query_mapping(ctx, &table, &t).await?,
-        _ => unimplemented!("yet"),
+        TableSource::Mapping(_) | TableSource::Merge(_) | TableSource::SingleValues(_) => {
+            query_mapping(ctx, &table, &t).await?
+        }
     }
     Ok(())
 }

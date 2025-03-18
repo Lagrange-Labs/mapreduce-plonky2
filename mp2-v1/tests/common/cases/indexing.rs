@@ -193,6 +193,7 @@ impl TableIndexing {
 
     pub(crate) async fn single_value_test_case(
         ctx: &mut TestContext,
+        multiple_slots: bool,
     ) -> anyhow::Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
@@ -211,10 +212,14 @@ impl TableIndexing {
             address: *contract_address,
             chain_id,
         };
-
+        let slots = if multiple_slots {
+            SINGLE_SLOTS.to_vec()
+        } else {
+            vec![INDEX_SLOT]
+        };
         let mut source = TableSource::SingleValues(SingleValuesExtractionArgs {
             index_slot: Some(INDEX_SLOT),
-            slots: SINGLE_SLOTS.to_vec(),
+            slots: slots.clone(),
         });
         let genesis_updates = source.init_contract_data(ctx, &contract).await;
 
@@ -241,7 +246,7 @@ impl TableIndexing {
                 // here we put false always since these are not coming from a "merged" table
                 multiplier: false,
             },
-            rest: SINGLE_SLOTS
+            rest: slots
                 .iter()
                 .enumerate()
                 .filter_map(|(i, slot)| match i {
@@ -260,10 +265,16 @@ impl TableIndexing {
                 })
                 .collect::<Vec<_>>(),
         };
-        let table = Table::new(indexing_genesis_block, "single_table".to_string(), columns).await;
+        let value_column = columns.secondary.name.clone();
+        let root_table_name = if multiple_slots {
+            "single_table".to_string()
+        } else {
+            "single_table_single_slot".to_string()
+        };
+        let table = Table::new(indexing_genesis_block, root_table_name, columns).await;
         Ok((
             Self {
-                value_column: "".to_string(),
+                value_column,
                 source: source.clone(),
                 table,
                 contract,
@@ -565,6 +576,7 @@ impl TableIndexing {
         ctx: &mut TestContext,
         bn: BlockPrimaryIndex,
     ) -> anyhow::Result<HashOutput> {
+        info!("Start MPT pre-processing");
         let contract_proof_key = ProofKey::ContractExtraction((self.contract.address, bn));
         let contract_proof = match ctx.storage.get_proof_exact(&contract_proof_key) {
             Ok(proof) => {
