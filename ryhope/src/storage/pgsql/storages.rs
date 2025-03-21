@@ -1334,8 +1334,7 @@ where
                 let value = self.wrapped.lock().unwrap().payload_cache.get(k).cloned();
                 if let Some(Some(cached_value)) = value {
                     Ok(Some(cached_value.into_value()))
-                } else if let Some(value) = T::fetch_payload_at(db, &table, k, epoch).await?
-                {
+                } else if let Some(value) = T::fetch_payload_at(db, &table, k, epoch).await? {
                     let mut guard = self.wrapped.lock().unwrap();
                     guard
                         .payload_cache
