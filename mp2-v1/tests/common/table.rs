@@ -17,7 +17,7 @@ use mp2_v1::indexing::{
 use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
 use ryhope::{
     storage::{
-        pgsql::{SqlServerConnection, SqlStorageSettings},
+        pgsql::{DbBackend, SqlServerConnection, SqlStorageSettings},
         updatetree::UpdateTree,
         EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
@@ -26,6 +26,7 @@ use ryhope::{
 };
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, iter::once};
+use tokio_postgres::Client;
 use verifiable_db::query::computational_hash_ids::ColumnIDs;
 
 use super::{
@@ -155,7 +156,7 @@ async fn new_db_pool(db_url: &str) -> anyhow::Result<DBPool> {
         .context("while creating the db_pool")?;
     Ok(db_pool)
 }
-pub struct Table {
+pub struct Table<BR: DbBackend, BI: DbBackend> {
     pub(crate) genesis_block: BlockPrimaryIndex,
     pub(crate) public_name: TableID,
     pub(crate) columns: TableColumns,
@@ -164,8 +165,8 @@ pub struct Table {
     // and that means one sql table per row which would be untenable.
     // Instead, we construct the tree from the mapping identifier -> tree key from
     // the columns information
-    pub(crate) row: MerkleRowTree,
-    pub(crate) index: MerkleIndexTree,
+    pub(crate) row: MerkleRowTree<BR>,
+    pub(crate) index: MerkleIndexTree<BI>,
     pub(crate) db_pool: DBPool,
 }
 
@@ -176,24 +177,17 @@ fn index_table_name(name: &str) -> String {
     format!("index_{}", name)
 }
 
-impl Table {
+impl Table<Client, Client> {
     pub async fn load(public_name: String, columns: TableColumns) -> anyhow::Result<Self> {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
-        let row_tree = MerkleRowTree::new(
+        let row_tree = MerkleRowTree::<Client>::new(
             InitSettings::MustExist,
-            SqlStorageSettings {
-                table: row_table_name(&public_name),
-                source: SqlServerConnection::NewConnection(db_url.clone()),
-            },
+            SqlStorageSettings::from_url(&db_url, row_table_name(&public_name)).await?,
         )
-        .await
-        .unwrap();
-        let index_tree = MerkleIndexTree::new(
+        .await?;
+        let index_tree = MerkleIndexTree::<Client>::new(
             InitSettings::MustExist,
-            SqlStorageSettings {
-                source: SqlServerConnection::NewConnection(db_url.clone()),
-                table: index_table_name(&public_name),
-            },
+            SqlStorageSettings::from_url(&db_url, index_table_name(&public_name)).await?,
         )
         .await
         .unwrap();
