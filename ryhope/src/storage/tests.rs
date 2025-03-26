@@ -577,7 +577,7 @@ async fn thousand_rows() -> Result<()> {
         })
     })
     .await?;
-    assert_eq!(s.size().await, 1000);
+    assert_eq!(s.size().await.unwrap(), 1000);
 
     let to_remove = (0..100)
         .map(|_| rng.gen_range(1..=1000))
@@ -600,7 +600,7 @@ async fn thousand_rows() -> Result<()> {
         .await?;
     mt.print();
 
-    assert_eq!(s.size().await, 1000 - to_remove.len());
+    assert_eq!(s.size().await.unwrap(), 1000 - to_remove.len());
     for k in to_remove {
         assert!(s.try_fetch(&k).await?.is_none());
     }
@@ -700,7 +700,7 @@ async fn test_rollback<
     }
 
     assert_eq!(s.current_epoch(), 3 + initial_epoch);
-    assert_eq!(s.size().await, 6);
+    assert_eq!(s.size().await.unwrap(), 6);
     for i in 0..=5 {
         assert!(s.contains(&i.into()).await.unwrap());
     }
@@ -710,7 +710,7 @@ async fn test_rollback<
         .await
         .unwrap_or_else(|_| panic!("failed to rollback to {}", 1 + initial_epoch));
     assert_eq!(s.current_epoch(), 1 + initial_epoch);
-    assert_eq!(s.size().await, 2);
+    assert_eq!(s.size().await.unwrap(), 2);
     for i in 0..=5 {
         if i <= 1 {
             assert!(s.contains(&i.into()).await.unwrap());
@@ -722,7 +722,7 @@ async fn test_rollback<
     // rollback once to reach to epoch 0
     s.rollback().await.unwrap();
     assert_eq!(s.current_epoch(), initial_epoch);
-    assert_eq!(s.size().await, 0);
+    assert_eq!(s.size().await.unwrap(), 0);
     for i in 0..=5 {
         assert!(!s.contains(&i.into()).await.unwrap());
     }
@@ -1004,8 +1004,8 @@ async fn grouped_txs() -> Result<()> {
     let commited_root = t1.root().await.unwrap().unwrap();
     assert_eq!(commited_root, in_flight_root);
     // Sizes must have been commited coorectly
-    assert_eq!(t1.size().await, 2);
-    assert_eq!(t2.size().await, 3);
+    assert_eq!(t1.size().await.unwrap(), 2);
+    assert_eq!(t2.size().await.unwrap(), 3);
 
     assert!(t2.try_fetch(&4).await.unwrap().is_some());
     assert!(t2.try_fetch(&5).await.unwrap().is_none());
@@ -1029,8 +1029,8 @@ async fn grouped_txs() -> Result<()> {
     t2.commit_failed();
 
     // Size should not have changed
-    assert_eq!(t1.size().await, 2);
-    assert_eq!(t2.size().await, 3);
+    assert_eq!(t1.size().await.unwrap(), 2);
+    assert_eq!(t2.size().await.unwrap(), 3);
 
     // Old data must still be there
     assert!(t2.try_fetch(&4).await.unwrap().is_some());
