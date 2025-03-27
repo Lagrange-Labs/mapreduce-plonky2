@@ -78,7 +78,9 @@ mod verifier;
 // The function is used to generate the asset files of `circuit.bin`,
 // `r1cs.bin`, `pk.bin`, `vk.bin` and `Verifier.sol`. It's only necessary to be
 // called for re-generating these asset files when the circuit code changes.
-pub use compiler::compile_and_generate_assets;
+pub use compiler::{
+    build_verifier_circuit, compile_and_generate_assets, generate_solidity_verifier,
+};
 
 // The exported Groth16 proof struct
 pub use proof::Groth16Proof;

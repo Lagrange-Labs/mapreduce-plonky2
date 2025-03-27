@@ -15,6 +15,7 @@ use common::{
     TestContext,
 };
 use groth16_framework::{
+    generate_solidity_verifier,
     test_utils::test_groth16_proving_and_verification,
     utils::{read_file_to_string, write_file, SOLIDITY_VERIFIER_FILENAME},
     EVMVerifier,
@@ -72,6 +73,41 @@ fn test_groth16_proving_for_query() {
     // TODO: In practice, the separate `Groth16VerifierExtension.sol` and
     // `Verifier.sol` should be used, but the `revm` (Rust EVM) cannot support
     // compilated contract deployment (as inheritance) for now.
+    verify_query_in_solidity(ASSET_DIR);
+}
+
+#[ignore]
+#[serial]
+#[test]
+fn test_groth16_circuit_compiler() {
+    env_logger::init();
+
+    const ASSET_DIR: &str = "groth16_query";
+
+    // Create the testing context.
+    let ctx = TestContext::new();
+
+    ctx.build_verifier_circuit(ASSET_DIR);
+}
+
+#[ignore]
+#[serial]
+#[test]
+fn test_groth16_proving_from_trusted_setup_keys() {
+    env_logger::init();
+
+    const ASSET_DIR: &str = "groth16_query";
+
+    // Create the testing context.
+    let ctx = TestContext::new();
+
+    let proof = ctx.generate_query_proof(ASSET_DIR);
+
+    // Test Groth16 proving, verification and Solidity verification.
+    test_groth16_proving_and_verification(ASSET_DIR, &proof);
+
+    generate_solidity_verifier(ASSET_DIR).unwrap();
+
     verify_query_in_solidity(ASSET_DIR);
 }
 
@@ -139,7 +175,9 @@ fn verify_query_in_solidity(asset_dir: &str) {
     });
 
     // remove closing `}` from verifier code
-    let verifier_code = verifier_code.trim_end().strip_suffix('}')
+    let verifier_code = verifier_code
+        .trim_end()
+        .strip_suffix('}')
         .expect("No } found at the end of verifier code");
 
     let verifier_logic_path = Path::new("test_data")

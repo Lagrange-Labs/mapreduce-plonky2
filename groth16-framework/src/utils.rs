@@ -21,6 +21,12 @@ pub const CIRCUIT_DATA_FILENAME: &str = "circuit.bin";
 /// The filename of the exported Solidity verifier contract.
 pub const SOLIDITY_VERIFIER_FILENAME: &str = "Verifier.sol";
 
+/// The filename of the Groth16 proving key
+pub const PK_FILENAME: &str = "pk.bin";
+
+/// The filename of the Groth16 verification key
+pub const VK_FILENAME: &str = "vk.bin";
+
 /// Convert a string with `0x` prefix to an U256.
 pub fn hex_to_u256(s: &str) -> Result<U256> {
     let s = s
@@ -81,4 +87,28 @@ pub fn deserialize_circuit_data(bytes: &[u8]) -> Result<CircuitData<F, C, D>> {
 /// Serialize reference of circuit data, then deserialize to implement clone.
 pub fn clone_circuit_data(circuit_data: &CircuitData<F, C, D>) -> Result<CircuitData<F, C, D>> {
     deserialize_circuit_data(&serialize_circuit_data(circuit_data)?)
+}
+
+/// Read the circuit data from file `circuit.bin` in the asset dir. This is
+/// the circuit data of the final wrapped proof.
+pub(crate) fn load_circuit_data(asset_dir: &str) -> Result<CircuitData<F, C, D>> {
+    // Read from file.
+    let file_path = Path::new(asset_dir).join(CIRCUIT_DATA_FILENAME);
+    let bytes = read_file(file_path)?;
+
+    // Deserialize the circuit data.
+    deserialize_circuit_data(&bytes)
+}
+
+/// Save the circuit data to file `circuit.bin` in the asset dir.
+pub(crate) fn save_circuit_data(
+    circuit_data: &CircuitData<F, C, D>,
+    dst_asset_dir: &str,
+) -> Result<()> {
+    // Serialize the circuit data.
+    let data = serialize_circuit_data(circuit_data)?;
+
+    // Write to file.
+    let file_path = Path::new(dst_asset_dir).join(CIRCUIT_DATA_FILENAME);
+    write_file(file_path, &data)
 }

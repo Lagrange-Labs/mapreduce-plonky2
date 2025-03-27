@@ -1,9 +1,7 @@
 //! Compile the circuit data and generate the asset files
 
 use crate::{
-    utils::{
-        serialize_circuit_data, write_file, CIRCUIT_DATA_FILENAME, SOLIDITY_VERIFIER_FILENAME,
-    },
+    utils::{load_circuit_data, save_circuit_data, SOLIDITY_VERIFIER_FILENAME},
     C,
 };
 use anyhow::{anyhow, Result};
@@ -42,6 +40,36 @@ pub fn compile_and_generate_assets(
     // Generate these asset files by gnark-utils.
     gnark_utils::compile_and_generate_assets(&common_data, &verifier_data, dst_asset_dir)?;
 
+    process_solidity_verifier(dst_asset_dir, &wrapper)
+}
+
+pub fn build_verifier_circuit(
+    circuit_data: CircuitData<F, C, D>,
+    dst_asset_dir: &str,
+) -> Result<()> {
+    // Save the circuit data to file `circuit.bin` in the asset dir. It could be
+    // reused in proving.
+    save_circuit_data(&circuit_data, dst_asset_dir)?;
+
+    // Create the wrapped circuit.
+    let wrapper = WrapCircuit::build_from_raw_circuit(circuit_data);
+
+    // Serialize the circuit data, verifier data and public inputs to JSON.
+    let common_data = serde_json::to_string(&wrapper.wrapper_circuit.data.common)?;
+    let verifier_data = serde_json::to_string(&wrapper.wrapper_circuit.data.verifier_only)?;
+
+    // compile verifier circuit to R1CS file
+    gnark_utils::build_verifier_circuit(&common_data, &verifier_data, dst_asset_dir)
+}
+
+pub fn generate_solidity_verifier(dst_asset_dir: &str) -> Result<String> {
+    let circuit_data = load_circuit_data(dst_asset_dir)?;
+    let wrapper = WrapCircuit::build_from_raw_circuit(circuit_data);
+
+    process_solidity_verifier(dst_asset_dir, &wrapper)
+}
+
+fn process_solidity_verifier(dst_asset_dir: &str, wrapper: &WrapCircuit) -> Result<String> {
     // Generate the full file path of the Solidity verifier contract.
     let verifier_contract_file_path = Path::new(dst_asset_dir)
         .join(SOLIDITY_VERIFIER_FILENAME)
@@ -49,19 +77,9 @@ pub fn compile_and_generate_assets(
         .to_string();
 
     // Add a constant of circuit digest to the verifier contract file.
-    add_circuit_digest_to_verifier_contract(&verifier_contract_file_path, &wrapper)?;
+    add_circuit_digest_to_verifier_contract(&verifier_contract_file_path, wrapper)?;
 
     Ok(verifier_contract_file_path)
-}
-
-/// Save the circuit data to file `circuit.bin` in the asset dir.
-fn save_circuit_data(circuit_data: &CircuitData<F, C, D>, dst_asset_dir: &str) -> Result<()> {
-    // Serialize the circuit data.
-    let data = serialize_circuit_data(circuit_data)?;
-
-    // Write to file.
-    let file_path = Path::new(dst_asset_dir).join(CIRCUIT_DATA_FILENAME);
-    write_file(file_path, &data)
 }
 
 /// Get the wrapped circuit digest.

@@ -4,9 +4,11 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use clap::Parser;
-use groth16_framework::compile_and_generate_assets;
-use groth16_framework::utils::clone_circuit_data;
+use clap::{Parser, Subcommand};
+use groth16_framework::utils::{clone_circuit_data, PK_FILENAME, VK_FILENAME};
+use groth16_framework::{
+    build_verifier_circuit, compile_and_generate_assets, generate_solidity_verifier,
+};
 use mp2_v1::api::{build_circuits_params, PublicParameters};
 use verifiable_db::api::QueryParameters;
 
@@ -47,6 +49,30 @@ struct Args {
     /// Generate Groth16 parameters from existing query parameters
     #[arg(long)]
     only_groth16: bool,
+
+    /// If this flag is true, then only the R1CS file is generated for Groth16
+    /// instead of all the Groth16 assets; useful when the proving and verification
+    /// keys must be generated with a trusted setup ceremony
+    #[arg(long)]
+    only_r1cs: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    GenSolidityCmd {
+        /// Path to the proving key file; if no path is provided, the proving key is assumed
+        /// to be already in the asset dir directory
+        #[arg(short, long)]
+        pk_path: Option<String>,
+
+        /// Path to the verification key file; if no path is provided, the proving key is assumed
+        /// to be already in the asset dir directory
+        #[arg(short, long)]
+        vk_path: Option<String>,
+    },
 }
 
 /// Build the params directory with a sub-path of mp2 version.
@@ -103,22 +129,28 @@ async fn main() {
 
     println!("serializing parameters to `{}`", args.params_root_dir);
 
-    let query_params = if args.only_groth16 {
-        load_query_params_from_disk(&args.params_root_dir)
-    } else {
-        // TRICKY: The parameters have large size, we suppose to generate and drop it in a local
-        // scope to avoid stack overflow, and also need to avoid passing into an async function.
+    match &args.command {
+        Some(Commands::GenSolidityCmd { pk_path, vk_path }) => {
+            generate_solidity_cmd(&args.params_root_dir, pk_path, vk_path)
+        }
+        None => {
+            let query_params = if args.only_groth16 {
+                load_query_params_from_disk(&args.params_root_dir)
+            } else {
+                // TRICKY: The parameters have large size, we suppose to generate and drop it in a local
+                // scope to avoid stack overflow, and also need to avoid passing into an async function.
 
-        let preprocessing_params = build_preprocessing_params();
-        let query_params = build_query_parameters(&preprocessing_params);
-        generate_groth16_assets(&args.params_root_dir, &query_params);
+                let preprocessing_params = build_preprocessing_params();
+                let query_params = build_query_parameters(&preprocessing_params);
 
-        let _ = store_preprocessing_params(&args.params_root_dir, &preprocessing_params);
-        let _ = store_query_params(&args.params_root_dir, &query_params);
+                let _ = store_preprocessing_params(&args.params_root_dir, &preprocessing_params);
+                let _ = store_query_params(&args.params_root_dir, &query_params);
 
-        query_params
-    };
-    generate_groth16_assets(&args.params_root_dir, &query_params);
+                query_params
+            };
+            generate_groth16_assets(&args.params_root_dir, &query_params, args.only_r1cs);
+        }
+    }
 
     write_hashes(&args.params_root_dir);
 }
@@ -221,8 +253,13 @@ fn load_query_params_from_disk(params_root_dir: &str) -> QueryParams {
     query_params
 }
 
-/// Generate Groth16 asset files and save to disk
-fn generate_groth16_assets(params_root_dir: &str, query_params: &QueryParams) {
+fn groth16_assets_dir(params_root_dir: &str) -> String {
+    format!("{}/{GROTH16_ASSETS_PREFIX}", params_dir(params_root_dir))
+}
+
+/// Generate Groth16 asset files and save to disk; if `only_r1cs` flag is true, only the R1CS
+/// circuit is compiled and saved in asset directory
+fn generate_groth16_assets(params_root_dir: &str, query_params: &QueryParams, only_r1cs: bool) {
     let now = Instant::now();
 
     println!("Start to generate the Groth16 asset files");
@@ -233,11 +270,45 @@ fn generate_groth16_assets(params_root_dir: &str, query_params: &QueryParams) {
         .unwrap_or_else(|err| panic!("Failed to clone the circuit data: {}", err));
 
     // Compile and generate the Groth16 asset files.
-    let assets_dir = format!("{}/{GROTH16_ASSETS_PREFIX}", params_dir(params_root_dir));
-    compile_and_generate_assets(circuit_data, &assets_dir).unwrap();
+    let assets_dir = groth16_assets_dir(params_root_dir);
+    if only_r1cs {
+        build_verifier_circuit(circuit_data, &assets_dir).unwrap()
+    } else {
+        compile_and_generate_assets(circuit_data, &assets_dir).unwrap();
+    }
 
     println!(
         "Finish generating the Groth16 asset files, elapsed: {:?}",
         now.elapsed()
     );
+}
+
+fn generate_solidity_cmd(
+    params_root_dir: &str,
+    pk_path: &Option<String>,
+    vk_path: &Option<String>,
+) {
+    let assets_dir = groth16_assets_dir(params_root_dir);
+    // if a path to a proving key file is provided, then copy the proving key from `pk_path` to `assets_dir/PK_FILENAME`;
+    // otherwise, it is assumed that the proving key has already been saved in `assets_dir/PK_FILENAME`
+    if let Some(path) = pk_path {
+        let pk_file = Path::new(&assets_dir)
+            .join(PK_FILENAME)
+            .to_string_lossy()
+            .to_string();
+        std::fs::hard_link(path, pk_file).unwrap()
+    }
+
+    // if a path to a verification key file is provided, then copy the verification key from `vk_path` to
+    // `assets_dir/VK_FILENAME`; otherwise, it is assumed that the verification key has already been saved in
+    // `assets_dir/VK_FILENAME`
+    if let Some(path) = vk_path {
+        let vk_file = Path::new(&assets_dir)
+            .join(VK_FILENAME)
+            .to_string_lossy()
+            .to_string();
+        std::fs::hard_link(path, vk_file).unwrap()
+    }
+
+    generate_solidity_verifier(&assets_dir).unwrap();
 }

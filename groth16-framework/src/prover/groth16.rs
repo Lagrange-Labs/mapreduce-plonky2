@@ -2,22 +2,17 @@
 
 use crate::{
     proof::Groth16Proof,
-    utils::{deserialize_circuit_data, hex_to_u256, read_file, CIRCUIT_DATA_FILENAME},
+    utils::{deserialize_circuit_data, hex_to_u256, load_circuit_data},
     C,
 };
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{proof::deserialize_proof, D, F};
-use plonky2::{
-    field::types::PrimeField64,
-    plonk::{circuit_data::CircuitData, proof::ProofWithPublicInputs},
-};
+use plonky2::{field::types::PrimeField64, plonk::proof::ProofWithPublicInputs};
 use plonky2x::backend::{
     circuit::{DefaultParameters, Groth16WrapperParameters},
     wrapper::wrap::WrappedCircuit,
 };
-use std::path::Path;
-
 /// Groth16 prover
 #[derive(Debug)]
 pub struct Groth16Prover {
@@ -95,17 +90,6 @@ impl Groth16Prover {
 
         Ok(groth16_proof)
     }
-}
-
-/// Read the circuit data from file `circuit.bin` in the asset dir. This is
-/// the circuit data of the final wrapped proof.
-fn load_circuit_data(asset_dir: &str) -> Result<CircuitData<F, C, D>> {
-    // Read from file.
-    let file_path = Path::new(asset_dir).join(CIRCUIT_DATA_FILENAME);
-    let bytes = read_file(file_path)?;
-
-    // Deserialize the circuit data.
-    deserialize_circuit_data(&bytes)
 }
 
 /// Combine the Groth16 proof and the plonky2 proof to big-endian bytes as:

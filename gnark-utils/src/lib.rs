@@ -5,7 +5,9 @@ mod prove;
 mod utils;
 mod verify;
 
-pub use compile::compile_and_generate_assets;
+pub use compile::{
+    build_verifier_circuit, compile_and_generate_assets, generate_solidity_verifier,
+};
 pub use prove::{init_prover, init_prover_from_bytes, prove};
 pub use verify::{init_verifier, verify};
 
@@ -21,6 +23,18 @@ mod go {
             verifier_only_circuit_data: *const c_char,
             dst_asset_dir: *const c_char,
         ) -> *const c_char;
+
+        /// Compile the circuit data to an R1CS file `r1cs.bin` in the specified dir
+        pub fn BuildAndSaveVerifierCircuit(
+            common_circuit_data: *const c_char,
+            verifier_only_circuit_data: *const c_char,
+            dst_asset_dir: *const c_char,
+        ) -> *const c_char;
+
+        /// Generate the Solidity code for the verification key found in `vk.bin` file
+        /// located in the specified dir. The generated Solidity verifier is stored in
+        /// `Verifier.sol` file in the specified dir
+        pub fn GenerateSolidityVerifier(dst_asset_dir: *const c_char) -> *const c_char;
 
         /// Initialize the prover. The asset dir must include `r1cs.bin` and
         /// `pk.bin`.
