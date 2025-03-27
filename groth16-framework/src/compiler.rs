@@ -66,6 +66,8 @@ pub fn generate_solidity_verifier(dst_asset_dir: &str) -> Result<String> {
     let circuit_data = load_circuit_data(dst_asset_dir)?;
     let wrapper = WrapCircuit::build_from_raw_circuit(circuit_data);
 
+    gnark_utils::generate_solidity_verifier(dst_asset_dir)?;
+
     process_solidity_verifier(dst_asset_dir, &wrapper)
 }
 
