@@ -12,7 +12,7 @@ use mp2_v1::indexing::{
     cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},
     index::IndexNode,
     row::{CellCollection, Row, RowTreeKey},
-    ColumnID,
+    ColumnID, LagrangeNode,
 };
 use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
 use ryhope::{
@@ -80,7 +80,9 @@ impl TableColumns {
         self.rest.clone()
     }
     pub fn column_id_of_cells_index(&self, key: CellTreeKey) -> Option<ColumnID> {
-        self.rest.get(key - 1).map(|tc| tc.identifier)
+        (key > 0)
+            .then(|| self.rest.get(key - 1).map(|tc| tc.identifier))
+            .flatten()
     }
     pub fn column_info(&self, identifier: ColumnIdentifier) -> TableColumn {
         self.rest
@@ -353,7 +355,13 @@ impl Table {
         println!(
             "Cell trees root hash after updates (impacted keys {:?}): {:?}",
             cell_update.nodes().collect_vec(),
-            hex::encode(&cell_tree.root_data().await?.unwrap().hash[..])
+            hex::encode(
+                &cell_tree
+                    .root_data()
+                    .await?
+                    .unwrap_or(MerkleCell::new_empty())
+                    .hash[..]
+            )
         );
         Ok(CellsUpdateResult {
             previous_row_key: update.previous_row_key,
@@ -443,7 +451,7 @@ impl Table {
             );
             println!(
                 " ++ After row update, row cell tree root tree proof hash = {:?}",
-                hex::encode(root.cell_root_hash.unwrap().0)
+                hex::encode(&root.embedded_hash())
             );
             self.row.print_tree().await;
             println!("\n+++++++++++++++++++++++++++++++++\n");

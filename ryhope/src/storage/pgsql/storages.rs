@@ -28,7 +28,8 @@ use tracing::*;
 
 use super::{CachedValue, PayloadInDb, ToFromBytea, MAX_PGSQL_BIGINT};
 
-pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
+pub type ConnectionManager = PostgresConnectionManager<NoTls>;
+pub type DBPool = Pool<ConnectionManager>;
 
 const PARENT: &str = "__parent";
 const LEFT_CHILD: &str = "__left_child";
@@ -108,7 +109,7 @@ where
         epoch: Epoch,
     ) -> impl Future<Output = Result<Vec<Self::Key>, RyhopeError>> + Send {
         async move {
-            let connection = db.get().await.unwrap();
+            let connection = connect(&db).await?;
             Ok(connection
                 .query(
                     &format!(
@@ -132,7 +133,7 @@ where
         epoch: Epoch,
     ) -> impl Future<Output = Result<Option<Self::Key>, RyhopeError>> + Send {
         async move {
-            let connection = db.get().await.unwrap();
+            let connection = connect(&db).await?;
             Ok(connection
                 .query(
                     &format!(
@@ -156,7 +157,7 @@ where
         epoch: Epoch,
     ) -> impl Future<Output = Result<HashMap<Self::Key, V>, RyhopeError>> + std::marker::Send {
         async move {
-            let connection = db.get().await.unwrap();
+            let connection = connect(&db).await?;
             Ok(connection
                 .query(
                     &format!(
@@ -181,7 +182,7 @@ where
         epoch: Epoch,
     ) -> impl std::future::Future<Output = Result<Option<V>, RyhopeError>> + std::marker::Send {
         async move {
-            let connection = db.get().await.unwrap();
+            let connection = connect(&db).await?;
             connection
             .query(
                 &format!(
@@ -247,7 +248,7 @@ where
         k: &NodeIdx,
         epoch: Epoch,
     ) -> Result<Option<()>, RyhopeError> {
-        let connection = db.get().await.unwrap();
+        let connection = connect(&db).await?;
         connection
             .query(
                 &format!(
@@ -386,7 +387,7 @@ where
         data: I,
     ) -> Result<Vec<(Epoch, NodeContext<Self::Key>, V)>, RyhopeError> {
         let data = data.into_iter().collect::<Vec<_>>();
-        let connection = db.get().await.unwrap();
+        let connection = connect(&db).await?;
         let immediate_table = data
             .iter()
             .map(|(epoch, key)| {
@@ -452,7 +453,7 @@ where
         k: &K,
         epoch: Epoch,
     ) -> Result<Option<Self::Node>, RyhopeError> {
-        let connection = db.get().await.unwrap();
+        let connection = connect(&db).await?;
         connection
             .query(
                 &format!(
@@ -551,7 +552,7 @@ where
             zk_table = table,
             core_keys_query = keys_query,
         );
-        let connection = db.get().await.unwrap();
+        let connection = connect(&db).await?;
         let rows = connection
             .query(&query, &[&bounds.0, &bounds.1])
             .await
@@ -616,7 +617,7 @@ where
         data: I,
     ) -> Result<Vec<(Epoch, NodeContext<Self::Key>, V)>, RyhopeError> {
         let data = data.into_iter().collect::<Vec<_>>();
-        let connection = db.get().await.unwrap();
+        let connection = connect(&db).await?;
         let immediate_table = data
             .iter()
             .map(|(epoch, key)| {
@@ -705,7 +706,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
         t: T,
     ) -> Result<Self, RyhopeError> {
         {
-            let connection = db.get().await.unwrap();
+            let connection = connect(&db).await?;
             connection
                 .query(
                     &format!(
@@ -875,7 +876,7 @@ where
 
     async fn fetch_at(&self, epoch: Epoch) -> Result<T, RyhopeError> {
         trace!("[{self}] fetching payload at {}", epoch);
-        let connection = self.db.get().await.unwrap();
+        let connection = connect(&self.db).await?;
         connection
             .query_one(
                 &format!(
@@ -927,7 +928,7 @@ where
         )?;
 
         let _ = self.cache.get_mut().take();
-        let mut connection = self.db.get().await.unwrap();
+        let mut connection = connect(&self.db).await?;
         let db_tx = connection
             .transaction()
             .await
@@ -1035,13 +1036,13 @@ where
         self.epoch
     }
 
-    pub async fn size(&self) -> usize {
+    pub async fn size(&self) -> Result<usize, RyhopeError> {
         self.size_at(self.epoch).await
     }
 
-    pub async fn size_at(&self, epoch: Epoch) -> usize {
-        let connection = self.db.get().await.unwrap();
-        connection
+    pub async fn size_at(&self, epoch: Epoch) -> Result<usize, RyhopeError> {
+        let connection = connect(&self.db).await?;
+        Ok(connection
             .query_one(
                 &format!(
                     "SELECT COUNT(*) FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
@@ -1051,10 +1052,9 @@ where
             )
             .await
             .map(|row| row.get::<_, i64>(0))
-            .map_err(|err| RyhopeError::from_db("counting rows", err))
-            .unwrap()
+            .map_err(|err| RyhopeError::from_db("counting rows", err))?
             .try_into()
-            .unwrap()
+            .unwrap())
     }
 
     pub(super) async fn rollback_to(&mut self, new_epoch: Epoch) -> Result<(), RyhopeError> {
@@ -1077,7 +1077,7 @@ where
 
         self.nodes_cache.clear();
         self.payload_cache.clear();
-        let mut connection = self.db.get().await.unwrap();
+        let mut connection = connect(&self.db).await?;
         let db_tx = connection
             .transaction()
             .await
@@ -1146,8 +1146,8 @@ where
         to self.wrapped.lock().unwrap() {
             fn initial_epoch(&self) -> Epoch ;
             fn current_epoch(&self) -> Epoch ;
-            async fn size(&self) -> usize;
-            async fn size_at(&self, epoch: Epoch) -> usize;
+            async fn size(&self) -> Result<usize, RyhopeError>;
+            async fn size_at(&self, epoch: Epoch) -> Result<usize, RyhopeError>;
         }
     }
 
@@ -1314,8 +1314,8 @@ where
         to self.wrapped.lock().unwrap() {
             fn initial_epoch(&self) -> Epoch ;
             fn current_epoch(&self) -> Epoch ;
-            async fn size(&self) -> usize ;
-            async fn size_at(&self, epoch: Epoch) -> usize ;
+            async fn size(&self) -> Result<usize, RyhopeError> ;
+            async fn size_at(&self, epoch: Epoch) -> Result<usize, RyhopeError> ;
         }
     }
 
@@ -1334,8 +1334,7 @@ where
                 let value = self.wrapped.lock().unwrap().payload_cache.get(k).cloned();
                 if let Some(Some(cached_value)) = value {
                     Ok(Some(cached_value.into_value()))
-                } else if let Some(value) = T::fetch_payload_at(db, &table, k, epoch).await.unwrap()
-                {
+                } else if let Some(value) = T::fetch_payload_at(db, &table, k, epoch).await? {
                     let mut guard = self.wrapped.lock().unwrap();
                     guard
                         .payload_cache
@@ -1421,4 +1420,11 @@ where
             .insert(k, Some(CachedValue::Written(value)));
         async { Ok(()) }
     }
+}
+
+async fn connect(db: &DBPool) -> Result<bb8::PooledConnection<'_, ConnectionManager>, RyhopeError> {
+    db.get().await.map_err(|err| RyhopeError::DbPoolError {
+        msg: "Unable to connect to DB".to_string(),
+        err,
+    })
 }

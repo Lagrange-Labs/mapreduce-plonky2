@@ -23,7 +23,6 @@ use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::*;
 use mp2_common::{
-    poseidon::empty_poseidon_hash,
     proof::{deserialize_proof, ProofWithVK},
     types::HashOutput,
     C, D, F,
@@ -35,6 +34,7 @@ use mp2_v1::{
         block::BlockPrimaryIndex,
         cell::MerkleCell,
         row::{Row, RowPayload, RowTreeKey},
+        LagrangeNode,
     },
     query::{
         batching_planner::{generate_chunks_and_update_tree, UTForChunkProofs, UTKey},
@@ -855,9 +855,7 @@ async fn check_correct_cells_tree(
     payload: &RowPayload<BlockPrimaryIndex>,
 ) -> Result<()> {
     let local_cells = all_cells.to_vec();
-    let expected_cells_root = payload
-        .cell_root_hash
-        .unwrap_or(HashOutput::from(*empty_poseidon_hash()));
+    let expected_cells_root = payload.embedded_hash();
     let mut tree = indexing::cell::new_tree().await;
     tree.in_transaction(|t| {
         async move {

@@ -193,7 +193,7 @@ where
     }
 
     // Expensive, but only used in test context.
-    async fn size(&self) -> usize {
+    async fn size(&self) -> Result<usize, RyhopeError> {
         let all_keys = self
             .mem
             .iter()
@@ -206,10 +206,10 @@ where
                 count += 1;
             }
         }
-        count
+        Ok(count)
     }
 
-    async fn size_at(&self, epoch: Epoch) -> usize {
+    async fn size_at(&self, epoch: Epoch) -> Result<usize, RyhopeError> {
         assert!(epoch >= self.epoch_offset);
         let epoch = epoch - self.epoch_offset;
         let mut keys = HashSet::new();
@@ -218,7 +218,7 @@ where
             keys.extend(self.mem[i].keys())
         }
 
-        keys.len()
+        Ok(keys.len())
     }
 
     async fn keys_at(&self, epoch: Epoch) -> Vec<K> {

@@ -1,3 +1,6 @@
+//! Provides API to generate proofs for the table creation and query execution
+//! steps of Lagrange Zk-SQL coprocessor.
+
 // Add this to allow generic const expressions, e.g. `PAD_LEN(NODE_LEN)`.
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
