@@ -99,6 +99,7 @@ impl<
                 .nodes
                 .size()
                 .await
+                .unwrap()
                 .to_string()
                 .blue()
         )
