@@ -444,7 +444,7 @@ impl<
         self.storage.data().try_fetch_at(k, epoch).await
     }
 
-    async fn size_at(&self, epoch: Epoch) -> usize {
+    async fn size_at(&self, epoch: Epoch) -> Result<usize, RyhopeError> {
         self.storage.data().size_at(epoch).await
     }
 

@@ -1,4 +1,10 @@
-//! Circuits for v1 of Lagrange Proof Network (LPN)
+//! Provide the generic APIs to build proving parameters and generate proofs for
+//! the Zk-SQL coprocessor by Lagrange.
+//!
+//! In a nutshell, Lagrange Zk-SQL coprocessor allows to run verifiable SQL queries
+//! over tables in Lagrange verifiable DB. The verifiable DB allows to create
+//! tables from blockchain data, altogether with a proof that the DB was constructed
+//! with the same data extracted from the blockchain.
 #![allow(incomplete_features)]
 #![allow(clippy::large_enum_variant)]
 // Add this to allow generic const expressions, e.g. `PAD_LEN(NODE_LEN)`.

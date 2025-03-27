@@ -105,7 +105,7 @@ impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStor
         }
     }
 
-    async fn size_at(&self, epoch: Epoch) -> usize {
+    async fn size_at(&self, epoch: Epoch) -> Result<usize, RyhopeError> {
         self.wrapped.size_at(epoch).await
     }
 

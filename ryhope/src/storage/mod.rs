@@ -267,12 +267,12 @@ where
     }
 
     /// Return the number of stored K/V pairs at the current epoch.
-    fn size(&self) -> impl Future<Output = usize> {
+    fn size(&self) -> impl Future<Output = Result<usize, RyhopeError>> {
         self.size_at(self.current_epoch())
     }
 
     /// Return the number of stored K/V pairs at the given epoch.
-    fn size_at(&self, epoch: Epoch) -> impl Future<Output = usize>;
+    fn size_at(&self, epoch: Epoch) -> impl Future<Output = Result<usize, RyhopeError>>;
 
     /// Return all the keys existing at the given epoch.
     fn keys_at(&self, epoch: Epoch) -> impl Future<Output = Vec<K>>;

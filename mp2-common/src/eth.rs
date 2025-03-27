@@ -275,11 +275,6 @@ mod test {
     use std::str::FromStr;
 
     use alloy::{primitives::Bytes, providers::ProviderBuilder};
-    use ethereum_types::U64;
-    use ethers::{
-        providers::{Http, Middleware},
-        types::BlockNumber,
-    };
     use hashbrown::HashMap;
 
     use crate::{
@@ -480,96 +475,10 @@ mod test {
         let alloy_computed = block.header.hash_slow();
         assert_eq!(mp2_computed.as_slice(), alloy_computed.as_slice());
 
-        // CHECK RLP ENCODING FROM ETHERS MMODIF AND ALLOY
-        let ethers_provider = ethers::providers::Provider::<Http>::try_from(url)
-            .expect("could not instantiate HTTP Provider");
-        let ethers_block = ethers_provider
-            .get_block_with_txs(BlockNumber::Number(U64::from(block.header.number)))
-            .await?
-            .unwrap();
-        // sanity check that ethers manual rlp implementation works
-        assert_eq!(block.header.hash.as_slice(), ethers_block.block_hash());
-        let ethers_rlp = ethers_block.rlp();
-        let alloy_rlp = block.header.rlp();
-        assert_eq!(ethers_rlp, alloy_rlp);
-        let manual_alloy_rlp = block.header.rlp();
-        let ethers_stream = rlp::Rlp::new(&ethers_rlp);
-        let manual_stream = rlp::Rlp::new(&manual_alloy_rlp);
-        compare_rlp(ethers_stream, manual_stream);
-        assert_eq!(ethers_rlp, manual_alloy_rlp);
-
         let previous_computed = previous_block.block_hash();
         assert_eq!(&previous_computed, block.header.parent_hash.as_slice());
         let alloy_given = block.header.hash;
         assert_eq!(alloy_given, alloy_computed);
         Ok(())
-    }
-
-    fn compare_rlp<'a>(a: rlp::Rlp<'a>, b: rlp::Rlp<'a>) {
-        let ap = a.payload_info().unwrap();
-        let bp = b.payload_info().unwrap();
-        assert_eq!(
-            a.item_count().unwrap(),
-            b.item_count().unwrap(),
-            "not same item count in  list"
-        );
-        assert_eq!(
-            ap.header_len, bp.header_len,
-            "payloads different header len"
-        );
-        assert_eq!(a.is_list(), b.is_list());
-        println!(
-            "Item count for block RLP => a = {}, b = {}",
-            a.item_count().unwrap(),
-            b.item_count().unwrap()
-        );
-        for i in 0..a.item_count().unwrap() {
-            let ae = a.at(i).unwrap().as_raw();
-            let be = b.at(i).unwrap().as_raw();
-            println!("Checking element {} - len {} vs {}", i, ae.len(), be.len());
-            assert_eq!(ae, be, "elements not the same at index {i}");
-        }
-        // FAILING
-        assert_eq!(ap.value_len, bp.value_len, "payloads different value len");
-    }
-    /// TEST to compare alloy with ethers
-    pub struct RLPBlock<'a, X>(pub &'a ethers::types::Block<X>);
-    impl<X> BlockUtil for ethers::types::Block<X> {
-        fn rlp(&self) -> Vec<u8> {
-            let rlp = RLPBlock(self);
-            rlp::encode(&rlp).to_vec()
-        }
-    }
-    impl<X> rlp::Encodable for RLPBlock<'_, X> {
-        fn rlp_append(&self, s: &mut rlp::RlpStream) {
-            s.begin_unbounded_list();
-            s.append(&self.0.parent_hash);
-            s.append(&self.0.uncles_hash);
-            s.append(&self.0.author.unwrap_or_default());
-            s.append(&self.0.state_root);
-            s.append(&self.0.transactions_root);
-            s.append(&self.0.receipts_root);
-            s.append(&self.0.logs_bloom.unwrap_or_default());
-            s.append(&self.0.difficulty);
-            s.append(&self.0.number.unwrap_or_default());
-            s.append(&self.0.gas_limit);
-            s.append(&self.0.gas_used);
-            s.append(&self.0.timestamp);
-            s.append(&self.0.extra_data.to_vec());
-            s.append(&self.0.mix_hash.unwrap_or_default());
-            s.append(&self.0.nonce.unwrap_or_default());
-            rlp_opt(s, &self.0.base_fee_per_gas);
-            rlp_opt(s, &self.0.withdrawals_root);
-            rlp_opt(s, &self.0.blob_gas_used);
-            rlp_opt(s, &self.0.excess_blob_gas);
-            rlp_opt(s, &self.0.parent_beacon_block_root);
-            s.finalize_unbounded_list();
-        }
-    }
-    /// Extracted from ether-rs
-    pub(crate) fn rlp_opt<T: rlp::Encodable>(rlp: &mut rlp::RlpStream, opt: &Option<T>) {
-        if let Some(inner) = opt {
-            rlp.append(inner);
-        }
     }
 }
