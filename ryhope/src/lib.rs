@@ -648,6 +648,7 @@ pub async fn new_row_tree<
 >(
     genesis_block: Epoch,
     alpha: scapegoat::Alpha,
+    max_depth: usize,
     storage_settings: S::Settings,
     reset_if_exist: bool,
 ) -> Result<MerkleTreeKvDb<scapegoat::Tree<K>, V, S>, RyhopeError> {
@@ -656,7 +657,7 @@ pub async fn new_row_tree<
     }
 
     let initial_epoch = genesis_block - 1;
-    let tree_settings = scapegoat::Tree::empty(alpha);
+    let tree_settings = scapegoat::Tree::empty(alpha, max_depth);
 
     MerkleTreeKvDb::new(
         if reset_if_exist {

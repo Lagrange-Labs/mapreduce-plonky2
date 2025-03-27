@@ -6,6 +6,8 @@ use crate::tree::PrintableTree;
 use crate::tree::{scapegoat, scapegoat::Alpha};
 use crate::{InitSettings, MerkleTreeKvDb};
 
+const MAX_TREE_DEPTH: usize = 10;
+
 #[tokio::test]
 async fn run() -> Result<()> {
     println!("Example to create a RowTree backed by memory storage");
@@ -15,7 +17,7 @@ async fn run() -> Result<()> {
 
     type Storage = InMemory<RowTree, V>;
     let mut tree = MerkleTreeKvDb::<RowTree, V, Storage>::new(
-        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.5))),
+        InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.5), MAX_TREE_DEPTH)),
         (),
     )
     .await?;
