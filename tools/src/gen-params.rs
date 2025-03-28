@@ -14,7 +14,10 @@ use tools::{INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX
     MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, NUM_CHUNKS, NUM_ROWS, 
     PARAMS_CHECKSUM_FILENAME, PP_BIN_KEY, QP_BIN_KEY, ROW_TREE_MAX_DEPTH, GROTH16_ASSETS_PREFIX,
 };
+use mp2_common::{F, D};
+use groth16_framework::C;
 use verifiable_db::api::QueryParameters;
+use plonky2::plonk::circuit_data::CircuitData;
 
 type QueryParams = QueryParameters<
     NUM_CHUNKS,
@@ -130,15 +133,18 @@ async fn main() {
             } else {
                 // TRICKY: The parameters have large size, we suppose to generate and drop it in a local
                 // scope to avoid stack overflow, and also need to avoid passing into an async function.
+                let params_info = {
                 let preprocessing_params = build_preprocessing_params();
-                let query_params = build_query_parameters(&preprocessing_params);
-
                 let _ = store_preprocessing_params(&args.params_root_dir, &preprocessing_params);
+                preprocessing_params.get_params_info().unwrap()
+                };
+                let query_params = build_query_parameters(params_info);
+
                 let _ = store_query_params(&args.params_root_dir, &query_params);
 
                 query_params
             };
-            generate_groth16_assets(&args.params_root_dir, &query_params, args.only_r1cs);
+            generate_groth16_assets(&args.params_root_dir, query_params.final_proof_circuit_data(), args.only_r1cs);
         }
     }
 
@@ -192,8 +198,8 @@ fn store_preprocessing_params(
 }
 
 /// Build query parameters from preprocessing parameters
-fn build_query_parameters(indexing_params: &PublicParameters) -> QueryParams {
-    QueryParameters::build_params(&indexing_params.get_params_info().unwrap()).unwrap()
+fn build_query_parameters(params_info: Vec<u8>) -> QueryParams {
+    QueryParameters::build_params(&params_info).unwrap()
 }
 
 /// Store query parameters on disk and return the saved file path
@@ -249,13 +255,12 @@ fn groth16_assets_dir(params_root_dir: &str) -> String {
 
 /// Generate Groth16 asset files and save to disk; if `only_r1cs` flag is true, only the R1CS
 /// circuit is compiled and saved in asset directory
-fn generate_groth16_assets(params_root_dir: &str, query_params: &QueryParams, only_r1cs: bool) {
+fn generate_groth16_assets(params_root_dir: &str, circuit_data: &CircuitData<F, C, D>, only_r1cs: bool) {
     let now = Instant::now();
 
     println!("Start to generate the Groth16 asset files");
 
     // Get the final circuit data of the query parameters.
-    let circuit_data = query_params.final_proof_circuit_data();
     let circuit_data = clone_circuit_data(circuit_data)
         .unwrap_or_else(|err| panic!("Failed to clone the circuit data: {}", err));
 

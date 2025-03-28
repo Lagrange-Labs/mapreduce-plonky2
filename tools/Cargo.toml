@@ -13,7 +13,9 @@ blake3 = { version = "1.5.5", features = ["mmap", "rayon"] }
 clap = { workspace = true, features = ["derive", "std", "suggestions", "help"] }
 env_logger.workspace = true
 groth16_framework.path = "../groth16-framework/"
+mp2_common.path = "../mp2-common"
 mp2_v1.path = "../mp2-v1/"
+plonky2.workspace= true
 semver = "1.0.25"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 verifiable-db.path = "../verifiable-db/"
