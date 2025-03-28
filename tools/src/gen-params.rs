@@ -10,20 +10,11 @@ use groth16_framework::{
     build_verifier_circuit, compile_and_generate_assets, generate_solidity_verifier,
 };
 use mp2_v1::api::{build_circuits_params, PublicParameters};
+use tools::{INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, 
+    MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, NUM_CHUNKS, NUM_ROWS, 
+    PARAMS_CHECKSUM_FILENAME, PP_BIN_KEY, QP_BIN_KEY, ROW_TREE_MAX_DEPTH, GROTH16_ASSETS_PREFIX,
+};
 use verifiable_db::api::QueryParameters;
-
-use lgn_messages::types::v1::query::{NUM_CHUNKS, NUM_ROWS};
-use lgn_provers::params::PARAMS_CHECKSUM_FILENAME;
-use lgn_provers::provers::v1::query::MAX_NUM_OUTPUTS;
-use lgn_provers::provers::v1::query::MAX_NUM_PLACEHOLDERS;
-use lgn_provers::provers::v1::query::MAX_NUM_PREDICATE_OPS;
-use lgn_provers::provers::v1::query::MAX_NUM_RESULT_OPS;
-use lgn_provers::provers::v1::query::{INDEX_TREE_MAX_DEPTH, MAX_NUM_ITEMS_PER_OUTPUT};
-use lgn_provers::provers::v1::query::{MAX_NUM_COLUMNS, ROW_TREE_MAX_DEPTH};
-
-const GROTH16_ASSETS_PREFIX: &str = "groth16_assets";
-const PP_BIN_KEY: &str = "preprocessing_params.bin";
-const QP_BIN_KEY: &str = "query_params.bin";
 
 type QueryParams = QueryParameters<
     NUM_CHUNKS,
@@ -47,13 +38,13 @@ struct Args {
     params_root_dir: String,
 
     /// Generate Groth16 parameters from existing query parameters
-    #[arg(long)]
+    #[arg(long, default_value_t = false)]
     only_groth16: bool,
 
     /// If this flag is true, then only the R1CS file is generated for Groth16
     /// instead of all the Groth16 assets; useful when the proving and verification
     /// keys must be generated with a trusted setup ceremony
-    #[arg(long)]
+    #[arg(long, default_value_t = false)]
     only_r1cs: bool,
 
     #[command(subcommand)]
@@ -121,14 +112,14 @@ fn write_hashes(params_root_dir: &str) {
     }
 }
 
-/// Main entry point for the parameter generation tool
 #[tokio::main]
+/// Main entry point for the parameter generation tool
 async fn main() {
+    env_logger::init();
     // Parse the CLI arguments.
     let args = Args::parse();
-
     println!("serializing parameters to `{}`", args.params_root_dir);
-
+    
     match &args.command {
         Some(Commands::GenSolidityCmd { pk_path, vk_path }) => {
             generate_solidity_cmd(&args.params_root_dir, pk_path, vk_path)
@@ -139,7 +130,6 @@ async fn main() {
             } else {
                 // TRICKY: The parameters have large size, we suppose to generate and drop it in a local
                 // scope to avoid stack overflow, and also need to avoid passing into an async function.
-
                 let preprocessing_params = build_preprocessing_params();
                 let query_params = build_query_parameters(&preprocessing_params);
 
