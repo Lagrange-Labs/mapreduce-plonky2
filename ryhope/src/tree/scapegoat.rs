@@ -144,7 +144,12 @@ pub struct State<K> {
     pub(crate) alpha: Alpha,
     /// Maximum depth of the scapegoat tree; a re-balance will be triggered if a
     /// node has a higher depth than this upper bound
+    #[serde(default = "default_max_depth")]
     pub(crate) max_depth: usize,
+}
+
+fn default_max_depth() -> usize {
+    25
 }
 
 pub struct Tree<
