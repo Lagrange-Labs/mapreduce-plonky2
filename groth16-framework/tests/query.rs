@@ -98,6 +98,8 @@ fn test_groth16_proving_from_trusted_setup_keys() {
 
     const ASSET_DIR: &str = "groth16_query";
 
+    generate_solidity_verifier(ASSET_DIR).unwrap();
+
     // Create the testing context.
     let ctx = TestContext::new();
 
@@ -105,8 +107,6 @@ fn test_groth16_proving_from_trusted_setup_keys() {
 
     // Test Groth16 proving, verification and Solidity verification.
     test_groth16_proving_and_verification(ASSET_DIR, &proof);
-
-    generate_solidity_verifier(ASSET_DIR).unwrap();
 
     verify_query_in_solidity(ASSET_DIR);
 }
