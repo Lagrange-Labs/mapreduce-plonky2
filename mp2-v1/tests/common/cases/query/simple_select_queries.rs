@@ -82,7 +82,7 @@ pub(crate) async fn prove_query(
         })
         .collect::<Result<Vec<_>>>()?;
     // compute input for each matching row
-    let current_epoch = planner.table.index.current_epoch();
+    let current_epoch = planner.table.index.current_epoch().await;
     let mut matching_rows_input = vec![];
     for (key, epoch, result) in matching_rows.into_iter() {
         let row_proof = prove_single_row(
@@ -444,8 +444,8 @@ pub(crate) async fn cook_query_no_matching_rows(
     table: &Table,
     info: &TableInfo,
 ) -> Result<QueryCooking> {
-    let initial_epoch = table.index.initial_epoch();
-    let current_epoch = table.index.current_epoch();
+    let initial_epoch = table.index.initial_epoch().await;
+    let current_epoch = table.index.current_epoch().await;
     let min_block = initial_epoch as BlockPrimaryIndex;
     let max_block = current_epoch as BlockPrimaryIndex;
 

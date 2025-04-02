@@ -37,8 +37,10 @@ pub trait TreeTopology: Default + Send + Sync {
     type State: Send + Sync + Clone + Debug + Serialize + for<'a> Deserialize<'a>;
 
     /// Return the number of nodes currently stored in the tree
-    fn size<S: TreeStorage<Self>>(&self, s: &S)
-        -> impl Future<Output = Result<usize, RyhopeError>>;
+    fn size<S: TreeStorage<Self>>(
+        &self,
+        s: &S,
+    ) -> impl Future<Output = Result<usize, RyhopeError>> + Send;
 
     /// Return the root of the tree.
     ///

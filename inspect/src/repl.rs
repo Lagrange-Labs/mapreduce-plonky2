@@ -77,7 +77,7 @@ impl<
 {
     pub async fn new(db: MerkleTreeKvDb<T, V, S>, payload_fmt: F) -> anyhow::Result<Self> {
         let current_key = db.root().await?.ok_or(anyhow!("tree is empty"))?;
-        let current_epoch = db.current_epoch();
+        let current_epoch = db.current_epoch().await;
 
         Ok(Self {
             current_key,
@@ -106,21 +106,22 @@ impl<
         .unwrap();
     }
 
-    pub fn set_epoch(&mut self, epoch: Epoch) -> anyhow::Result<()> {
-        if epoch < self.db.initial_epoch() {
-            bail!(
-                "epoch `{}` is older than initial epoch `{}`",
-                epoch,
-                self.db.initial_epoch()
-            );
-        }
-        if epoch > self.db.current_epoch() {
-            bail!(
-                "epoch `{}` is newer than latest epoch `{}`",
-                epoch,
-                self.db.current_epoch()
-            );
-        }
+    pub async fn set_epoch(&mut self, epoch: Epoch) -> anyhow::Result<()> {
+        let initial_epoch = self.db.initial_epoch().await;
+        anyhow::ensure!(
+            epoch >= initial_epoch,
+            "epoch `{}` is older than initial epoch `{}`",
+            epoch,
+            initial_epoch
+        );
+
+        let current_epoch = self.db.current_epoch().await;
+        anyhow::ensure!(
+            epoch <= current_epoch,
+            "epoch `{}` is newer than latest epoch `{}`",
+            epoch,
+            current_epoch
+        );
 
         self.current_epoch = epoch;
         Ok(())
@@ -150,7 +151,7 @@ impl<
         loop {
             let epoch: Epoch = Input::new().with_prompt("target epoch:").interact_text()?;
 
-            self.set_epoch(epoch)?;
+            self.set_epoch(epoch).await?;
         }
     }
 
