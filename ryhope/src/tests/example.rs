@@ -23,7 +23,7 @@ async fn run() -> Result<()> {
     println!("Insertion of some (key,value) pairs");
     println!(
         "Current version of the tree before insertion: {}",
-        tree.current_epoch()
+        tree.current_epoch().await
     );
 
     let res = tree
@@ -35,10 +35,10 @@ async fn run() -> Result<()> {
         .await
         .expect("this should work");
 
-    let first_stamp = tree.current_epoch();
+    let first_stamp = tree.current_epoch().await;
     println!(
         "Current version of the tree after insertion: {}",
-        tree.current_epoch()
+        tree.current_epoch().await
     );
 
     println!("Tree of keys to update:");
@@ -77,7 +77,7 @@ async fn run() -> Result<()> {
     }
 
     // Printing the tree at its previous versions
-    println!("tree at {} is now:", tree.current_epoch());
+    println!("tree at {} is now:", tree.current_epoch().await);
     tree.tree().print(&tree.storage).await;
 
     println!("tree at epoch {first_stamp} was:");

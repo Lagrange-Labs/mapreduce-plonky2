@@ -83,7 +83,7 @@ pub(crate) async fn prove_query(
         .table
         .row
         .wide_lineage_between(
-            planner.table.row.current_epoch(),
+            planner.table.row.current_epoch().await,
             &core_keys_for_row_tree(
                 &planner.query.query,
                 planner.settings,
@@ -98,8 +98,8 @@ pub(crate) async fn prove_query(
         .await?;
     // prove the index tree, on a single version. Both path can be taken depending if we do have
     // some nodes or not
-    let initial_epoch = planner.table.index.initial_epoch() as BlockPrimaryIndex;
-    let current_epoch = planner.table.index.current_epoch() as BlockPrimaryIndex;
+    let initial_epoch = planner.table.index.initial_epoch().await as BlockPrimaryIndex;
+    let current_epoch = planner.table.index.current_epoch().await as BlockPrimaryIndex;
     let block_range =
         planner.query.min_block.max(initial_epoch + 1)..=planner.query.max_block.min(current_epoch);
     info!(
@@ -252,7 +252,7 @@ pub(crate) async fn prove_query(
         planner.ctx,
         &planner.query,
         planner.pis,
-        planner.table.index.current_epoch(),
+        planner.table.index.current_epoch().await,
         &query_proof_id,
     )
     .await?;
@@ -280,7 +280,7 @@ pub(crate) async fn prove_query(
         planner.table,
         &planner.query,
         &pis,
-        planner.table.index.current_epoch(),
+        planner.table.index.current_epoch().await,
         num_touched_rows,
         res,
         metadata,
@@ -428,7 +428,7 @@ pub(crate) async fn cook_query_between_blocks(
     table: &Table,
     info: &TableInfo,
 ) -> Result<QueryCooking> {
-    let max = table.row.current_epoch();
+    let max = table.row.current_epoch().await;
     let min = max - 1;
 
     let value_column = &info.value_column;
@@ -634,7 +634,7 @@ pub(crate) async fn cook_query_partial_block_range(
     let key_column = table.columns.secondary.name.clone();
     let value_column = info.value_column.clone();
     let table_name = &table.public_name;
-    let initial_epoch = table.row.initial_epoch();
+    let initial_epoch = table.row.initial_epoch().await;
     // choose a min query bound smaller than initial epoch
     let min_block = initial_epoch - 1;
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
@@ -660,7 +660,7 @@ pub(crate) async fn cook_query_no_matching_entries(
     table: &Table,
     info: &TableInfo,
 ) -> Result<QueryCooking> {
-    let initial_epoch = table.row.initial_epoch();
+    let initial_epoch = table.row.initial_epoch().await;
     // choose query bounds outside of the range [initial_epoch, last_epoch]
     let min_block = 0;
     let max_block = initial_epoch - 1;
@@ -704,8 +704,8 @@ pub(crate) async fn cook_query_non_matching_entries_some_blocks(
     let table_name = &table.public_name;
     // in this query we set query bounds on block numbers to the widest range, so that we
     // are sure that there are blocks where the chosen key is not alive
-    let min_block = table.row.initial_epoch() + 1;
-    let max_block = table.row.current_epoch();
+    let min_block = table.row.initial_epoch().await + 1;
+    let max_block = table.row.current_epoch().await;
     let placeholders = Placeholders::new_empty(U256::from(min_block), U256::from(max_block));
 
     let query_str = format!(
@@ -729,8 +729,8 @@ pub(crate) async fn cook_query_non_matching_entries_some_blocks(
 /// was valid
 async fn extract_row_liveness(table: &Table) -> Result<HashMap<RowTreeKey, Vec<Epoch>>> {
     let mut all_table = HashMap::new();
-    let max = table.row.current_epoch();
-    let min = table.row.initial_epoch() + 1;
+    let max = table.row.current_epoch().await;
+    let min = table.row.initial_epoch().await + 1;
     for block in (min..=max).rev() {
         println!("Querying for block {block}");
         let rows = collect_all_at(&table.row, block).await?;
@@ -759,8 +759,8 @@ pub(crate) async fn find_longest_lived_key(
     table: &Table,
     must_not_be_alive_in_some_blocks: bool,
 ) -> Result<(RowTreeKey, BlockRange)> {
-    let initial_epoch = table.row.initial_epoch() + 1;
-    let last_epoch = table.row.current_epoch();
+    let initial_epoch = table.row.initial_epoch().await + 1;
+    let last_epoch = table.row.current_epoch().await;
     let all_table = extract_row_liveness(table).await?;
     // find the longest running row
     let (longest_key, longest_sequence, starting) = all_table

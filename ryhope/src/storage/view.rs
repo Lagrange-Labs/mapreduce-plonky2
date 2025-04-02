@@ -86,11 +86,11 @@ pub struct KvStorageAt<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>
 impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStorage<T::Key, T::Node>
     for KvStorageAt<'_, T, S>
 {
-    fn initial_epoch(&self) -> Epoch {
-        self.wrapped.initial_epoch()
+    async fn initial_epoch(&self) -> Epoch {
+        self.wrapped.initial_epoch().await
     }
 
-    fn current_epoch(&self) -> Epoch {
+    async fn current_epoch(&self) -> Epoch {
         self.current_epoch
     }
 

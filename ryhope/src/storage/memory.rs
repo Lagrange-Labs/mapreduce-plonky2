@@ -162,11 +162,11 @@ where
     K: Hash + Eq + Clone + Debug + Send + Sync,
     V: Clone + Debug + Send + Sync,
 {
-    fn initial_epoch(&self) -> Epoch {
+    async fn initial_epoch(&self) -> Epoch {
         self.epoch_offset
     }
 
-    fn current_epoch(&self) -> Epoch {
+    async fn current_epoch(&self) -> Epoch {
         // There is a 1-1 mapping between the epoch and the position in the list of
         // diffs; epoch 0 being the initial empty state.
         let inner_epoch: Epoch = (self.mem.len() - 1) as Epoch;
@@ -193,7 +193,7 @@ where
     }
 
     // Expensive, but only used in test context.
-    async fn size(&self) -> usize {
+    async fn size(&self) -> Result<usize, RyhopeError> {
         let all_keys = self
             .mem
             .iter()
@@ -206,7 +206,7 @@ where
                 count += 1;
             }
         }
-        count
+        Ok(count)
     }
 
     async fn size_at(&self, epoch: Epoch) -> usize {
@@ -300,11 +300,11 @@ where
 
         let epoch = epoch - self.epoch_offset;
         ensure(
-            epoch <= self.current_epoch(),
+            epoch <= self.current_epoch().await,
             format!(
                 "unable to rollback to epoch `{}` more recent than current epoch `{}`",
                 epoch,
-                self.current_epoch()
+                self.current_epoch().await
             ),
         )?;
 
@@ -399,8 +399,8 @@ where
         self.nodes.rollback_to(epoch).await?;
         self.data.rollback_to(epoch).await?;
 
-        assert_eq!(self.state.current_epoch(), self.nodes.current_epoch());
-        assert_eq!(self.state.current_epoch(), self.data.current_epoch());
+        assert_eq!(self.state.current_epoch(), self.nodes.current_epoch().await);
+        assert_eq!(self.state.current_epoch(), self.data.current_epoch().await);
 
         Ok(())
     }

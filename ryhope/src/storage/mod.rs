@@ -161,7 +161,10 @@ pub trait TreeStorage<T: TreeTopology>: Sized + Send + Sync {
 
     /// Rollback this tree one epoch in the past
     fn rollback<F>(&mut self) -> impl Future<Output = Result<(), RyhopeError>> {
-        self.rollback_to(self.nodes().current_epoch() - 1)
+        async move {
+            self.rollback_to(self.nodes().current_epoch().await - 1)
+                .await
+        }
     }
 
     /// Rollback this tree to the given epoch
@@ -237,15 +240,15 @@ where
     V: Send + Sync,
 {
     /// Return the first registered time stamp of the storage
-    fn initial_epoch(&self) -> Epoch;
+    fn initial_epoch(&self) -> impl Future<Output = Epoch> + Send;
 
     /// Return the current time stamp of the storage
-    fn current_epoch(&self) -> Epoch;
+    fn current_epoch(&self) -> impl Future<Output = Epoch> + Send;
 
     /// Return the value associated to `k` at the current epoch if it exists,
     /// `None` otherwise.
     fn try_fetch(&self, k: &K) -> impl Future<Output = Result<Option<V>, RyhopeError>> + Send {
-        async { self.try_fetch_at(k, self.current_epoch()).await }
+        async { self.try_fetch_at(k, self.current_epoch().await).await }
     }
 
     /// Return the value associated to `k` at the given `epoch` if it exists,
@@ -267,8 +270,8 @@ where
     }
 
     /// Return the number of stored K/V pairs at the current epoch.
-    fn size(&self) -> impl Future<Output = usize> {
-        self.size_at(self.current_epoch())
+    fn size(&self) -> impl Future<Output = Result<usize, RyhopeError>> {
+        async move { Ok(self.size_at(self.current_epoch().await).await) }
     }
 
     /// Return the number of stored K/V pairs at the given epoch.
@@ -334,7 +337,7 @@ pub trait EpochKvStorage<K: Eq + Hash + Send + Sync, V: Send + Sync>:
     /// Rollback this storage one epoch back. Please note that this is a
     /// destructive and irreversible operation.
     fn rollback(&mut self) -> impl Future<Output = Result<(), RyhopeError>> {
-        self.rollback_to(self.current_epoch() - 1)
+        async move { self.rollback_to(self.current_epoch().await - 1).await }
     }
 
     /// Rollback this storage to the given epoch. Please note that this is a
@@ -388,12 +391,12 @@ pub trait SqlTransactionStorage: TransactionalStorage {
     /// This hook **MUST** be called after the **SUCCESSFUL** execution of the
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution failed.
-    fn commit_success(&mut self);
+    fn commit_success(&mut self) -> impl std::future::Future<Output = ()> + Send;
 
     /// This hook **MUST** be called after the **FAILED** execution of the
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution is successful.
-    fn commit_failed(&mut self);
+    fn commit_failed(&mut self) -> impl std::future::Future<Output = ()> + Send;
 }
 
 /// Similar to [`TransactionalStorage`], but returns a [`Minitree`] of the
@@ -478,12 +481,12 @@ pub trait SqlTreeTransactionalStorage<K: Clone + Hash + Eq + Send + Sync, V: Sen
     /// This hook **MUST** be called after the **SUCCESSFUL** execution of the
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution failed.
-    fn commit_success(&mut self);
+    fn commit_success(&mut self) -> impl std::future::Future<Output = ()> + Send;
 
     /// This hook **MUST** be called after the **FAILED** execution of the
     /// transaction given to [`commit_in`]. It **MUST NOT** be called if the
     /// transaction execution is successful.
-    fn commit_failed(&mut self);
+    fn commit_failed(&mut self) -> impl std::future::Future<Output = ()> + Send;
 }
 
 /// The meta-operations trait gathers high-level operations that may be
