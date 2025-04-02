@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
 
             let mut repl = Repl::new(tree_db, payload_fmt).await?;
             if let Some(epoch) = args.epoch {
-                repl.set_epoch(epoch)?;
+                repl.set_epoch(epoch).await?;
             }
             repl.run().await
         }
@@ -109,7 +109,7 @@ async fn main() -> Result<()> {
 
             let mut repl = Repl::new(tree_db, payload_fmt).await?;
             if let Some(epoch) = args.epoch {
-                repl.set_epoch(epoch)?;
+                repl.set_epoch(epoch).await?;
             }
             repl.run().await
         }

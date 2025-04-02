@@ -162,17 +162,15 @@ where
     K: Hash + Eq + Clone + Debug + Send + Sync,
     V: Clone + Debug + Send + Sync,
 {
-    fn initial_epoch(&self) -> impl std::future::Future<Output = Epoch> + Send {
-        async move { self.epoch_offset }
+    async fn initial_epoch(&self) -> Epoch {
+        self.epoch_offset
     }
 
-    fn current_epoch(&self) -> impl std::future::Future<Output = Epoch> + Send {
-        async move {
-            // There is a 1-1 mapping between the epoch and the position in the list of
-            // diffs; epoch 0 being the initial empty state.
-            let inner_epoch: Epoch = (self.mem.len() - 1) as Epoch;
-            inner_epoch + self.epoch_offset
-        }
+    async fn current_epoch(&self) -> Epoch {
+        // There is a 1-1 mapping between the epoch and the position in the list of
+        // diffs; epoch 0 being the initial empty state.
+        let inner_epoch: Epoch = (self.mem.len() - 1) as Epoch;
+        inner_epoch + self.epoch_offset
     }
 
     async fn try_fetch_at(&self, k: &K, epoch: Epoch) -> Result<Option<V>, RyhopeError> {

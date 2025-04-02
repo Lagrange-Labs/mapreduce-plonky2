@@ -1136,45 +1136,39 @@ where
     T::Key: ToFromBytea,
     V: PayloadInDb,
 {
-    fn initial_epoch(&self) -> impl Future<Output = Epoch> {
-        async move { self.wrapped.lock().await.initial_epoch() }
+    async fn initial_epoch(&self) -> Epoch {
+        self.wrapped.lock().await.initial_epoch()
     }
 
-    fn current_epoch(&self) -> impl Future<Output = Epoch> {
-        async move { self.wrapped.lock().await.current_epoch() }
+    async fn current_epoch(&self) -> Epoch {
+        self.wrapped.lock().await.current_epoch()
     }
 
-    fn size_at(&self, epoch: Epoch) -> impl Future<Output = Result<usize, RyhopeError>> {
-        async move { self.wrapped.lock().await.size_at(epoch).await }
+    async fn size_at(&self, epoch: Epoch) -> Result<usize, RyhopeError> {
+        self.wrapped.lock().await.size_at(epoch).await
     }
 
-    fn try_fetch_at(
-        &self,
-        k: &T::Key,
-        epoch: Epoch,
-    ) -> impl Future<Output = Result<Option<T::Node>, RyhopeError>> + Send {
-        async move {
-            trace!("[{self}] fetching {k:?}@{epoch}",);
-            let db = self.wrapped.lock().await.db.clone();
-            let table = self.wrapped.lock().await.table.to_owned();
-            if epoch == self.current_epoch().await {
-                // Directly returns the value if it is already in cache, fetch it from
-                // the DB otherwise.
-                let value = self.wrapped.lock().await.nodes_cache.get(k).cloned();
-                Ok(if let Some(Some(cached_value)) = value {
-                    Some(cached_value.into_value())
-                } else if let Some(value) = T::fetch_node_at(db, &table, k, epoch).await.unwrap() {
-                    let mut guard = self.wrapped.lock().await;
-                    guard
-                        .nodes_cache
-                        .insert(k.clone(), Some(CachedValue::Read(value.clone())));
-                    Some(value)
-                } else {
-                    None
-                })
+    async fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Result<Option<T::Node>, RyhopeError> {
+        trace!("[{self}] fetching {k:?}@{epoch}",);
+        let db = self.wrapped.lock().await.db.clone();
+        let table = self.wrapped.lock().await.table.to_owned();
+        if epoch == self.current_epoch().await {
+            // Directly returns the value if it is already in cache, fetch it from
+            // the DB otherwise.
+            let value = self.wrapped.lock().await.nodes_cache.get(k).cloned();
+            Ok(if let Some(Some(cached_value)) = value {
+                Some(cached_value.into_value())
+            } else if let Some(value) = T::fetch_node_at(db, &table, k, epoch).await.unwrap() {
+                let mut guard = self.wrapped.lock().await;
+                guard
+                    .nodes_cache
+                    .insert(k.clone(), Some(CachedValue::Read(value.clone())));
+                Some(value)
             } else {
-                T::fetch_node_at(db, &table, k, epoch).await
-            }
+                None
+            })
+        } else {
+            T::fetch_node_at(db, &table, k, epoch).await
         }
     }
 
@@ -1221,12 +1215,10 @@ where
         }
     }
 
-    fn remove(&mut self, k: T::Key) -> impl Future<Output = Result<(), RyhopeError>> + Send {
-        async move {
-            trace!("[{self}] removing {k:?} from cache",);
-            self.wrapped.lock().await.nodes_cache.insert(k, None);
-            Ok(())
-        }
+    async fn remove(&mut self, k: T::Key) -> Result<(), RyhopeError> {
+        trace!("[{self}] removing {k:?} from cache",);
+        self.wrapped.lock().await.nodes_cache.insert(k, None);
+        Ok(())
     }
 
     fn update(
@@ -1313,16 +1305,16 @@ where
     T::Key: ToFromBytea,
     V: PayloadInDb,
 {
-    fn initial_epoch(&self) -> impl Future<Output = Epoch> {
-        async move { self.wrapped.lock().await.initial_epoch() }
+    async fn initial_epoch(&self) -> Epoch {
+        self.wrapped.lock().await.initial_epoch()
     }
 
-    fn current_epoch(&self) -> impl Future<Output = Epoch> {
-        async move { self.wrapped.lock().await.current_epoch() }
+    async fn current_epoch(&self) -> Epoch {
+        self.wrapped.lock().await.current_epoch()
     }
 
-    fn size_at(&self, epoch: Epoch) -> impl Future<Output = Result<usize, RyhopeError>> {
-        async move { self.wrapped.lock().await.size_at(epoch).await }
+    async fn size_at(&self, epoch: Epoch) -> Result<usize, RyhopeError> {
+        self.wrapped.lock().await.size_at(epoch).await
     }
 
     fn try_fetch_at(
@@ -1383,8 +1375,8 @@ where
     T::Node: Sync + Clone,
     V: PayloadInDb,
 {
-    fn rollback_to(&mut self, epoch: Epoch) -> impl Future<Output = Result<(), RyhopeError>> {
-        async move { self.wrapped.lock().await.rollback_to(epoch).await }
+    async fn rollback_to(&mut self, epoch: Epoch) -> Result<(), RyhopeError> {
+        self.wrapped.lock().await.rollback_to(epoch).await
     }
 
     fn remove(&mut self, k: T::Key) -> impl Future<Output = Result<(), RyhopeError>> + Send {
