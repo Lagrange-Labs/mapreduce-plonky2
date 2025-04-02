@@ -86,12 +86,12 @@ pub struct KvStorageAt<'a, T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node>
 impl<T: TreeTopology, S: RoEpochKvStorage<T::Key, T::Node> + Sync> RoEpochKvStorage<T::Key, T::Node>
     for KvStorageAt<'_, T, S>
 {
-    fn initial_epoch(&self) -> Epoch {
-        self.wrapped.initial_epoch()
+    fn initial_epoch(&self) -> impl std::future::Future<Output = Epoch> + Send {
+        async move { self.wrapped.initial_epoch().await }
     }
 
-    fn current_epoch(&self) -> Epoch {
-        self.current_epoch
+    fn current_epoch(&self) -> impl std::future::Future<Output = Epoch> + Send {
+        async move { self.current_epoch }
     }
 
     async fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Result<Option<T::Node>, RyhopeError> {

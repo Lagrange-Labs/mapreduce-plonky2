@@ -13,13 +13,9 @@ use bb8_postgres::PostgresConnectionManager;
 use futures::TryFutureExt;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashSet,
-    fmt::Debug,
-    future::Future,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashSet, fmt::Debug, future::Future, sync::Arc};
 use storages::{NodeProjection, PayloadProjection};
+use tokio::sync::Mutex;
 use tokio_postgres::{NoTls, Transaction};
 use tracing::*;
 
@@ -565,34 +561,14 @@ where
 
         // Collect all the keys found in the caches
         let mut cached_keys = HashSet::new();
+        cached_keys.extend(self.tree_store.lock().await.nodes_cache.keys().cloned());
         {
-            cached_keys.extend(self.tree_store.lock().unwrap().nodes_cache.keys().cloned());
-        }
-        {
-            cached_keys.extend(
-                self.tree_store
-                    .lock()
-                    .map_err(|e| {
-                        RyhopeError::fatal(format!("failed to lock tree store mutex: {e:?}"))
-                    })?
-                    .payload_cache
-                    .keys()
-                    .cloned(),
-            );
+            cached_keys.extend(self.tree_store.lock().await.payload_cache.keys().cloned());
         }
 
         for k in cached_keys {
-            let node_value = { self.tree_store.lock().unwrap().nodes_cache.get(&k).cloned() };
-            let data_value = {
-                self.tree_store
-                    .lock()
-                    .map_err(|e| {
-                        RyhopeError::fatal(format!("failed to lock tree store mutex: {e:?}"))
-                    })?
-                    .payload_cache
-                    .get(&k)
-                    .cloned()
-            };
+            let node_value = { self.tree_store.lock().await.nodes_cache.get(&k).cloned() };
+            let data_value = { self.tree_store.lock().await.payload_cache.get(&k).cloned() };
 
             match (node_value, data_value) {
                     // Nothing or a combination of read-only operations, do nothing
@@ -660,7 +636,7 @@ where
     }
 
     // FIXME: should return Result
-    fn on_commit_success(&mut self) {
+    async fn on_commit_success(&mut self) {
         assert!(self.in_tx);
         trace!(
             "[{self}] commit succesful; updating inner state - current epoch {}",
@@ -668,19 +644,19 @@ where
         );
         self.in_tx = false;
         self.epoch += 1;
-        self.state.commit_success();
-        self.tree_store.lock().unwrap().new_epoch();
+        self.state.commit_success().await;
+        self.tree_store.lock().await.new_epoch();
     }
 
-    fn on_commit_failed(&mut self) {
+    async fn on_commit_failed(&mut self) {
         assert!(self.in_tx);
         trace!(
             "[{self}] commit failed; updating inner state - current epoch {}",
             self.epoch
         );
         self.in_tx = false;
-        self.state.commit_failed();
-        self.tree_store.lock().unwrap().clear();
+        self.state.commit_failed().await;
+        self.tree_store.lock().await.clear();
     }
 }
 
@@ -722,9 +698,9 @@ where
             .await
             .map_err(|err| RyhopeError::from_db("committing transaction", err));
         if err.is_ok() {
-            self.on_commit_success();
+            self.on_commit_success().await;
         } else {
-            self.on_commit_failed();
+            self.on_commit_failed().await;
         }
         err
     }
@@ -743,14 +719,14 @@ where
         self.commit_in_transaction(tx).await
     }
 
-    fn commit_success(&mut self) {
+    async fn commit_success(&mut self) {
         trace!("[{self}] API-facing commit_success called");
-        self.on_commit_success();
+        self.on_commit_success().await;
     }
 
-    fn commit_failed(&mut self) {
+    async fn commit_failed(&mut self) {
         trace!("[{self}] API-facing commit_failed called");
-        self.on_commit_failed()
+        self.on_commit_failed().await
     }
 }
 
@@ -797,13 +773,13 @@ where
 
     async fn rollback_to(&mut self, epoch: Epoch) -> Result<(), RyhopeError> {
         self.state.rollback_to(epoch).await?;
-        self.tree_store.lock().unwrap().rollback_to(epoch).await?;
+        self.tree_store.lock().await.rollback_to(epoch).await?;
         self.epoch = epoch;
 
         // Ensure epochs coherence
         assert_eq!(
             self.state.current_epoch(),
-            self.tree_store.lock().unwrap().current_epoch()
+            self.tree_store.lock().await.current_epoch()
         );
         assert_eq!(self.state.current_epoch(), self.epoch);
 

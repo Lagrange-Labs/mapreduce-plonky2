@@ -699,7 +699,7 @@ async fn test_rollback<
         .unwrap();
     }
 
-    assert_eq!(s.current_epoch(), 3 + initial_epoch);
+    assert_eq!(s.current_epoch().await, 3 + initial_epoch);
     assert_eq!(s.size().await.unwrap(), 6);
     for i in 0..=5 {
         assert!(s.contains(&i.into()).await.unwrap());
@@ -709,7 +709,7 @@ async fn test_rollback<
     s.rollback_to(1 + initial_epoch)
         .await
         .unwrap_or_else(|_| panic!("failed to rollback to {}", 1 + initial_epoch));
-    assert_eq!(s.current_epoch(), 1 + initial_epoch);
+    assert_eq!(s.current_epoch().await, 1 + initial_epoch);
     assert_eq!(s.size().await.unwrap(), 2);
     for i in 0..=5 {
         if i <= 1 {
@@ -721,7 +721,7 @@ async fn test_rollback<
 
     // rollback once to reach to epoch 0
     s.rollback().await.unwrap();
-    assert_eq!(s.current_epoch(), initial_epoch);
+    assert_eq!(s.current_epoch().await, initial_epoch);
     assert_eq!(s.size().await.unwrap(), 0);
     for i in 0..=5 {
         assert!(!s.contains(&i.into()).await.unwrap());
@@ -997,8 +997,8 @@ async fn grouped_txs() -> Result<()> {
 
     tx.commit().await?;
 
-    t1.commit_success();
-    t2.commit_success();
+    t1.commit_success().await;
+    t2.commit_success().await;
 
     // The commited root must be equal to its in-flight snapshot
     let commited_root = t1.root().await.unwrap().unwrap();
@@ -1025,8 +1025,8 @@ async fn grouped_txs() -> Result<()> {
     t2.commit_in(&mut tx).await?;
 
     tx.rollback().await?;
-    t1.commit_failed();
-    t2.commit_failed();
+    t1.commit_failed().await;
+    t2.commit_failed().await;
 
     // Size should not have changed
     assert_eq!(t1.size().await.unwrap(), 2);
