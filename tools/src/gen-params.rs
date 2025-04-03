@@ -4,24 +4,20 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use clap::Parser;
-use groth16_framework::compile_and_generate_assets;
-use groth16_framework::utils::clone_circuit_data;
+use clap::{Parser, Subcommand};
+use groth16_framework::utils::{clone_circuit_data, PK_FILENAME, VK_FILENAME};
+use groth16_framework::{
+    build_verifier_circuit, compile_and_generate_assets, generate_solidity_verifier,
+};
 use mp2_v1::api::{build_circuits_params, PublicParameters};
+use tools::{INDEX_TREE_MAX_DEPTH, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, 
+    MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS, NUM_CHUNKS, NUM_ROWS, 
+    PARAMS_CHECKSUM_FILENAME, PP_BIN_KEY, QP_BIN_KEY, ROW_TREE_MAX_DEPTH, GROTH16_ASSETS_PREFIX,
+};
+use mp2_common::{F, D};
+use groth16_framework::C;
 use verifiable_db::api::QueryParameters;
-
-use lgn_messages::types::v1::query::{NUM_CHUNKS, NUM_ROWS};
-use lgn_provers::params::PARAMS_CHECKSUM_FILENAME;
-use lgn_provers::provers::v1::query::MAX_NUM_OUTPUTS;
-use lgn_provers::provers::v1::query::MAX_NUM_PLACEHOLDERS;
-use lgn_provers::provers::v1::query::MAX_NUM_PREDICATE_OPS;
-use lgn_provers::provers::v1::query::MAX_NUM_RESULT_OPS;
-use lgn_provers::provers::v1::query::{INDEX_TREE_MAX_DEPTH, MAX_NUM_ITEMS_PER_OUTPUT};
-use lgn_provers::provers::v1::query::{MAX_NUM_COLUMNS, ROW_TREE_MAX_DEPTH};
-
-const GROTH16_ASSETS_PREFIX: &str = "groth16_assets";
-const PP_BIN_KEY: &str = "preprocessing_params.bin";
-const QP_BIN_KEY: &str = "query_params.bin";
+use plonky2::plonk::circuit_data::CircuitData;
 
 type QueryParams = QueryParameters<
     NUM_CHUNKS,
@@ -45,8 +41,32 @@ struct Args {
     params_root_dir: String,
 
     /// Generate Groth16 parameters from existing query parameters
-    #[arg(long)]
+    #[arg(long, default_value_t = false)]
     only_groth16: bool,
+
+    /// If this flag is true, then only the R1CS file is generated for Groth16
+    /// instead of all the Groth16 assets; useful when the proving and verification
+    /// keys must be generated with a trusted setup ceremony
+    #[arg(long, default_value_t = false)]
+    only_r1cs: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    GenSolidityCmd {
+        /// Path to the proving key file; if no path is provided, the proving key is assumed
+        /// to be already in the asset dir directory
+        #[arg(short, long)]
+        pk_path: Option<String>,
+
+        /// Path to the verification key file; if no path is provided, the proving key is assumed
+        /// to be already in the asset dir directory
+        #[arg(short, long)]
+        vk_path: Option<String>,
+    },
 }
 
 /// Build the params directory with a sub-path of mp2 version.
@@ -95,30 +115,38 @@ fn write_hashes(params_root_dir: &str) {
     }
 }
 
-/// Main entry point for the parameter generation tool
 #[tokio::main]
+/// Main entry point for the parameter generation tool
 async fn main() {
+    env_logger::init();
     // Parse the CLI arguments.
     let args = Args::parse();
-
     println!("serializing parameters to `{}`", args.params_root_dir);
+    
+    match &args.command {
+        Some(Commands::GenSolidityCmd { pk_path, vk_path }) => {
+            generate_solidity_cmd(&args.params_root_dir, pk_path, vk_path)
+        }
+        None => {
+            let query_params = if args.only_groth16 {
+                load_query_params_from_disk(&args.params_root_dir)
+            } else {
+                // TRICKY: The parameters have large size, we suppose to generate and drop it in a local
+                // scope to avoid stack overflow, and also need to avoid passing into an async function.
+                let params_info = {
+                let preprocessing_params = build_preprocessing_params();
+                let _ = store_preprocessing_params(&args.params_root_dir, &preprocessing_params);
+                preprocessing_params.get_params_info().unwrap()
+                };
+                let query_params = build_query_parameters(params_info);
 
-    let query_params = if args.only_groth16 {
-        load_query_params_from_disk(&args.params_root_dir)
-    } else {
-        // TRICKY: The parameters have large size, we suppose to generate and drop it in a local
-        // scope to avoid stack overflow, and also need to avoid passing into an async function.
+                let _ = store_query_params(&args.params_root_dir, &query_params);
 
-        let preprocessing_params = build_preprocessing_params();
-        let query_params = build_query_parameters(&preprocessing_params);
-        generate_groth16_assets(&args.params_root_dir, &query_params);
-
-        let _ = store_preprocessing_params(&args.params_root_dir, &preprocessing_params);
-        let _ = store_query_params(&args.params_root_dir, &query_params);
-
-        query_params
-    };
-    generate_groth16_assets(&args.params_root_dir, &query_params);
+                query_params
+            };
+            generate_groth16_assets(&args.params_root_dir, query_params.final_proof_circuit_data(), args.only_r1cs);
+        }
+    }
 
     write_hashes(&args.params_root_dir);
 }
@@ -170,8 +198,8 @@ fn store_preprocessing_params(
 }
 
 /// Build query parameters from preprocessing parameters
-fn build_query_parameters(indexing_params: &PublicParameters) -> QueryParams {
-    QueryParameters::build_params(&indexing_params.get_params_info().unwrap()).unwrap()
+fn build_query_parameters(params_info: Vec<u8>) -> QueryParams {
+    QueryParameters::build_params(&params_info).unwrap()
 }
 
 /// Store query parameters on disk and return the saved file path
@@ -221,23 +249,61 @@ fn load_query_params_from_disk(params_root_dir: &str) -> QueryParams {
     query_params
 }
 
-/// Generate Groth16 asset files and save to disk
-fn generate_groth16_assets(params_root_dir: &str, query_params: &QueryParams) {
+fn groth16_assets_dir(params_root_dir: &str) -> String {
+    format!("{}/{GROTH16_ASSETS_PREFIX}", params_dir(params_root_dir))
+}
+
+/// Generate Groth16 asset files and save to disk; if `only_r1cs` flag is true, only the R1CS
+/// circuit is compiled and saved in asset directory
+fn generate_groth16_assets(params_root_dir: &str, circuit_data: &CircuitData<F, C, D>, only_r1cs: bool) {
     let now = Instant::now();
 
     println!("Start to generate the Groth16 asset files");
 
     // Get the final circuit data of the query parameters.
-    let circuit_data = query_params.final_proof_circuit_data();
     let circuit_data = clone_circuit_data(circuit_data)
         .unwrap_or_else(|err| panic!("Failed to clone the circuit data: {}", err));
 
     // Compile and generate the Groth16 asset files.
-    let assets_dir = format!("{}/{GROTH16_ASSETS_PREFIX}", params_dir(params_root_dir));
-    compile_and_generate_assets(circuit_data, &assets_dir).unwrap();
+    let assets_dir = groth16_assets_dir(params_root_dir);
+    if only_r1cs {
+        build_verifier_circuit(circuit_data, &assets_dir).unwrap()
+    } else {
+        compile_and_generate_assets(circuit_data, &assets_dir).unwrap();
+    }
 
     println!(
         "Finish generating the Groth16 asset files, elapsed: {:?}",
         now.elapsed()
     );
+}
+
+fn generate_solidity_cmd(
+    params_root_dir: &str,
+    pk_path: &Option<String>,
+    vk_path: &Option<String>,
+) {
+    let assets_dir = groth16_assets_dir(params_root_dir);
+    // if a path to a proving key file is provided, then copy the proving key from `pk_path` to `assets_dir/PK_FILENAME`;
+    // otherwise, it is assumed that the proving key has already been saved in `assets_dir/PK_FILENAME`
+    if let Some(path) = pk_path {
+        let pk_file = Path::new(&assets_dir)
+            .join(PK_FILENAME)
+            .to_string_lossy()
+            .to_string();
+        std::fs::hard_link(path, pk_file).unwrap()
+    }
+
+    // if a path to a verification key file is provided, then copy the verification key from `vk_path` to
+    // `assets_dir/VK_FILENAME`; otherwise, it is assumed that the verification key has already been saved in
+    // `assets_dir/VK_FILENAME`
+    if let Some(path) = vk_path {
+        let vk_file = Path::new(&assets_dir)
+            .join(VK_FILENAME)
+            .to_string_lossy()
+            .to_string();
+        std::fs::hard_link(path, vk_file).unwrap()
+    }
+
+    generate_solidity_verifier(&assets_dir).unwrap();
 }

@@ -34,7 +34,7 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/logger"
 	"github.com/pkg/errors"
-	"github.com/succinctlabs/gnark-plonky2-verifier/types"
+	"github.com/lagrange-labs/gnark-plonky2-verifier/types"
 )
 
 // Global variables for the proving process are only necessary to initialize
@@ -57,26 +57,14 @@ func CompileAndGenerateAssets(
 ) *C.char {
 	dstAssetDir := C.GoString(dstAssetDirStr)
 
-	// Check if the asset dir exists.
-	_, err := os.Stat(dstAssetDir)
-	if err != nil {
-		return C.CString(fmt.Sprintf("destination asset dir doesn't exist: %v", err))
+	if err:= generateAssetsInit(dstAssetDir); err != nil {
+		return C.CString(err.Error())
 	}
-
-	// Explicitly use the bit decomposition range checker could avoid
-	// generating Groth16 Commitments which cause an error in Solidity
-	// verification, could reference:
-	// <https://github.com/Consensys/gnark/issues/860>
-	// <https://github.com/succinctlabs/gnark-plonky2-verifier/blob/c01f530fe1d0107cc20da226cfec541ece9fb882/goldilocks/base.go#L131>
-	// TODO: need to test if the below fixes could work with Groth16 commitments.
-	// <https://github.com/Consensys/gnark/pull/1063>
-	// <https://github.com/Lagrange-Labs/gnark-plonky2-verifier/pull/1>
-	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
 
 	Logger.Info().Msg("starting compiling verifier circuit")
 
 	// Compile the verifier circuit and generate the assets (R1CS, PK and VK).
-	r1cs, pk, vk, err := CompileVerifierCircuit(
+	r1cs, pk, vk, err := compileVerifierCircuit(
 		C.GoString(commonCircuitData),
 		C.GoString(verifierOnlyCircuitData))
 	if err != nil {
@@ -85,7 +73,7 @@ func CompileAndGenerateAssets(
 
 	// Save the asset files for further proving and verifying processes. These
 	// asset files are only related with the common circuit data.
-	err = SaveVerifierCircuit(dstAssetDir, r1cs, pk, vk)
+	err = SaveAssets(dstAssetDir, r1cs, pk, vk)
 	if err != nil {
 		return C.CString(fmt.Sprintf("failed to save verifier circuit: %v", err))
 	}
@@ -210,22 +198,87 @@ func Verify(proofStr *C.char) *C.char {
 	return nil
 }
 
+//export BuildAndSaveVerifierCircuit
+func BuildAndSaveVerifierCircuit(
+	commonCircuitData *C.char,
+	verifierOnlyCircuitData *C.char,
+	dstAssetDirStr *C.char,
+) *C.char {
+	dstAssetDir := C.GoString(dstAssetDirStr)
+
+	if err:= generateAssetsInit(dstAssetDir); err != nil {
+		return C.CString(err.Error())
+	}
+
+	Logger.Info().Msg("starting compiling verifier circuit")
+
+	r1cs, err := buildVerifierCircuit(
+		C.GoString(commonCircuitData),
+		C.GoString(verifierOnlyCircuitData),
+	)
+	if err != nil {
+		return C.CString(fmt.Sprintf("error when compiling verifier circuit: %v", err))
+	}
+
+	err = saveVerifierCircuit(dstAssetDir, r1cs)
+	if err != nil {
+		return C.CString(fmt.Sprintf("error when storing verifier circuit: %v", err))
+	}
+
+	return nil
+}
+
+//export GenerateSolidityVerifier
+func GenerateSolidityVerifier(dstAssetDirStr *C.char) *C.char {
+	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
+	dstAssetDir := C.GoString(dstAssetDirStr)
+	vk, err := LoadVerifierKey(dstAssetDir)
+	if err != nil {
+		return C.CString(fmt.Sprintf("failed to load verifier key: %v", err))
+	}
+	if err := saveVerifierSolidity(dstAssetDir, vk); err != nil {
+		return C.CString(fmt.Sprintf("failed to generate Solidity verifier: %v", err))
+	}
+
+	return nil
+}
+
 //export FreeString
 func FreeString(str *C.char) {
 	C.free(unsafe.Pointer(str))
 }
 
-func CompileVerifierCircuit(
+func generateAssetsInit(dstAssetDir string) error {
+	// Check if the asset dir exists.
+	_, err := os.Stat(dstAssetDir)
+	if err != nil {
+		return fmt.Errorf("destination asset dir doesn't exist: %v", err)
+	}
+
+	// Explicitly use the bit decomposition range checker could avoid
+	// generating Groth16 Commitments which cause an error in Solidity
+	// verification, could reference:
+	// <https://github.com/Consensys/gnark/issues/860>
+	// <https://github.com/succinctlabs/gnark-plonky2-verifier/blob/c01f530fe1d0107cc20da226cfec541ece9fb882/goldilocks/base.go#L131>
+	// TODO: need to test if the below fixes could work with Groth16 commitments.
+	// <https://github.com/Consensys/gnark/pull/1063>
+	// <https://github.com/Lagrange-Labs/gnark-plonky2-verifier/pull/1>
+	os.Setenv("USE_BIT_DECOMPOSITION_RANGE_CHECK", "true")
+
+	return nil
+}
+
+func buildVerifierCircuit(
 	commonCircuitDataStr string,
 	verifierOnlyCircuitDataStr string,
-) (constraint.ConstraintSystem, groth16.ProvingKey, groth16.VerifyingKey, error) {
+) (constraint.ConstraintSystem, error) {
 	verifierOnlyCircuitData, err := DeserializeVerifierOnlyCircuitData(verifierOnlyCircuitDataStr)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	commonCircuitData, err := DeserializeCommonCircuitData(commonCircuitDataStr)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	proofWithPis := NewProofWithPublicInputs(commonCircuitData)
 
@@ -241,22 +294,13 @@ func CompileVerifierCircuit(
 	// Compile the verifier circuit.
 	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "compile verifier circuit")
+		return nil, errors.Wrap(err, "compile verifier circuit")
 	}
 
-	Logger.Info().Msg("running circuit setup")
-	start := time.Now()
-	pk, vk, err := groth16.Setup(r1cs)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	elapsed := time.Since(start)
-	Logger.Info().Msg("successfully ran circuit setup in " + elapsed.String())
-
-	return r1cs, pk, vk, nil
+	return r1cs, nil
 }
 
-func SaveVerifierCircuit(assetDir string, r1cs constraint.ConstraintSystem, pk groth16.ProvingKey, vk groth16.VerifyingKey) error {
+func saveVerifierCircuit(assetDir string, r1cs constraint.ConstraintSystem) error {
 	// Create the asset dir if not exists.
 	os.MkdirAll(assetDir, 0755)
 
@@ -269,6 +313,40 @@ func SaveVerifierCircuit(assetDir string, r1cs constraint.ConstraintSystem, pk g
 	r1csFile.Close()
 	Logger.Info().Msg("Successfully saved circuit constraints to r1cs.bin")
 
+	return nil
+}
+
+func compileVerifierCircuit(
+	commonCircuitDataStr string,
+	verifierOnlyCircuitDataStr string,
+) (constraint.ConstraintSystem, groth16.ProvingKey, groth16.VerifyingKey, error) {
+	r1cs, err := buildVerifierCircuit(
+		commonCircuitDataStr,
+		verifierOnlyCircuitDataStr,
+	)
+	if err != nil {
+		return r1cs, nil, nil, errors.Wrap(err, "compile verifier circuit")
+	}
+
+	// generate proving and verification key
+	Logger.Info().Msg("running circuit setup")
+	start := time.Now()
+	pk, vk, err := groth16.Setup(r1cs)
+	if err != nil {
+		return r1cs, pk, vk, errors.Wrap(err, "generate proving and verifciation keys")
+	}
+	elapsed := time.Since(start)
+	Logger.Info().Msg("successfully ran circuit setup in " + elapsed.String())
+
+	return r1cs, pk, vk, nil
+}
+
+func SaveAssets(assetDir string, r1cs constraint.ConstraintSystem, pk groth16.ProvingKey, vk groth16.VerifyingKey) error {
+	// Save r1cs circuit
+	err := saveVerifierCircuit(assetDir, r1cs)
+	if err != nil {
+		return errors.Wrap(err, "store circuit file")
+	}
 	// Save the PK.
 	Logger.Info().Msg("Saving proving key to pk.bin")
 	pkFile, err := os.Create(assetDir + "/pk.bin")
@@ -289,7 +367,7 @@ func SaveVerifierCircuit(assetDir string, r1cs constraint.ConstraintSystem, pk g
 	Logger.Info().Msg("Successfully saved verifying key to vk.bin")
 
 	// Save the Solidity verifier contract.
-	err = SaveVerifierSolidity(assetDir, vk)
+	err = saveVerifierSolidity(assetDir, vk)
 	if err != nil {
 		return err
 	}
@@ -297,7 +375,7 @@ func SaveVerifierCircuit(assetDir string, r1cs constraint.ConstraintSystem, pk g
 	return nil
 }
 
-func SaveVerifierSolidity(assetDir string, vk groth16.VerifyingKey) error {
+func saveVerifierSolidity(assetDir string, vk groth16.VerifyingKey) error {
 	// Create a new buffer and export the VerifyingKey into it as a Solidity
 	// contract and convert the buffer content to a string for further
 	// manipulation.
@@ -403,6 +481,9 @@ func ProveCircuit(
 	}
 	var proofWithPisRaw types.ProofWithPublicInputsRaw
 	err = json.Unmarshal([]byte(proofWithPublicInputsStr), &proofWithPisRaw)
+	if err != nil {
+		return "", err
+	}
 	proofWithPis, err := DeserializeProofWithPublicInputs(proofWithPublicInputsStr)
 	if err != nil {
 		return "", err
@@ -441,6 +522,9 @@ func ProveCircuit(
 	_proof := proof.(*groth16_bn254.Proof)
 	var buf bytes.Buffer
 	_, err = _proof.WriteRawTo(&buf)
+	if err != nil {
+		return "", err
+	}
 	proofBytes := buf.Bytes()
 	Logger.Info().Msg("proof byte length: " + strconv.Itoa(len(proofBytes)))
 

@@ -1,7 +1,9 @@
 //! Testing context used in the cases
 
 use super::{NUM_PREPROCESSING_IO, NUM_QUERY_IO};
-use groth16_framework::{compile_and_generate_assets, utils::clone_circuit_data};
+use groth16_framework::{
+    build_verifier_circuit, compile_and_generate_assets, utils::clone_circuit_data,
+};
 use mp2_common::{C, D, F};
 use mp2_test::circuit::TestDummyCircuit;
 use recursion_framework::framework_testing::TestingRecursiveCircuits;
@@ -86,5 +88,11 @@ impl TestContext {
 
         compile_and_generate_assets(circuit_data, asset_dir)
             .expect("Failed to generate the Groth16 asset files");
+    }
+
+    pub(crate) fn build_verifier_circuit(&self, asset_dir: &str) {
+        let circuit_data = clone_circuit_data(self.wrap_circuit.circuit_data()).unwrap();
+
+        build_verifier_circuit(circuit_data, asset_dir).expect("failed to compile R1CS circuit");
     }
 }
