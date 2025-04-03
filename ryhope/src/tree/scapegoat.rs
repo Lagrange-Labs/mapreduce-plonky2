@@ -142,6 +142,14 @@ pub struct State<K> {
     pub(crate) root: Option<K>,
     /// The α parameter of the scapegoat tree
     pub(crate) alpha: Alpha,
+    /// Maximum depth of the scapegoat tree; a re-balance will be triggered if a
+    /// node has a higher depth than this upper bound
+    #[serde(default = "default_max_depth")]
+    pub(crate) max_depth: usize,
+}
+
+fn default_max_depth() -> usize {
+    25
 }
 
 pub struct Tree<
@@ -158,11 +166,12 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
 impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize<'a> + Send>
     Tree<K>
 {
-    pub fn empty(alpha: Alpha) -> State<K> {
+    pub fn empty(alpha: Alpha, max_depth: usize) -> State<K> {
         State {
             node_count: 0,
             root: None,
             alpha,
+            max_depth,
         }
     }
 
@@ -854,9 +863,10 @@ impl<K: Debug + Sync + Clone + Eq + Hash + Ord + Serialize + for<'a> Deserialize
         node_count: usize,
         s: &mut S,
     ) -> Result<usize, RyhopeError> {
-        Ok((node_count as f32)
-            .log(s.state().fetch().await?.alpha.inverse())
-            .floor() as usize)
+        let state = s.state().fetch().await?;
+        let computed_depth = (node_count as f32).log(state.alpha.inverse()).floor() as usize;
+        // ensure that the depth returned to trigger a re-balance is never higher than `state.max_depth`
+        Ok(computed_depth.min(state.max_depth))
     }
 }
 

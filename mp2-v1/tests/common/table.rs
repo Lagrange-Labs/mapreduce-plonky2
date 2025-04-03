@@ -31,7 +31,7 @@ use verifiable_db::query::computational_hash_ids::ColumnIDs;
 use super::{
     cases::query::{
         MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PREDICATE_OPS,
-        MAX_NUM_RESULT_OPS,
+        MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH,
     },
     index_tree::MerkleIndexTree,
     rowtree::MerkleRowTree,
@@ -228,6 +228,7 @@ impl Table {
         let row_tree = ryhope::new_row_tree(
             genesis_block as Epoch,
             Alpha::new(0.8),
+            ROW_TREE_MAX_DEPTH,
             db_settings_row,
             true,
         )

@@ -76,6 +76,8 @@ mod scapegoat {
     use crate::tree::scapegoat::{self, Alpha};
     use crate::tree::{PrintableTree, TreeTopology};
 
+    const MAX_TREE_DEPTH: usize = 10;
+
     fn scapegaot_in_memory<
         K: Eq
             + Hash
@@ -90,7 +92,10 @@ mod scapegoat {
     >(
         a: Alpha,
     ) -> (scapegoat::Tree<K>, InMemory<scapegoat::Tree<K>, ()>) {
-        (Default::default(), InMemory::new(scapegoat::Tree::empty(a)))
+        (
+            Default::default(),
+            InMemory::new(scapegoat::Tree::empty(a, MAX_TREE_DEPTH)),
+        )
     }
 
     #[tokio::test]
@@ -139,7 +144,7 @@ mod scapegoat {
         ls.state_mut().commit_transaction().await.unwrap();
 
         assert_eq!(bbst.depth(&bs).await.unwrap(), 7);
-        assert_eq!(list.depth(&ls).await.unwrap(), 127);
+        assert_eq!(list.depth(&ls).await.unwrap(), MAX_TREE_DEPTH);
         Ok(())
     }
 
