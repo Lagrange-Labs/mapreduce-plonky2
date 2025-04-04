@@ -55,7 +55,8 @@ impl BlockCircuit {
     pub fn new(rlp_headers: Vec<u8>) -> Result<Self> {
         ensure!(
             rlp_headers.len() <= MAX_BLOCK_LEN,
-            "block rlp headers too long"
+            "block rlp headers too long: found {}, max {MAX_BLOCK_LEN}",
+            rlp_headers.len()
         );
         Ok(Self { rlp_headers })
     }

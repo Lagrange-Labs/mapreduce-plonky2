@@ -6,8 +6,9 @@ use assembler::assemble_static;
 use clap::{Parser, Subcommand};
 use log::Level;
 use parsil::queries::{core_keys_for_index_tree, core_keys_for_row_tree};
-use ryhope::{tree::sbbst::NodeIdx, Epoch};
-use symbols::FileContextProvider;
+use ryhope::{tree::sbbst::NodeIdx, UserEpoch};
+use sqlparser::ast::Query;
+use symbols::{ContextProvider, FileContextProvider};
 use utils::{parse_and_validate, ParsilSettings, PlaceholderSettings};
 
 mod assembler;
@@ -85,12 +86,14 @@ enum Command {
         to_keys: bool,
     },
     Core {
+        /// The query to execute if tree_type is "row", or the table name if
+        /// tree_type is "index"
         #[arg(long, short = 'Q')]
         request: String,
 
         /// The epoch at which to run the query
         #[arg(short = 'E', long)]
-        epoch: Epoch,
+        epoch: UserEpoch,
 
         /// Primary index lower bound
         #[arg(short = 'm', long)]
@@ -216,9 +219,11 @@ fn main() -> Result<()> {
                     //     todo!(),
                     // )?
                 }
-                "index" => {
-                    core_keys_for_index_tree(epoch, (min_block as NodeIdx, max_block as NodeIdx))?
-                }
+                "index" => core_keys_for_index_tree(
+                    epoch,
+                    (min_block as NodeIdx, max_block as NodeIdx),
+                    &request,
+                )?,
                 _ => unreachable!(),
             };
 
