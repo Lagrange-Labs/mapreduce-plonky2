@@ -58,3 +58,19 @@ pub async fn get_next_epoch(
         .await
         .map(|(ctx, _)| ctx.node_id))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MerkleIndexTree;
+
+    fn check_if_send<T: Send>() {}
+    fn check_if_sync<T: Sync>() {}
+
+    #[test]
+    fn test_is_send() {
+        check_if_send::<MerkleIndexTree>();
+        check_if_send::<&MerkleIndexTree>();
+        check_if_sync::<MerkleIndexTree>();
+        check_if_sync::<&MerkleIndexTree>();
+    }
+}

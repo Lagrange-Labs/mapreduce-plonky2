@@ -325,9 +325,12 @@ where
             .collect::<Vec<_>>();
 
         // The SBBST can compute all the wide lineage in closed form
-        let ascendances = self
-            .ascendance(core_keys.iter().map(|(_epoch, key)| key).cloned(), s)
-            .await?;
+        let ns = core_keys
+            .iter()
+            .map(|(_epoch, key)| key)
+            .cloned()
+            .collect::<Vec<_>>();
+        let ascendances = self.ascendance(ns, s).await?;
         let mut touched_keys = HashSet::new();
         for n in ascendances.into_iter() {
             touched_keys.extend(self.descendance(s, &n, 2).await?);
