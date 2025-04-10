@@ -35,7 +35,7 @@ jobs:
           pr-merge-strategy: "squash"
   public-params:
     if: inputs.bump == 'major'
-    name: Generate & Upload PPs
+    name: Generate & Upload PPs, major version-indexed
     runs-on: ['memory:32GB']
     environment: CI
     steps:
@@ -51,7 +51,7 @@ jobs:
       - name: Generate PPs
         run: |
           ulimit -s unlimited
-          cargo run --release --bin gen-params
+          cargo run --release --bin gen-params --mode major
       - name: Upload PPs
         run: aws s3 cp --no-progress --recursive zkmr_params s3://lagrange-public-parameters --endpoint-url=https://428e47101872e479a0c311b576430fac.r2.cloudflarestorage.com
         env:

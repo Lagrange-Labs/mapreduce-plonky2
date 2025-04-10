@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 pub mod array;
 pub mod digest;
 pub mod eth;
-pub mod git;
 pub mod group_hashing;
 pub mod hash;
 pub mod keccak;
