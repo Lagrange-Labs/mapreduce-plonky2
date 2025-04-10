@@ -59,6 +59,7 @@ impl ParamGenerationSettings {
             "hash" => verifiable_db::short_git_version(),
             _ => unreachable!("ensured by clap"),
         };
+        println!("Saving parameters under `{root}`");
 
         path.join(root).to_string_lossy().to_string()
     }
