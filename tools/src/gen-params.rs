@@ -132,7 +132,6 @@ async fn main() {
     } else {
         // TRICKY: The parameters have large size, we suppose to generate and drop it in a local
         // scope to avoid stack overflow, and also need to avoid passing into an async function.
-
         let preprocessing_params = build_preprocessing_params();
         let query_params = build_query_parameters(&preprocessing_params);
         generate_groth16_assets(&param_storage_settings, &query_params);

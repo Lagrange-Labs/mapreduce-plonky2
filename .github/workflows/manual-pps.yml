@@ -5,7 +5,7 @@ on:
 jobs:
   public-params:
     name: Manually Generate & Upload PPs, hash-indexed
-    runs-on: ['memory:64GB']
+    runs-on: ['nix-128g']
     environment: CI
     steps:
       - uses: actions/checkout@v4
