@@ -44,7 +44,7 @@ jobs:
         shell: devenv shell bash -- -e {0}
         run: |
           ulimit -s unlimited
-          cargo run --release --bin gen-params --mode major
+          cargo run --release --bin gen-params -- --mode major
       - name: Upload PPs
         run: aws s3 cp --no-progress --recursive zkmr_params s3://lagrange-public-parameters --endpoint-url=https://428e47101872e479a0c311b576430fac.r2.cloudflarestorage.com
         env:
