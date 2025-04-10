@@ -8,6 +8,7 @@ alloy.workspace = true
 anyhow.workspace = true
 bincode.workspace = true
 derive_more.workspace = true
+git-version.workspace = true
 itertools.workspace = true
 log.workspace = true
 plonky2.workspace = true

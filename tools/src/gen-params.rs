@@ -37,6 +37,34 @@ type QueryParams = QueryParameters<
 >;
 type PreprocessingParameters = PublicParameters;
 
+/// The settings required to determine the location of the PP files on disk.
+struct ParamGenerationSettings {
+    /// Under which directory the PPs shall be saved
+    root_dir: String,
+    /// Whether PPs should be addressed by MP2 major version or git hash.
+    mode: String,
+}
+impl ParamGenerationSettings {
+    /// Build the params directory as a sub-path of mp2 major version or hash.
+    fn params_dir(&self) -> String {
+        let path = Path::new(&self.root_dir);
+        let root = match self.mode.as_str() {
+            "major" => {
+                let mp2_version_str = verifiable_db::version();
+                semver::Version::parse(mp2_version_str)
+                    .unwrap()
+                    .major
+                    .to_string()
+            }
+            "hash" => verifiable_db::short_git_version(),
+            _ => unreachable!("ensured by clap"),
+        };
+        println!("Saving parameters under `{root}`");
+
+        path.join(root).to_string_lossy().to_string()
+    }
+}
+
 /// Generate the public parameters for the current version of MR2.
 #[derive(Debug, Parser)]
 struct Args {
@@ -47,27 +75,19 @@ struct Args {
     /// Generate Groth16 parameters from existing query parameters
     #[arg(long)]
     only_groth16: bool,
-}
 
-/// Build the params directory with a sub-path of mp2 version.
-fn params_dir(params_dir: &str) -> String {
-    let path = Path::new(params_dir);
-    let mp2_version_str = verifiable_db::version();
-    let version = semver::Version::parse(mp2_version_str).unwrap();
-
-    path.join(version.major.to_string())
-        .to_string_lossy()
-        .to_string()
+    #[arg(short, long, value_parser = ["major", "hash"])]
+    mode: String,
 }
 
 /// Given a config, walk its PPs direct and write the list of the relative path
 /// of the contained files and their B3 hash to the target hash file.
-fn write_hashes(params_root_dir: &str) {
+fn write_hashes(param_settings: &ParamGenerationSettings) {
     let hash_file_path =
-        Path::new(params_dir(params_root_dir).as_str()).join(PARAMS_CHECKSUM_FILENAME);
+        Path::new(param_settings.params_dir().as_str()).join(PARAMS_CHECKSUM_FILENAME);
     let mut out_file = File::create(hash_file_path).expect("failed to create hash file");
 
-    for entry in walkdir::WalkDir::new(params_root_dir)
+    for entry in walkdir::WalkDir::new(param_settings.params_dir())
         .into_iter()
         .filter_map(|e| e.ok())
         .map(|e| e.path().to_path_buf())
@@ -84,7 +104,7 @@ fn write_hashes(params_root_dir: &str) {
                 format!(
                     "{} {}\n",
                     entry
-                        .strip_prefix(params_dir(params_root_dir))
+                        .strip_prefix(param_settings.params_dir())
                         .unwrap()
                         .display(),
                     hash_str
@@ -100,27 +120,30 @@ fn write_hashes(params_root_dir: &str) {
 async fn main() {
     // Parse the CLI arguments.
     let args = Args::parse();
+    let param_storage_settings = ParamGenerationSettings {
+        root_dir: args.params_root_dir.clone(),
+        mode: args.mode.clone(),
+    };
 
     println!("serializing parameters to `{}`", args.params_root_dir);
 
     let query_params = if args.only_groth16 {
-        load_query_params_from_disk(&args.params_root_dir)
+        load_query_params_from_disk(&param_storage_settings)
     } else {
         // TRICKY: The parameters have large size, we suppose to generate and drop it in a local
         // scope to avoid stack overflow, and also need to avoid passing into an async function.
-
         let preprocessing_params = build_preprocessing_params();
         let query_params = build_query_parameters(&preprocessing_params);
-        generate_groth16_assets(&args.params_root_dir, &query_params);
+        generate_groth16_assets(&param_storage_settings, &query_params);
 
-        let _ = store_preprocessing_params(&args.params_root_dir, &preprocessing_params);
-        let _ = store_query_params(&args.params_root_dir, &query_params);
+        let _ = store_preprocessing_params(&param_storage_settings, &preprocessing_params);
+        let _ = store_query_params(&param_storage_settings, &query_params);
 
         query_params
     };
-    generate_groth16_assets(&args.params_root_dir, &query_params);
+    generate_groth16_assets(&param_storage_settings, &query_params);
 
-    write_hashes(&args.params_root_dir);
+    write_hashes(&param_storage_settings);
 }
 
 /// Build preprocessing parameters
@@ -141,7 +164,7 @@ fn build_preprocessing_params() -> PreprocessingParameters {
 
 /// Store preprocessing parameters on disk and return the saved file path
 fn store_preprocessing_params(
-    params_root_dir: &str,
+    param_settings: &ParamGenerationSettings,
     preprocessing_params: &PreprocessingParameters,
 ) -> PathBuf {
     let _now = Instant::now();
@@ -154,7 +177,7 @@ fn store_preprocessing_params(
     // Store on disk
     println!("Start to store the preprocessing parameters on disk");
 
-    let file_path = Path::new(params_dir(params_root_dir).as_str()).join(PP_BIN_KEY);
+    let file_path = Path::new(param_settings.params_dir().as_str()).join(PP_BIN_KEY);
     println!("Writing to file: {:?}", file_path);
 
     // Try to create the parent dir if not exists.
@@ -175,7 +198,10 @@ fn build_query_parameters(indexing_params: &PublicParameters) -> QueryParams {
 }
 
 /// Store query parameters on disk and return the saved file path
-fn store_query_params(params_root_dir: &str, query_params: &QueryParams) -> PathBuf {
+fn store_query_params(
+    param_settings: &ParamGenerationSettings,
+    query_params: &QueryParams,
+) -> PathBuf {
     let _now = Instant::now();
 
     // Serialize the preprocessing parameters.
@@ -185,7 +211,7 @@ fn store_query_params(params_root_dir: &str, query_params: &QueryParams) -> Path
 
     // Store on disk
     println!("Start to store the query parameters on disk");
-    let file_path = Path::new(params_dir(params_root_dir).as_str()).join(QP_BIN_KEY);
+    let file_path = Path::new(param_settings.params_dir().as_str()).join(QP_BIN_KEY);
     println!("Writing to file: {:?}", file_path);
 
     // Try to create the parent dir if not exists.
@@ -201,11 +227,11 @@ fn store_query_params(params_root_dir: &str, query_params: &QueryParams) -> Path
 }
 
 /// Load query parameters from disk
-fn load_query_params_from_disk(params_root_dir: &str) -> QueryParams {
+fn load_query_params_from_disk(param_settings: &ParamGenerationSettings) -> QueryParams {
     let now = Instant::now();
     println!("Start loading query parameters from disk");
 
-    let file_path = Path::new(params_dir(params_root_dir).as_str()).join(QP_BIN_KEY);
+    let file_path = Path::new(param_settings.params_dir().as_str()).join(QP_BIN_KEY);
     let mut file = File::open(file_path).unwrap_or_else(|_| panic!("Failed to open {QP_BIN_KEY}"));
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).expect("Failed to read file");
@@ -222,7 +248,7 @@ fn load_query_params_from_disk(params_root_dir: &str) -> QueryParams {
 }
 
 /// Generate Groth16 asset files and save to disk
-fn generate_groth16_assets(params_root_dir: &str, query_params: &QueryParams) {
+fn generate_groth16_assets(param_settings: &ParamGenerationSettings, query_params: &QueryParams) {
     let now = Instant::now();
 
     println!("Start to generate the Groth16 asset files");
@@ -233,7 +259,7 @@ fn generate_groth16_assets(params_root_dir: &str, query_params: &QueryParams) {
         .unwrap_or_else(|err| panic!("Failed to clone the circuit data: {}", err));
 
     // Compile and generate the Groth16 asset files.
-    let assets_dir = format!("{}/{GROTH16_ASSETS_PREFIX}", params_dir(params_root_dir));
+    let assets_dir = format!("{}/{GROTH16_ASSETS_PREFIX}", param_settings.params_dir());
     compile_and_generate_assets(circuit_data, &assets_dir).unwrap();
 
     println!(
