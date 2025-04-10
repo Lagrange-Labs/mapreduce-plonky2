@@ -10,6 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check aws is installed
+        shell: devenv shell bash -- -e {0}
         run: aws --version
       - name: Generate PPs
         shell: devenv shell bash -- -e {0}
