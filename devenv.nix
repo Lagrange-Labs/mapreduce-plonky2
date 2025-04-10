@@ -8,7 +8,7 @@ in
   cachix.enable = false;
 
   # https://devenv.sh/packages/
-  packages = [ pkgs.git pkgs.figlet pkgs.openssl pkgs.pkg-config pkgs.cargo-limit ]
+  packages = [ pkgs.git pkgs.figlet pkgs.openssl pkgs.pkg-config pkgs.cargo-limit pks.awscli2 ]
              ++ lib.optionals config.devenv.isTesting [ pkgs.docker ]
              ++ lib.optionals pkgs.stdenv.targetPlatform.isDarwin [
                pkgs.libiconv
