@@ -36,7 +36,7 @@ jobs:
   public-params:
     if: inputs.bump == 'major'
     name: Generate & Upload PPs, major version-indexed
-    runs-on: ['memory:32GB']
+    runs-on: ['memory:64GB']
     environment: CI
     steps:
       - uses: actions/checkout@v4
