@@ -1,24 +1,28 @@
 use self::storages::{CachedDbStore, CachedDbTreeStore, DbConnector};
 use super::{
-    EpochStorage, FromSettings, MetaOperations, PayloadStorage, SqlTransactionStorage,
-    TransactionalStorage, TreeStorage, WideLineage,
+    EpochMapper, EpochStorage, FromSettings, MetaOperations, PayloadStorage, SharedEpochMapper,
+    SqlTransactionStorage, TransactionalStorage, TreeStorage, WideLineage,
 };
 use crate::{
     error::{ensure, RyhopeError},
+    mapper_table_name, metadata_table_name,
     storage::pgsql::storages::DBPool,
     tree::{NodeContext, TreeTopology},
-    Epoch, InitSettings, KEY, PAYLOAD, VALID_FROM, VALID_UNTIL,
+    IncrementalEpoch, InitSettings, UserEpoch, INCREMENTAL_EPOCH, KEY, PAYLOAD, USER_EPOCH,
+    VALID_FROM, VALID_UNTIL,
 };
 use bb8_postgres::PostgresConnectionManager;
+use epoch_mapper::{EpochMapperStorage, INITIAL_INCREMENTAL_EPOCH};
 use futures::TryFutureExt;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fmt::Debug, future::Future, sync::Arc};
 use storages::{NodeProjection, PayloadProjection};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio_postgres::{NoTls, Transaction};
 use tracing::*;
 
+mod epoch_mapper;
 mod storages;
 
 const MAX_PGSQL_BIGINT: i64 = i64::MAX;
@@ -98,7 +102,10 @@ pub trait PayloadInDb: Clone + Send + Sync + Debug + Serialize + for<'a> Deseria
 impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> PayloadInDb for T {}
 
 /// If it exists, remove the given table from the current database.
-async fn delete_storage_table(db: DBPool, table: &str) -> Result<(), RyhopeError> {
+async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(
+    db: DBPool,
+    table: &str,
+) -> Result<(), RyhopeError> {
     let connection = db.get().await.unwrap();
     connection
         .execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
@@ -106,10 +113,37 @@ async fn delete_storage_table(db: DBPool, table: &str) -> Result<(), RyhopeError
         .map_err(|err| RyhopeError::from_db(format!("unable to delete table `{table}`"), err))
         .map(|_| ())?;
     connection
-        .execute(&format!("DROP TABLE IF EXISTS {}_meta", table), &[])
+        .execute(
+            &format!("DROP TABLE IF EXISTS {}", metadata_table_name(table)),
+            &[],
+        )
         .await
         .map_err(|err| RyhopeError::from_db(format!("unable to delete table `{table}`"), err))
-        .map(|_| ())
+        .map(|_| ())?;
+    if EXTERNAL_EPOCH_MAPPER {
+        // The epoch mapper is external, so we just need to delete the view
+        let mapper_table_alias = mapper_table_name(table);
+        connection
+            .execute(&format!("DROP VIEW IF EXISTS {mapper_table_alias}"), &[])
+            .await
+            .map_err(|err| {
+                RyhopeError::from_db(format!("unable to delete view `{mapper_table_alias}`"), err)
+            })
+            .map(|_| ())
+    } else {
+        // The epoch mapper is internal, so we directly erase the table
+        let mapper_table_name = mapper_table_name(table);
+        connection
+            .execute(
+                &format!("DROP TABLE IF EXISTS {mapper_table_name} CASCADE"),
+                &[],
+            )
+            .await
+            .map_err(|err| {
+                RyhopeError::from_db(format!("unable to delete table `{mapper_table_name}`"), err)
+            })
+            .map(|_| ())
+    }
 }
 
 /// Keeps track of which kind of operation came into the cache
@@ -155,9 +189,13 @@ pub struct SqlStorageSettings {
     pub table: String,
     /// A way to connect to the DB server
     pub source: SqlServerConnection,
+    /// In case an external epoch mapper is employed for this storage,
+    /// this field contains the name of the table providing such an epoch mapper.
+    /// It is None if the epoch mapper is handled internally by the storage
+    pub external_mapper: Option<String>,
 }
 
-pub struct PgsqlStorage<T, V>
+pub struct PgsqlStorage<T, V, const EXTERNAL_EPOCH_MAPPER: bool>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
@@ -169,18 +207,21 @@ where
     /// A connection to the PostgreSQL server
     db: DBPool,
     /// The current epoch
-    epoch: i64,
+    epoch: IncrementalEpoch,
+    /// Epoch mapper
+    epoch_mapper: SharedEpochMapper<EpochMapperStorage, EXTERNAL_EPOCH_MAPPER>,
     /// Tree state information
     state: CachedDbStore<T::State>,
     /// Topological information
-    tree_store: Arc<Mutex<CachedDbTreeStore<T, V>>>,
+    tree_store: Arc<RwLock<CachedDbTreeStore<T, V>>>,
     nodes: NodeProjection<T, V>,
     payloads: PayloadProjection<T, V>,
     /// If any, the transaction progress
     in_tx: bool,
 }
 
-impl<T, V> FromSettings<T::State> for PgsqlStorage<T, V>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> FromSettings<T::State>
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
@@ -194,6 +235,24 @@ where
         init_settings: InitSettings<T::State>,
         storage_settings: Self::Settings,
     ) -> Result<Self, RyhopeError> {
+        // check consistency between `EXTERNAL_EPOCH_MAPPER` and `storage_settings.external_mapper`.
+        // This check is not relevant if `init_settings` is `MustExist`, as in this case we don't need
+        // to create a new mapping table or view.
+        if let InitSettings::MustExist = init_settings {
+        } else {
+            match (
+                EXTERNAL_EPOCH_MAPPER,
+                storage_settings.external_mapper.is_some(),
+            ) {
+                (true, false) => Err(RyhopeError::internal(
+                    "No external mapper table provided for a storage with external epoch mapper",
+                ))?,
+                (false, true) => Err(RyhopeError::internal(
+                    "External mapper table provided for a storage with no external epoch mapper",
+                ))?,
+                _ => {}
+            }
+        };
         match init_settings {
             InitSettings::MustExist => {
                 Self::load_existing(&storage_settings.source, storage_settings.table).await
@@ -204,6 +263,7 @@ where
                     storage_settings.table,
                     tree_state,
                     0,
+                    storage_settings.external_mapper,
                 )
                 .await
             }
@@ -213,6 +273,7 @@ where
                     storage_settings.table,
                     tree_state,
                     epoch,
+                    storage_settings.external_mapper,
                 )
                 .await
             }
@@ -222,6 +283,7 @@ where
                     storage_settings.table,
                     tree_settings,
                     0,
+                    storage_settings.external_mapper,
                 )
                 .await
             }
@@ -231,6 +293,7 @@ where
                     storage_settings.table,
                     tree_settings,
                     initial_epoch,
+                    storage_settings.external_mapper,
                 )
                 .await
             }
@@ -248,7 +311,10 @@ async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64), RyhopeE
     let connection = db.get().await.unwrap();
     connection
         .query_one(
-            &format!("SELECT MIN({VALID_FROM}), MAX({VALID_UNTIL}) FROM {table}_meta",),
+            &format!(
+                "SELECT MIN({VALID_FROM}), MAX({VALID_UNTIL}) FROM {}",
+                metadata_table_name(table)
+            ),
             &[],
         )
         .await
@@ -256,7 +322,8 @@ async fn fetch_epoch_data(db: DBPool, table: &str) -> Result<(i64, i64), RyhopeE
         .map_err(|err| RyhopeError::from_db("fetching current epoch data", err))
 }
 
-impl<T, V> std::fmt::Display for PgsqlStorage<T, V>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> std::fmt::Display
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
@@ -268,7 +335,7 @@ where
         write!(f, "PgSqlStorage {}@{}", self.table, self.epoch)
     }
 }
-impl<T, V> PgsqlStorage<T, V>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     T: TreeTopology + DbConnector<V>,
     T::Key: ToFromBytea,
@@ -284,7 +351,8 @@ where
         db_src: &SqlServerConnection,
         table: String,
         tree_state: T::State,
-        epoch: Epoch,
+        epoch: UserEpoch,
+        mapper_table: Option<String>,
     ) -> Result<Self, RyhopeError> {
         debug!("creating new table for `{table}` at epoch {epoch}");
         let db_pool = Self::init_db_pool(db_src).await?;
@@ -293,13 +361,18 @@ where
             fetch_epoch_data(db_pool.clone(), &table).await.is_err(),
             format!("table `{table}` already exists"),
         )?;
-        Self::create_tables(db_pool.clone(), &table).await?;
+        Self::create_tables(db_pool.clone(), &table, mapper_table).await?;
 
-        let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
-            epoch,
-            epoch,
+        let epoch_mapper = SharedEpochMapper::new(
+            EpochMapperStorage::new::<EXTERNAL_EPOCH_MAPPER>(table.clone(), db_pool.clone(), epoch)
+                .await?,
+        );
+
+        let tree_store = Arc::new(RwLock::new(CachedDbTreeStore::new(
+            INITIAL_INCREMENTAL_EPOCH,
             table.clone(),
             db_pool.clone(),
+            (&epoch_mapper).into(),
         )));
         let nodes = NodeProjection {
             wrapped: tree_store.clone(),
@@ -311,13 +384,19 @@ where
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
-            epoch,
+            epoch: 0,
             in_tx: false,
             tree_store,
             nodes,
             payloads,
-            state: CachedDbStore::with_value(epoch, table.clone(), db_pool.clone(), tree_state)
-                .await?,
+            state: CachedDbStore::with_value(
+                table.clone(),
+                db_pool.clone(),
+                tree_state,
+                (&epoch_mapper).into(),
+            )
+            .await?,
+            epoch_mapper,
         };
         Ok(r)
     }
@@ -333,11 +412,31 @@ where
 
         let (initial_epoch, latest_epoch) = fetch_epoch_data(db_pool.clone(), &table).await?;
         debug!("loading `{table}`; latest epoch is {latest_epoch}");
-        let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
-            initial_epoch,
+        ensure(
+            initial_epoch == INITIAL_INCREMENTAL_EPOCH,
+            format!(
+                "Wrong internal initial epoch found for existing table {table}: 
+                expected {INITIAL_INCREMENTAL_EPOCH}, found {initial_epoch}"
+            ),
+        )?;
+        let epoch_mapper =
+            EpochMapperStorage::new_from_table(table.clone(), db_pool.clone()).await?;
+        let latest_epoch_in_mapper = epoch_mapper
+            .to_incremental_epoch(epoch_mapper.latest_epoch().await)
+            .await;
+        ensure(
+            latest_epoch_in_mapper == latest_epoch,
+            format!(
+                "Mismatch between the latest internal epoch in mapper table and the latest epoch 
+            found in the storage: {latest_epoch_in_mapper} != {latest_epoch}"
+            ),
+        )?;
+        let epoch_mapper = SharedEpochMapper::new(epoch_mapper);
+        let tree_store = Arc::new(RwLock::new(CachedDbTreeStore::new(
             latest_epoch,
             table.clone(),
             db_pool.clone(),
+            (&epoch_mapper).into(),
         )));
         let nodes = NodeProjection {
             wrapped: tree_store.clone(),
@@ -350,7 +449,13 @@ where
             table: table.clone(),
             db: db_pool.clone(),
             epoch: latest_epoch,
-            state: CachedDbStore::new(initial_epoch, latest_epoch, table.clone(), db_pool.clone()),
+            state: CachedDbStore::new(
+                latest_epoch,
+                table.clone(),
+                db_pool.clone(),
+                (&epoch_mapper).into(),
+            ),
+            epoch_mapper,
             tree_store,
             nodes,
             payloads,
@@ -366,19 +471,29 @@ where
         db_src: &SqlServerConnection,
         table: String,
         tree_state: T::State,
-        initial_epoch: Epoch,
+        initial_epoch: UserEpoch,
+        mapper_table: Option<String>,
     ) -> Result<Self, RyhopeError> {
         debug!("resetting table `{table}` at epoch {initial_epoch}");
         let db_pool = Self::init_db_pool(db_src).await?;
 
-        delete_storage_table(db_pool.clone(), &table).await?;
-        Self::create_tables(db_pool.clone(), &table).await?;
+        delete_storage_table::<EXTERNAL_EPOCH_MAPPER>(db_pool.clone(), &table).await?;
+        Self::create_tables(db_pool.clone(), &table, mapper_table).await?;
 
-        let tree_store = Arc::new(Mutex::new(CachedDbTreeStore::new(
-            initial_epoch,
-            initial_epoch,
+        let epoch_mapper = SharedEpochMapper::new(
+            EpochMapperStorage::new::<EXTERNAL_EPOCH_MAPPER>(
+                table.clone(),
+                db_pool.clone(),
+                initial_epoch,
+            )
+            .await?,
+        );
+
+        let tree_store = Arc::new(RwLock::new(CachedDbTreeStore::new(
+            INITIAL_INCREMENTAL_EPOCH,
             table.clone(),
             db_pool.clone(),
+            (&epoch_mapper).into(),
         )));
         let nodes = NodeProjection {
             wrapped: tree_store.clone(),
@@ -390,14 +505,15 @@ where
         let r = Self {
             table: table.clone(),
             db: db_pool.clone(),
-            epoch: initial_epoch,
+            epoch: INITIAL_INCREMENTAL_EPOCH,
             state: CachedDbStore::with_value(
-                initial_epoch,
                 table.clone(),
                 db_pool.clone(),
                 tree_state,
+                (&epoch_mapper).into(),
             )
             .await?,
+            epoch_mapper,
             tree_store,
             nodes,
             payloads,
@@ -454,7 +570,11 @@ where
     ///     the tree at the given epoch range.
     ///
     /// Will fail if the CREATE is not valid (e.g. the table already exists)
-    async fn create_tables(db: DBPool, table: &str) -> Result<(), RyhopeError> {
+    async fn create_tables(
+        db: DBPool,
+        table: &str,
+        mapper_table: Option<String>,
+    ) -> Result<(), RyhopeError> {
         let node_columns = <T as DbConnector<V>>::columns()
             .iter()
             .map(|(name, t)| format!("{name} {t},"))
@@ -478,11 +598,42 @@ where
             .map(|_| ())
             .map_err(|err| RyhopeError::from_db(format!("creating table `{table}`"), err))?;
 
+        // create index on `VALID_FROM`
+        connection
+            .execute(
+                &format!("CREATE INDEX {table}_index_from ON {table} ({VALID_FROM})"),
+                &[],
+            )
+            .await
+            .map(|_| ())
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!("unable to create index on table `{table}` for {VALID_FROM}"),
+                    err,
+                )
+            })?;
+
+        // create index on `VALID_UNTIL`
+        connection
+            .execute(
+                &format!("CREATE INDEX {table}_index_until ON {table} ({VALID_UNTIL})"),
+                &[],
+            )
+            .await
+            .map(|_| ())
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!("unable to create index on table `{table}` for {VALID_UNTIL}"),
+                    err,
+                )
+            })?;
+
         // The meta table will store everything related to the tree itself.
+        let meta_table = metadata_table_name(table);
         connection
             .execute(
                 &format!(
-                    "CREATE TABLE {table}_meta (
+                    "CREATE TABLE {meta_table} (
                    {VALID_FROM}   BIGINT NOT NULL UNIQUE,
                    {VALID_UNTIL}  BIGINT DEFAULT -1,
                    {PAYLOAD}      JSONB)"
@@ -491,9 +642,72 @@ where
             )
             .await
             .map(|_| ())
-            .map_err(|err| RyhopeError::from_db(format!("creating table `{table}_meta`"), err))?;
+            .map_err(|err| RyhopeError::from_db(format!("creating table `{meta_table}`"), err))?;
 
-        Ok(())
+        Ok(())?;
+
+        // create index on `VALID_UNTIL`
+        connection
+            .execute(
+                &format!("CREATE INDEX {meta_table}_index_until ON {meta_table} ({VALID_UNTIL})"),
+                &[],
+            )
+            .await
+            .map(|_| ())
+            .map_err(|err| {
+                RyhopeError::from_db(
+                    format!("unable to create index on table `{meta_table}` for {VALID_UNTIL}"),
+                    err,
+                )
+            })?;
+
+        // Create the mapper table if the mapper table is not external, otherwise
+        // create a view for the mapper table name expected for `table` to `mapper_table`.
+        if EXTERNAL_EPOCH_MAPPER {
+            ensure(
+                mapper_table.is_some(),
+                "No mapper table name provided for storage with external epoch mapper",
+            )?;
+            let mapper_table_alias = mapper_table_name(table);
+            let mapper_table_name = mapper_table_name(mapper_table.unwrap().as_str());
+            connection
+                .execute(
+                    &format!(
+                        "
+                        CREATE VIEW {mapper_table_alias} AS
+                        SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {mapper_table_name}"
+                    ),
+                    &[],
+                )
+                .await
+                .map(|_| ())
+                .map_err(|err| {
+                    RyhopeError::from_db(
+                        format!("unable to create view for `{mapper_table_alias}`"),
+                        err,
+                    )
+                })
+        } else {
+            let mapper_table_name = mapper_table_name(table);
+            connection
+                .execute(
+                    &format!(
+                        "CREATE TABLE {mapper_table_name} (
+                        {USER_EPOCH} BIGINT NOT NULL UNIQUE,
+                        {INCREMENTAL_EPOCH} BIGINT NOT NULL UNIQUE
+                    )"
+                    ),
+                    &[],
+                )
+                .await
+                .map(|_| ())
+                .map_err(|err| {
+                    RyhopeError::from_db(
+                        format!("unable to create table `{mapper_table_name}`"),
+                        err,
+                    )
+                })
+        }
     }
 
     /// Close the lifetim of a row to `self.epoch`.
@@ -561,14 +775,14 @@ where
 
         // Collect all the keys found in the caches
         let mut cached_keys = HashSet::new();
-        cached_keys.extend(self.tree_store.lock().await.nodes_cache.keys().cloned());
+        cached_keys.extend(self.tree_store.read().await.nodes_cache.keys().cloned());
         {
-            cached_keys.extend(self.tree_store.lock().await.payload_cache.keys().cloned());
+            cached_keys.extend(self.tree_store.read().await.payload_cache.keys().cloned());
         }
 
         for k in cached_keys {
-            let node_value = { self.tree_store.lock().await.nodes_cache.get(&k).cloned() };
-            let data_value = { self.tree_store.lock().await.payload_cache.get(&k).cloned() };
+            let node_value = { self.tree_store.read().await.nodes_cache.get(&k).cloned() };
+            let data_value = { self.tree_store.read().await.payload_cache.get(&k).cloned() };
 
             match (node_value, data_value) {
                     // Nothing or a combination of read-only operations, do nothing
@@ -630,6 +844,13 @@ where
                     (_, Some(None)) => unreachable!(),
                 }
         }
+        // add new incremental epoch to `epoch_mapper` (unless an an epoch map for `self.epoch + 1`
+        // have already been added to `self.epoch_mapper`) and commit the new epoch map to DB
+        let new_epoch = self.epoch + 1;
+        if let Some(mut mapper) = self.epoch_mapper.write_access_ref().await {
+            mapper.new_incremental_epoch(new_epoch).await?;
+            mapper.commit_in_transaction(db_tx).await?;
+        }
         self.state.commit_in(db_tx).await?;
         trace!("[{}] commit successful.", self.table);
         Ok(())
@@ -645,7 +866,14 @@ where
         self.in_tx = false;
         self.epoch += 1;
         self.state.commit_success().await;
-        self.tree_store.lock().await.new_epoch();
+        self.epoch_mapper
+            .apply_fn(|mapper| {
+                mapper.commit_success();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        self.tree_store.write().await.new_epoch();
     }
 
     async fn on_commit_failed(&mut self) {
@@ -656,11 +884,15 @@ where
         );
         self.in_tx = false;
         self.state.commit_failed().await;
-        self.tree_store.lock().await.clear();
+        if let Some(mut mapper) = self.epoch_mapper.write_access_ref().await {
+            mapper.commit_failed().await;
+        }
+        self.tree_store.write().await.clear();
     }
 }
 
-impl<T: TreeTopology, V: PayloadInDb> TransactionalStorage for PgsqlStorage<T, V>
+impl<T: TreeTopology, V: PayloadInDb, const EXTERNAL_EPOCH_MAPPER: bool> TransactionalStorage
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     V: Send + Sync,
     T: DbConnector<V>,
@@ -668,13 +900,16 @@ where
     T::Node: Send + Sync + Clone,
     T::State: Send + Sync + Clone,
 {
-    fn start_transaction(&mut self) -> Result<(), RyhopeError> {
+    async fn start_transaction(&mut self) -> Result<(), RyhopeError> {
         if self.in_tx {
             return Err(RyhopeError::AlreadyInTransaction);
         }
         trace!("[{self}] starting a new transaction");
         self.in_tx = true;
-        self.state.start_transaction()?;
+        self.epoch_mapper
+            .apply_fn(|mapper| mapper.start_transaction())
+            .await?;
+        self.state.start_transaction().await?;
         Ok(())
     }
 
@@ -706,7 +941,8 @@ where
     }
 }
 
-impl<T: TreeTopology, V: PayloadInDb> SqlTransactionStorage for PgsqlStorage<T, V>
+impl<T: TreeTopology, V: PayloadInDb, const EXTERNAL_EPOCH_MAPPER: bool> SqlTransactionStorage
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     V: Send + Sync,
     T: DbConnector<V>,
@@ -730,7 +966,8 @@ where
     }
 }
 
-impl<T, V> TreeStorage<T> for PgsqlStorage<T, V>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> TreeStorage<T>
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     T: TreeTopology + DbConnector<V>,
     V: PayloadInDb + Send,
@@ -740,6 +977,7 @@ where
 {
     type StateStorage = CachedDbStore<T::State>;
     type NodeStorage = NodeProjection<T, V>;
+    type EpochMapper = SharedEpochMapper<EpochMapperStorage, EXTERNAL_EPOCH_MAPPER>;
 
     fn state(&self) -> &Self::StateStorage {
         &self.state
@@ -757,12 +995,13 @@ where
         &mut self.nodes
     }
 
-    async fn born_at(&self, epoch: Epoch) -> Vec<T::Key> {
+    async fn born_at(&self, epoch: UserEpoch) -> Vec<T::Key> {
+        let inner_epoch = self.epoch_mapper.to_incremental_epoch(epoch).await;
         let connection = self.db.get().await.unwrap();
         connection
             .query(
                 &format!("SELECT {KEY} FROM {} WHERE {VALID_FROM}=$1", self.table),
-                &[&epoch],
+                &[&inner_epoch],
             )
             .await
             .expect("while fetching newborns from database")
@@ -771,23 +1010,64 @@ where
             .collect::<Vec<_>>()
     }
 
-    async fn rollback_to(&mut self, epoch: Epoch) -> Result<(), RyhopeError> {
+    async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<(), RyhopeError> {
         self.state.rollback_to(epoch).await?;
-        self.tree_store.lock().await.rollback_to(epoch).await?;
-        self.epoch = epoch;
+        let inner_epoch = self
+            .epoch_mapper
+            .try_to_incremental_epoch(epoch)
+            .await
+            .ok_or(RyhopeError::epoch_error(format!(
+                "IncrementalEpoch for epoch {epoch} not found"
+            )))?;
+        self.tree_store
+            .write()
+            .await
+            .rollback_to(inner_epoch)
+            .await?;
+        self.epoch = inner_epoch;
+
+        // rollback epoch mapper
+        self.epoch_mapper
+            .as_ref()
+            .write()
+            .await
+            .rollback_to::<EXTERNAL_EPOCH_MAPPER>(epoch)
+            .await?;
 
         // Ensure epochs coherence
+        assert_eq!(self.epoch, self.tree_store.read().await.current_epoch());
         assert_eq!(
-            self.state.current_epoch(),
-            self.tree_store.lock().await.current_epoch()
+            self.epoch_mapper
+                .to_incremental_epoch(self.state.current_epoch().await?)
+                .await,
+            self.epoch
         );
-        assert_eq!(self.state.current_epoch(), self.epoch);
-
+        assert_eq!(
+            self.epoch_mapper
+                .to_incremental_epoch(
+                    self.epoch_mapper
+                        .read_access_ref()
+                        .await
+                        .latest_epoch()
+                        .await
+                )
+                .await,
+            self.epoch,
+        );
         Ok(())
+    }
+
+    fn epoch_mapper(&self) -> &Self::EpochMapper {
+        &self.epoch_mapper
+    }
+
+    fn epoch_mapper_mut(&mut self) -> &mut Self::EpochMapper {
+        &mut self.epoch_mapper
     }
 }
 
-impl<T, V> PayloadStorage<T::Key, V> for PgsqlStorage<T, V>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> PayloadStorage<T::Key, V>
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     Self: TreeStorage<T>,
     T: TreeTopology + DbConnector<V>,
@@ -808,7 +1088,8 @@ where
     }
 }
 
-impl<T, V> MetaOperations<T, V> for PgsqlStorage<T, V>
+impl<T, V, const EXTERNAL_EPOCH_MAPPER: bool> MetaOperations<T, V>
+    for PgsqlStorage<T, V, EXTERNAL_EPOCH_MAPPER>
 where
     Self: TreeStorage<T>,
     T: TreeTopology + DbConnector<V>,
@@ -822,10 +1103,10 @@ where
 
     async fn wide_lineage_between(
         &self,
-        at: Epoch,
+        at: UserEpoch,
         t: &T,
         keys: &Self::KeySource,
-        bounds: (Epoch, Epoch),
+        bounds: (UserEpoch, UserEpoch),
     ) -> Result<WideLineage<T::Key, V>, RyhopeError> {
         let r = t
             .wide_lineage_between(
@@ -840,16 +1121,26 @@ where
         Ok(r)
     }
 
-    fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, <T as TreeTopology>::Key)> + Send>(
+    fn try_fetch_many_at<I: IntoIterator<Item = (UserEpoch, <T as TreeTopology>::Key)> + Send>(
         &self,
         t: &T,
         data: I,
-    ) -> impl Future<Output = Result<Vec<(Epoch, NodeContext<T::Key>, V)>, RyhopeError>> + Send
+    ) -> impl Future<Output = Result<Vec<(UserEpoch, NodeContext<T::Key>, V)>, RyhopeError>> + Send
     where
         <I as IntoIterator>::IntoIter: Send,
     {
         trace!("[{self}] fetching many contexts & payloads",);
         let table = self.table.to_owned();
-        async move { t.fetch_many_at(self, self.db.clone(), &table, data).await }
+        async move {
+            let mut data_with_incremental_epochs = vec![];
+            for (epoch, key) in data {
+                // add current (epoch, key) pair to data to be fetched only if `epoch` is found in the epoch mapper
+                if let Some(inner_epoch) = self.epoch_mapper.try_to_incremental_epoch(epoch).await {
+                    data_with_incremental_epochs.push((epoch, inner_epoch, key));
+                }
+            }
+            t.fetch_many_at(self, self.db.clone(), &table, data_with_incremental_epochs)
+                .await
+        }
     }
 }

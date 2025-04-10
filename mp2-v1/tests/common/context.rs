@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use envconfig::Envconfig;
 use log::info;
 use mp2_common::eth::ProofQuery;
-use mp2_v1::api::{build_circuits_params, PublicParameters};
+use mp2_v1::api::build_circuits_params;
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
@@ -33,6 +33,7 @@ use super::{
         },
     },
     proof_storage::ProofKV,
+    PublicParameters,
 };
 
 #[derive(Envconfig)]

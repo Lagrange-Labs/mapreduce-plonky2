@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
+    future::Future,
     hash::Hash,
     marker::PhantomData,
 };
@@ -34,10 +35,30 @@ pub const EPOCH: &str = "__epoch";
 pub const VALID_FROM: &str = "__valid_from";
 /// The column containing the last epoch of validity of the row in the zkTable
 pub const VALID_UNTIL: &str = "__valid_until";
+/// The column containing epoch values that are meaningful for the user-exposed table
+pub const USER_EPOCH: &str = "__user_epoch";
+/// The column containing the incremental epochs employed in the zkTable
+pub const INCREMENTAL_EPOCH: &str = "__incremental_epoch";
 
-/// A timestamp in a versioned storage. Using a signed type allows for easy
-/// detection & debugging of erroneous subtractions.
-pub type Epoch = i64;
+/// A timestamp in a versioned storage. It corresponds to the actual epochs used internally in
+/// the storage implementations, which are assumed to be sequential.
+/// Using a signed type allows for easy detection & debugging of erroneous subtractions.
+pub type IncrementalEpoch = i64;
+
+/// Represents the epochs of the storage as defined by the user.
+/// The storages provided here allows to decouple these epochs from the `IncrementalEpoch`s
+/// being used internally, allowing users to define epochs for the storage which are not
+/// necessarily incremental. The only assumption is that these user-defined epochs
+/// are monotonically increasing.
+pub type UserEpoch = i64;
+
+pub fn mapper_table_name(table_name: &str) -> String {
+    format!("{}_mapper", table_name)
+}
+
+pub(crate) fn metadata_table_name(table_name: &str) -> String {
+    format!("{}_meta", table_name)
+}
 
 /// A payload attached to a node, that may need to compute aggregated values
 /// from the bottom of the tree to the top. If not, simply do not override the
@@ -73,13 +94,13 @@ pub enum InitSettings<T> {
     MustNotExist(T),
     /// Fail to initialize if the tree already exists, create with the given
     /// state and starting at the given epoch otherwise.
-    MustNotExistAt(T, Epoch),
+    MustNotExistAt(T, UserEpoch),
     /// Ensure that the tree is re-created with the given settings, erasing it
     /// if it exists.
     Reset(T),
     /// Ensure that the tree is re-created with the given settings and at the
     /// given initial epoch, erasing it if it exists.
-    ResetAt(T, Epoch),
+    ResetAt(T, UserEpoch),
 }
 
 /// An `MerkleTreeKvDb` wraps together:
@@ -206,7 +227,7 @@ where
     }
 
     /// Return the key mapped to the root of the Merkle tree at the given epoch.
-    pub async fn root_at(&self, epoch: Epoch) -> Result<Option<T::Key>, RyhopeError> {
+    pub async fn root_at(&self, epoch: UserEpoch) -> Result<Option<T::Key>, RyhopeError> {
         self.tree.root(&self.storage.view_at(epoch)).await
     }
 
@@ -220,7 +241,7 @@ where
     }
 
     /// Return the payload of the Merkle tree root at the given epoch.
-    pub async fn root_data_at(&self, epoch: Epoch) -> Result<Option<V>, RyhopeError> {
+    pub async fn root_data_at(&self, epoch: UserEpoch) -> Result<Option<V>, RyhopeError> {
         Ok(
             if let Some(root) = self.tree.root(&self.storage.view_at(epoch)).await? {
                 self.storage.data().try_fetch_at(&root, epoch).await?
@@ -254,7 +275,7 @@ where
     pub async fn try_fetch_with_context_at(
         &self,
         k: &T::Key,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> Result<Option<(NodeContext<T::Key>, V)>, RyhopeError> {
         if let Some(ctx) = self
             .tree
@@ -282,7 +303,7 @@ where
     pub async fn fetch_with_context_at(
         &self,
         k: &T::Key,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> Result<Option<(NodeContext<T::Key>, V)>, RyhopeError> {
         self.try_fetch_with_context_at(k, epoch).await
     }
@@ -307,7 +328,7 @@ where
     pub async fn node_context_at(
         &self,
         k: &T::Key,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> Result<Option<NodeContext<T::Key>>, RyhopeError> {
         self.tree
             .node_context(k, &self.storage.view_at(epoch))
@@ -326,7 +347,7 @@ where
     pub async fn lineage_at(
         &self,
         k: &T::Key,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> Result<Option<NodePath<T::Key>>, RyhopeError> {
         let s = TreeStorageView::<'_, T, S>::new(&self.storage, epoch);
         self.tree.lineage(k, &s).await
@@ -337,7 +358,7 @@ where
     pub async fn ascendance_at<I: IntoIterator<Item = T::Key>>(
         &self,
         ks: I,
-        epoch: Epoch,
+        epoch: UserEpoch,
     ) -> Result<HashSet<T::Key>, RyhopeError> {
         self.tree.ascendance(ks, &self.view_at(epoch)).await
     }
@@ -350,16 +371,18 @@ where
 
     /// Return an epoch-locked, read-only, [`TreeStorage`] offering a view on
     /// this Merkle tree as it was at the given epoch.
-    pub fn view_at(&self, epoch: Epoch) -> TreeStorageView<'_, T, S> {
+    pub fn view_at(&self, epoch: UserEpoch) -> TreeStorageView<'_, T, S> {
         TreeStorageView::<'_, T, S>::new(&self.storage, epoch)
     }
 
     /// Return the update tree generated by the transaction defining the given
     /// epoch.
-    pub async fn diff_at(&self, epoch: Epoch) -> Result<Option<UpdateTree<T::Key>>, RyhopeError> {
-        if epoch > self.current_epoch().await {
-            Ok(None)
-        } else {
+    pub async fn diff_at(
+        &self,
+        epoch: UserEpoch,
+    ) -> Result<Option<UpdateTree<T::Key>>, RyhopeError> {
+        let current_epoch = self.current_epoch().await?;
+        Ok(if epoch <= current_epoch {
             let dirtied = self.storage.born_at(epoch).await;
             let s = TreeStorageView::<'_, T, S>::new(&self.storage, epoch);
 
@@ -371,8 +394,10 @@ where
             }
 
             let ut = UpdateTree::from_paths(paths, epoch);
-            Ok(Some(ut))
-        }
+            Some(ut)
+        } else {
+            None
+        })
     }
 }
 
@@ -388,19 +413,19 @@ impl<
 {
     pub async fn wide_update_trees_at(
         &self,
-        at: Epoch,
+        at: UserEpoch,
         keys_query: &S::KeySource,
-        bounds: (Epoch, Epoch),
+        bounds: (UserEpoch, UserEpoch),
     ) -> Result<Vec<UpdateTree<T::Key>>, RyhopeError> {
         self.storage
             .wide_update_trees(at, &self.tree, keys_query, bounds)
             .await
     }
 
-    pub async fn try_fetch_many_at<I: IntoIterator<Item = (Epoch, T::Key)> + Send>(
+    pub async fn try_fetch_many_at<I: IntoIterator<Item = (UserEpoch, T::Key)> + Send>(
         &self,
         data: I,
-    ) -> Result<Vec<(Epoch, NodeContext<T::Key>, V)>, RyhopeError>
+    ) -> Result<Vec<(UserEpoch, NodeContext<T::Key>, V)>, RyhopeError>
     where
         <I as IntoIterator>::IntoIter: Send,
     {
@@ -409,9 +434,9 @@ impl<
 
     pub async fn wide_lineage_between(
         &self,
-        at: Epoch,
+        at: UserEpoch,
         keys_query: &S::KeySource,
-        bounds: (Epoch, Epoch),
+        bounds: (UserEpoch, UserEpoch),
     ) -> Result<WideLineage<T::Key, V>, RyhopeError> {
         self.storage
             .wide_lineage_between(at, &self.tree, keys_query, bounds)
@@ -431,31 +456,40 @@ impl<
         S: TransactionalStorage + TreeStorage<T> + PayloadStorage<T::Key, V> + FromSettings<T::State>,
     > RoEpochKvStorage<T::Key, V> for MerkleTreeKvDb<T, V, S>
 {
-    fn initial_epoch(&self) -> impl std::future::Future<Output = Epoch> + Send {
+    /// Return the first registered time stamp of the storage
+    fn initial_epoch(&self) -> impl Future<Output = UserEpoch> + Send {
         self.storage.data().initial_epoch()
     }
 
-    fn current_epoch(&self) -> impl std::future::Future<Output = Epoch> + Send {
+    fn current_epoch(&self) -> impl Future<Output = Result<UserEpoch, RyhopeError>> + Send {
         self.storage.data().current_epoch()
     }
 
-    async fn try_fetch_at(&self, k: &T::Key, epoch: Epoch) -> Result<Option<V>, RyhopeError> {
+    async fn try_fetch_at(&self, k: &T::Key, epoch: UserEpoch) -> Result<Option<V>, RyhopeError> {
         self.storage.data().try_fetch_at(k, epoch).await
     }
 
-    async fn size_at(&self, epoch: Epoch) -> Result<usize, RyhopeError> {
+    async fn try_fetch(&self, k: &T::Key) -> Result<Option<V>, RyhopeError> {
+        self.storage.data().try_fetch(k).await
+    }
+
+    async fn size_at(&self, epoch: UserEpoch) -> Result<usize, RyhopeError> {
         self.storage.data().size_at(epoch).await
     }
 
-    async fn keys_at(&self, epoch: Epoch) -> Vec<T::Key> {
+    async fn size(&self) -> Result<usize, RyhopeError> {
+        self.storage.data().size().await
+    }
+
+    async fn keys_at(&self, epoch: UserEpoch) -> Vec<T::Key> {
         self.storage.data().keys_at(epoch).await
     }
 
-    async fn random_key_at(&self, epoch: Epoch) -> Option<T::Key> {
+    async fn random_key_at(&self, epoch: UserEpoch) -> Option<T::Key> {
         self.storage.data().random_key_at(epoch).await
     }
 
-    async fn pairs_at(&self, epoch: Epoch) -> Result<HashMap<T::Key, V>, RyhopeError> {
+    async fn pairs_at(&self, epoch: UserEpoch) -> Result<HashMap<T::Key, V>, RyhopeError> {
         self.storage.data().pairs_at(epoch).await
     }
 }
@@ -504,9 +538,14 @@ impl<
     /// Rollback this storage to the given epoch. Please note that this is a
     /// destructive and irreversible operation; to merely get a view on the
     /// storage at a given epoch, use the `view_at` method.
-    async fn rollback_to(&mut self, epoch: Epoch) -> Result<(), RyhopeError> {
+    async fn rollback_to(&mut self, epoch: UserEpoch) -> Result<(), RyhopeError> {
         trace!("[MerkleTreeKvDb] rolling back to {epoch}");
         self.storage.rollback_to(epoch).await
+    }
+
+    async fn rollback(&mut self) -> Result<(), RyhopeError> {
+        trace!("[MerkleTreeKvDb] rolling back");
+        self.storage.rollback().await
     }
 }
 
@@ -521,7 +560,7 @@ impl<
 {
     async fn start_transaction(&mut self) -> Result<(), RyhopeError> {
         trace!("[MerkleTreeKvDb] calling start_transaction");
-        self.storage.start_transaction()?;
+        self.storage.start_transaction().await?;
         Ok(())
     }
 
@@ -534,7 +573,7 @@ impl<
             }
         }
 
-        let update_tree = UpdateTree::from_paths(paths, self.current_epoch().await + 1);
+        let update_tree = UpdateTree::from_paths(paths, self.current_epoch().await?);
 
         let plan = update_tree.clone().into_workplan();
 
@@ -563,7 +602,7 @@ impl<
             }
         }
 
-        let update_tree = UpdateTree::from_paths(paths, self.current_epoch().await + 1);
+        let update_tree = UpdateTree::from_paths(paths, self.current_epoch().await?);
         let plan = update_tree.clone().into_workplan();
         self.aggregate(plan.clone()).await?;
         self.storage.commit_in(tx).await?;
@@ -604,20 +643,20 @@ impl<
 pub async fn new_index_tree<
     V: NodePayload + Send + Sync,
     S: TransactionalStorage
-        + TreeStorage<sbbst::Tree>
+        + TreeStorage<sbbst::EpochTree>
         + PayloadStorage<sbbst::NodeIdx, V>
         + FromSettings<sbbst::State>,
 >(
-    genesis_block: Epoch,
+    genesis_block: UserEpoch,
     storage_settings: S::Settings,
     reset_if_exist: bool,
-) -> Result<MerkleTreeKvDb<sbbst::Tree, V, S>, RyhopeError> {
+) -> Result<MerkleTreeKvDb<sbbst::EpochTree, V, S>, RyhopeError> {
     if genesis_block <= 0 {
         return Err(RyhopeError::fatal("the genesis block must be positive"));
     }
 
     let initial_epoch = genesis_block - 1;
-    let tree_settings = sbbst::Tree::with_shift(initial_epoch.try_into().unwrap());
+    let tree_settings = sbbst::EpochTree::with_shift(initial_epoch.try_into().unwrap());
 
     MerkleTreeKvDb::new(
         if reset_if_exist {
@@ -646,7 +685,7 @@ pub async fn new_row_tree<
         + PayloadStorage<K, V>
         + FromSettings<scapegoat::State<K>>,
 >(
-    genesis_block: Epoch,
+    genesis_block: UserEpoch,
     alpha: scapegoat::Alpha,
     max_depth: usize,
     storage_settings: S::Settings,

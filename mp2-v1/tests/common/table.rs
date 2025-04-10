@@ -1,4 +1,4 @@
-use anyhow::{ensure, Context};
+use anyhow::{ensure, Context, Result};
 use bb8::Pool;
 use bb8_postgres::{tokio_postgres::NoTls, PostgresConnectionManager};
 use futures::{
@@ -7,22 +7,24 @@ use futures::{
 };
 use itertools::Itertools;
 use log::debug;
-use mp2_v1::indexing::{
-    block::{BlockPrimaryIndex, BlockTreeKey},
-    cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},
-    index::IndexNode,
-    row::{CellCollection, Row, RowTreeKey},
-    ColumnID, LagrangeNode,
+use mp2_v1::{
+    indexing::{
+        block::{BlockPrimaryIndex, BlockTreeKey, MerkleIndexTree},
+        build_trees,
+        cell::{self, Cell, CellTreeKey, MerkleCell, MerkleCellTree},
+        index::IndexNode,
+        load_trees,
+        row::{CellCollection, MerkleRowTree, Row, RowTreeKey},
+        ColumnID, LagrangeNode,
+    },
+    values_extraction::gadgets::column_info::ColumnInfo,
 };
 use parsil::symbols::{ColumnKind, ContextProvider, ZkColumn, ZkTable};
+use plonky2::field::types::PrimeField64;
 use ryhope::{
-    storage::{
-        pgsql::{SqlServerConnection, SqlStorageSettings},
-        updatetree::UpdateTree,
-        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
-    },
+    storage::{updatetree::UpdateTree, EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage},
     tree::scapegoat::Alpha,
-    Epoch, InitSettings,
+    UserEpoch,
 };
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, iter::once};
@@ -33,8 +35,6 @@ use super::{
         MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PREDICATE_OPS,
         MAX_NUM_RESULT_OPS, ROW_TREE_MAX_DEPTH,
     },
-    index_tree::MerkleIndexTree,
-    rowtree::MerkleRowTree,
     ColumnIdentifier,
 };
 
@@ -56,11 +56,31 @@ impl IndexType {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TableColumn {
     pub name: String,
-    pub identifier: ColumnID,
+    pub info: ColumnInfo,
     pub index: IndexType,
     /// multiplier means if this columns come from a "merged" table, then it either come from a
     /// table a or table b. One of these table is the "multiplier" table, the other is not.
     pub multiplier: bool,
+}
+
+impl TableColumn {
+    pub fn identifier(&self) -> ColumnID {
+        self.info.identifier().to_canonical_u64()
+    }
+}
+
+/// Table Row unique ID is used to compute the unique data of a row when proving for the cells.
+/// It corresponds to the different types of storage slot as:
+/// Single slot - row_unique_data_for_single_leaf()
+/// Mapping slot - row_unique_data_for_mapping_leaf(mapping_key)
+/// Mapping of mappings slot - row_unique_data_for_mapping_of_mappings_leaf(outer_mapping_key, inner_mapping_key)
+/// We save the column IDs for fetching the cell value to compute this row unique data.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum TableRowUniqueID {
+    Single,
+    Mapping(ColumnID),
+    MappingOfMappings(ColumnID, ColumnID),
+    OffChain(Vec<ColumnID>),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -81,14 +101,14 @@ impl TableColumns {
     }
     pub fn column_id_of_cells_index(&self, key: CellTreeKey) -> Option<ColumnID> {
         (key > 0)
-            .then(|| self.rest.get(key - 1).map(|tc| tc.identifier))
+            .then(|| self.rest.get(key - 1).map(|tc| tc.identifier()))
             .flatten()
     }
     pub fn column_info(&self, identifier: ColumnIdentifier) -> TableColumn {
         self.rest
             .iter()
             .chain(once(&self.secondary))
-            .find(|c| c.identifier == identifier)
+            .find(|c| c.identifier() == identifier)
             .unwrap_or_else(|| panic!("can't find cell from identifier {}", identifier))
             .clone()
     }
@@ -105,17 +125,21 @@ impl TableColumns {
     pub fn cells_tree_index_of(&self, identifier: ColumnIdentifier) -> usize {
         match identifier {
             // TODO this will be problematic in the CSV case
-            _ if identifier == self.primary.identifier => panic!(
-                "should not call the position on primary index since should not be included in cells tree"
+            _ if identifier == self.primary.identifier() => panic!(
+                "should not call the position on primary index since should not be included in cells tree: {} == {}",
+                identifier,
+                self.primary.identifier(),
             ),
-            _ if identifier == self.secondary.identifier => panic!(
-                "should not call the position on secondary index since should not be included in cells tree"
+            _ if identifier == self.secondary.identifier() => panic!(
+                "should not call the position on secondary index since should not be included in cells tree: {} == {}",
+                identifier,
+                self.secondary.identifier(),
             ),
             _ => self
                 .rest
                 .iter()
                 .enumerate()
-                .find(|(_, c)| c.identifier == identifier)
+                .find(|(_, c)| c.identifier() == identifier)
                 // + 1 because sbbst starts at 1 not zero
                 .map(|(i, _)| i+1)
                 .expect("can't find index of identfier"),
@@ -123,9 +147,9 @@ impl TableColumns {
     }
     pub fn self_assert(&self) {
         for column in self.non_indexed_columns() {
-            let idx = self.cells_tree_index_of(column.identifier);
+            let idx = self.cells_tree_index_of(column.identifier());
             let id = self.column_id_of_cells_index(idx).unwrap();
-            assert!(column.identifier == id);
+            assert!(column.identifier() == id);
         }
     }
 }
@@ -133,12 +157,12 @@ impl TableColumns {
 impl From<&TableColumns> for ColumnIDs {
     fn from(columns: &TableColumns) -> Self {
         ColumnIDs::new(
-            columns.primary.identifier,
-            columns.secondary.identifier,
+            columns.primary.identifier(),
+            columns.secondary.identifier(),
             columns
                 .non_indexed_columns()
                 .into_iter()
-                .map(|column| column.identifier)
+                .map(|column| column.identifier())
                 .collect_vec(),
         )
     }
@@ -155,10 +179,12 @@ async fn new_db_pool(db_url: &str) -> anyhow::Result<DBPool> {
         .context("while creating the db_pool")?;
     Ok(db_pool)
 }
+
 pub struct Table {
     pub(crate) genesis_block: BlockPrimaryIndex,
     pub(crate) public_name: TableID,
     pub(crate) columns: TableColumns,
+    pub(crate) row_unique_id: TableRowUniqueID,
     // NOTE: there is no cell tree because it's small and can be reconstructed
     // on the fly very quickly. Otherwise, we would need to store one cell tree per row
     // and that means one sql table per row which would be untenable.
@@ -177,32 +203,25 @@ fn index_table_name(name: &str) -> String {
 }
 
 impl Table {
-    pub async fn load(public_name: String, columns: TableColumns) -> anyhow::Result<Self> {
+    pub async fn load(
+        public_name: String,
+        columns: TableColumns,
+        row_unique_id: TableRowUniqueID,
+    ) -> Result<Self> {
         let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
-        let row_tree = MerkleRowTree::new(
-            InitSettings::MustExist,
-            SqlStorageSettings {
-                table: row_table_name(&public_name),
-                source: SqlServerConnection::NewConnection(db_url.clone()),
-            },
+        let (index_tree, row_tree) = load_trees(
+            db_url.as_str(),
+            index_table_name(&public_name),
+            row_table_name(&public_name),
         )
-        .await
-        .unwrap();
-        let index_tree = MerkleIndexTree::new(
-            InitSettings::MustExist,
-            SqlStorageSettings {
-                source: SqlServerConnection::NewConnection(db_url.clone()),
-                table: index_table_name(&public_name),
-            },
-        )
-        .await
-        .unwrap();
+        .await?;
         let genesis = index_tree.storage_state().await?.shift;
         columns.self_assert();
 
         Ok(Self {
             db_pool: new_db_pool(&db_url).await?,
             columns,
+            row_unique_id,
             genesis_block: genesis as BlockPrimaryIndex,
             public_name,
             row: row_tree,
@@ -214,41 +233,39 @@ impl Table {
         row_table_name(&self.public_name)
     }
 
-    pub async fn new(genesis_block: u64, root_table_name: String, columns: TableColumns) -> Self {
-        let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
-        let db_settings_index = SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url.clone()),
-            table: index_table_name(&root_table_name),
-        };
-        let db_settings_row = SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url.clone()),
-            table: row_table_name(&root_table_name),
-        };
+    pub(crate) fn index_table_name(&self) -> String {
+        index_table_name(&self.public_name)
+    }
 
-        let row_tree = ryhope::new_row_tree(
-            genesis_block as Epoch,
+    pub async fn new(
+        genesis_block: u64,
+        root_table_name: String,
+        columns: TableColumns,
+        row_unique_id: TableRowUniqueID,
+    ) -> Result<Self> {
+        let db_url = std::env::var("DB_URL").unwrap_or("host=localhost dbname=storage".to_string());
+        let (index_tree, row_tree) = build_trees(
+            db_url.as_str(),
+            index_table_name(&root_table_name),
+            row_table_name(&root_table_name),
+            genesis_block as UserEpoch,
             Alpha::new(0.8),
             ROW_TREE_MAX_DEPTH,
-            db_settings_row,
             true,
         )
-        .await
-        .unwrap();
-        let index_tree = ryhope::new_index_tree(genesis_block as Epoch, db_settings_index, true)
-            .await
-            .unwrap();
-
+        .await?;
         columns.self_assert();
-        Self {
+        Ok(Self {
             db_pool: new_db_pool(&db_url)
                 .await
                 .expect("unable to create db pool"),
             columns,
+            row_unique_id,
             genesis_block: genesis_block as BlockPrimaryIndex,
             public_name: root_table_name,
             row: row_tree,
             index: index_tree,
-        }
+        })
     }
 
     // Function to call each time we need to build the index tree, i.e. for each row and
@@ -264,7 +281,7 @@ impl Table {
             .columns
             .non_indexed_columns()
             .iter()
-            .map(|tc| tc.identifier)
+            .map(|tc| tc.identifier())
             .filter_map(|id| cells.find_by_column(id).map(|info| (id, info)))
             .map(|(id, info)| cell::MerkleCell::new(id, info.value, info.primary))
             .collect::<Vec<_>>();
@@ -377,8 +394,7 @@ impl Table {
         &mut self,
         new_primary: BlockPrimaryIndex,
         updates: Vec<TreeRowUpdate>,
-    ) -> anyhow::Result<RowUpdateResult> {
-        let current_epoch = self.row.current_epoch().await;
+    ) -> Result<RowUpdateResult> {
         let out = self
             .row
             .in_transaction(|t| {
@@ -443,13 +459,6 @@ impl Table {
             // debugging
             println!("\n+++++++++++++++++++++++++++++++++\n");
             let root = self.row.root_data().await?.unwrap();
-            let new_epoch = self.row.current_epoch().await;
-            assert!(
-                current_epoch != new_epoch,
-                "new epoch {} vs previous epoch {}",
-                new_epoch,
-                current_epoch
-            );
             println!(
                 " ++ After row update, row cell tree root tree proof hash = {:?}",
                 hex::encode(&root.embedded_hash())
@@ -612,7 +621,7 @@ impl TableColumns {
 impl TableColumn {
     pub fn to_zkcolumn(&self) -> ZkColumn {
         ZkColumn {
-            id: self.identifier,
+            id: self.identifier(),
             kind: match self.index {
                 IndexType::Primary => ColumnKind::PrimaryIndex,
                 IndexType::Secondary => ColumnKind::SecondaryIndex,

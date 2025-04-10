@@ -4,10 +4,11 @@ version = "1.2.3"
 edition = "2021"
 
 [dependencies]
+num.workspace = true
 alloy.workspace = true
 anyhow.workspace = true
 bincode.workspace = true
-derive_more.workspace = true
+derive_more= { workspace = true, features = [ "into" ] }
 git-version.workspace = true
 itertools.workspace = true
 log.workspace = true

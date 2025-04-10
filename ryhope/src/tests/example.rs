@@ -15,7 +15,7 @@ async fn run() -> Result<()> {
     type V = usize;
     type RowTree = scapegoat::Tree<usize>;
 
-    type Storage = InMemory<RowTree, V>;
+    type Storage = InMemory<RowTree, V, false>;
     let mut tree = MerkleTreeKvDb::<RowTree, V, Storage>::new(
         InitSettings::Reset(scapegoat::Tree::empty(Alpha::new(0.5), MAX_TREE_DEPTH)),
         (),
@@ -25,7 +25,7 @@ async fn run() -> Result<()> {
     println!("Insertion of some (key,value) pairs");
     println!(
         "Current version of the tree before insertion: {}",
-        tree.current_epoch().await
+        tree.current_epoch().await.unwrap()
     );
 
     let res = tree
@@ -37,10 +37,10 @@ async fn run() -> Result<()> {
         .await
         .expect("this should work");
 
-    let first_stamp = tree.current_epoch().await;
+    let first_stamp = tree.current_epoch().await?;
     println!(
         "Current version of the tree after insertion: {}",
-        tree.current_epoch().await
+        first_stamp
     );
 
     println!("Tree of keys to update:");
@@ -79,7 +79,7 @@ async fn run() -> Result<()> {
     }
 
     // Printing the tree at its previous versions
-    println!("tree at {} is now:", tree.current_epoch().await);
+    println!("tree at {} is now:", tree.current_epoch().await?);
     tree.tree().print(&tree.storage).await;
 
     println!("tree at epoch {first_stamp} was:");
@@ -90,14 +90,10 @@ async fn run() -> Result<()> {
         "The update tree from {first_stamp} to {} was:",
         first_stamp + 1
     );
-    tree.diff_at(first_stamp + 1)
-        .await
-        .unwrap()
-        .unwrap()
-        .print();
+    tree.diff_at(first_stamp + 1).await?.unwrap().print();
 
     println!("The update tree from 0 to 1 was:",);
-    tree.diff_at(1).await.unwrap().unwrap().print();
+    tree.diff_at(1).await?.unwrap().print();
 
     Ok(())
 }

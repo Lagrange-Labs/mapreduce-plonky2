@@ -1,128 +1,218 @@
 //! Public inputs for Cells Tree Construction circuits
+
 use mp2_common::{
     digest::{SplitDigestPoint, SplitDigestTarget},
     group_hashing::weierstrass_to_point,
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::{CBuilder, GFp, CURVE_TARGET_LEN},
+    types::{CBuilder, CURVE_TARGET_LEN},
     utils::{FromFields, FromTargets},
     F,
 };
 use plonky2::{
-    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+    hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
     iop::target::Target,
 };
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};
-use std::{array, fmt::Debug};
+use std::iter::once;
 
-// Cells Tree Construction public inputs:
-// - `H : [4]F` : Poseidon hash of the subtree at this node
-// - `DI : Digest[F]` : Cells digests accumulated up so far for INDIVIDUAL digest
-// - `DM: Digest[F]` : Cells digests accumulated up so far for MULTIPLIER digest
-const H_RANGE: PublicInputRange = 0..NUM_HASH_OUT_ELTS;
-const DI_RANGE: PublicInputRange = H_RANGE.end..H_RANGE.end + CURVE_TARGET_LEN;
-const DM_RANGE: PublicInputRange = DI_RANGE.end..DI_RANGE.end + CURVE_TARGET_LEN;
+pub enum CellsTreePublicInputs {
+    // `H : F[4]` - Poseidon hash of the subtree at this node
+    NodeHash,
+    // - `individual_vd : Digest` - Cumulative digest of values of cells accumulated as individual
+    IndividualValuesDigest,
+    // - `multiplier_vd : Digest` - Cumulative digest of values of cells accumulated as multiplier
+    MultiplierValuesDigest,
+    // - `individual_counter : F` - Counter of the number of cells accumulated so far as individual
+    IndividualCounter,
+    // - `multiplier_counter : F` - Counter of the number of cells accumulated so far as multiplier
+    MultiplierCounter,
+}
 
 /// Public inputs for Cells Tree Construction
 #[derive(Clone, Debug)]
 pub struct PublicInputs<'a, T> {
     pub(crate) h: &'a [T],
-    pub(crate) ind: &'a [T],
-    pub(crate) mul: &'a [T],
+    pub(crate) individual_vd: &'a [T],
+    pub(crate) multiplier_vd: &'a [T],
+    pub(crate) individual_cnt: &'a T,
+    pub(crate) multiplier_cnt: &'a T,
+}
+
+const NUM_PUBLIC_INPUTS: usize = CellsTreePublicInputs::MultiplierCounter as usize + 1;
+
+impl<'a, T: Clone> PublicInputs<'a, T> {
+    const PI_RANGES: [PublicInputRange; NUM_PUBLIC_INPUTS] = [
+        Self::to_range(CellsTreePublicInputs::NodeHash),
+        Self::to_range(CellsTreePublicInputs::IndividualValuesDigest),
+        Self::to_range(CellsTreePublicInputs::MultiplierValuesDigest),
+        Self::to_range(CellsTreePublicInputs::IndividualCounter),
+        Self::to_range(CellsTreePublicInputs::MultiplierCounter),
+    ];
+
+    const SIZES: [usize; NUM_PUBLIC_INPUTS] = [
+        // Poseidon hash of the subtree at this node
+        NUM_HASH_OUT_ELTS,
+        // Cumulative digest of values of cells accumulated as individual
+        CURVE_TARGET_LEN,
+        // Cumulative digest of values of cells accumulated as multiplier
+        CURVE_TARGET_LEN,
+        // Counter of the number of cells accumulated so far as individual
+        1,
+        // Counter of the number of cells accumulated so far as multiplier
+        1,
+    ];
+
+    pub(crate) const fn to_range(pi: CellsTreePublicInputs) -> PublicInputRange {
+        let mut i = 0;
+        let mut offset = 0;
+        let pi_pos = pi as usize;
+        while i < pi_pos {
+            offset += Self::SIZES[i];
+            i += 1;
+        }
+        offset..offset + Self::SIZES[pi_pos]
+    }
+
+    pub const fn total_len() -> usize {
+        Self::to_range(CellsTreePublicInputs::MultiplierCounter).end
+    }
+
+    pub fn to_node_hash_raw(&self) -> &[T] {
+        self.h
+    }
+
+    pub fn to_individual_values_digest_raw(&self) -> &[T] {
+        self.individual_vd
+    }
+
+    pub fn to_multiplier_values_digest_raw(&self) -> &[T] {
+        self.multiplier_vd
+    }
+
+    pub fn to_individual_counter_raw(&self) -> &T {
+        self.individual_cnt
+    }
+
+    pub fn to_multiplier_counter_raw(&self) -> &T {
+        self.multiplier_cnt
+    }
+
+    pub fn from_slice(input: &'a [T]) -> Self {
+        assert!(
+            input.len() >= Self::total_len(),
+            "Input slice too short to build cells tree public inputs, must be at least {} elements",
+            Self::total_len(),
+        );
+
+        Self {
+            h: &input[Self::PI_RANGES[0].clone()],
+            individual_vd: &input[Self::PI_RANGES[1].clone()],
+            multiplier_vd: &input[Self::PI_RANGES[2].clone()],
+            individual_cnt: &input[Self::PI_RANGES[3].clone()][0],
+            multiplier_cnt: &input[Self::PI_RANGES[4].clone()][0],
+        }
+    }
+
+    pub fn new(
+        h: &'a [T],
+        individual_vd: &'a [T],
+        multiplier_vd: &'a [T],
+        individual_cnt: &'a T,
+        multiplier_cnt: &'a T,
+    ) -> Self {
+        Self {
+            h,
+            individual_vd,
+            multiplier_vd,
+            individual_cnt,
+            multiplier_cnt,
+        }
+    }
+
+    pub fn to_vec(&self) -> Vec<T> {
+        self.h
+            .iter()
+            .chain(self.individual_vd)
+            .chain(self.multiplier_vd)
+            .chain(once(self.individual_cnt))
+            .chain(once(self.multiplier_cnt))
+            .cloned()
+            .collect()
+    }
 }
 
 impl PublicInputCommon for PublicInputs<'_, Target> {
-    const RANGES: &'static [PublicInputRange] = &[H_RANGE, DI_RANGE, DM_RANGE];
+    const RANGES: &'static [PublicInputRange] = &Self::PI_RANGES;
 
     fn register_args(&self, cb: &mut CBuilder) {
         cb.register_public_inputs(self.h);
-        cb.register_public_inputs(self.ind);
-        cb.register_public_inputs(self.mul);
-    }
-}
-
-impl PublicInputs<'_, GFp> {
-    /// Get the cells digest point.
-    pub fn individual_digest_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(self.ind)
-    }
-    pub fn multiplier_digest_point(&self) -> WeierstrassPoint {
-        WeierstrassPoint::from_fields(self.mul)
-    }
-    pub fn split_digest_point(&self) -> SplitDigestPoint {
-        SplitDigestPoint {
-            individual: weierstrass_to_point(&self.individual_digest_point()),
-            multiplier: weierstrass_to_point(&self.multiplier_digest_point()),
-        }
+        cb.register_public_inputs(self.individual_vd);
+        cb.register_public_inputs(self.multiplier_vd);
+        cb.register_public_input(*self.individual_cnt);
+        cb.register_public_input(*self.multiplier_cnt);
     }
 }
 
 impl PublicInputs<'_, Target> {
-    /// Get the Poseidon hash of the subtree at this node.
-    pub fn node_hash(&self) -> HashOutTarget {
-        self.h.try_into().unwrap()
+    pub fn node_hash_target(&self) -> [Target; NUM_HASH_OUT_ELTS] {
+        self.to_node_hash_raw().try_into().unwrap()
     }
 
-    /// Get the individual digest target.
-    pub fn individual_digest_target(&self) -> CurveTarget {
-        CurveTarget::from_targets(self.ind)
+    pub fn individual_values_digest_target(&self) -> CurveTarget {
+        CurveTarget::from_targets(self.individual_vd)
     }
 
-    /// Get the cells multiplier digest
-    pub fn multiplier_digest_target(&self) -> CurveTarget {
-        CurveTarget::from_targets(self.mul)
+    pub fn multiplier_values_digest_target(&self) -> CurveTarget {
+        CurveTarget::from_targets(self.multiplier_vd)
     }
-    pub fn split_digest_target(&self) -> SplitDigestTarget {
+
+    pub fn split_values_digest_target(&self) -> SplitDigestTarget {
         SplitDigestTarget {
-            individual: self.individual_digest_target(),
-            multiplier: self.multiplier_digest_target(),
-        }
-    }
-}
-
-impl<'a, T: Copy> PublicInputs<'a, T> {
-    /// Total length of the public inputs
-    pub(crate) const TOTAL_LEN: usize = DM_RANGE.end;
-
-    /// Create a new public inputs.
-    pub fn new(h: &'a [T], ind: &'a [T], mul: &'a [T]) -> Self {
-        Self { h, ind, mul }
-    }
-    /// Create from a slice.
-    pub fn from_slice(pi: &'a [T]) -> Self {
-        assert!(pi.len() >= Self::TOTAL_LEN);
-
-        Self {
-            h: &pi[H_RANGE],
-            ind: &pi[DI_RANGE],
-            mul: &pi[DM_RANGE],
+            individual: self.individual_values_digest_target(),
+            multiplier: self.multiplier_values_digest_target(),
         }
     }
 
-    /// Combine to a vector.
-    pub fn to_vec(&self) -> Vec<T> {
-        self.h
-            .iter()
-            .chain(self.ind)
-            .chain(self.mul)
-            .cloned()
-            .collect()
+    pub fn individual_counter_target(&self) -> Target {
+        *self.to_individual_counter_raw()
     }
 
-    pub fn h_raw(&self) -> &'a [T] {
-        self.h
+    pub fn multiplier_counter_target(&self) -> Target {
+        *self.to_multiplier_counter_raw()
     }
 }
 
 impl PublicInputs<'_, F> {
-    pub fn root_hash_hashout(&self) -> HashOut<F> {
-        HashOut {
-            elements: array::from_fn(|i| self.h[i]),
+    pub fn node_hash(&self) -> HashOut<F> {
+        HashOut::from_partial(self.to_node_hash_raw())
+    }
+
+    pub fn individual_values_digest_point(&self) -> WeierstrassPoint {
+        WeierstrassPoint::from_fields(self.individual_vd)
+    }
+
+    pub fn multiplier_values_digest_point(&self) -> WeierstrassPoint {
+        WeierstrassPoint::from_fields(self.multiplier_vd)
+    }
+
+    pub fn split_values_digest_point(&self) -> SplitDigestPoint {
+        SplitDigestPoint {
+            individual: weierstrass_to_point(&self.individual_values_digest_point()),
+            multiplier: weierstrass_to_point(&self.multiplier_values_digest_point()),
         }
+    }
+
+    pub fn individual_counter(&self) -> F {
+        *self.to_individual_counter_raw()
+    }
+
+    pub fn multiplier_counter(&self) -> F {
+        *self.to_multiplier_counter_raw()
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use mp2_common::{utils::ToFields, C, D, F};
     use mp2_test::{
@@ -137,21 +227,48 @@ mod tests {
         },
     };
     use plonky2_ecgfp5::curve::curve::Point;
-    use rand::thread_rng;
+    use rand::{thread_rng, Rng};
+    use std::slice;
+
+    impl PublicInputs<'_, F> {
+        pub(crate) fn sample(is_multiplier: bool) -> Vec<F> {
+            let rng = &mut thread_rng();
+
+            let h = random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
+
+            let point_zero = WeierstrassPoint::NEUTRAL.to_fields();
+            let values_digest = Point::sample(rng).to_weierstrass().to_fields();
+            let [individual_vd, multiplier_vd] = if is_multiplier {
+                [point_zero.clone(), values_digest]
+            } else {
+                [values_digest, point_zero]
+            };
+            let [individual_cnt, multiplier_cnt] = F::rand_array();
+
+            PublicInputs::new(
+                &h,
+                &individual_vd,
+                &multiplier_vd,
+                &individual_cnt,
+                &multiplier_cnt,
+            )
+            .to_vec()
+        }
+    }
 
     #[derive(Clone, Debug)]
-    struct TestPICircuit<'a> {
+    struct TestPublicInputs<'a> {
         exp_pi: &'a [F],
     }
 
-    impl UserCircuit<F, D> for TestPICircuit<'_> {
+    impl UserCircuit<F, D> for TestPublicInputs<'_> {
         type Wires = Vec<Target>;
 
         fn build(b: &mut CBuilder) -> Self::Wires {
-            let pi = b.add_virtual_targets(PublicInputs::<Target>::TOTAL_LEN);
-            PublicInputs::from_slice(&pi).register(b);
+            let exp_pi = b.add_virtual_targets(PublicInputs::<Target>::total_len());
+            PublicInputs::from_slice(&exp_pi).register(b);
 
-            pi
+            exp_pi
         }
 
         fn prove(&self, pw: &mut PartialWitness<F>, wires: &Self::Wires) {
@@ -161,21 +278,35 @@ mod tests {
 
     #[test]
     fn test_cells_tree_public_inputs() {
-        let mut rng = thread_rng();
+        let rng = &mut thread_rng();
+        let is_multiplier = rng.gen();
 
-        // Prepare the public inputs.
-        let h = &random_vector::<u32>(NUM_HASH_OUT_ELTS).to_fields();
-        let dc = &Point::sample(&mut rng).to_weierstrass().to_fields();
-        let exp_pi = PublicInputs {
-            h,
-            ind: dc,
-            mul: dc,
-        };
-        let exp_pi = &exp_pi.to_vec();
-
-        let test_circuit = TestPICircuit { exp_pi };
+        let exp_pi = &PublicInputs::sample(is_multiplier);
+        let test_circuit = TestPublicInputs { exp_pi };
         let proof = run_circuit::<F, D, C, _>(test_circuit);
-
         assert_eq!(&proof.public_inputs, exp_pi);
+
+        // Check if the public inputs are constructed correctly.
+        let pi = PublicInputs::from_slice(&proof.public_inputs);
+        assert_eq!(
+            &exp_pi[PublicInputs::<F>::to_range(CellsTreePublicInputs::NodeHash)],
+            pi.to_node_hash_raw(),
+        );
+        assert_eq!(
+            &exp_pi[PublicInputs::<F>::to_range(CellsTreePublicInputs::IndividualValuesDigest)],
+            pi.to_individual_values_digest_raw(),
+        );
+        assert_eq!(
+            &exp_pi[PublicInputs::<F>::to_range(CellsTreePublicInputs::MultiplierValuesDigest)],
+            pi.to_multiplier_values_digest_raw(),
+        );
+        assert_eq!(
+            &exp_pi[PublicInputs::<F>::to_range(CellsTreePublicInputs::IndividualCounter)],
+            slice::from_ref(pi.to_individual_counter_raw()),
+        );
+        assert_eq!(
+            &exp_pi[PublicInputs::<F>::to_range(CellsTreePublicInputs::MultiplierCounter)],
+            slice::from_ref(pi.to_multiplier_counter_raw()),
+        );
     }
 }
