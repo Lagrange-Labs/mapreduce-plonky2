@@ -87,7 +87,7 @@ fn write_hashes(param_settings: &ParamGenerationSettings) {
         Path::new(param_settings.params_dir().as_str()).join(PARAMS_CHECKSUM_FILENAME);
     let mut out_file = File::create(hash_file_path).expect("failed to create hash file");
 
-    for entry in walkdir::WalkDir::new(&param_settings.params_dir())
+    for entry in walkdir::WalkDir::new(param_settings.params_dir())
         .into_iter()
         .filter_map(|e| e.ok())
         .map(|e| e.path().to_path_buf())
