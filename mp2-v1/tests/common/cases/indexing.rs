@@ -714,7 +714,7 @@ impl TableIndexing {
             if prev_bn == bn {
                 continue;
             }
-            // if there is a new block on the chain, we need to prove a new block even if there are no 
+            // if there is a new block on the chain, we need to prove a new block even if there are no
             // updates in `table_row_updates`, otherwise the block consequentiality check in circuits will
             // fail
             log::info!("Applying follow up updates to contract done - now at block {bn}",);
