@@ -704,14 +704,19 @@ impl TableIndexing {
         log::info!("FIRST block {bn} finished proving. Moving on to update",);
 
         for ut in changes {
+            let prev_bn = self.source.latest_epoch(ctx).await;
             let table_row_updates = self
                 .source
                 .random_contract_update(ctx, &self.contract, ut)
                 .await;
-            if table_row_updates.is_empty() {
+            let bn = self.source.latest_epoch(ctx).await;
+            // check if there is a new block to prove
+            if prev_bn == bn {
                 continue;
             }
-            let bn = self.source.latest_epoch(ctx).await;
+            // if there is a new block on the chain, we need to prove a new block even if there are no 
+            // updates in `table_row_updates`, otherwise the block consequentiality check in circuits will
+            // fail
             log::info!("Applying follow up updates to contract done - now at block {bn}",);
             // we first run the initial preprocessing and db creation.
             // NOTE: we don't show copy on write here - the fact of only reproving what has been
