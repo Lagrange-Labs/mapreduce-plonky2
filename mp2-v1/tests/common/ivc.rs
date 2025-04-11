@@ -17,7 +17,9 @@ impl TestContext {
         table_id: &TableID,
         bn: BlockPrimaryIndex,
         index_tree: &MerkleIndexTree,
+        provable_data_commitment: bool,
         expected_metadata_hash: &HashOutput,
+        expected_root_of_trust: HashOutput,
     ) -> anyhow::Result<()> {
         // load the block proof of the current block
         let root_key = index_tree.root().await?.unwrap();
@@ -36,9 +38,13 @@ impl TestContext {
         let input = if let Some(prev_bn) = previous_block {
             let previous_ivc_key = ProofKey::IVC(prev_bn);
             let previous_proof = self.storage.get_proof_exact(&previous_ivc_key)?;
-            verifiable_db::ivc::CircuitInput::new_subsequent_input(root_proof, previous_proof)
+            verifiable_db::ivc::CircuitInput::new_subsequent_input(
+                provable_data_commitment,
+                root_proof,
+                previous_proof,
+            )
         } else {
-            verifiable_db::ivc::CircuitInput::new_first_input(root_proof)
+            verifiable_db::ivc::CircuitInput::new_first_input(provable_data_commitment, root_proof)
         }
         .expect("unable to create ivc circuit inputs");
         let ivc_proof = self
@@ -54,6 +60,8 @@ impl TestContext {
             ivc_pi.metadata_hash(),
             &HashOut::<F>::from_bytes(expected_metadata_hash.into()).to_vec(),
         );
+        // check root of trust
+        assert_eq!(ivc_pi.block_hash_output(), expected_root_of_trust,);
         self.storage
             .store_proof(ProofKey::IVC(bn), ivc_proof)
             .expect("unable to store new ivc proof");

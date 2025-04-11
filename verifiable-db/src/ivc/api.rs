@@ -7,39 +7,63 @@ use recursion_framework::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::circuit::{DummyCircuit, DummyWires, RecursiveIVCInput, RecursiveIVCWires};
+use super::circuit::{DummyCircuit, DummyWires, IVCCircuit, RecursiveIVCInput, RecursiveIVCWires};
 
 #[derive(Serialize, Deserialize)]
 pub enum CircuitInput {
     FirstProof {
+        provable_data_commitment: bool,
         dummy: DummyCircuit,
         block_proof: Vec<u8>,
     },
     SubsequentProof {
+        provable_data_commitment: bool,
         block_proof: Vec<u8>,
         prev_proof: Vec<u8>,
     },
 }
 
 impl CircuitInput {
-    pub fn new_first_input(block_proof: Vec<u8>) -> Result<Self> {
+    /// Build input for the first IVC proof being generated. Requires as inputs:
+    /// - `block_proof`: the proof of the block tree construction for the current block
+    /// - `provable_data_commitment`: this flag must be true iff a commitment to the data
+    ///     found in the tree has to be provably computed and used as a root of trust for
+    ///     the data
+    pub fn new_first_input(provable_data_commitment: bool, block_proof: Vec<u8>) -> Result<Self> {
         let p = ProofWithVK::deserialize(&block_proof)?;
         let pi = crate::block_tree::PublicInputs::<F>::from_slice(&p.proof.public_inputs);
         let block_hash = pi.prev_block_hash_fields();
-        let md = pi.metadata_hash();
+        let md = if provable_data_commitment {
+            IVCCircuit::add_provable_data_commitment_prefix(HashOut::try_from(pi.metadata_hash())?)
+        } else {
+            HashOut::try_from(pi.metadata_hash())?
+        };
+
         let z0 = pi.min_block_number()?;
         Ok(Self::FirstProof {
+            provable_data_commitment,
             dummy: DummyCircuit {
                 block_hash,
-                metadata_hash: HashOut::try_from(md)?,
+                metadata_hash: md,
                 z0,
             },
             block_proof,
         })
     }
 
-    pub fn new_subsequent_input(block_proof: Vec<u8>, prev_proof: Vec<u8>) -> Result<Self> {
+    /// Build input for any subsequent IVC proof being generated. Requires as inputs:
+    /// - `block_proof`: the proof of the block tree construction for the current block
+    /// - `prev_proof`:  the IVC proof generated for the previous block
+    /// - `provable_data_commitment`: this flag must be true iff a commitment to the data
+    ///     found in the tree has to be provably computed and used as a root of trust for
+    ///     the data
+    pub fn new_subsequent_input(
+        provable_data_commitment: bool,
+        block_proof: Vec<u8>,
+        prev_proof: Vec<u8>,
+    ) -> Result<Self> {
         Ok(Self::SubsequentProof {
+            provable_data_commitment,
             block_proof,
             prev_proof,
         })
@@ -77,16 +101,22 @@ impl PublicParameters {
         input: CircuitInput,
         block_set: &RecursiveCircuits<F, C, D>,
     ) -> Result<Vec<u8>> {
-        let (prev_proof, vd, block_proof) = match input {
-            CircuitInput::FirstProof { dummy, block_proof } => {
+        let (prev_proof, vd, provable_data_commitment, block_proof) = match input {
+            CircuitInput::FirstProof {
+                provable_data_commitment: commit_to_data,
+                dummy,
+                block_proof,
+            } => {
                 let dummy_proof = self.set.generate_proof(&self.dummy, [], [], dummy)?;
                 (
                     dummy_proof,
                     self.dummy.circuit_data().verifier_only.clone(),
+                    commit_to_data,
                     block_proof,
                 )
             }
             CircuitInput::SubsequentProof {
+                provable_data_commitment: commit_to_data,
                 block_proof,
                 prev_proof,
             } => {
@@ -94,12 +124,16 @@ impl PublicParameters {
                 (
                     prev_proof.proof,
                     self.ivc.circuit_data().verifier_only.clone(),
+                    commit_to_data,
                     block_proof,
                 )
             }
         };
         let block_proof = ProofWithVK::deserialize(&block_proof)?;
         let input = RecursiveIVCInput {
+            ivc: IVCCircuit {
+                provable_data_commitment,
+            },
             block_proof,
             block_set: block_set.clone(),
         };
@@ -126,8 +160,9 @@ mod test {
     use alloy::primitives::U256;
     use anyhow::Result;
     use mp2_common::{
+        group_hashing::weierstrass_to_point,
         keccak::PACKED_HASH_LEN,
-        poseidon::empty_poseidon_hash,
+        poseidon::{empty_poseidon_hash, flatten_poseidon_hash_value},
         utils::{FromFields, ToFields},
         C, D, F,
     };
@@ -137,7 +172,7 @@ mod test {
     use rand::{thread_rng, Rng};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
 
-    use crate::ivc::circuit::BLOCK_IO;
+    use crate::ivc::circuit::{test::compute_data_commitment, BLOCK_IO};
 
     #[test]
     fn ivc_api() -> Result<()> {
@@ -176,20 +211,34 @@ mod test {
             first_block_proof[0].clone(),
             block_set.verifier_data_for_input_proofs::<1>()[0].clone(),
         ));
-        let input = CircuitInput::new_first_input(first_block_proof.serialize()?)?;
+        let provable_data_commitment = thread_rng().gen();
+        let input = CircuitInput::new_first_input(
+            provable_data_commitment,
+            first_block_proof.serialize()?,
+        )?;
         println!("generating first ivc proof");
         let first_ivc_proof_buff =
             params.generate_proof(input, block_set.get_recursive_circuit_set())?;
         println!("checking first ivc proof");
         let (first_ivc_proof, _) = ProofWithVK::deserialize(&first_ivc_proof_buff)?.into();
-        {
+        let commitment = {
             let block_pi = crate::block_tree::PublicInputs::from_slice(&first_block_pi);
             let ivc_pi = crate::ivc::PublicInputs::<F>::from_slice(&first_ivc_proof.public_inputs);
             assert_eq!(
                 ivc_pi.merkle_root_hash_fields(),
                 block_pi.new_merkle_hash_field(),
             );
-            assert_eq!(ivc_pi.metadata_hash(), block_pi.metadata_hash(),);
+            assert_eq!(
+                ivc_pi.metadata_hash().to_vec(),
+                if provable_data_commitment {
+                    IVCCircuit::add_provable_data_commitment_prefix(HashOut::from_partial(
+                        block_pi.metadata_hash(),
+                    ))
+                    .to_fields()
+                } else {
+                    block_pi.metadata_hash().to_vec()
+                }
+            );
             // same value digest
             assert_eq!(
                 ivc_pi.value_set_digest_point(),
@@ -197,14 +246,22 @@ mod test {
             );
             assert_eq!(ivc_pi.z0_u256(), min);
             assert_eq!(ivc_pi.zi_u256(), min);
-            assert_eq!(ivc_pi.block_hash_fields(), block_pi.block_hash());
-        }
+            let commitment = if provable_data_commitment {
+                flatten_poseidon_hash_value(compute_data_commitment(&weierstrass_to_point(
+                    &block_pi.new_value_set_digest_point(),
+                )))
+            } else {
+                block_pi.block_hash()
+            };
+            assert_eq!(ivc_pi.block_hash_fields(), commitment);
+            commitment
+        };
 
         println!("Generating second block proof");
         let h_old = h_new;
         let h_new = HashOut::<F>::rand().to_fields();
         let next_block_number = (first_block_number + U256::from(1)).to_fields();
-        let prev_block_hash = block_hash;
+        let prev_block_hash = commitment;
         let next_block_hash = random_vector::<u32>(PACKED_HASH_LEN).to_fields();
         let next_value_digest = Point::rand().to_fields();
 
@@ -228,6 +285,7 @@ mod test {
         ));
         println!("Generating second IVC proof");
         let second_input = CircuitInput::new_subsequent_input(
+            provable_data_commitment,
             second_block_proof.serialize()?,
             first_ivc_proof_buff,
         )?;
@@ -241,14 +299,31 @@ mod test {
                 ivc_pi.merkle_root_hash_fields(),
                 block_pi.new_merkle_hash_field(),
             );
-            assert_eq!(ivc_pi.metadata_hash(), block_pi.metadata_hash(),);
+            assert_eq!(
+                ivc_pi.metadata_hash().to_vec(),
+                if provable_data_commitment {
+                    IVCCircuit::add_provable_data_commitment_prefix(HashOut::from_partial(
+                        block_pi.metadata_hash(),
+                    ))
+                    .to_fields()
+                } else {
+                    block_pi.metadata_hash().to_vec()
+                }
+            );
             // the two digest should be added together from first proof
             let exp_digest =
                 Point::from_fields(&next_value_digest) + Point::from_fields(&value_digest);
             assert_eq!(ivc_pi.value_set_digest_point(), exp_digest.to_weierstrass(),);
             assert_eq!(ivc_pi.z0_u256(), min);
             assert_eq!(ivc_pi.zi_u256(), U256::from_fields(&next_block_number));
-            assert_eq!(ivc_pi.block_hash_fields(), block_pi.block_hash());
+            assert_eq!(
+                ivc_pi.block_hash_fields(),
+                if provable_data_commitment {
+                    flatten_poseidon_hash_value(compute_data_commitment(&exp_digest))
+                } else {
+                    block_pi.block_hash()
+                }
+            );
         }
         Ok(())
     }
