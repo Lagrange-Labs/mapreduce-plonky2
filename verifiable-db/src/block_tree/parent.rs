@@ -1,7 +1,9 @@
 //! This circuit is employed when the new node is inserted as parent of an existing node,
 //! referred to as old node.
 
-use super::{compute_final_digest_target, compute_index_digest, public_inputs::PublicInputs};
+use super::{
+    compute_final_digest_target, compute_index_digest_target, public_inputs::PublicInputs,
+};
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
@@ -106,7 +108,7 @@ impl ParentCircuit {
         let inputs = iter::once(index_identifier)
             .chain(block_number.iter().cloned())
             .collect();
-        let node_digest = compute_index_digest(b, inputs, final_digest);
+        let node_digest = compute_index_digest_target(b, inputs, final_digest);
 
         // We recompute the hash of the old node to bind the `old_min` and `old_max`
         // values to the hash of the old tree.

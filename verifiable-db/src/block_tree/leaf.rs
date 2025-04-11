@@ -2,7 +2,9 @@
 //! an existing node (or if there is no existing node, which happens for the
 //! first block number).
 
-use super::{compute_final_digest_target, compute_index_digest, public_inputs::PublicInputs};
+use super::{
+    compute_final_digest_target, compute_index_digest_target, public_inputs::PublicInputs,
+};
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
@@ -78,7 +80,7 @@ impl LeafCircuit {
         let inputs = iter::once(index_identifier)
             .chain(index_value.iter().cloned())
             .collect();
-        let node_digest = compute_index_digest(b, inputs, final_digest);
+        let node_digest = compute_index_digest_target(b, inputs, final_digest);
 
         // Compute hash of the inserted node
         // node_min = block_number
@@ -208,19 +210,19 @@ pub mod tests {
     };
     use crate::{
         block_tree::{
-            compute_final_digest,
+            compute_final_digest, compute_index_digest,
             tests::{TestPIField, TestPITargets},
         },
         extraction,
     };
     use alloy::primitives::U256;
     use mp2_common::{
-        poseidon::{hash_to_int_value, H},
+        poseidon::H,
         utils::{Fieldable, ToFields},
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
-    use plonky2::{field::types::Field, hash::hash_types::HashOut, plonk::config::Hasher};
-    use plonky2_ecgfp5::curve::{curve::Point, scalar_field::Scalar};
+    use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
+    use plonky2_ecgfp5::curve::curve::Point;
     use rand::{thread_rng, Rng};
 
     pub fn compute_expected_hash(
@@ -245,11 +247,8 @@ pub mod tests {
         let inputs: Vec<_> = iter::once(identifier)
             .chain(value.iter().cloned())
             .collect();
-        let hash = H::hash_no_pad(&inputs);
-        let int = hash_to_int_value(hash);
-        let scalar = Scalar::from_noncanonical_biguint(int);
         let point = compute_final_digest(is_merge_case, &rows_tree_pi);
-        point * scalar
+        compute_index_digest(inputs, point)
     }
     #[derive(Clone, Debug)]
     struct TestLeafCircuit<'a> {

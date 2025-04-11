@@ -141,7 +141,10 @@ impl TableInfo {
                     mapping,
                 )
             }
-            TableSource::OffChain(off_chain) => no_provable_metadata_hash(off_chain.column_ids()),
+            TableSource::OffChain(off_chain) => no_provable_metadata_hash(
+                off_chain.column_ids(),
+                off_chain.provable_data_commitment,
+            ),
         }
     }
 }

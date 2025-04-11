@@ -1,7 +1,7 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
-use std::iter::once;
+use std::{fmt::Debug, iter::once};
 
 use anyhow::{ensure, Result};
 use itertools::Itertools;
@@ -101,8 +101,10 @@ fn single_value_slot_inputs(all_slots: bool) -> Vec<SlotInput> {
         .collect_vec();
 
     // Add the Struct single slots.
-    let struct_slots = LargeStruct::slot_inputs(SINGLE_STRUCT_SLOT as u8);
-    slot_inputs.extend(struct_slots);
+    if all_slots {
+        let struct_slots = LargeStruct::slot_inputs(SINGLE_STRUCT_SLOT as u8);
+        slot_inputs.extend(struct_slots);
+    }
 
     slot_inputs
 }
@@ -601,6 +603,7 @@ impl TableIndexing {
 
     pub(crate) async fn off_chain_test_case(
         ctx: &mut TestContext,
+        provable_commitment_data: bool,
     ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // build a table with the following columns:
         // - "total_supply"
@@ -624,6 +627,7 @@ impl TableIndexing {
             TABLE_NAME.to_string(),
             secondary_index_column,
             non_indexed_columns.to_vec(),
+            provable_commitment_data,
         );
         let genesis_updates = off_chain_data_args.init_data();
         // Defining the columns structure of the table
@@ -852,12 +856,24 @@ impl TableIndexing {
             .prove_update_index_tree(bn, &self.table, updates.plan)
             .await;
         info!("Generated final BLOCK tree proofs for block {current_block}");
+        let provable_data_commitment = self.source.provable_data_commitment_for_ivc();
+        let expected_root_of_trust = match &self.source {
+            TableSource::OffChain(args) => args.expected_root_of_trust(&self.table).await?,
+            _ => {
+                let block = ctx
+                    .query_block_at(alloy::eips::BlockNumberOrTag::Number(bn as u64))
+                    .await;
+                HashOutput::from(block.header.hash.0)
+            }
+        };
         let _ = ctx
             .prove_ivc(
                 &self.table.public_name,
                 bn,
                 &self.table.index,
+                provable_data_commitment,
                 expected_metadata_hash,
+                expected_root_of_trust,
             )
             .await;
         info!("Generated final IVC proof for block {}", current_block);
@@ -1338,7 +1354,7 @@ pub enum TableRowUpdate<PrimaryIndex> {
 
 impl<PrimaryIndex> TableRowUpdate<PrimaryIndex>
 where
-    PrimaryIndex: PartialEq + Eq + Default + Clone + Default,
+    PrimaryIndex: PartialEq + Eq + Default + Clone + Default + Debug,
 {
     // Returns the full cell collection to put inside the JSON row payload
     fn updated_cells_collection(

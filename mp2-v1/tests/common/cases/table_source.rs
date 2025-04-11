@@ -13,7 +13,7 @@ use alloy::{
     primitives::{Address, U256},
 };
 use anyhow::{bail, ensure, Result};
-use futures::{future::BoxFuture, FutureExt};
+use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_common::{
@@ -24,7 +24,7 @@ use mp2_common::{
 use mp2_v1::{
     api::{
         compute_table_info, merge_metadata_hash, metadata_hash, no_provable_metadata_hash,
-        SlotInput, SlotInputs,
+        off_chain_data_commitment, SlotInput, SlotInputs, TableRow,
     },
     final_extraction::OffChainRootOfTrust,
     indexing::{
@@ -46,6 +46,7 @@ use rand::{
     rngs::StdRng,
     thread_rng, Rng, SeedableRng,
 };
+use ryhope::{storage::RoEpochKvStorage, UserEpoch};
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
@@ -54,7 +55,7 @@ use crate::common::{
     },
     proof_storage::{ProofKey, ProofStorage},
     rowtree::SecondaryIndexCell,
-    table::CellsUpdate,
+    table::{CellsUpdate, Table},
     TestContext, TEST_MAX_COLUMNS,
 };
 
@@ -341,6 +342,18 @@ pub(crate) enum TableSource {
 }
 
 impl TableSource {
+    /// Return the provable data commitment flag to be provided as input for the IVC proof.
+    /// The value of the flag depends on the type of the table
+    pub fn provable_data_commitment_for_ivc(&self) -> bool {
+        match self {
+            TableSource::OffChain(off_chain_table_args) => {
+                off_chain_table_args.provable_data_commitment
+            }
+            _ => false, // for all on-chain tables, we use block hash as root of trust, so this flag must
+                        // always be false
+        }
+    }
+
     pub async fn generate_extraction_proof_inputs(
         &self,
         ctx: &mut TestContext,
@@ -1469,6 +1482,9 @@ pub(crate) struct OffChainTableArgs {
     pub(crate) row_values: Vec<TableRowValues<BlockPrimaryIndex>>,
     // Last epoch where `row_values` were updated
     pub(crate) last_update_epoch: BlockPrimaryIndex,
+    /// Boolean flag specifying whether the table is using as root ot trust
+    /// a provable commitment
+    pub(crate) provable_data_commitment: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
@@ -1496,6 +1512,7 @@ impl OffChainTableArgs {
         table_name: String,
         secondary_index_column: ColumnMetadata,
         non_indexed_columns: Vec<ColumnMetadata>,
+        provable_data_commitment: bool,
     ) -> Self {
         Self {
             table_name,
@@ -1503,6 +1520,35 @@ impl OffChainTableArgs {
             non_indexed_columns,
             row_values: vec![], // instantiate with no rows
             last_update_epoch: 0,
+            provable_data_commitment,
+        }
+    }
+
+    pub(crate) async fn expected_root_of_trust(&self, table: &Table) -> Result<HashOutput> {
+        if self.provable_data_commitment {
+            // fetch all rows from the table
+            let current_epoch = table.index.current_epoch().await?;
+            let primary_indexes = table.index.keys_at(current_epoch).await;
+            let rows = stream::iter(primary_indexes)
+                .then(|index| async move {
+                    table
+                        .row
+                        .pairs_at(index as UserEpoch)
+                        .await
+                        .unwrap()
+                        .into_values()
+                        .map(move |row| TableRow::new(index, row.cells))
+                })
+                .flat_map(stream::iter)
+                .collect::<Vec<_>>()
+                .await;
+            off_chain_data_commitment(
+                &rows,
+                table.columns.primary.identifier(),
+                &self.primary_key_column_ids(),
+            )
+        } else {
+            Ok(OffChainRootOfTrust::Dummy.hash())
         }
     }
 
@@ -1846,16 +1892,16 @@ impl OffChainTableArgs {
             .iter()
             .map(CellCollection::try_from)
             .collect::<Result<Vec<_>>>()?;
-        let rng = &mut thread_rng();
         // This could be computed from the table data according to any logic,
-        // here for simplicity we just generate it at random
-        let hash = HashOutput::from(array::from_fn(|_| rng.gen()));
+        // here for simplicity we just use a fixed dummy value
+        let hash = OffChainRootOfTrust::Dummy;
         // fetch previous IVC proof, if any
         let prev_proof = ctx.storage.get_proof_exact(&proof_key).ok();
 
-        let metadata_hash = no_provable_metadata_hash(self.column_ids());
+        let metadata_hash =
+            no_provable_metadata_hash(self.column_ids(), self.provable_data_commitment);
         let input = ExtractionProofInput::Offchain(OffChainExtractionProof {
-            hash: OffChainRootOfTrust::Hash(hash),
+            hash,
             prev_proof,
             primary_index: self.last_update_epoch,
             rows,

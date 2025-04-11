@@ -10,6 +10,7 @@ use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
     row_tree,
 };
+use alloy::primitives::U256;
 pub use api::{CircuitInput, PublicParameters};
 use itertools::Itertools;
 use mp2_common::{
@@ -35,9 +36,27 @@ use plonky2_ecgfp5::{
 };
 pub use public_inputs::PublicInputs;
 
+pub fn add_primary_index_to_digest(
+    primary_index_id: u64,
+    index_value: U256,
+    digest: Point,
+) -> Point {
+    let inputs: Vec<_> = once(F::from_canonical_u64(primary_index_id))
+        .chain(index_value.to_fields().iter().cloned())
+        .collect();
+    compute_index_digest(inputs, digest)
+}
+
+pub(crate) fn compute_index_digest(inputs: Vec<F>, digest: Point) -> Point {
+    let hash = H::hash_no_pad(&inputs);
+    let int = hash_to_int_value(hash);
+    let scalar = Scalar::from_noncanonical_biguint(int);
+    scalar * digest
+}
+
 /// Common function to compute the digest of the block tree which uses a special format using
 /// scalar1 multiplication
-pub(crate) fn compute_index_digest(
+pub(crate) fn compute_index_digest_target(
     b: &mut CircuitBuilder<F, D>,
     inputs: Vec<Target>,
     base: CurveTarget,

@@ -158,7 +158,7 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Deletion,
     ];
     merged.run(&mut ctx, genesis, changes).await?;
-    let (mut off_chain, genesis) = TableIndexing::off_chain_test_case(&mut ctx).await?;
+    let (mut off_chain, genesis) = TableIndexing::off_chain_test_case(&mut ctx, true).await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
