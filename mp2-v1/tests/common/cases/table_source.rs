@@ -30,7 +30,7 @@ use mp2_v1::{
     indexing::{
         block::BlockPrimaryIndex,
         cell::Cell,
-        row::{CellCollection, RowTreeKey, RowTreeKeyNonce, ToNonce},
+        row::{RowTreeKey, RowTreeKeyNonce, ToNonce},
         ColumnID,
     },
     values_extraction::{
@@ -1525,6 +1525,7 @@ impl OffChainTableArgs {
     }
 
     pub(crate) async fn expected_root_of_trust(&self, table: &Table) -> Result<HashOutput> {
+        let primary_index_id = table.columns.primary.identifier();
         if self.provable_data_commitment {
             // fetch all rows from the table
             let current_epoch = table.index.current_epoch().await?;
@@ -1537,16 +1538,21 @@ impl OffChainTableArgs {
                         .await
                         .unwrap()
                         .into_values()
-                        .map(move |row| TableRow::new(index, row.cells))
+                        .map(move |row| {
+                            TableRow::new(
+                                Cell::new(primary_index_id, U256::from(index)),
+                                row.cells
+                                    .0
+                                    .into_iter()
+                                    .map(|(id, c)| Cell::new(id, c.value))
+                                    .collect(),
+                            )
+                        })
                 })
                 .flat_map(stream::iter)
                 .collect::<Vec<_>>()
                 .await;
-            off_chain_data_commitment(
-                &rows,
-                table.columns.primary.identifier(),
-                &self.primary_key_column_ids(),
-            )
+            off_chain_data_commitment(&rows, &self.primary_key_column_ids())
         } else {
             Ok(OffChainRootOfTrust::Dummy.hash())
         }
@@ -1890,7 +1896,7 @@ impl OffChainTableArgs {
         let rows = self
             .row_values
             .iter()
-            .map(CellCollection::try_from)
+            .map(|row| row.to_table_row(self.primary_index_column_id()))
             .collect::<Result<Vec<_>>>()?;
         // This could be computed from the table data according to any logic,
         // here for simplicity we just use a fixed dummy value

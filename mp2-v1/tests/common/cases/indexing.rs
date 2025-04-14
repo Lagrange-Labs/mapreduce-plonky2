@@ -3,11 +3,12 @@
 
 use std::{fmt::Debug, iter::once};
 
-use anyhow::{ensure, Result};
+use alloy::primitives::U256;
+use anyhow::{anyhow, ensure, Result};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_v1::{
-    api::SlotInput,
+    api::{SlotInput, TableRow},
     contract_extraction,
     indexing::{
         block::BlockPrimaryIndex,
@@ -1234,7 +1235,10 @@ pub struct TableRowValues<PrimaryIndex> {
     pub primary: PrimaryIndex,
 }
 
-impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex> {
+impl<PrimaryIndex: Clone + Default + PartialEq + Eq + TryInto<U256>> TableRowValues<PrimaryIndex>
+where
+    <PrimaryIndex as TryInto<U256>>::Error: Debug,
+{
     // Compute the update from the current values and the new values
     // NOTE: if the table doesn't have a secondary index, the table row update will have all row
     // keys set to default. This must later be fixed before "sending" this to the update table
@@ -1309,34 +1313,26 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex
             }
         }
     }
-}
 
-impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TryFrom<&TableRowValues<PrimaryIndex>>
-    for CellCollection<PrimaryIndex>
-{
-    type Error = anyhow::Error;
-
-    fn try_from(value: &TableRowValues<PrimaryIndex>) -> Result<Self, Self::Error> {
+    pub fn to_table_row(&self, primary_index_column_id: ColumnID) -> Result<TableRow> {
+        let primary_index_column = Cell::new(
+            primary_index_column_id,
+            self.primary
+                .clone()
+                .try_into()
+                .map_err(|e| anyhow!("while converting primary index to U256: {e:?}"))?,
+        );
         ensure!(
-            value.current_secondary.is_some(),
+            self.current_secondary.is_some(),
             "trying to convert TableRowValues with no secondary cell to CellCollection"
         );
-        Ok(Self(
-            value
-                .current_cells
-                .iter()
-                .chain(once(&value.current_secondary.as_ref().unwrap().cell()))
-                .map(|cell| {
-                    (
-                        cell.identifier(),
-                        CellInfo {
-                            value: cell.value(),
-                            primary: value.primary.clone(),
-                        },
-                    )
-                })
-                .collect(),
-        ))
+        let other_columns = self
+            .current_cells
+            .iter()
+            .chain(once(&self.current_secondary.as_ref().unwrap().cell()))
+            .cloned()
+            .collect();
+        Ok(TableRow::new(primary_index_column, other_columns))
     }
 }
 

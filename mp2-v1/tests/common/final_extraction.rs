@@ -3,9 +3,10 @@ use mp2_common::{
     group_hashing::weierstrass_to_point, proof::ProofWithVK, types::HashOutput, utils::ToFields, F,
 };
 use mp2_v1::{
-    api, contract_extraction,
+    api::{self, TableRow},
+    contract_extraction,
     final_extraction::{CircuitInput, OffChainRootOfTrust, PublicInputs},
-    indexing::{block::BlockPrimaryIndex, row::CellCollection, ColumnID},
+    indexing::{block::BlockPrimaryIndex, ColumnID},
     values_extraction,
 };
 
@@ -31,7 +32,7 @@ pub(crate) struct OffChainExtractionProof {
     pub(crate) hash: OffChainRootOfTrust,
     pub(crate) prev_proof: Option<Vec<u8>>,
     pub(crate) primary_index: BlockPrimaryIndex,
-    pub(crate) rows: Vec<CellCollection<BlockPrimaryIndex>>,
+    pub(crate) rows: Vec<TableRow>,
     pub(crate) primary_key_columns: Vec<ColumnID>,
 }
 

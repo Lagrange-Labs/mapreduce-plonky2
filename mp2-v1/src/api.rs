@@ -11,7 +11,7 @@ use crate::{
     block_extraction,
     contract_extraction::{self, compute_metadata_digest as contract_metadata_digest},
     final_extraction,
-    indexing::{row::CellCollection, ColumnID},
+    indexing::{cell::Cell, ColumnID},
     length_extraction::{
         self, compute_metadata_digest as length_metadata_digest, LengthCircuitInput,
     },
@@ -25,7 +25,7 @@ use crate::{
     MAX_LEAF_NODE_LEN,
 };
 use alloy::primitives::{Address, U256};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use itertools::Itertools;
 use log::debug;
 use mp2_common::{
@@ -506,39 +506,60 @@ pub fn no_provable_metadata_hash<I: IntoIterator<Item = ColumnID>>(
     }
 }
 
-pub struct TableRow<PrimaryIndex> {
-    primary_index: PrimaryIndex,
-    row_values: CellCollection<PrimaryIndex>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Data about a row for a table provided as input to APIs
+pub struct TableRow {
+    pub(crate) primary_index_column: Cell,
+    pub(crate) other_columns: Vec<Cell>,
 }
 
-impl<PrimaryIndex> TableRow<PrimaryIndex> {
-    pub fn new(primary_index: PrimaryIndex, row_values: CellCollection<PrimaryIndex>) -> Self {
+impl TableRow {
+    pub fn new(primary_index_column: Cell, other_columns: Vec<Cell>) -> Self {
         Self {
-            primary_index,
-            row_values,
+            primary_index_column,
+            other_columns,
         }
+    }
+
+    pub(crate) fn column_ids(&self) -> Vec<ColumnID> {
+        once(&self.primary_index_column)
+            .chain(&self.other_columns)
+            .map(|c| c.identifier())
+            .collect()
+    }
+
+    pub(crate) fn find_by_column_id(&self, id: ColumnID) -> Option<U256> {
+        once(&self.primary_index_column)
+            .chain(&self.other_columns)
+            .find_map(|c| {
+                if c.identifier() == id {
+                    Some(c.value())
+                } else {
+                    None
+                }
+            })
+    }
+}
+
+impl AsRef<TableRow> for TableRow {
+    fn as_ref(&self) -> &TableRow {
+        self
     }
 }
 
 /// Compute the provable commitment to the data found in an off-chain table
-pub fn off_chain_data_commitment<
-    PrimaryIndex: PartialEq + Eq + Default + Clone + Debug + Hash + TryInto<U256>,
->(
-    table_rows: &[TableRow<PrimaryIndex>],
-    primary_index_column: ColumnID,
+pub fn off_chain_data_commitment(
+    table_rows: &[TableRow],
     row_unique_columns: &[ColumnId],
-) -> Result<HashOutput>
-where
-    <PrimaryIndex as TryInto<U256>>::Error: Debug,
-{
+) -> Result<HashOutput> {
     // first, group rows by primary index values
     let mut grouped_rows = HashMap::new();
     for row in table_rows {
-        let primary = row.primary_index.clone();
+        let primary = row.primary_index_column.value();
         grouped_rows
             .entry(primary)
-            .and_modify(|rows: &mut Vec<_>| rows.push(&row.row_values))
-            .or_insert(vec![&row.row_values]);
+            .and_modify(|rows: &mut Vec<_>| rows.push(row))
+            .or_insert(vec![row]);
     }
 
     // then, for each group of rows with the same primary index, compute the row value digest
@@ -546,14 +567,9 @@ where
         .into_iter()
         .try_fold(Point::NEUTRAL, |acc, (primary, rows)| {
             let row_digest = compute_table_row_digest(&rows, row_unique_columns)?;
+            let primary_index_column = rows[0].primary_index_column.identifier();
             // add primary index value to digest
-            let digest = add_primary_index_to_digest(
-                primary_index_column,
-                primary
-                    .try_into()
-                    .map_err(|e| anyhow!("while converting primary index to U256: {e:?}"))?,
-                row_digest,
-            );
+            let digest = add_primary_index_to_digest(primary_index_column, primary, row_digest);
             // accumulate with the previous digest
             anyhow::Ok(acc + digest)
         })?;

@@ -1,4 +1,4 @@
-use crate::api::SlotInput;
+use crate::api::{SlotInput, TableRow};
 use alloy::primitives::Address;
 use anyhow::{ensure, Result};
 use gadgets::{
@@ -35,8 +35,6 @@ pub mod public_inputs;
 
 pub use api::{build_circuits_params, generate_proof, CircuitInput, PublicParameters};
 pub use public_inputs::PublicInputs;
-
-use crate::indexing::row::CellCollection;
 
 /// Constant prefixes for the mapping key ID. Restrict to 4-bytes (Uint32).
 pub(crate) const KEY_ID_PREFIX: &[u8] = b"\0KEY";
@@ -524,10 +522,7 @@ fn compute_row_id(row_unique_data: HashOutput, num_actual_columns: usize) -> Sca
 
 /// Compute the row value digest of one table, taking as input the rows of the
 /// table and the identifiers of columns employed to compute the row unique data
-pub fn compute_table_row_digest<
-    PrimaryIndex: PartialEq + Eq + Default + Clone + Debug,
-    T: AsRef<CellCollection<PrimaryIndex>>,
->(
+pub fn compute_table_row_digest<T: AsRef<TableRow>>(
     table_rows: &[T],
     row_unique_columns: &[ColumnId],
 ) -> Result<Digest> {
@@ -548,12 +543,12 @@ pub fn compute_table_row_digest<
                 "row {i} has different column ids than other rows"
             );
             let current_row_digest =
-                current_column_ids
-                    .into_iter()
-                    .fold(Digest::NEUTRAL, |acc, id| {
+                row.other_columns
+                    .iter()
+                    .fold(Digest::NEUTRAL, |acc, column| {
                         let current = map_to_curve_point(
-                            &once(F::from_canonical_u64(id))
-                                .chain(row.find_by_column(id).unwrap().value.to_fields())
+                            &once(F::from_canonical_u64(column.identifier()))
+                                .chain(column.value().to_fields())
                                 .collect_vec(),
                         );
                         acc + current
@@ -562,12 +557,7 @@ pub fn compute_table_row_digest<
             let row_unique_data = {
                 let column_values = row_unique_columns
                     .iter()
-                    .map(|&id| {
-                        row.find_by_column(id)
-                            .unwrap()
-                            .value
-                            .to_be_bytes_trimmed_vec()
-                    })
+                    .map(|&id| row.find_by_column_id(id).unwrap().to_be_bytes_trimmed_vec())
                     .collect_vec();
                 row_unique_data(column_values.iter().map(|v| v.as_slice()))
             };
