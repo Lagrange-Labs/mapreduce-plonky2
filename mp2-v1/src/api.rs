@@ -1,7 +1,7 @@
 //! Main APIs and related structures
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt::Debug,
     hash::Hash,
     iter::once,
@@ -510,34 +510,39 @@ pub fn no_provable_metadata_hash<I: IntoIterator<Item = ColumnID>>(
 /// Data about a row for a table provided as input to APIs
 pub struct TableRow {
     pub(crate) primary_index_column: Cell,
-    pub(crate) other_columns: Vec<Cell>,
+    pub(crate) other_columns: BTreeMap<ColumnID, U256>,
 }
 
 impl TableRow {
     pub fn new(primary_index_column: Cell, other_columns: Vec<Cell>) -> Self {
         Self {
             primary_index_column,
-            other_columns,
+            other_columns: other_columns
+                .into_iter()
+                .map(|c| (c.identifier(), c.value()))
+                .collect(),
         }
     }
 
     pub(crate) fn column_ids(&self) -> Vec<ColumnID> {
-        once(&self.primary_index_column)
-            .chain(&self.other_columns)
-            .map(|c| c.identifier())
-            .collect()
+        self.other_columns.keys().copied().collect()
     }
 
     pub(crate) fn find_by_column_id(&self, id: ColumnID) -> Option<U256> {
-        once(&self.primary_index_column)
-            .chain(&self.other_columns)
-            .find_map(|c| {
-                if c.identifier() == id {
-                    Some(c.value())
+        once((
+            &self.primary_index_column.identifier(),
+            &self.primary_index_column.value(),
+        ))
+        .chain(&self.other_columns)
+        .find_map(
+            |(column_id, value)| {
+                if *column_id == id {
+                    Some(*value)
                 } else {
                     None
                 }
-            })
+            },
+        )
     }
 }
 

@@ -545,10 +545,10 @@ pub fn compute_table_row_digest<T: AsRef<TableRow>>(
             let current_row_digest =
                 row.other_columns
                     .iter()
-                    .fold(Digest::NEUTRAL, |acc, column| {
+                    .fold(Digest::NEUTRAL, |acc, (&id, &value)| {
                         let current = map_to_curve_point(
-                            &once(F::from_canonical_u64(column.identifier()))
-                                .chain(column.value().to_fields())
+                            &once(F::from_canonical_u64(id))
+                                .chain(value.to_fields())
                                 .collect_vec(),
                         );
                         acc + current
