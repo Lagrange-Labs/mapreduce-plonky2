@@ -524,11 +524,14 @@ fn compute_row_id(row_unique_data: HashOutput, num_actual_columns: usize) -> Sca
 
 /// Compute the row value digest of one table, taking as input the rows of the
 /// table and the identifiers of columns employed to compute the row unique data
-pub fn compute_table_row_digest<PrimaryIndex: PartialEq + Eq + Default + Clone + Debug>(
-    table_rows: &[CellCollection<PrimaryIndex>],
+pub fn compute_table_row_digest<
+    PrimaryIndex: PartialEq + Eq + Default + Clone + Debug,
+    T: AsRef<CellCollection<PrimaryIndex>>,
+>(
+    table_rows: &[T],
     row_unique_columns: &[ColumnId],
 ) -> Result<Digest> {
-    let column_ids = table_rows[0].column_ids();
+    let column_ids = table_rows[0].as_ref().column_ids();
     let num_actual_columns = column_ids.len();
     // check that the identifiers of row unique columns are actual identifiers of the columns
     // of the table
@@ -537,6 +540,7 @@ pub fn compute_table_row_digest<PrimaryIndex: PartialEq + Eq + Default + Clone +
         .iter()
         .enumerate()
         .fold(Digest::NEUTRAL, |acc, (i, row)| {
+            let row = row.as_ref();
             let current_column_ids = row.column_ids();
             // check that column ids are the same for each row
             assert_eq!(

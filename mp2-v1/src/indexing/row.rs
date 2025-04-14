@@ -153,6 +153,12 @@ impl<PrimaryIndex: PartialEq + Eq + Default + Clone + Debug> CellCollection<Prim
     }
 }
 
+impl<PrimaryIndex> AsRef<CellCollection<PrimaryIndex>> for CellCollection<PrimaryIndex> {
+    fn as_ref(&self) -> &CellCollection<PrimaryIndex> {
+        self
+    }
+}
+
 /// An utility wrapper to pass around that connects what we put in the JSON description and
 /// the actual row key used to insert in the tree
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

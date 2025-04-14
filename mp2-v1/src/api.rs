@@ -537,8 +537,8 @@ where
         let primary = row.primary_index.clone();
         grouped_rows
             .entry(primary)
-            .and_modify(|rows: &mut Vec<_>| rows.push(row.row_values.clone()))
-            .or_insert(vec![row.row_values.clone()]);
+            .and_modify(|rows: &mut Vec<_>| rows.push(&row.row_values))
+            .or_insert(vec![&row.row_values]);
     }
 
     // then, for each group of rows with the same primary index, compute the row value digest
