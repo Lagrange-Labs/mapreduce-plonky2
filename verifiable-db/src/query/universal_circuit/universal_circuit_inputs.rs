@@ -462,7 +462,7 @@ impl ResultStructure {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColumnCell {
     pub value: U256,
     pub id: F,
@@ -477,7 +477,7 @@ impl ColumnCell {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct RowCells {
     primary: ColumnCell,
     secondary: ColumnCell,

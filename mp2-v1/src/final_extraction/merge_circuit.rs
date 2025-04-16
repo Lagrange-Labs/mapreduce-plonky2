@@ -6,7 +6,7 @@ use super::{
     BaseCircuitProofInputs, PublicInputs,
 };
 use mp2_common::{
-    digest::{SplitDigestTarget, TableDimension, TableDimensionWire},
+    digest::SplitDigestTarget,
     serialization::{deserialize, serialize},
     types::CBuilder,
     utils::ToTargets,
@@ -32,16 +32,12 @@ use verifiable_db::extraction::ExtractionPI;
 #[derive(Clone, Debug)]
 pub struct MergeTable {
     pub(crate) is_table_a_multiplier: bool,
-    pub(crate) dimension_a: TableDimension,
-    pub(crate) dimension_b: TableDimension,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct MergeTableWires {
     #[serde(deserialize_with = "deserialize", serialize_with = "serialize")]
     is_table_a_multiplier: BoolTarget,
-    dimension_a: TableDimensionWire,
-    dimension_b: TableDimensionWire,
 }
 
 impl MergeTable {
@@ -60,17 +56,8 @@ impl MergeTable {
         let table_a = values_extraction::PublicInputs::new(table_a);
         let table_b = values_extraction::PublicInputs::new(table_b);
 
-        // prepare the table digest if they're compound or not
-        // At final extraction, if we're extracting a single type table, then we need to digest one
-        // more time the value proof digest. The value proof digest gives us SUM D(column) but at
-        // this stage we want D ( SUM D(column)).
-        // NOTE: in practice at first we only gonna have one table being the single table with a
-        // single row and the other one being a mapping. But this implementation should allow for
-        // mappings X mappings, or arrays X mappings etc.
-        let table_a_dimension = TableDimensionWire(b.add_virtual_bool_target_safe());
-        let table_b_dimension = TableDimensionWire(b.add_virtual_bool_target_safe());
-        let digest_a = table_a_dimension.conditional_row_digest(b, table_a.values_digest_target());
-        let digest_b = table_b_dimension.conditional_row_digest(b, table_b.values_digest_target());
+        let digest_a = table_a.values_digest_target();
+        let digest_b = table_b.values_digest_target();
 
         // Combine the two digest depending on which table is the multiplier
         let is_table_a_multiplier = b.add_virtual_bool_target_safe();
@@ -96,13 +83,9 @@ impl MergeTable {
         .register_args(b);
         MergeTableWires {
             is_table_a_multiplier,
-            dimension_a: table_a_dimension,
-            dimension_b: table_b_dimension,
         }
     }
     fn assign(&self, pw: &mut PartialWitness<F>, wires: &MergeTableWires) {
-        self.dimension_a.assign_wire(pw, &wires.dimension_a);
-        self.dimension_b.assign_wire(pw, &wires.dimension_b);
         pw.set_bool_target(wires.is_table_a_multiplier, self.is_table_a_multiplier);
     }
 }
@@ -164,7 +147,9 @@ mod test {
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
     use mp2_common::{
-        digest::SplitDigestPoint, group_hashing::weierstrass_to_point as wp, C, D, F,
+        digest::SplitDigestPoint,
+        group_hashing::{map_to_curve_point, weierstrass_to_point as wp},
+        C, D, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::witness::WitnessWrite;
@@ -213,8 +198,6 @@ mod test {
     fn test_final_merge_circuit() {
         let pis_a = ProofsPi::random();
         let pis_b = pis_a.generate_new_random_value();
-        let table_a_dimension = TableDimension::Single;
-        let table_b_dimension = TableDimension::Compound;
 
         let table_a_multiplier = true;
         let test_circuit = TestMergeCircuit {
@@ -222,19 +205,14 @@ mod test {
             pis_b: pis_b.values_pi.clone(),
             circuit: MergeTable {
                 is_table_a_multiplier: table_a_multiplier,
-                dimension_a: table_a_dimension,
-                dimension_b: table_b_dimension,
             },
         };
 
         let proof = run_circuit::<F, D, C, _>(test_circuit);
         let pi = PublicInputs::from_slice(&proof.public_inputs);
 
-        // first compute the right digest for each table according to their dimension
-        let table_a_digest =
-            table_a_dimension.conditional_row_digest(wp(&pis_a.value_inputs().values_digest()));
-        let table_b_digest =
-            table_b_dimension.conditional_row_digest(wp(&pis_b.value_inputs().values_digest()));
+        let table_a_digest = wp(&pis_a.value_inputs().values_digest());
+        let table_b_digest = wp(&pis_b.value_inputs().values_digest());
         // then do the splitting according to how we want to merge them (i.e. which is the
         // multiplier)
         let split_a =
@@ -246,9 +224,10 @@ mod test {
         let final_digest = split_total.combine_to_row_digest();
         // testing the digest values
         assert_eq!(final_digest, wp(&pi.value_point()));
-        let combined_metadata = wp(&pis_a.value_inputs().metadata_digest())
-            + wp(&pis_b.value_inputs().metadata_digest())
-            + wp(&pis_a.contract_inputs().metadata_point());
+        let [metadata_a, metadata_b] =
+            [&pis_a, &pis_b].map(|pi| map_to_curve_point(pi.value_inputs().metadata_digest_raw()));
+        let combined_metadata =
+            metadata_a + metadata_b + wp(&pis_a.contract_inputs().metadata_point());
         assert_eq!(combined_metadata, wp(&pi.metadata_point()));
         let block_pi = pis_a.block_inputs();
         assert_eq!(pi.bn, block_pi.bn);

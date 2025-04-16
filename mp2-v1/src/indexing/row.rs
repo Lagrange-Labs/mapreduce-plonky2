@@ -1,4 +1,6 @@
-use super::{cell::CellTreeKey, ColumnID};
+use std::collections::HashSet;
+
+use super::{block::BlockPrimaryIndex, cell::CellTreeKey, ColumnID};
 use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{Deref, From};
@@ -14,11 +16,18 @@ use plonky2::{
     hash::hash_types::HashOut,
     plonk::config::{GenericHashOut, Hasher},
 };
-use ryhope::{storage::pgsql::ToFromBytea, tree::scapegoat, NodePayload};
+use ryhope::{
+    storage::pgsql::{PgsqlStorage, ToFromBytea},
+    tree::scapegoat,
+    MerkleTreeKvDb, NodePayload,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub type RowTree = scapegoat::Tree<RowTreeKey>;
 pub type RowTreeKeyNonce = Vec<u8>;
+
+pub type RowStorage = PgsqlStorage<RowTree, RowPayload<BlockPrimaryIndex>, true>;
+pub type MerkleRowTree = MerkleTreeKvDb<RowTree, RowPayload<BlockPrimaryIndex>, RowStorage>;
 
 pub trait ToNonce {
     fn to_nonce(&self) -> RowTreeKeyNonce;
@@ -117,6 +126,12 @@ impl<PrimaryIndex: PartialEq + Eq + Default + Clone> CellCollection<PrimaryIndex
     pub fn find_by_column(&self, id: ColumnID) -> Option<&CellInfo<PrimaryIndex>> {
         self.0.get(&id)
     }
+
+    // Return the set of all the column identifiers for cells in `self`
+    pub fn column_ids(&self) -> HashSet<ColumnID> {
+        self.0.keys().cloned().collect()
+    }
+
     // take all the cells ids on both collections, take the value present in the updated one
     // if it exists, otherwise take from self.
     pub fn merge_with_update(&self, updated_cells: &Self) -> Self {
@@ -201,6 +216,9 @@ impl<PrimaryIndex: std::fmt::Debug + Clone + Default + PartialEq + Eq> RowPayloa
         }
     }
 
+    pub fn column_value(&self, column_id: ColumnID) -> Option<U256> {
+        self.cells.get(&column_id).map(|c| c.value)
+    }
     pub fn secondary_index_value(&self) -> U256 {
         self.cells
             .get(&self.secondary_index_column)

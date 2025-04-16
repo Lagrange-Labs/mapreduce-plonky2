@@ -69,7 +69,9 @@ pub(crate) mod common;
 const PROOF_STORE_FILE: &str = "test_proofs.store";
 const SINGLE_TABLE_INFO_FILE: &str = "single_column_info.json";
 const MAPPING_TABLE_INFO_FILE: &str = "mapping_column_info.json";
+const MAPPING_OF_MAPPING_TABLE_INFO_FILE: &str = "mapping_of_mapping_column_info.json";
 const MERGE_TABLE_INFO_FILE: &str = "merge_column_info.json";
+const OFFCHAIN_TABLE_INFO_FILE: &str = "off_chain_column_info.json";
 
 #[test(tokio::test)]
 #[ignore]
@@ -102,7 +104,61 @@ async fn integrated_indexing() -> Result<()> {
     ];
     single.run(&mut ctx, genesis, changes.clone()).await?;
 
-    let (mut mapping, genesis) = TableIndexing::mapping_test_case(&mut ctx).await?;
+    let (mut mapping, genesis) = TableIndexing::mapping_value_test_case(&mut ctx).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
+        ChangeType::Silent,
+    ];
+    mapping.run(&mut ctx, genesis, changes).await?;
+
+    let (mut mapping, genesis) = TableIndexing::mapping_struct_test_case(&mut ctx).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
+        ChangeType::Silent,
+    ];
+    mapping.run(&mut ctx, genesis, changes).await?;
+
+    let (mut mapping_of_single_value_mappings, genesis) =
+        TableIndexing::mapping_of_single_value_mappings_test_case(&mut ctx).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
+        ChangeType::Silent,
+    ];
+    mapping_of_single_value_mappings
+        .run(&mut ctx, genesis, changes)
+        .await?;
+
+    let (mut mapping_of_struct_mappings, genesis) =
+        TableIndexing::mapping_of_struct_mappings_test_case(&mut ctx).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Update(UpdateType::SecondaryIndex),
+        ChangeType::Deletion,
+        ChangeType::Silent,
+    ];
+    mapping_of_struct_mappings
+        .run(&mut ctx, genesis, changes)
+        .await?;
+
+    let (mut merged, genesis) = TableIndexing::merge_table_test_case(&mut ctx).await?;
+    let changes = vec![
+        ChangeType::Insertion,
+        ChangeType::Update(UpdateType::Rest),
+        ChangeType::Silent,
+        ChangeType::Deletion,
+    ];
+    merged.run(&mut ctx, genesis, changes).await?;
+    let (mut off_chain, genesis) = TableIndexing::off_chain_test_case(&mut ctx).await?;
     let changes = vec![
         ChangeType::Insertion,
         ChangeType::Update(UpdateType::Rest),
@@ -110,22 +166,18 @@ async fn integrated_indexing() -> Result<()> {
         ChangeType::Update(UpdateType::SecondaryIndex),
         ChangeType::Deletion,
     ];
-    mapping.run(&mut ctx, genesis, changes).await?;
-
-    let (mut merged, genesis) = TableIndexing::merge_table_test_case(&mut ctx).await?;
-    let changes = vec![
-        ChangeType::Insertion,
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Update(UpdateType::Rest),
-        ChangeType::Silent,
-        ChangeType::Deletion,
-    ];
-    merged.run(&mut ctx, genesis, changes).await?;
-
+    off_chain.run(&mut ctx, genesis, changes).await?;
     // save columns information and table information in JSON so querying test can pick up
     write_table_info(SINGLE_TABLE_INFO_FILE, single.table_info())?;
     write_table_info(MAPPING_TABLE_INFO_FILE, mapping.table_info())?;
     write_table_info(MERGE_TABLE_INFO_FILE, merged.table_info())?;
+    write_table_info(OFFCHAIN_TABLE_INFO_FILE, off_chain.table_info())?;
+
+    write_table_info(
+        MAPPING_OF_MAPPING_TABLE_INFO_FILE,
+        mapping_of_struct_mappings.table_info(),
+    )?;
+
     Ok(())
 }
 
@@ -136,7 +188,12 @@ async fn integrated_querying(table_info: TableInfo) -> Result<()> {
     info!("Building querying params");
     ctx.build_params(ParamsType::Query).unwrap();
     info!("Params built");
-    let table = Table::load(table_info.public_name.clone(), table_info.columns.clone()).await?;
+    let table = Table::load(
+        table_info.public_name.clone(),
+        table_info.columns.clone(),
+        table_info.row_unique_id.clone(),
+    )
+    .await?;
     dbg!(&table.public_name);
     test_query(&mut ctx, table, table_info).await?;
     Ok(())
@@ -166,6 +223,24 @@ async fn integrated_querying_merged_table() -> Result<()> {
     let _ = env_logger::try_init();
     info!("Running QUERY test for merged table");
     let table_info = read_table_info(MERGE_TABLE_INFO_FILE)?;
+    integrated_querying(table_info).await
+}
+
+#[test(tokio::test)]
+#[ignore]
+async fn integrated_querying_mapping_of_mappings_table() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test for merged table");
+    let table_info = read_table_info(MAPPING_OF_MAPPING_TABLE_INFO_FILE)?;
+    integrated_querying(table_info).await
+}
+
+#[test(tokio::test)]
+#[ignore]
+async fn integrated_querying_off_chain_table() -> Result<()> {
+    let _ = env_logger::try_init();
+    info!("Running QUERY test for off-chain table");
+    let table_info = read_table_info(OFFCHAIN_TABLE_INFO_FILE)?;
     integrated_querying(table_info).await
 }
 

@@ -74,10 +74,11 @@ impl BaseCircuit {
         }
         b.connect(contract_pi.mpt_key().pointer, minus_one);
 
-        let mut base_dm = value_pis[0].metadata_digest_target();
-        for vp in value_pis.iter().skip(1) {
-            base_dm = b.add_curve_point(&[base_dm, vp.metadata_digest_target()]);
-        }
+        let value_dms = value_pis
+            .iter()
+            .map(|vp| b.map_to_curve_point(vp.metadata_digest_raw()))
+            .collect_vec();
+        let base_dm = b.add_curve_point(&value_dms);
         let final_dm = b.add_curve_point(&[base_dm, contract_pi.metadata_digest()]);
 
         // enforce block_pi.state_root == contract_pi.state_root
@@ -114,7 +115,7 @@ pub(crate) struct BaseCircuitProofWires {
 pub(crate) const CONTRACT_SET_NUM_IO: usize = contract_extraction::PublicInputs::<F>::TOTAL_LEN;
 pub(crate) const VALUE_SET_NUM_IO: usize = values_extraction::PublicInputs::<F>::TOTAL_LEN;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BaseCircuitInput {
     block_proof: ProofWithPublicInputs<F, C, D>,
     contract_proof: ProofWithVK,
@@ -238,7 +239,6 @@ pub(crate) mod test {
     use anyhow::Result;
     use itertools::Itertools;
     use mp2_common::{
-        digest::TableDimension,
         group_hashing::map_to_curve_point,
         keccak::PACKED_HASH_LEN,
         rlp::MAX_KEY_NIBBLE_LEN,
@@ -385,7 +385,6 @@ pub(crate) mod test {
         pub(crate) fn check_proof_public_inputs(
             &self,
             proof: &ProofWithPublicInputs<F, C, D>,
-            dimension: TableDimension,
             length_dm: Option<WeierstrassPoint>,
         ) {
             let proof_pis = PublicInputs::from_slice(&proof.public_inputs);
@@ -397,13 +396,7 @@ pub(crate) mod test {
 
             // check digests
             let value_pi = values_extraction::PublicInputs::new(&self.values_pi);
-            if let TableDimension::Compound = dimension {
-                assert_eq!(proof_pis.value_point(), value_pi.values_digest());
-            } else {
-                // in this case, dv is D(value_dv)
-                let exp_dv = map_to_curve_point(&value_pi.values_digest().to_fields());
-                assert_eq!(proof_pis.value_point(), exp_dv.to_weierstrass());
-            }
+            assert_eq!(proof_pis.value_point(), value_pi.values_digest());
             // metadata is addition of contract and value
             // ToDo: make it a trait once we understand it's sound
             let weierstrass_to_point = |wp: WeierstrassPoint| {
@@ -414,7 +407,7 @@ pub(crate) mod test {
             };
             let contract_pi = contract_extraction::PublicInputs::from_slice(&self.contract_pi);
             let contract_dm = weierstrass_to_point(contract_pi.metadata_point()).unwrap();
-            let value_dm = weierstrass_to_point(value_pi.metadata_digest()).unwrap();
+            let value_dm = map_to_curve_point(value_pi.metadata_digest_raw());
             let expected_dm = if let Some(len_dm) = length_dm {
                 let len_dm = weierstrass_to_point(len_dm).unwrap();
                 contract_dm + value_dm + len_dm

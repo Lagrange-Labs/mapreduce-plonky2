@@ -35,7 +35,6 @@ type QueryParams = QueryParameters<
     MAX_NUM_ITEMS_PER_OUTPUT,
     MAX_NUM_PLACEHOLDERS,
 >;
-type PreprocessingParameters = PublicParameters;
 
 /// The settings required to determine the location of the PP files on disk.
 struct ParamGenerationSettings {
@@ -147,7 +146,7 @@ async fn main() {
 }
 
 /// Build preprocessing parameters
-fn build_preprocessing_params() -> PreprocessingParameters {
+fn build_preprocessing_params() -> PublicParameters<MAX_NUM_COLUMNS> {
     let now = Instant::now();
 
     println!("Start to generate the preprocessing parameters");
@@ -163,9 +162,9 @@ fn build_preprocessing_params() -> PreprocessingParameters {
 }
 
 /// Store preprocessing parameters on disk and return the saved file path
-fn store_preprocessing_params(
+fn store_preprocessing_params<const MAX_NUM_COLUMNS: usize>(
     param_settings: &ParamGenerationSettings,
-    preprocessing_params: &PreprocessingParameters,
+    preprocessing_params: &PublicParameters<MAX_NUM_COLUMNS>,
 ) -> PathBuf {
     let _now = Instant::now();
 
@@ -193,7 +192,9 @@ fn store_preprocessing_params(
 }
 
 /// Build query parameters from preprocessing parameters
-fn build_query_parameters(indexing_params: &PublicParameters) -> QueryParams {
+fn build_query_parameters<const MAX_NUM_COLUMNS: usize>(
+    indexing_params: &PublicParameters<MAX_NUM_COLUMNS>,
+) -> QueryParams {
     QueryParameters::build_params(&indexing_params.get_params_info().unwrap()).unwrap()
 }
 

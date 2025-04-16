@@ -16,7 +16,10 @@ use mp2_common::{
 use serde::{Deserialize, Serialize};
 
 pub use public_inputs::PublicInputs;
+
+#[derive(Serialize, Deserialize)]
 pub struct CircuitInput(Vec<u8>);
+
 impl CircuitInput {
     pub fn from_block_header(rlp_header: Vec<u8>) -> Self {
         Self(rlp_header)

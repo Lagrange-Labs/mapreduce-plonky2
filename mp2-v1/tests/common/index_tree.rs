@@ -1,11 +1,10 @@
 use alloy::primitives::U256;
-
 use log::{debug, info};
 use mp2_common::{poseidon::empty_poseidon_hash, proof::ProofWithVK};
 use mp2_v1::{
     api,
     indexing::{
-        block::{BlockPrimaryIndex, BlockTree, BlockTreeKey},
+        block::{get_previous_epoch, BlockPrimaryIndex, BlockTreeKey, MerkleIndexTree},
         index::IndexNode,
     },
     values_extraction::identifier_block_column,
@@ -13,12 +12,12 @@ use mp2_v1::{
 use plonky2::plonk::config::GenericHashOut;
 use ryhope::{
     storage::{
-        pgsql::PgsqlStorage,
         updatetree::{Next, UpdateTree},
         RoEpochKvStorage,
     },
-    MerkleTreeKvDb,
+    UserEpoch,
 };
+use verifiable_db::block_tree::compute_final_digest;
 
 use crate::common::proof_storage::{IndexProofIdentifier, ProofKey};
 
@@ -27,9 +26,6 @@ use super::{
     table::{Table, TableID},
     TestContext,
 };
-
-pub type IndexStorage = PgsqlStorage<BlockTree, IndexNode<BlockPrimaryIndex>>;
-pub type MerkleIndexTree = MerkleTreeKvDb<BlockTree, IndexNode<BlockPrimaryIndex>, IndexStorage>;
 
 impl TestContext {
     /// NOTE: we require the added_index information because we need to distinguish if a new node
@@ -83,11 +79,18 @@ impl TestContext {
                 let ext_pi = mp2_v1::final_extraction::PublicInputs::from_slice(
                     &ext_proof.proof().public_inputs,
                 );
+                let is_merge = ext_pi.is_merge_case();
+                let final_db_digest = compute_final_digest(is_merge, &row_pi).to_weierstrass();
                 assert_eq!(
-                    row_pi.rows_digest_field(),
+                    final_db_digest,
                     ext_pi.value_point(),
-                    "values extracted vs value in db don't match (left row, right mpt (block {})",
+                    "Block (DB) values digest and values extraction don't match (left DB, right MPT, is_merge {} block {})",
+                    is_merge,
                     node.value.0.to::<u64>()
+                );
+                debug!(
+                    "NodeIndex Proving - multiplier digest: {:?}",
+                    row_pi.multiplier_digest_point(),
                 );
             }
             let proof = if context.is_leaf() {
@@ -163,8 +166,12 @@ impl TestContext {
                 // here we are simply proving the new updated nodes from the new node to
                 // the root. We fetch the same node but at the previous version of the
                 // tree to prove the update.
+                let previous_epoch =
+                    get_previous_epoch(t, t.current_epoch().await? as BlockPrimaryIndex)
+                        .await?
+                        .expect("No previous epoch found, we shouldn't be in this case");
                 let previous_node = t
-                    .try_fetch_at(k, t.current_epoch().await - 1)
+                    .try_fetch_at(k, previous_epoch as UserEpoch)
                     .await?
                     .unwrap();
                 let left_key = context.left.expect("should always be a left child");

@@ -16,7 +16,7 @@ use plonky2_crypto::u32::arithmetic_u32::U32Target;
 use serde::{Deserialize, Serialize};
 use std::{array::from_fn as create_array, fmt::Debug, ops::Index};
 
-use crate::utils::{less_than, less_than_or_equal_to};
+use crate::utils::less_than;
 
 /// Utility trait to convert any value into its field representation equivalence
 pub trait ToField<F: RichField> {
@@ -166,16 +166,21 @@ impl<const MAX_LEN: usize> VectorWire<Target, MAX_LEN> {
     ) -> Array<Target, PAD_LEN> {
         let zero = b.zero();
         let pad_t = b.constant(F::from_canonical_usize(PAD_LEN));
+        // initialize is_lt to false
+        let mut is_lt = b._false();
         Array {
             arr: create_array(|i| {
                 // ((pad_len - i) < real_len) * vec[real_len - (pad_len-i)]
                 // i.e. reading value backwards and inserting in order
                 let it = b.constant(F::from_canonical_usize(i));
                 let jt = b.sub(pad_t, it);
-                let is_lt =
-                    less_than_or_equal_to(b, jt, self.real_len, (PAD_LEN.ilog2() + 1) as usize);
+                // update is_lt incrementally: it should become true when PAD_LEN-i == self.real_len
+                let is_eq = b.is_equal(jt, self.real_len);
+                is_lt = b.or(is_lt, is_eq);
                 let idx = b.sub(self.real_len, jt);
-                let val = self.arr.value_at_failover(b, idx);
+                let idx = b.select(is_lt, idx, zero); // workaround to always have a in-bound access in
+                                                      // the array
+                let val = self.arr.value_at(b, idx);
                 b.select(is_lt, val, zero)
             }),
         }

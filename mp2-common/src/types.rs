@@ -67,14 +67,17 @@ impl AsRef<[u8]> for &HashOutput {
 }
 
 /// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
-/// since it still has to do 5 rounds in 622 or 650.
-pub const MAX_BLOCK_LEN: usize = 650;
+/// since it still has to do 5 rounds in 622 or 670.
+pub const MAX_BLOCK_LEN: usize = 670;
 
 /// This constant represents the maximum size a value can be inside the storage trie.
 ///
 /// It is different than the `MAX_LEAF_VALUE_LEN` constant because it represents the
 /// value **not** RLP encoded,i.e. without the 1-byte RLP header.
 pub const MAPPING_LEAF_VALUE_LEN: usize = 32;
+
+/// The length of an EVM word
+pub const EVM_WORD_LEN: usize = 32;
 
 impl From<[u8; 32]> for HashOutput {
     fn from(value: [u8; 32]) -> Self {
@@ -106,5 +109,23 @@ impl<'a> From<&'a HashOutput> for Vec<u8> {
 impl From<HashOut<F>> for HashOutput {
     fn from(value: HashOut<F>) -> Self {
         value.to_bytes().try_into().unwrap()
+    }
+}
+
+impl From<&HashOut<F>> for HashOutput {
+    fn from(value: &HashOut<F>) -> Self {
+        value.to_bytes().try_into().unwrap()
+    }
+}
+
+impl From<HashOutput> for HashOut<F> {
+    fn from(value: HashOutput) -> Self {
+        Self::from_bytes(&value.0)
+    }
+}
+
+impl From<&HashOutput> for HashOut<F> {
+    fn from(value: &HashOutput) -> Self {
+        Self::from_bytes(&value.0)
     }
 }
