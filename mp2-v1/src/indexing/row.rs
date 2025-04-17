@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt::Debug};
 
 use super::{block::BlockPrimaryIndex, cell::CellTreeKey, ColumnID};
 use alloy::primitives::U256;
@@ -119,7 +119,7 @@ impl<PrimaryIndex> CellInfo<PrimaryIndex> {
 /// searchable format.
 #[derive(Eq, PartialEq, Deref, From, Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CellCollection<PrimaryIndex>(pub HashMap<ColumnID, CellInfo<PrimaryIndex>>);
-impl<PrimaryIndex: PartialEq + Eq + Default + Clone> CellCollection<PrimaryIndex> {
+impl<PrimaryIndex: PartialEq + Eq + Default + Clone + Debug> CellCollection<PrimaryIndex> {
     pub fn update_column(&mut self, id: ColumnID, cell: CellInfo<PrimaryIndex>) {
         self.0.insert(id, cell);
     }
@@ -150,6 +150,12 @@ impl<PrimaryIndex: PartialEq + Eq + Default + Clone> CellCollection<PrimaryIndex
                 .map(|(id, cell)| (*id, cell.clone()))
                 .collect(),
         )
+    }
+}
+
+impl<PrimaryIndex> AsRef<CellCollection<PrimaryIndex>> for CellCollection<PrimaryIndex> {
+    fn as_ref(&self) -> &CellCollection<PrimaryIndex> {
+        self
     }
 }
 

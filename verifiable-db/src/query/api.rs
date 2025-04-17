@@ -135,7 +135,7 @@ impl RowInput {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum CircuitInput<
     const NUM_CHUNKS: usize,

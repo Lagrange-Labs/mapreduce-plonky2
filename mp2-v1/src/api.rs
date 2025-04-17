@@ -1,32 +1,37 @@
 //! Main APIs and related structures
 
-use std::{collections::BTreeSet, iter::once};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    fmt::Debug,
+    hash::Hash,
+    iter::once,
+};
 
 use crate::{
     block_extraction,
     contract_extraction::{self, compute_metadata_digest as contract_metadata_digest},
     final_extraction,
-    indexing::ColumnID,
+    indexing::{cell::Cell, ColumnID},
     length_extraction::{
         self, compute_metadata_digest as length_metadata_digest, LengthCircuitInput,
     },
     values_extraction::{
         self, compute_leaf_mapping_metadata_digest,
         compute_leaf_mapping_of_mappings_metadata_digest, compute_leaf_single_metadata_digest,
-        gadgets::column_info::ColumnInfo, identifier_block_column,
+        compute_table_row_digest, gadgets::column_info::ColumnInfo, identifier_block_column,
         identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
-        identifier_for_outer_mapping_key_column, identifier_for_value_column,
+        identifier_for_outer_mapping_key_column, identifier_for_value_column, ColumnId,
     },
     MAX_LEAF_NODE_LEN,
 };
-use alloy::primitives::Address;
+use alloy::primitives::{Address, U256};
 use anyhow::Result;
 use itertools::Itertools;
 use log::debug;
 use mp2_common::{
     digest::Digest,
     group_hashing::map_to_curve_point,
-    poseidon::H,
+    poseidon::{flatten_poseidon_hash_value, H},
     types::HashOutput,
     utils::{Fieldable, ToFields},
     F,
@@ -36,7 +41,11 @@ use plonky2::{
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };
+use plonky2_ecgfp5::curve::curve::Point;
 use serde::{Deserialize, Serialize};
+use verifiable_db::{
+    block_tree::add_primary_index_to_digest, ivc::add_provable_data_commitment_prefix,
+};
 
 /// Struct containing the expected input MPT Extension/Branch node
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -467,8 +476,15 @@ pub(crate) fn no_provable_metadata_digest<I: IntoIterator<Item = ColumnID>>(
 }
 
 /// Compute the metadata hash for a table including no provable extraction data.
-/// The input is the set of the column identifiers of the table
-pub fn no_provable_metadata_hash<I: IntoIterator<Item = ColumnID>>(column_ids: I) -> MetadataHash {
+/// The input is the set of the column identifiers of the table.
+/// The input flag `provable_data_commitment` must be true if the root of trust being
+/// used to verify proofs over the table must be a commitment provably computed from the data
+/// inserted in the table, false when the root of trust is instead an existing
+/// commitment computed elsewhere (e.g., a block hash).
+pub fn no_provable_metadata_hash<I: IntoIterator<Item = ColumnID>>(
+    column_ids: I,
+    provable_data_commitment: bool,
+) -> MetadataHash {
     let metadata_digest = no_provable_metadata_digest(column_ids);
     // Add the prefix to the metadata digest to ensure the metadata digest
     // will keep track of whether we use this dummy circuit or not.
@@ -480,7 +496,95 @@ pub fn no_provable_metadata_hash<I: IntoIterator<Item = ColumnID>>(column_ids: I
         .collect_vec();
     let digest = map_to_curve_point(&inputs);
 
-    combine_digest_and_block(digest)
+    let metadata_hash = combine_digest_and_block(digest);
+    if provable_data_commitment {
+        // add the data commitment prefix to the metadata hash, to keep track
+        // of whether a commitment to the data of the table is used as root of trust
+        add_provable_data_commitment_prefix(metadata_hash)
+    } else {
+        metadata_hash
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Data about a row for a table provided as input to APIs
+pub struct TableRow {
+    pub(crate) primary_index_column: Cell,
+    pub(crate) other_columns: BTreeMap<ColumnID, U256>,
+}
+
+impl TableRow {
+    pub fn new(primary_index_column: Cell, other_columns: Vec<Cell>) -> Self {
+        Self {
+            primary_index_column,
+            other_columns: other_columns
+                .into_iter()
+                .map(|c| (c.identifier(), c.value()))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn column_ids(&self) -> Vec<ColumnID> {
+        self.other_columns.keys().copied().collect()
+    }
+
+    pub(crate) fn find_by_column_id(&self, id: ColumnID) -> Option<U256> {
+        once((
+            &self.primary_index_column.identifier(),
+            &self.primary_index_column.value(),
+        ))
+        .chain(&self.other_columns)
+        .find_map(
+            |(column_id, value)| {
+                if *column_id == id {
+                    Some(*value)
+                } else {
+                    None
+                }
+            },
+        )
+    }
+}
+
+impl AsRef<TableRow> for TableRow {
+    fn as_ref(&self) -> &TableRow {
+        self
+    }
+}
+
+/// Compute the provable commitment to the data found in an off-chain table
+pub fn off_chain_data_commitment(
+    table_rows: &[TableRow],
+    row_unique_columns: &[ColumnId],
+) -> Result<HashOutput> {
+    // first, group rows by primary index values
+    let mut grouped_rows = HashMap::new();
+    for row in table_rows {
+        let primary = row.primary_index_column.value();
+        grouped_rows
+            .entry(primary)
+            .and_modify(|rows: &mut Vec<_>| rows.push(row))
+            .or_insert(vec![row]);
+    }
+
+    // then, for each group of rows with the same primary index, compute the row value digest
+    let digest = grouped_rows
+        .into_iter()
+        .try_fold(Point::NEUTRAL, |acc, (primary, rows)| {
+            let row_digest = compute_table_row_digest(&rows, row_unique_columns)?;
+            let primary_index_column = rows[0].primary_index_column.identifier();
+            // add primary index value to digest
+            let digest = add_primary_index_to_digest(primary_index_column, primary, row_digest);
+            // accumulate with the previous digest
+            anyhow::Ok(acc + digest)
+        })?;
+
+    // hash the digest
+    let hash_bytes = flatten_poseidon_hash_value(H::hash_no_pad(&digest.to_fields()))
+        .into_iter()
+        .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
+        .collect_vec();
+    Ok(HashOutput::try_from(hash_bytes).unwrap())
 }
 
 #[cfg(test)]

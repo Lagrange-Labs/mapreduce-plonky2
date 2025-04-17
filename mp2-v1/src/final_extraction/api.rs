@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 use crate::{
-    api::no_provable_metadata_digest,
-    indexing::{row::CellCollection, ColumnID},
+    api::{no_provable_metadata_digest, TableRow},
+    indexing::ColumnID,
     values_extraction::compute_table_row_digest,
 };
 use verifiable_db::ivc::PublicInputs as IvcPublicInputs;
@@ -292,7 +292,7 @@ impl CircuitInput {
         primary_index: PrimaryIndex,
         root_of_trust: OffChainRootOfTrust,
         prev_epoch_proof: Option<Vec<u8>>,
-        table_rows: &[CellCollection<PrimaryIndex>],
+        table_rows: &[TableRow],
         row_unique_columns: &[ColumnID],
     ) -> Result<Self>
     where

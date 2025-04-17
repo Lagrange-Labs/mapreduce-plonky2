@@ -1,13 +1,14 @@
 //! Test case for local Simple contract
 //! Reference `test-contracts/src/Simple.sol` for the details of Simple contract.
 
-use std::iter::once;
+use std::{fmt::Debug, iter::once};
 
-use anyhow::{ensure, Result};
+use alloy::primitives::U256;
+use anyhow::{anyhow, ensure, Result};
 use itertools::Itertools;
 use log::{debug, info};
 use mp2_v1::{
-    api::SlotInput,
+    api::{SlotInput, TableRow},
     contract_extraction,
     indexing::{
         block::BlockPrimaryIndex,
@@ -101,8 +102,10 @@ fn single_value_slot_inputs(all_slots: bool) -> Vec<SlotInput> {
         .collect_vec();
 
     // Add the Struct single slots.
-    let struct_slots = LargeStruct::slot_inputs(SINGLE_STRUCT_SLOT as u8);
-    slot_inputs.extend(struct_slots);
+    if all_slots {
+        let struct_slots = LargeStruct::slot_inputs(SINGLE_STRUCT_SLOT as u8);
+        slot_inputs.extend(struct_slots);
+    }
 
     slot_inputs
 }
@@ -601,6 +604,7 @@ impl TableIndexing {
 
     pub(crate) async fn off_chain_test_case(
         ctx: &mut TestContext,
+        provable_commitment_data: bool,
     ) -> Result<(Self, Vec<TableRowUpdate<BlockPrimaryIndex>>)> {
         // build a table with the following columns:
         // - "total_supply"
@@ -624,6 +628,7 @@ impl TableIndexing {
             TABLE_NAME.to_string(),
             secondary_index_column,
             non_indexed_columns.to_vec(),
+            provable_commitment_data,
         );
         let genesis_updates = off_chain_data_args.init_data();
         // Defining the columns structure of the table
@@ -700,14 +705,19 @@ impl TableIndexing {
         log::info!("FIRST block {bn} finished proving. Moving on to update",);
 
         for ut in changes {
+            let prev_bn = self.source.latest_epoch(ctx).await;
             let table_row_updates = self
                 .source
                 .random_contract_update(ctx, &self.contract, ut)
                 .await;
-            if table_row_updates.is_empty() {
+            let bn = self.source.latest_epoch(ctx).await;
+            // check if there is a new block to prove
+            if prev_bn == bn {
                 continue;
             }
-            let bn = self.source.latest_epoch(ctx).await;
+            // if there is a new block on the chain, we need to prove a new block even if there are no
+            // updates in `table_row_updates`, otherwise the block consequentiality check in circuits will
+            // fail
             log::info!("Applying follow up updates to contract done - now at block {bn}",);
             // we first run the initial preprocessing and db creation.
             // NOTE: we don't show copy on write here - the fact of only reproving what has been
@@ -852,12 +862,24 @@ impl TableIndexing {
             .prove_update_index_tree(bn, &self.table, updates.plan)
             .await;
         info!("Generated final BLOCK tree proofs for block {current_block}");
+        let provable_data_commitment = self.source.provable_data_commitment_for_ivc();
+        let expected_root_of_trust = match &self.source {
+            TableSource::OffChain(args) => args.expected_root_of_trust(&self.table).await?,
+            _ => {
+                let block = ctx
+                    .query_block_at(alloy::eips::BlockNumberOrTag::Number(bn as u64))
+                    .await;
+                HashOutput::from(block.header.hash.0)
+            }
+        };
         let _ = ctx
             .prove_ivc(
                 &self.table.public_name,
                 bn,
                 &self.table.index,
+                provable_data_commitment,
                 expected_metadata_hash,
+                expected_root_of_trust,
             )
             .await;
         info!("Generated final IVC proof for block {}", current_block);
@@ -1213,7 +1235,10 @@ pub struct TableRowValues<PrimaryIndex> {
     pub primary: PrimaryIndex,
 }
 
-impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex> {
+impl<PrimaryIndex: Clone + Default + PartialEq + Eq + TryInto<U256>> TableRowValues<PrimaryIndex>
+where
+    <PrimaryIndex as TryInto<U256>>::Error: Debug,
+{
     // Compute the update from the current values and the new values
     // NOTE: if the table doesn't have a secondary index, the table row update will have all row
     // keys set to default. This must later be fixed before "sending" this to the update table
@@ -1288,34 +1313,26 @@ impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TableRowValues<PrimaryIndex
             }
         }
     }
-}
 
-impl<PrimaryIndex: Clone + Default + PartialEq + Eq> TryFrom<&TableRowValues<PrimaryIndex>>
-    for CellCollection<PrimaryIndex>
-{
-    type Error = anyhow::Error;
-
-    fn try_from(value: &TableRowValues<PrimaryIndex>) -> Result<Self, Self::Error> {
+    pub fn to_table_row(&self, primary_index_column_id: ColumnID) -> Result<TableRow> {
+        let primary_index_column = Cell::new(
+            primary_index_column_id,
+            self.primary
+                .clone()
+                .try_into()
+                .map_err(|e| anyhow!("while converting primary index to U256: {e:?}"))?,
+        );
         ensure!(
-            value.current_secondary.is_some(),
+            self.current_secondary.is_some(),
             "trying to convert TableRowValues with no secondary cell to CellCollection"
         );
-        Ok(Self(
-            value
-                .current_cells
-                .iter()
-                .chain(once(&value.current_secondary.as_ref().unwrap().cell()))
-                .map(|cell| {
-                    (
-                        cell.identifier(),
-                        CellInfo {
-                            value: cell.value(),
-                            primary: value.primary.clone(),
-                        },
-                    )
-                })
-                .collect(),
-        ))
+        let other_columns = self
+            .current_cells
+            .iter()
+            .chain(once(&self.current_secondary.as_ref().unwrap().cell()))
+            .cloned()
+            .collect();
+        Ok(TableRow::new(primary_index_column, other_columns))
     }
 }
 
@@ -1338,7 +1355,7 @@ pub enum TableRowUpdate<PrimaryIndex> {
 
 impl<PrimaryIndex> TableRowUpdate<PrimaryIndex>
 where
-    PrimaryIndex: PartialEq + Eq + Default + Clone + Default,
+    PrimaryIndex: PartialEq + Eq + Default + Clone + Default + Debug,
 {
     // Returns the full cell collection to put inside the JSON row payload
     fn updated_cells_collection(
