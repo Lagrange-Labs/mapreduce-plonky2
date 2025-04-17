@@ -1,8 +1,49 @@
 # Changelog
 
+## [2.0.0] - 2025-04-17
+
+[Compare 9db80d8 ... 9b4b3df](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/9db80d8fd4f10567e1c58c633c74af3c8c469f46...9b4b3dfd8d4f19131cd0fd1caf32750815784123)
+
+### Features
+
+
+
+- New extraction features - in [PR #462](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/462)
+
+- Provable commitment for off chain tables - in [PR #477](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/477)
+
+
+### Bug Fixes
+
+- *(ryhope)* Propagate an error in failed fetch to caller - in [PR #468](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/468)
+
+
+
+- Propagate an error in failed fetch to caller - in [PR #468](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/468)
+
+- Ryhope - handle and propagate DB conn errors - in [PR #469](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/469)
+
+- Ensure max depth in scapegoat tree - in [PR #472](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/472)
+
+
+### Refactor
+
+
+
+- Async-ize more ryhope functions - in [PR #473](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/473)
+
+
+### Miscellaneous Tasks
+
+
+
+- Add a way to manually generate commit hash-indexed PPs - in [PR #475](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/475)
+
+- Run PPs generation in devenv - in [PR #476](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/476)
+
 ## [1.2.3] - 2025-03-18
 
-[Compare f13b976 ... f5bcb44](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/f13b97656f4ac86b69d2a0a0be056673d207e932...f5bcb4454bc42b43714db44ef355336d655077d7)
+[Compare f13b976 ... 9db80d8](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/f13b97656f4ac86b69d2a0a0be056673d207e932...9db80d8fd4f10567e1c58c633c74af3c8c469f46)
 
 ### Bug Fixes
 
@@ -16,6 +57,13 @@
 
 
 - Add README - in [PR #457](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/457)
+
+
+### Release
+
+
+
+- V1.2.3 - in [PR #467](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/467)
 
 ## [1.2.2] - 2025-02-13
 

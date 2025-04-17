@@ -1,6 +1,6 @@
 [package]
 name = "mp2_test"
-version = "1.2.3"
+version = "2.0.0"
 edition = "2021"
 
 [dependencies]
@@ -14,9 +14,9 @@ plonky2_ecgfp5.workspace = true
 rand.workspace = true
 serde.workspace = true
 
-mp2_common = { path = "../mp2-common" , version = "1.2.3" }
-recursion_framework = { path = "../recursion-framework" , version = "1.2.3" }
-ryhope = { path = "../ryhope" , version = "1.2.3" }
+mp2_common = { path = "../mp2-common" , version = "2.0.0" }
+recursion_framework = { path = "../recursion-framework" , version = "2.0.0" }
+ryhope = { path = "../ryhope" , version = "2.0.0" }
 
 [features]
 ci = []
