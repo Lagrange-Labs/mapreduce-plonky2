@@ -1,6 +1,6 @@
 [package]
 name = "inspect"
-version = "1.2.3"
+version = "2.0.0"
 edition = "2021"
 
 [dependencies]
@@ -14,5 +14,5 @@ serde.workspace = true
 tabled.workspace = true
 tokio.workspace = true
 
-ryhope = { path = "../ryhope" , version = "1.2.3" }
-mp2_v1 = { path = "../mp2-v1" , version = "1.2.3" }
+ryhope = { path = "../ryhope" , version = "2.0.0" }
+mp2_v1 = { path = "../mp2-v1" , version = "2.0.0" }
