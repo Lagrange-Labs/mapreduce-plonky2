@@ -33,22 +33,3 @@ jobs:
           crate-release-all: true
           pr-meta-comment: false
           pr-merge-strategy: "squash"
-  public-params:
-    if: inputs.bump == 'major'
-    name: Generate & Upload PPs, major version-indexed
-    runs-on: ['nix-128g']
-    environment: CI
-    steps:
-      - uses: actions/checkout@v4
-      - name: Generate PPs
-        shell: devenv shell bash -- -e {0}
-        run: |
-          ulimit -s unlimited
-          cargo run --release --bin gen-params -- --mode major
-      - name: Upload PPs
-        shell: devenv shell bash -- -e {0}
-        run: aws s3 cp --no-progress --recursive zkmr_params s3://lagrange-public-parameters --endpoint-url=https://428e47101872e479a0c311b576430fac.r2.cloudflarestorage.com
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.CF_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: eeur
