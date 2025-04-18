@@ -47,7 +47,7 @@ sub check_not_on_s3 {
       say "no";
     } else {
       say "yes, exiting";
-      # exit 1;
+      exit 1;
     }
   }
 }

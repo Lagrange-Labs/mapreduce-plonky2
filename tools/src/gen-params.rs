@@ -58,7 +58,6 @@ impl ParamGenerationSettings {
             "hash" => verifiable_db::short_git_version(),
             _ => unreachable!("ensured by clap"),
         };
-        println!("Saving parameters under `{root}`");
 
         path.join(root).to_string_lossy().to_string()
     }
@@ -156,14 +155,9 @@ async fn main() {
 fn build_preprocessing_params() -> PublicParameters<MAX_NUM_COLUMNS> {
     let now = Instant::now();
 
-    println!("Start to generate the preprocessing parameters");
-
+    print!("Generating the preprocessing parameters...");
     let params = build_circuits_params();
-
-    println!(
-        "Finish generating the preprocessing parameters, elapsed: {:?}",
-        now.elapsed()
-    );
+    println!("done in {:?}s", now.elapsed().as_secs());
 
     params
 }
@@ -176,15 +170,10 @@ fn store_preprocessing_params<const MAX_NUM_COLUMNS: usize>(
     let _now = Instant::now();
 
     // Serialize the preprocessing parameters.
-    println!("Start to serialize the preprocessing parameters");
     let data = bincode::serialize(&preprocessing_params).unwrap();
-    println!("Finish serializing the preprocessing parameters");
 
     // Store on disk
-    println!("Start to store the preprocessing parameters on disk");
-
     let file_path = Path::new(param_settings.params_dir().as_str()).join(PP_BIN_KEY);
-    println!("Writing to file: {:?}", file_path);
 
     // Try to create the parent dir if not exists.
     if let Some(parent_dir) = file_path.parent() {
@@ -193,7 +182,6 @@ fn store_preprocessing_params<const MAX_NUM_COLUMNS: usize>(
 
     let mut buffer = File::create(file_path.clone()).unwrap();
     buffer.write_all(&data).unwrap();
-    println!("Finish storing the preprocessing parameters on disk");
 
     file_path
 }
@@ -202,7 +190,12 @@ fn store_preprocessing_params<const MAX_NUM_COLUMNS: usize>(
 fn build_query_parameters<const MAX_NUM_COLUMNS: usize>(
     indexing_params: &PublicParameters<MAX_NUM_COLUMNS>,
 ) -> QueryParams {
-    QueryParameters::build_params(&indexing_params.get_params_info().unwrap()).unwrap()
+    let now = Instant::now();
+    print!("Generating the querying  parameters...");
+    let params =
+        QueryParameters::build_params(&indexing_params.get_params_info().unwrap()).unwrap();
+    println!("done in {:?}s", now.elapsed().as_secs());
+    params
 }
 
 /// Store query parameters on disk and return the saved file path
@@ -213,14 +206,10 @@ fn store_query_params(
     let _now = Instant::now();
 
     // Serialize the preprocessing parameters.
-    println!("Start to serialize the query parameters");
     let data = bincode::serialize(query_params).unwrap();
-    println!("Finish serializing the query parameters");
 
     // Store on disk
-    println!("Start to store the query parameters on disk");
     let file_path = Path::new(param_settings.params_dir().as_str()).join(QP_BIN_KEY);
-    println!("Writing to file: {:?}", file_path);
 
     // Try to create the parent dir if not exists.
     if let Some(parent_dir) = file_path.parent() {
@@ -229,7 +218,6 @@ fn store_query_params(
 
     let mut buffer = File::create(file_path.clone()).unwrap();
     buffer.write_all(&data).unwrap();
-    println!("Finish storing the query parameters on disk");
 
     file_path
 }
@@ -237,7 +225,7 @@ fn store_query_params(
 /// Load query parameters from disk
 fn load_query_params_from_disk(param_settings: &ParamGenerationSettings) -> QueryParams {
     let now = Instant::now();
-    println!("Start loading query parameters from disk");
+    print!("Loading querying parameters from disk...");
 
     let file_path = Path::new(param_settings.params_dir().as_str()).join(QP_BIN_KEY);
     let mut file = File::open(file_path).unwrap_or_else(|_| panic!("Failed to open {QP_BIN_KEY}"));
@@ -247,10 +235,7 @@ fn load_query_params_from_disk(param_settings: &ParamGenerationSettings) -> Quer
     let query_params: QueryParams =
         bincode::deserialize(&buffer).expect("Failed to deserialize query parameters");
 
-    println!(
-        "Finished loading query parameters from disk, elapsed: {:?}",
-        now.elapsed()
-    );
+    println!("done in {:?}s", now.elapsed().as_secs());
 
     query_params
 }
@@ -259,7 +244,7 @@ fn load_query_params_from_disk(param_settings: &ParamGenerationSettings) -> Quer
 fn generate_groth16_assets(param_settings: &ParamGenerationSettings, query_params: &QueryParams) {
     let now = Instant::now();
 
-    println!("Start to generate the Groth16 asset files");
+    print!("Generating Groth16 assets...");
 
     // Get the final circuit data of the query parameters.
     let circuit_data = query_params.final_proof_circuit_data();
@@ -270,8 +255,5 @@ fn generate_groth16_assets(param_settings: &ParamGenerationSettings, query_param
     let assets_dir = format!("{}/{GROTH16_ASSETS_PREFIX}", param_settings.params_dir());
     compile_and_generate_assets(circuit_data, &assets_dir).unwrap();
 
-    println!(
-        "Finish generating the Groth16 asset files, elapsed: {:?}",
-        now.elapsed()
-    );
+    print!("done in {:?}s", now.elapsed().as_secs());
 }
