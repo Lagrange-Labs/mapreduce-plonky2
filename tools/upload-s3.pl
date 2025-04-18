@@ -10,7 +10,9 @@ use Cwd;
 
 # Fetch the PPs directory from $ARGV[1]
 my $pps_directory = shift;
-say "Processing PPs from $pps_directory";
+# Fetch the S3 endpoint from $ARGV[2]
+my $s3_endpoint = shift;
+say "Processing PPs from $pps_directory, will upload to $s3_endpoint";
 
 # Save the current dir
 my $current_dir = getcwd;
@@ -40,7 +42,7 @@ sub check_not_on_s3 {
     print "Checking if `$filename` is present on S3... ";
 
     # Check if the file already exists on S3
-    `aws s3 ls s3://lagrange-public-parameters/$filename --endpoint-url=https://428e47101872e479a0c311b576430fac.r2.cloudflarestorage.com`;
+    `aws s3 ls s3://lagrange-public-parameters/$filename --endpoint-url=$s3_endpoint`;
 
     # aws s3 ls returns 0 if the file has been found, 1 otherwise.
     if ($?) {
