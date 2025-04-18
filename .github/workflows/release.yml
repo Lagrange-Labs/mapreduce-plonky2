@@ -36,7 +36,7 @@ jobs:
           cargo run --release --bin gen-params -- --mode major
       - name: Upload PPs
         shell: devenv shell bash -- -e {0}
-        run: aws s3 cp --no-progress --recursive zkmr_params s3://lagrange-public-parameters --endpoint-url=https://428e47101872e479a0c311b576430fac.r2.cloudflarestorage.com
+        run: tools/upload-s3.pl zkmr_params
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CF_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_AWS_SECRET_ACCESS_KEY }}
