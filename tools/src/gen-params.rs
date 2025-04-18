@@ -92,12 +92,19 @@ fn write_hashes(param_settings: &ParamGenerationSettings) {
         .map(|e| e.path().to_path_buf())
         .filter(|p| p.is_file())
     {
-        println!("hashing {}", entry.display());
         let mut hasher = blake3::Hasher::new();
         hasher
             .update_mmap_rayon(entry.as_path())
             .expect("hashing failed");
         let hash_str = hasher.finalize().to_hex();
+        println!(
+            "{:50} {}",
+            entry
+                .strip_prefix(param_settings.params_dir())
+                .unwrap()
+                .display(),
+            hash_str
+        );
         out_file
             .write_all(
                 format!(
