@@ -367,7 +367,7 @@ impl ProofQuery {
         let memdb = Arc::new(MemoryDB::new(true));
         let tx_trie = EthTrie::new(Arc::clone(&memdb));
 
-        // According to EIP-1186, accountProof starts with the the state root.
+        // According to EIP-1186, accountProof starts with the state root.
         let state_root_hash = H256(keccak256(&res.account_proof[0]).try_into().unwrap());
 
         // The MPT key is Keccak hash of the contract (requested) address.
