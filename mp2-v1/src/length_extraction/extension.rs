@@ -22,7 +22,7 @@ use crate::{MAX_EXTENSION_NODE_LEN, MAX_EXTENSION_NODE_LEN_PADDED};
 
 use super::PublicInputs;
 
-/// The wires structure for the extension extension extraction.
+/// The wires structure for the extension extraction.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExtensionLengthWires {
     node: VectorWire<Target, MAX_EXTENSION_NODE_LEN_PADDED>,
