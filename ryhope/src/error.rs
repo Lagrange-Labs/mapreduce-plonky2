@@ -1,3 +1,4 @@
+use crate::UserEpoch;
 use thiserror::Error;
 use tokio_postgres::error::Error as PgError;
 
@@ -42,6 +43,9 @@ pub enum RyhopeError {
 
     #[error("Error in epoch mapper operation: {0}")]
     EpochMapperError(String),
+
+    #[error("no state for epoch {0} found")]
+    NoStateForEpoch(UserEpoch),
 }
 impl RyhopeError {
     pub fn from_db<S: AsRef<str>>(msg: S, err: PgError) -> Self {
