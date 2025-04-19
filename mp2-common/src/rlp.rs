@@ -293,7 +293,7 @@ pub fn decode_fixed_list<F: RichField + Extendable<D>, const D: usize, const N: 
         dec_type[i] = header.data_type;
 
         // move offset to the next field in the list
-        // updates offset such that is is either < end_idx or after that
+        // updates offset such that is either < end_idx or after that
         // always equals to end_idx
         let diff = b.sub(new_offset, offset);
         offset = b.mul_add(before_the_end.target, diff, offset);
