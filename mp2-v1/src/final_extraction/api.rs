@@ -210,7 +210,7 @@ pub struct MergeCircuitInput {
 
 /// Represent the root of trust for the offchain data. It can be an actual hash if
 /// there is a root of trust, or dummy if there is no root of trust
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum OffChainRootOfTrust {
     Hash(HashOutput),
     Dummy,

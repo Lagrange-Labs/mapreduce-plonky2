@@ -506,7 +506,7 @@ pub fn no_provable_metadata_hash<I: IntoIterator<Item = ColumnID>>(
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 /// Data about a row for a table provided as input to APIs
 pub struct TableRow {
     pub(crate) primary_index_column: Cell,
