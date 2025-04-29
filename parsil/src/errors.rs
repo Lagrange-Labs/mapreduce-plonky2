@@ -30,6 +30,9 @@ pub enum ValidationError {
     #[error("`{0}` is not used")]
     MissingPlaceholder(String),
 
+    #[error("Too many query parameters. Expected {expected}, got {got}")]
+    TooManyParameters { expected: usize, got: usize },
+
     #[error("`{0}`: unsupported immediate value")]
     UnsupportedImmediateValue(String),
 
