@@ -27,20 +27,19 @@ pub async fn load_trees(
 ) -> Result<(MerkleIndexTree, MerkleRowTree)> {
     let index_tree = MerkleIndexTree::new(
         InitSettings::MustExist,
-        SqlStorageSettings {
-            source: SqlServerConnection::NewConnection(db_url.to_string()),
-            table: index_table_name.clone(),
-            external_mapper: None,
-        },
+        SqlStorageSettings::new(
+            &index_table_name,
+            SqlServerConnection::NewConnection(db_url.to_string()),
+        )?,
     )
     .await?;
     let row_tree = MerkleRowTree::new(
         InitSettings::MustExist,
-        SqlStorageSettings {
-            table: row_table_name,
-            source: SqlServerConnection::NewConnection(db_url.to_string()),
-            external_mapper: Some(index_table_name),
-        },
+        SqlStorageSettings::new_with_mapper(
+            &row_table_name,
+            SqlServerConnection::NewConnection(db_url.to_string()),
+            index_table_name,
+        )?,
     )
     .await?;
 
@@ -62,16 +61,15 @@ pub async fn build_trees(
     max_depth: usize,
     reset_if_exist: bool,
 ) -> Result<(MerkleIndexTree, MerkleRowTree)> {
-    let db_settings_index = SqlStorageSettings {
-        source: SqlServerConnection::NewConnection(db_url.to_string()),
-        table: index_table_name.clone(),
-        external_mapper: None,
-    };
-    let db_settings_row = SqlStorageSettings {
-        source: SqlServerConnection::NewConnection(db_url.to_string()),
-        table: row_table_name,
-        external_mapper: Some(index_table_name),
-    };
+    let db_settings_index = SqlStorageSettings::new(
+        &index_table_name,
+        SqlServerConnection::NewConnection(db_url.to_string()),
+    )?;
+    let db_settings_row = SqlStorageSettings::new_with_mapper(
+        &row_table_name,
+        SqlServerConnection::NewConnection(db_url.to_string()),
+        index_table_name,
+    )?;
 
     let index_tree = ryhope::new_index_tree(
         genesis_block as UserEpoch,

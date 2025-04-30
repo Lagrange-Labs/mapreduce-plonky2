@@ -45,3 +45,18 @@ pub fn keys_in_index_boundaries<C: ContextProvider>(
     q = isolator::isolate(&q, settings, bounds).context("while isolating indices")?;
     executor::generate_query_keys(&mut q, settings).context("while generating query keys")
 }
+
+/// Returns whether the given string is a valid column or table name.
+pub fn is_valid_name(name: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(!name.is_empty(), "empty table name");
+    anyhow::ensure!(
+        name.chars().next().unwrap().is_ascii_alphabetic(),
+        "table name must start with a letter"
+    );
+    anyhow::ensure!(
+        name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+        "invalid character in table name"
+    );
+
+    Ok(())
+}

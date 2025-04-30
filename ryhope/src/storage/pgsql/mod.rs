@@ -186,13 +186,52 @@ pub enum SqlServerConnection {
 /// The settings required to instantiate a [`PgsqlStorage`] from a PgSQL server.
 pub struct SqlStorageSettings {
     /// The table to use.
-    pub table: String,
+    pub(crate) table: String,
     /// A way to connect to the DB server
-    pub source: SqlServerConnection,
+    pub(crate) source: SqlServerConnection,
     /// In case an external epoch mapper is employed for this storage,
     /// this field contains the name of the table providing such an epoch mapper.
     /// It is None if the epoch mapper is handled internally by the storage
-    pub external_mapper: Option<String>,
+    pub(crate) external_mapper: Option<String>,
+}
+impl SqlStorageSettings {
+    fn validate_table_name(name: &str) -> anyhow::Result<()> {
+        anyhow::ensure!(!name.is_empty(), "empty table name");
+        anyhow::ensure!(
+            name.chars().next().unwrap().is_ascii_alphabetic(),
+            "table name must start with a letter"
+        );
+        anyhow::ensure!(
+            name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            "invalid character in table name"
+        );
+
+        Ok(())
+    }
+
+    pub fn new(table_name: &str, source: SqlServerConnection) -> anyhow::Result<Self> {
+        Self::validate_table_name(table_name)?;
+
+        Ok(SqlStorageSettings {
+            table: table_name.to_owned(),
+            source,
+            external_mapper: None,
+        })
+    }
+
+    pub fn new_with_mapper(
+        table_name: &str,
+        source: SqlServerConnection,
+        external_mapper: String,
+    ) -> anyhow::Result<Self> {
+        Self::validate_table_name(table_name)?;
+
+        Ok(SqlStorageSettings {
+            table: table_name.to_owned(),
+            source,
+            external_mapper: Some(external_mapper),
+        })
+    }
 }
 
 pub struct PgsqlStorage<T, V, const EXTERNAL_EPOCH_MAPPER: bool>
@@ -415,7 +454,7 @@ where
         ensure(
             initial_epoch == INITIAL_INCREMENTAL_EPOCH,
             format!(
-                "Wrong internal initial epoch found for existing table {table}: 
+                "Wrong internal initial epoch found for existing table {table}:
                 expected {INITIAL_INCREMENTAL_EPOCH}, found {initial_epoch}"
             ),
         )?;
@@ -427,7 +466,7 @@ where
         ensure(
             latest_epoch_in_mapper == latest_epoch,
             format!(
-                "Mismatch between the latest internal epoch in mapper table and the latest epoch 
+                "Mismatch between the latest internal epoch in mapper table and the latest epoch
             found in the storage: {latest_epoch_in_mapper} != {latest_epoch}"
             ),
         )?;
