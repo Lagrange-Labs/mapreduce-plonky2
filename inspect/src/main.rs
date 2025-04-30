@@ -74,12 +74,10 @@ async fn main() -> Result<()> {
         } => {
             let tree_db = RowDb::new(
                 InitSettings::MustExist,
-                SqlStorageSettings {
-                    source: SqlServerConnection::NewConnection(args.db_uri.clone()),
-                    table: args.db_table,
-                    external_mapper: None, // not necessary even if there is an external epoch mapper,
-                                           // since we are initializing the tree with `InitSettings::MustExist`
-                },
+                SqlStorageSettings::new(
+                    &args.db_table,
+                    SqlServerConnection::NewConnection(args.db_uri.clone()),
+                )?,
             )
             .await?;
 
@@ -100,11 +98,10 @@ async fn main() -> Result<()> {
         TreeReader::IndexTree => {
             let tree_db = IndexDb::new(
                 InitSettings::MustExist,
-                SqlStorageSettings {
-                    source: SqlServerConnection::NewConnection(args.db_uri.clone()),
-                    table: args.db_table,
-                    external_mapper: None,
-                },
+                SqlStorageSettings::new(
+                    &args.db_table,
+                    SqlServerConnection::NewConnection(args.db_uri.clone()),
+                )?,
             )
             .await?;
 
