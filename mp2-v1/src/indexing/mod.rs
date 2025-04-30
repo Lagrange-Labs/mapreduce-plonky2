@@ -35,9 +35,10 @@ pub async fn load_trees(
     .await?;
     let row_tree = MerkleRowTree::new(
         InitSettings::MustExist,
-        SqlStorageSettings::new(
+        SqlStorageSettings::new_with_mapper(
             &row_table_name,
             SqlServerConnection::NewConnection(db_url.to_string()),
+            index_table_name,
         )?,
     )
     .await?;
