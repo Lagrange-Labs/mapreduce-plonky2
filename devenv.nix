@@ -8,7 +8,7 @@ in
   cachix.enable = false;
 
   # https://devenv.sh/packages/
-  packages = [ pkgs.git pkgs.figlet pkgs.openssl pkgs.pkg-config pkgs.cargo-limit pkgs.awscli2 pkgs.perl ]
+  packages = [ pkgs.git pkgs.rustup pkgs.figlet pkgs.openssl pkgs.pkg-config pkgs.cargo-limit pkgs.awscli2 pkgs.perl ]
              ++ lib.optionals config.devenv.isTesting [ pkgs.docker ]
              ++ lib.optionals pkgs.stdenv.targetPlatform.isDarwin [
                pkgs.libiconv
@@ -63,11 +63,6 @@ in
     reset-db.exec = "rm -rf ${config.env.DEVENV_STATE}/postgres";
   };
 
-  # https://devenv.sh/languages/
-  languages.rust = {
-    enable = true;
-    channel = "nightly";
-  };
   languages.go.enable = true;
 
   # https://devenv.sh/pre-commit-hooks/
