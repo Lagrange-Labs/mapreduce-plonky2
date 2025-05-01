@@ -1,8 +1,8 @@
 use alloy::primitives::U256;
 use anyhow::{anyhow, bail, ensure};
 use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
-use std::sync::OnceLock;
 use std::str::FromStr;
+use std::sync::OnceLock;
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
 
 use crate::{
