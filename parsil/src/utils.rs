@@ -1,7 +1,7 @@
 use alloy::primitives::U256;
 use anyhow::{anyhow, bail, ensure};
 use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
-use std::cell::OnceCell;
+use std::sync::OnceLock;
 use std::str::FromStr;
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
 
@@ -119,7 +119,7 @@ pub struct PlaceholderSettings {
     /// The maximum number of free-standing `$i` placeholders
     pub max_free_placeholders: usize,
     /// The number of provided parameters for placeholders, if any
-    pub parameters_count: OnceCell<usize>,
+    pub parameters_count: OnceLock<usize>,
 }
 
 pub const DEFAULT_MIN_BLOCK_PLACEHOLDER: &str = "$MIN_BLOCK";
@@ -157,7 +157,7 @@ impl PlaceholderSettings {
             min_block_placeholder: min_block.to_string(),
             max_block_placeholder: max_block.to_string(),
             max_free_placeholders: n,
-            parameters_count: OnceCell::new(),
+            parameters_count: OnceLock::new(),
         })
     }
 
