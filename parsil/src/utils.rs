@@ -1,7 +1,8 @@
 use alloy::primitives::U256;
-use anyhow::{bail, ensure};
+use anyhow::{anyhow, bail, ensure};
 use sqlparser::ast::{BinaryOperator, Expr, Query, UnaryOperator, Value};
 use std::str::FromStr;
+use std::sync::OnceLock;
 use verifiable_db::query::computational_hash_ids::PlaceholderIdentifier;
 
 use crate::{
@@ -115,8 +116,10 @@ pub struct PlaceholderSettings {
     pub min_block_placeholder: String,
     /// The placeholder for the maximal value of the primary index
     pub max_block_placeholder: String,
-    /// The number of free-standing `$i` placeholders
+    /// The maximum number of free-standing `$i` placeholders
     pub max_free_placeholders: usize,
+    /// The number of provided parameters for placeholders, if any
+    pub parameters_count: OnceLock<usize>,
 }
 
 pub const DEFAULT_MIN_BLOCK_PLACEHOLDER: &str = "$MIN_BLOCK";
@@ -154,7 +157,16 @@ impl PlaceholderSettings {
             min_block_placeholder: min_block.to_string(),
             max_block_placeholder: max_block.to_string(),
             max_free_placeholders: n,
+            parameters_count: OnceLock::new(),
         })
+    }
+
+    /// Set the number of provided parameters for placeholders
+    pub fn with_parameters_count(self, parameters_count: usize) -> anyhow::Result<Self> {
+        self.parameters_count
+            .set(parameters_count)
+            .map_err(|_| anyhow!("parameters_count is already set"))?;
+        Ok(self)
     }
 
     /// Ensure that the given placeholder is valid, and update the validator

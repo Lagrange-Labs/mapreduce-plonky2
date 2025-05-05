@@ -43,13 +43,23 @@ impl<'a, C: ContextProvider> PlaceholderValidator<'a, C> {
         Ok(())
     }
 
-    /// Ensure that all the placeholders have been used, and return the largest
+    /// Ensure that all the placeholders have been used and that the number of
+    /// parameters matches the number of placeholders, and return the largest
     /// one found.
     fn ensured_used(&self) -> Result<usize> {
         for i in 0..self.current_max_freestanding {
             ensure!(
                 self.visited[i],
                 ValidationError::MissingPlaceholder(format!("${}", i + 1))
+            );
+        }
+        if let Some(parameters_count) = self.settings.placeholders.parameters_count.get() {
+            ensure!(
+                *parameters_count == self.current_max_freestanding,
+                ValidationError::TooManyParameters {
+                    expected: self.current_max_freestanding,
+                    got: *parameters_count,
+                }
             );
         }
         Ok(self.current_max_freestanding)
