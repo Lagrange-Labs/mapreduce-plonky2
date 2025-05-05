@@ -1,8 +1,44 @@
 # Changelog
 
+## [2.1.0] - 2025-05-05
+
+[Compare 1d7cf8a ... c205f24](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/1d7cf8acf76eda463609baafb678e81e3a61b20c...c205f24bb70abc9dd5c38470134d2c57ef5af3b5)
+
+### Features
+
+- *(parsil)* Ensure number of parameters matches the number of placeholders - in [PR #484](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/484)
+
+
+
+- Ensure number of parameters matches the number of placeholders - in [PR #484](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/484)
+
+
+### Bug Fixes
+
+- *(ryhope)* Immutable `touched` method on merkle tree db - in [PR #463](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/463)
+
+
+
+- Immutable `touched` method on merkle tree db - in [PR #463](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/463)
+
+- Validate table & column names - in [PR #485](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/485)
+
+
+### Miscellaneous Tasks
+
+
+
+- Generate PPs after release PR is merged - in [PR #479](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/479)
+
+- Ensure PPs generation is non-destructive - in [PR #480](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/480)
+
+- Add Deserialize/Serialize for TableRow/OffChainRootOfTrust - in [PR #483](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/483)
+
+- Add step to upload PPs to main account in release workflow - in [PR #481](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/481)
+
 ## [2.0.0] - 2025-04-17
 
-[Compare 9db80d8 ... 9b4b3df](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/9db80d8fd4f10567e1c58c633c74af3c8c469f46...9b4b3dfd8d4f19131cd0fd1caf32750815784123)
+[Compare 9db80d8 ... 1d7cf8a](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/9db80d8fd4f10567e1c58c633c74af3c8c469f46...1d7cf8acf76eda463609baafb678e81e3a61b20c)
 
 ### Features
 
@@ -40,6 +76,13 @@
 - Add a way to manually generate commit hash-indexed PPs - in [PR #475](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/475)
 
 - Run PPs generation in devenv - in [PR #476](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/476)
+
+
+### Release
+
+
+
+- V2.0.0 - in [PR #478](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/478)
 
 ## [1.2.3] - 2025-03-18
 
