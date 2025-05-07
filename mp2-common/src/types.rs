@@ -66,9 +66,9 @@ impl AsRef<[u8]> for &HashOutput {
     }
 }
 
-/// Max observed is 622 but better be safe by default, it doesn't cost "more" for keccak
-/// since it still has to do 5 rounds in 622 or 650.
-pub const MAX_BLOCK_LEN: usize = 650;
+/// Max observed is 655 but better be safe by default, it doesn't cost "more" for keccak
+/// since it still has to do 5 rounds in 655 or 679.
+pub const MAX_BLOCK_LEN: usize = 679;
 
 /// This constant represents the maximum size a value can be inside the storage trie.
 ///

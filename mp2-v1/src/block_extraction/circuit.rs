@@ -55,7 +55,8 @@ impl BlockCircuit {
     pub fn new(rlp_headers: Vec<u8>) -> Result<Self> {
         ensure!(
             rlp_headers.len() <= MAX_BLOCK_LEN,
-            "block rlp headers too long"
+            "block rlp headers too long: found {}, max {MAX_BLOCK_LEN}",
+            rlp_headers.len()
         );
         Ok(Self { rlp_headers })
     }
@@ -143,10 +144,19 @@ mod test {
 
     use plonky2::iop::witness::PartialWitness;
 
+    use crate::block_extraction::circuit::PADDED_HEADER_LEN;
+
     use super::{public_inputs::PublicInputs, BlockCircuit, BlockWires};
     use anyhow::Result;
 
     pub type SepoliaBlockCircuit = BlockCircuit;
+
+    #[test]
+    fn check_keccak_padded_len() {
+        // regression test to check that we don't increase the padded Keccak payload when
+        // chaning `MAX_BLOCK_LEN`
+        assert_eq!(PADDED_HEADER_LEN, 680);
+    }
 
     #[tokio::test]
     async fn prove_and_verify_block_extraction_circuit() -> Result<()> {
