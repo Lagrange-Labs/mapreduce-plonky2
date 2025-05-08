@@ -20,31 +20,3 @@ jobs:
           omitBody: true
           commit: "main"
           tag: ${{ steps.set-tag.outputs.tag }}
-  public-params:
-    name: Generate & Upload PPs, major version-indexed
-    runs-on: ['nix-128g']
-    environment: CI
-    steps:
-      - uses: actions/checkout@v4
-      - name: Get version
-        id: set-tag
-        run: echo "tag=$(cat VERSION)" >> $GITHUB_OUTPUT
-      - name: Generate PPs
-        shell: devenv shell bash -- -e {0}
-        run: |
-          ulimit -s unlimited
-          cargo run --release --bin gen-params -- --mode major
-      - name: Upload PPs to legacy S3
-        shell: devenv shell bash -- -e {0}
-        run: tools/upload-s3.pl zkmr_params https://428e47101872e479a0c311b576430fac.r2.cloudflarestorage.com
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.CF_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: eeur
-      - name: Upload PPs to S3
-        shell: devenv shell bash -- -e {0}
-        run: tools/upload-s3.pl zkmr_params https://6947101809337eb271c6f69060934681.r2.cloudflarestorage.com
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.CF_AWS_ACCESS_KEY_ID_MAIN }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_AWS_SECRET_ACCESS_KEY_MAIN }}
-          AWS_DEFAULT_REGION: eeur
