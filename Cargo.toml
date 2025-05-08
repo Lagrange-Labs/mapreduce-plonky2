@@ -9,7 +9,6 @@ members = [
   "parsil",
   "ryhope",
   "recursion-framework",
-  "tools",
   "verifiable-db",
 ]
 resolver = "2"

@@ -100,15 +100,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alloy"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d2cc5aeb8dfa1e451a49fac87bc4b86c5de40ebea153ed88e83eb92b8151e74"
-dependencies = [
- "alloy-core",
-]
-
-[[package]]
 name = "alloy-chains"
 version = "0.1.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -862,12 +853,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "220a2c618ab466efe41d0eace94dfeff1c35e3aa47891bdb95e1c0fefffd3c99"
 
 [[package]]
-name = "arrayref"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
-
-[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -925,12 +910,6 @@ dependencies = [
  "pharos",
  "rustc_version 0.4.1",
 ]
-
-[[package]]
-name = "atomic-waker"
-version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "atty"
@@ -1094,21 +1073,6 @@ dependencies = [
  "radium",
  "tap",
  "wyz",
-]
-
-[[package]]
-name = "blake3"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "389a099b34312839e16420d499a9cad9650541715937ffbdd40d36f49e77eeb3"
-dependencies = [
- "arrayref",
- "arrayvec",
- "cc",
- "cfg-if",
- "constant_time_eq 0.3.1",
- "memmap2",
- "rayon-core",
 ]
 
 [[package]]
@@ -1484,12 +1448,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
-name = "constant_time_eq"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
-
-[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1760,17 +1718,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "derive-debug-plus"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4ff10b45018aea03566d0b5ae02e46372f482f9d23d756d1db5684a51b18a8a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.100",
 ]
 
 [[package]]
@@ -2462,15 +2409,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "exponential-backoff"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ffb309d235a642598183aeda8925e871e85dd5a433c2c877e69ff0a960f4c02"
-dependencies = [
- "fastrand",
-]
-
-[[package]]
 name = "eyre"
 version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2873,17 +2811,6 @@ dependencies = [
 
 [[package]]
 name = "gnark-utils"
-version = "1.2.3"
-source = "git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?branch=main#95c537f5c90209833210a02d00eab318d3ba60bd"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "glob",
- "gobuild",
-]
-
-[[package]]
-name = "gnark-utils"
 version = "2.1.0"
 dependencies = [
  "anyhow",
@@ -2903,45 +2830,27 @@ dependencies = [
 
 [[package]]
 name = "groth16_framework"
-version = "1.2.3"
-source = "git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?branch=main#95c537f5c90209833210a02d00eab318d3ba60bd"
-dependencies = [
- "alloy 0.6.4",
- "anyhow",
- "gnark-utils 1.2.3",
- "hex",
- "log",
- "mp2_common 1.2.3",
- "plonky2",
- "plonky2x",
- "revm",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "groth16_framework"
 version = "2.1.0"
 dependencies = [
- "alloy 0.6.4",
+ "alloy",
  "anyhow",
  "env_logger 0.11.8",
- "gnark-utils 2.1.0",
+ "gnark-utils",
  "hex",
  "itertools 0.14.0",
  "log",
- "mp2_common 2.1.0",
- "mp2_test 2.1.0",
+ "mp2_common",
+ "mp2_test",
  "plonky2",
  "plonky2x",
  "rand 0.8.5",
- "recursion_framework 2.1.0",
+ "recursion_framework",
  "revm",
  "serde",
  "serde_json",
  "serial_test 3.2.0",
  "sha2",
- "verifiable-db 2.1.0",
+ "verifiable-db",
 ]
 
 [[package]]
@@ -2967,25 +2876,6 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http 0.2.12",
- "indexmap 2.8.0",
- "slab",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "h2"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5017294ff4bb30944501348f6f8e42e6ad28f42c8bbef7a74029aff064a4e3c2"
-dependencies = [
- "atomic-waker",
- "bytes",
- "fnv",
- "futures-core",
- "futures-sink",
- "http 1.3.1",
  "indexmap 2.8.0",
  "slab",
  "tokio",
@@ -3182,7 +3072,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.3.26",
+ "h2",
  "http 0.2.12",
  "http-body 0.4.6",
  "httparse",
@@ -3205,7 +3095,6 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "h2 0.4.8",
  "http 1.3.1",
  "http-body 1.0.1",
  "httparse",
@@ -3225,26 +3114,9 @@ dependencies = [
  "futures-util",
  "http 0.2.12",
  "hyper 0.14.32",
- "rustls 0.21.12",
+ "rustls",
  "tokio",
- "tokio-rustls 0.24.1",
-]
-
-[[package]]
-name = "hyper-rustls"
-version = "0.27.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d191583f3da1305256f22463b9bb0471acad48a4e534a5218b9963e9c1f59b2"
-dependencies = [
- "futures-util",
- "http 1.3.1",
- "hyper 1.6.0",
- "hyper-util",
- "rustls 0.23.25",
- "rustls-pki-types",
- "tokio",
- "tokio-rustls 0.26.2",
- "tower-service",
+ "tokio-rustls",
 ]
 
 [[package]]
@@ -3550,8 +3422,8 @@ dependencies = [
  "dialoguer",
  "hex",
  "itertools 0.14.0",
- "mp2_v1 2.1.0",
- "ryhope 2.1.0",
+ "mp2_v1",
+ "ryhope",
  "serde",
  "tabled",
  "tokio",
@@ -3798,48 +3670,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lgn-messages"
-version = "1.1.8"
-source = "git+https://github.com/Lagrange-Labs/lgn-coprocessor.git?branch=main#5bc463a875de7d163a8d3016542275deb48ddf9b"
-dependencies = [
- "alloy-primitives 0.8.25",
- "derive-debug-plus",
- "ethers",
- "mp2_common 1.2.3",
- "mp2_v1 1.2.3",
- "object_store",
- "serde",
- "serde_derive",
- "thiserror 2.0.12",
- "verifiable-db 1.2.3",
-]
-
-[[package]]
-name = "lgn-provers"
-version = "1.1.8"
-source = "git+https://github.com/Lagrange-Labs/lgn-coprocessor.git?branch=main#5bc463a875de7d163a8d3016542275deb48ddf9b"
-dependencies = [
- "alloy 0.11.1",
- "anyhow",
- "bincode",
- "blake3",
- "bytes",
- "ethers",
- "exponential-backoff",
- "groth16_framework 1.2.3",
- "lgn-messages",
- "metrics",
- "mp2_common 1.2.3",
- "mp2_v1 1.2.3",
- "parsil 1.2.3",
- "rand 0.8.5",
- "reqwest 0.12.15",
- "serde_json",
- "tracing",
- "verifiable-db 1.2.3",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.171"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3950,16 +3780,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "metrics"
-version = "0.24.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a7deb012b3b2767169ff203fadb4c6b0b82b947512e5eb9e0b78c2e186ad9e3"
-dependencies = [
- "ahash",
- "portable-atomic",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3993,37 +3813,9 @@ dependencies = [
 
 [[package]]
 name = "mp2_common"
-version = "1.2.3"
-source = "git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?branch=main#95c537f5c90209833210a02d00eab318d3ba60bd"
-dependencies = [
- "alloy 0.6.4",
- "anyhow",
- "bincode",
- "derive_more 2.0.1",
- "eth_trie",
- "ethereum-types",
- "git-version",
- "hashbrown 0.15.2",
- "hex",
- "itertools 0.14.0",
- "log",
- "num",
- "plonky2",
- "plonky2_crypto",
- "plonky2_ecdsa",
- "plonky2_ecgfp5",
- "poseidon2_plonky2",
- "rand 0.8.5",
- "rlp",
- "serde",
- "sha3",
-]
-
-[[package]]
-name = "mp2_common"
 version = "2.1.0"
 dependencies = [
- "alloy 0.6.4",
+ "alloy",
  "anyhow",
  "bincode",
  "derive_more 2.0.1",
@@ -4033,7 +3825,7 @@ dependencies = [
  "hex",
  "itertools 0.14.0",
  "log",
- "mp2_test 2.1.0",
+ "mp2_test",
  "num",
  "plonky2",
  "plonky2_crypto",
@@ -4050,80 +3842,27 @@ dependencies = [
 
 [[package]]
 name = "mp2_test"
-version = "1.2.3"
-source = "git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?branch=main#95c537f5c90209833210a02d00eab318d3ba60bd"
-dependencies = [
- "alloy 0.6.4",
- "anyhow",
- "env_logger 0.11.8",
- "eth_trie",
- "log",
- "mp2_common 1.2.3",
- "plonky2",
- "plonky2_ecgfp5",
- "rand 0.8.5",
- "recursion_framework 1.2.3",
- "ryhope 1.2.3",
- "serde",
-]
-
-[[package]]
-name = "mp2_test"
 version = "2.1.0"
 dependencies = [
- "alloy 0.6.4",
+ "alloy",
  "anyhow",
  "env_logger 0.11.8",
  "eth_trie",
  "log",
- "mp2_common 2.1.0",
+ "mp2_common",
  "plonky2",
  "plonky2_ecgfp5",
  "rand 0.8.5",
- "recursion_framework 2.1.0",
- "ryhope 2.1.0",
+ "recursion_framework",
+ "ryhope",
  "serde",
-]
-
-[[package]]
-name = "mp2_v1"
-version = "1.2.3"
-source = "git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?branch=main#95c537f5c90209833210a02d00eab318d3ba60bd"
-dependencies = [
- "alloy 0.6.4",
- "anyhow",
- "bb8",
- "bb8-postgres",
- "bincode",
- "derive_more 2.0.1",
- "eth_trie",
- "futures",
- "hashbrown 0.15.2",
- "hex",
- "itertools 0.14.0",
- "log",
- "mp2_common 1.2.3",
- "parsil 1.2.3",
- "paste",
- "plonky2",
- "plonky2_crypto",
- "plonky2_ecgfp5",
- "rand 0.8.5",
- "recursion_framework 1.2.3",
- "rlp",
- "ryhope 1.2.3",
- "serde",
- "serde_json",
- "tokio-postgres",
- "tracing",
- "verifiable-db 1.2.3",
 ]
 
 [[package]]
 name = "mp2_v1"
 version = "2.1.0"
 dependencies = [
- "alloy 0.6.4",
+ "alloy",
  "anyhow",
  "bb8",
  "bb8-postgres",
@@ -4140,9 +3879,9 @@ dependencies = [
  "jammdb",
  "lazy_static",
  "log",
- "mp2_common 2.1.0",
- "mp2_test 2.1.0",
- "parsil 2.1.0",
+ "mp2_common",
+ "mp2_test",
+ "parsil",
  "paste",
  "plonky2",
  "plonky2_crypto",
@@ -4150,9 +3889,9 @@ dependencies = [
  "plonky2_ecgfp5",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
- "recursion_framework 2.1.0",
+ "recursion_framework",
  "rlp",
- "ryhope 2.1.0",
+ "ryhope",
  "serde",
  "serde_json",
  "serial_test 3.2.0",
@@ -4162,7 +3901,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tracing",
- "verifiable-db 2.1.0",
+ "verifiable-db",
 ]
 
 [[package]]
@@ -4342,27 +4081,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "object_store"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cfccb68961a56facde1163f9319e0d15743352344e7808a11795fb99698dcaf"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "futures",
- "humantime",
- "itertools 0.13.0",
- "parking_lot",
- "percent-encoding",
- "snafu",
- "tokio",
- "tracing",
- "url",
- "walkdir",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4525,37 +4243,20 @@ dependencies = [
 
 [[package]]
 name = "parsil"
-version = "1.2.3"
-source = "git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?branch=main#95c537f5c90209833210a02d00eab318d3ba60bd"
-dependencies = [
- "alloy 0.6.4",
- "anyhow",
- "camelpaste",
- "log",
- "ryhope 1.2.3",
- "serde",
- "serde_json",
- "sqlparser",
- "thiserror 2.0.12",
- "verifiable-db 1.2.3",
-]
-
-[[package]]
-name = "parsil"
 version = "2.1.0"
 dependencies = [
- "alloy 0.6.4",
+ "alloy",
  "anyhow",
  "camelpaste",
  "clap",
  "log",
- "ryhope 2.1.0",
+ "ryhope",
  "serde",
  "serde_json",
  "sqlparser",
  "stderrlog",
  "thiserror 2.0.12",
- "verifiable-db 2.1.0",
+ "verifiable-db",
 ]
 
 [[package]]
@@ -5220,25 +4921,13 @@ dependencies = [
 
 [[package]]
 name = "recursion_framework"
-version = "1.2.3"
-source = "git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?branch=main#95c537f5c90209833210a02d00eab318d3ba60bd"
-dependencies = [
- "anyhow",
- "log",
- "mp2_common 1.2.3",
- "plonky2",
- "serde",
-]
-
-[[package]]
-name = "recursion_framework"
 version = "2.1.0"
 dependencies = [
  "anyhow",
  "bincode",
  "env_logger 0.11.8",
  "log",
- "mp2_common 2.1.0",
+ "mp2_common",
  "plonky2",
  "plonky2_monolith",
  "rstest 0.23.0",
@@ -5327,11 +5016,11 @@ dependencies = [
  "encoding_rs",
  "futures-core",
  "futures-util",
- "h2 0.3.26",
+ "h2",
  "http 0.2.12",
  "http-body 0.4.6",
  "hyper 0.14.32",
- "hyper-rustls 0.24.2",
+ "hyper-rustls",
  "hyper-tls 0.5.0",
  "ipnet",
  "js-sys",
@@ -5341,16 +5030,16 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls 0.21.12",
+ "rustls",
  "rustls-pemfile 1.0.4",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper 0.1.2",
- "system-configuration 0.5.1",
+ "system-configuration",
  "tokio",
  "tokio-native-tls",
- "tokio-rustls 0.24.1",
+ "tokio-rustls",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -5368,16 +5057,12 @@ checksum = "d19c46a6fdd48bc4dab94b6103fccc55d34c67cc0ad04653aad4ea2a07cd7bbb"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "encoding_rs",
- "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.4.8",
  "http 1.3.1",
  "http-body 1.0.1",
  "http-body-util",
  "hyper 1.6.0",
- "hyper-rustls 0.27.5",
  "hyper-tls 0.6.0",
  "hyper-util",
  "ipnet",
@@ -5393,7 +5078,6 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper 1.0.2",
- "system-configuration 0.6.1",
  "tokio",
  "tokio-native-tls",
  "tower",
@@ -5687,21 +5371,8 @@ checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
 dependencies = [
  "log",
  "ring 0.17.14",
- "rustls-webpki 0.101.7",
+ "rustls-webpki",
  "sct",
-]
-
-[[package]]
-name = "rustls"
-version = "0.23.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "822ee9188ac4ec04a2f0531e55d035fb2de73f18b41a63c70c2712503b6fb13c"
-dependencies = [
- "once_cell",
- "rustls-pki-types",
- "rustls-webpki 0.103.1",
- "subtle",
- "zeroize",
 ]
 
 [[package]]
@@ -5739,17 +5410,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustls-webpki"
-version = "0.103.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fef8b8769aaccf73098557a87cd1816b4f9c7c16811c9c77142aa695c16f2c03"
-dependencies = [
- "ring 0.17.14",
- "rustls-pki-types",
- "untrusted 0.9.0",
-]
-
-[[package]]
 name = "rustversion"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5765,28 +5425,6 @@ dependencies = [
  "quick-error",
  "tempfile",
  "wait-timeout",
-]
-
-[[package]]
-name = "ryhope"
-version = "1.2.3"
-source = "git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?branch=main#95c537f5c90209833210a02d00eab318d3ba60bd"
-dependencies = [
- "anyhow",
- "bb8",
- "bb8-postgres",
- "delegate",
- "futures",
- "hex",
- "itertools 0.14.0",
- "log",
- "postgres-types",
- "serde",
- "serde_json",
- "thiserror 2.0.12",
- "tokio",
- "tokio-postgres",
- "tracing",
 ]
 
 [[package]]
@@ -6310,27 +5948,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fcf8323ef1faaee30a44a340193b1ac6814fd9b7b4e88e9d4519a3e4abe1cfd"
 
 [[package]]
-name = "snafu"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "223891c85e2a29c3fe8fb900c1fae5e69c2e42415e3177752e8718475efa5019"
-dependencies = [
- "snafu-derive",
-]
-
-[[package]]
-name = "snafu-derive"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "syn 2.0.100",
-]
-
-[[package]]
 name = "socket2"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6618,18 +6235,7 @@ checksum = "ba3a3adc5c275d719af8cb4272ea1c4a6d668a777f37e115f6d11ddbc1c8e0e7"
 dependencies = [
  "bitflags 1.3.2",
  "core-foundation",
- "system-configuration-sys 0.5.0",
-]
-
-[[package]]
-name = "system-configuration"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b"
-dependencies = [
- "bitflags 2.9.0",
- "core-foundation",
- "system-configuration-sys 0.6.0",
+ "system-configuration-sys",
 ]
 
 [[package]]
@@ -6637,16 +6243,6 @@ name = "system-configuration-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a75fb188eb626b924683e3b95e3a48e63551fcfb51949de2f06a9d91dbee93c9"
-dependencies = [
- "core-foundation-sys",
- "libc",
-]
-
-[[package]]
-name = "system-configuration-sys"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
 dependencies = [
  "core-foundation-sys",
  "libc",
@@ -6942,17 +6538,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
- "rustls 0.21.12",
- "tokio",
-]
-
-[[package]]
-name = "tokio-rustls"
-version = "0.26.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e727b36a1a0e8b74c376ac2211e40c2c8af09fb4013c60d910495810f008e9b"
-dependencies = [
- "rustls 0.23.25",
+ "rustls",
  "tokio",
 ]
 
@@ -6976,9 +6562,9 @@ checksum = "212d5dcb2a1ce06d81107c3d0ffa3121fe974b73f068c8282cb1c32328113b6c"
 dependencies = [
  "futures-util",
  "log",
- "rustls 0.21.12",
+ "rustls",
  "tokio",
- "tokio-rustls 0.24.1",
+ "tokio-rustls",
  "tungstenite",
  "webpki-roots",
 ]
@@ -7028,23 +6614,6 @@ dependencies = [
  "serde_spanned",
  "toml_datetime",
  "winnow",
-]
-
-[[package]]
-name = "tools"
-version = "2.1.0"
-dependencies = [
- "bincode",
- "blake3",
- "clap",
- "groth16_framework 2.1.0",
- "lgn-messages",
- "lgn-provers",
- "mp2_v1 2.1.0",
- "semver 1.0.26",
- "tokio",
- "verifiable-db 2.1.0",
- "walkdir",
 ]
 
 [[package]]
@@ -7163,7 +6732,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.5",
- "rustls 0.21.12",
+ "rustls",
  "sha1",
  "thiserror 1.0.69",
  "url",
@@ -7329,32 +6898,9 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "verifiable-db"
-version = "1.2.3"
-source = "git+https://github.com/Lagrange-Labs/mapreduce-plonky2.git?branch=main#95c537f5c90209833210a02d00eab318d3ba60bd"
-dependencies = [
- "alloy 0.6.4",
- "anyhow",
- "bincode",
- "derive_more 2.0.1",
- "itertools 0.14.0",
- "log",
- "mp2_common 1.2.3",
- "mp2_test 1.2.3",
- "plonky2",
- "plonky2_crypto",
- "plonky2_ecdsa",
- "plonky2_ecgfp5",
- "rand 0.8.5",
- "recursion_framework 1.2.3",
- "ryhope 1.2.3",
- "serde",
-]
-
-[[package]]
-name = "verifiable-db"
 version = "2.1.0"
 dependencies = [
- "alloy 0.6.4",
+ "alloy",
  "anyhow",
  "bincode",
  "derive_more 2.0.1",
@@ -7362,16 +6908,16 @@ dependencies = [
  "git-version",
  "itertools 0.14.0",
  "log",
- "mp2_common 2.1.0",
- "mp2_test 2.1.0",
+ "mp2_common",
+ "mp2_test",
  "num",
  "plonky2",
  "plonky2_crypto",
  "plonky2_ecdsa",
  "plonky2_ecgfp5",
  "rand 0.8.5",
- "recursion_framework 2.1.0",
- "ryhope 2.1.0",
+ "recursion_framework",
+ "ryhope",
  "serde",
  "serial_test 3.2.0",
  "tokio",
@@ -8102,7 +7648,7 @@ dependencies = [
  "aes",
  "byteorder",
  "bzip2",
- "constant_time_eq 0.1.5",
+ "constant_time_eq",
  "crc32fast",
  "crossbeam-utils",
  "flate2",
