@@ -6,7 +6,6 @@ use alloy::{
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::{Block, EIP1186AccountProofResponse},
     signers::local::PrivateKeySigner,
-    transports::http::{Client, Http},
 };
 use anyhow::{Context, Result};
 use envconfig::Envconfig;
@@ -50,7 +49,7 @@ pub(crate) struct TestContext {
     pub(crate) rpc_url: String,
     /// HTTP provider
     /// TODO: fix to use alloy provider.
-    pub(crate) rpc: RootProvider<Http<Client>>,
+    pub(crate) rpc: RootProvider,
     /// Local node
     /// Should release after finishing the all tests.
     pub(crate) local_node: Option<AnvilInstance>,
@@ -80,11 +79,11 @@ pub async fn new_local_chain(storage: ProofKV) -> TestContext {
     // Create a provider with the wallet for contract deployment and interaction.
     let rpc_url = anvil.endpoint();
     info!("Anvil running at `{}`", rpc_url);
-    let rpc = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
+    let rpc = ProviderBuilder::new().connect_http(rpc_url.parse().unwrap());
 
     TestContext {
         rpc_url: anvil.endpoint(),
-        rpc,
+        rpc: rpc.root().clone(),
         local_node: Some(anvil),
         params: None,
         query_params: None,
@@ -248,7 +247,7 @@ impl TestContext {
         // assume there is always a block so None.unwrap() should not occur
         // and it's still a test...
         self.rpc
-            .get_block(BlockId::Number(bn), false.into())
+            .get_block(BlockId::Number(bn))
             .await
             .unwrap()
             .unwrap()
