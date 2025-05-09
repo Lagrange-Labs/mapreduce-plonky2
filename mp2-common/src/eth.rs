@@ -316,7 +316,7 @@ impl ProofQuery {
             slot: StorageSlot::Mapping(mapping_key, slot),
         }
     }
-    pub async fn query_mpt_proof<T: Transport + Clone + alloy::providers::Network>(
+    pub async fn query_mpt_proof<T: Clone + alloy::providers::Network>(
         &self,
         provider: &RootProvider<T>,
         block: BlockNumberOrTag,
@@ -437,14 +437,14 @@ mod test {
         let url = get_sepolia_url();
         let block_number1 = 5674446;
         let block_number2 = block_number1 + 1;
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let provider = ProviderBuilder::new().connect_http(url.parse().unwrap());
         let block = provider
-            .get_block(BlockNumberOrTag::Number(block_number1).into(), false.into())
+            .get_block(BlockNumberOrTag::Number(block_number1).into())
             .await?
             .unwrap();
         let comp_hash = keccak256(&block.rlp());
         let block_next = provider
-            .get_block(BlockNumberOrTag::from(block_number2).into(), false.into())
+            .get_block(BlockNumberOrTag::from(block_number2).into())
             .await?
             .unwrap();
         let exp_hash = block_next.header.parent_hash;
@@ -465,12 +465,12 @@ mod test {
         #[cfg(not(feature = "ci"))]
         let url = "https://ethereum-sepolia-rpc.publicnode.com";
 
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let provider = ProviderBuilder::new().connect_http(url.parse().unwrap());
         let pidgy_address = Address::from_str("0x363971ee2b96f360ec9d04b5809afd15c77b1af1")?;
         let length_slot = 8;
         let query = ProofQuery::new_simple_slot(pidgy_address, length_slot);
         let res = query
-            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .query_mpt_proof(provider.root(), BlockNumberOrTag::Latest)
             .await?;
         let tree_res = ProofQuery::verify_storage_proof(&res)?;
         println!("official response: {}", res.storage_proof[0].value);
@@ -507,13 +507,13 @@ mod test {
         let url = env::var("CI_ETH").expect("CI_ETH env var not set");
         #[cfg(not(feature = "ci"))]
         let url = "https://eth.llamarpc.com";
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let provider = ProviderBuilder::new().connect_http(url.parse().unwrap());
 
         // pidgy pinguins address
         let pidgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_simple_slot(pidgy_address, 8);
         let res = query
-            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .query_mpt_proof(provider.root(), BlockNumberOrTag::Latest)
             .await?;
         let tree_res = ProofQuery::verify_storage_proof(&res)?;
         println!("official response: {}", res.storage_proof[0].value);
@@ -579,7 +579,7 @@ mod test {
         let nft_id: u32 = 1116;
         let mapping_key = left_pad32(&nft_id.to_be_bytes());
         let url = get_mainnet_url();
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let provider = ProviderBuilder::new().connect_http(url.parse().unwrap());
 
         // extracting from
         // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol
@@ -589,7 +589,7 @@ mod test {
         let pudgy_address = Address::from_str("0xBd3531dA5CF5857e7CfAA92426877b022e612cf8")?;
         let query = ProofQuery::new_mapping_slot(pudgy_address, mapping_slot, mapping_key.to_vec());
         let res = query
-            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .query_mpt_proof(provider.root(), BlockNumberOrTag::Latest)
             .await?;
         let raw_address = ProofQuery::verify_storage_proof(&res)?;
         // the value is actually RLP encoded !
@@ -609,7 +609,7 @@ mod test {
         // mapping(address => uint256) public holders; // storage slot 1
         let url = get_sepolia_url();
         println!("URL given = {}", url);
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let provider = ProviderBuilder::new().connect_http(url.parse().unwrap());
 
         // sepolia contract
         let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
@@ -617,7 +617,7 @@ mod test {
         {
             let query = ProofQuery::new_simple_slot(contract, 0);
             let res = query
-                .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+                .query_mpt_proof(provider.root(), BlockNumberOrTag::Latest)
                 .await?;
             ProofQuery::verify_storage_proof(&res)?;
             query.verify_state_proof(&res)?;
@@ -628,7 +628,7 @@ mod test {
                 hex::decode("000000000000000000000000000000000000000000000000000000000001abcd")?;
             let query = ProofQuery::new_mapping_slot(contract, 1, mapping_key);
             let res = query
-                .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+                .query_mpt_proof(provider.root(), BlockNumberOrTag::Latest)
                 .await?;
             ProofQuery::verify_storage_proof(&res)?;
             query.verify_state_proof(&res)?;
@@ -639,16 +639,15 @@ mod test {
     async fn test_alloy_header_conversion() -> Result<()> {
         let url = get_sepolia_url();
         println!("URL given = {}", url);
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let provider = ProviderBuilder::new().connect_http(url.parse().unwrap());
         let block = provider
-            .get_block_by_number(BlockNumberOrTag::Latest, true.into())
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .full()
             .await?
             .unwrap();
         let previous_block = provider
-            .get_block_by_number(
-                BlockNumberOrTag::Number(block.header.number - 1),
-                true.into(),
-            )
+            .get_block_by_number(BlockNumberOrTag::Number(block.header.number - 1))
+            .full()
             .await?
             .unwrap();
 

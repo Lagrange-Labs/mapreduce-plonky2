@@ -405,7 +405,9 @@ mod test {
     use std::str::FromStr;
 
     use alloy::{
-        eips::BlockNumberOrTag, primitives::Address, providers::ProviderBuilder,
+        eips::BlockNumberOrTag,
+        primitives::Address,
+        providers::{Provider, ProviderBuilder},
         rpc::types::EIP1186AccountProofResponse,
     };
     use eth_trie::{Nibbles, Trie};
@@ -516,14 +518,14 @@ mod test {
         // https://sepolia.etherscan.io/address/0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E#code
         let url = get_sepolia_url();
 
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let provider = ProviderBuilder::new().connect_http(url.parse().unwrap());
 
         // sepolia contract
         let contract = Address::from_str("0xd6a2bFb7f76cAa64Dad0d13Ed8A9EFB73398F39E")?;
         // simple storage test
         let query = ProofQuery::new_simple_slot(contract, 0);
         let res = query
-            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .query_mpt_proof(provider.root(), BlockNumberOrTag::Latest)
             .await?;
 
         // Verify both storage and state proofs by this MPT circuit.

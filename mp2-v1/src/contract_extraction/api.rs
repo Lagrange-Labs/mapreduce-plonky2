@@ -177,7 +177,10 @@ impl PublicParameters {
 mod tests {
     use super::*;
     use crate::contract_extraction::compute_metadata_digest;
-    use alloy::{eips::BlockNumberOrTag, providers::ProviderBuilder};
+    use alloy::{
+        eips::BlockNumberOrTag,
+        providers::{Provider, ProviderBuilder},
+    };
     use eth_trie::Nibbles;
     use mp2_common::{
         eth::ProofQuery,
@@ -200,11 +203,11 @@ mod tests {
     async fn test_contract_extraction_api() -> Result<()> {
         // Query the MPT proof from RPC.
         let rpc_url = get_mainnet_url();
-        let provider = ProviderBuilder::new().on_http(rpc_url.parse().unwrap());
+        let provider = ProviderBuilder::new().connect_http(rpc_url.parse().unwrap());
         let contract_address = Address::from_str(PUDGY_PENGUINS_ADDRESS)?;
         let query = ProofQuery::new_simple_slot(contract_address, 0);
         let res = query
-            .query_mpt_proof(&provider, BlockNumberOrTag::Latest)
+            .query_mpt_proof(provider.root(), BlockNumberOrTag::Latest)
             .await?;
 
         // Get the storage root, it should be same with `keccak(storage_root)`,

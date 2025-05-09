@@ -15,6 +15,7 @@ resolver = "2"
 
 [workspace.dependencies]
 alloy = { version = "0.15", default-features = false, features = [
+  "full",
   "consensus",
   "contract",
   "getrandom",

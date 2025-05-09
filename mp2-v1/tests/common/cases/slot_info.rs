@@ -250,9 +250,9 @@ impl LargeStruct {
 impl From<simpleStructReturn> for LargeStruct {
     fn from(res: simpleStructReturn) -> Self {
         Self {
-            field1: res.field1,
-            field2: res.field2,
-            field3: res.field3,
+            field1: res._0,
+            field2: res._1,
+            field3: res._2,
         }
     }
 }
@@ -260,9 +260,9 @@ impl From<simpleStructReturn> for LargeStruct {
 impl From<structMappingReturn> for LargeStruct {
     fn from(res: structMappingReturn) -> Self {
         Self {
-            field1: res.field1,
-            field2: res.field2,
-            field3: res.field3,
+            field1: res._0,
+            field2: res._1,
+            field3: res._2,
         }
     }
 }
@@ -270,9 +270,9 @@ impl From<structMappingReturn> for LargeStruct {
 impl From<mappingOfStructMappingsReturn> for LargeStruct {
     fn from(res: mappingOfStructMappingsReturn) -> Self {
         Self {
-            field1: res.field1,
-            field2: res.field2,
-            field3: res.field3,
+            field1: res._0,
+            field2: res._1,
+            field3: res._2,
         }
     }
 }
