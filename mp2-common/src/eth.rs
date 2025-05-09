@@ -128,11 +128,16 @@ pub fn left_pad<const N: usize>(slice: &[u8]) -> [u8; N] {
 }
 
 /// Query the latest block.
-pub async fn query_latest_block<T: Transport + Clone>(provider: &RootProvider<T>) -> Result<Block> {
+pub async fn query_latest_block<
+    T: Transport + Clone + alloy::providers::Network<BlockResponse = Block>,
+>(
+    provider: &RootProvider<T>,
+) -> Result<Block> {
     // Query the MPT proof with retries.
     for i in 0..RETRY_NUM {
         if let Ok(response) = provider
-            .get_block_by_number(BlockNumberOrTag::Latest, true.into())
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .full()
             .await
         {
             // Has one block at least.
@@ -311,7 +316,7 @@ impl ProofQuery {
             slot: StorageSlot::Mapping(mapping_key, slot),
         }
     }
-    pub async fn query_mpt_proof<T: Transport + Clone>(
+    pub async fn query_mpt_proof<T: Transport + Clone + alloy::providers::Network>(
         &self,
         provider: &RootProvider<T>,
         block: BlockNumberOrTag,
