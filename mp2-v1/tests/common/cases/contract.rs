@@ -131,11 +131,11 @@ pub enum MappingUpdate<K, V> {
 
 impl<K, V> From<&MappingUpdate<K, V>> for MappingOperation {
     fn from(update: &MappingUpdate<K, V>) -> Self {
-        match update {
-            MappingUpdate::Deletion(_, _) => MappingOperation::Deletion,
-            MappingUpdate::Update(_, _, _) => MappingOperation::Update,
-            MappingUpdate::Insertion(_, _) => MappingOperation::Insertion,
-        }
+        Self::from(match update {
+            MappingUpdate::Deletion(_, _) => 0,
+            MappingUpdate::Update(_, _, _) => 1,
+            MappingUpdate::Insertion(_, _) => 2,
+        })
     }
 }
 
@@ -159,7 +159,7 @@ impl ContractController for Vec<MappingUpdate<MappingKey, Address>> {
                     MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => (*k, *v),
                 };
                 MappingChange {
-                    operation,
+                    operation: operation.into(),
                     key,
                     value,
                 }
@@ -213,7 +213,7 @@ impl ContractController for Vec<MappingUpdate<MappingKey, LargeStruct>> {
                     | MappingUpdate::Update(k, _, v) => (*k, v.field1, v.field2, v.field3),
                 };
                 MappingStructChange {
-                    operation,
+                    operation: operation.into(),
                     key,
                     field1,
                     field2,
@@ -267,7 +267,7 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, U256>> {
                 };
 
                 MappingOfSingleValueMappingsChange {
-                    operation,
+                    operation: operation.into(),
                     outerKey: k.outer_key,
                     innerKey: k.inner_key,
                     value: *v,
@@ -332,7 +332,7 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, LargeStruct>
                 };
 
                 MappingOfStructMappingsChange {
-                    operation,
+                    operation: operation.into(),
                     outerKey: k.outer_key,
                     innerKey: k.inner_key,
                     field1: v.field1,
