@@ -154,7 +154,6 @@ impl ContractController for Vec<MappingUpdate<MappingKey, Address>> {
             .iter()
             .map(|tuple| {
                 let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
                 let (key, value) = match tuple {
                     MappingUpdate::Deletion(k, _) => (*k, *DEFAULT_ADDRESS),
                     MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => (*k, *v),
@@ -208,7 +207,6 @@ impl ContractController for Vec<MappingUpdate<MappingKey, LargeStruct>> {
             .iter()
             .map(|tuple| {
                 let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
                 let (key, field1, field2, field3) = match tuple {
                     MappingUpdate::Insertion(k, v)
                     | MappingUpdate::Deletion(k, v)
@@ -262,7 +260,6 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, U256>> {
             .iter()
             .map(|tuple| {
                 let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
                 let (k, v) = match tuple {
                     MappingUpdate::Insertion(k, v)
                     | MappingUpdate::Deletion(k, v)
@@ -328,7 +325,6 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, LargeStruct>
             .iter()
             .map(|tuple| {
                 let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
                 let (k, v) = match tuple {
                     MappingUpdate::Insertion(k, v)
                     | MappingUpdate::Deletion(k, v)
