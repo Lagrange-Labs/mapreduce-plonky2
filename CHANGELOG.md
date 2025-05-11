@@ -1,8 +1,22 @@
 # Changelog
 
+## [2.1.1] - 2025-05-11
+
+[Compare 1b23c63 ... c2df1e2](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/1b23c637f120352cae399ca329e5292d3354408f...c2df1e28f8bbbc17e46c3156c5945f4f1839bc3e)
+
+### Miscellaneous Tasks
+
+
+
+- Move PPs generation to worker - in [PR #488](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/488)
+
+- Update dependencies - in [PR #487](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/487)
+
+- Updates alloy dependency - in [PR #489](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/489)
+
 ## [2.1.0] - 2025-05-05
 
-[Compare 1d7cf8a ... c205f24](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/1d7cf8acf76eda463609baafb678e81e3a61b20c...c205f24bb70abc9dd5c38470134d2c57ef5af3b5)
+[Compare 1d7cf8a ... 1b23c63](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/1d7cf8acf76eda463609baafb678e81e3a61b20c...1b23c637f120352cae399ca329e5292d3354408f)
 
 ### Features
 
@@ -35,6 +49,13 @@
 - Add Deserialize/Serialize for TableRow/OffChainRootOfTrust - in [PR #483](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/483)
 
 - Add step to upload PPs to main account in release workflow - in [PR #481](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/481)
+
+
+### Release
+
+
+
+- V2.1.0 - in [PR #486](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/486)
 
 ## [2.0.0] - 2025-04-17
 

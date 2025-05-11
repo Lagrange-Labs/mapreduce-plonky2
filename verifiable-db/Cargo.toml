@@ -1,6 +1,6 @@
 [package]
 name = "verifiable-db"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 
 [dependencies]
@@ -19,10 +19,10 @@ plonky2_ecgfp5.workspace = true
 rand.workspace = true
 serde.workspace = true
 
-mp2_common = { path = "../mp2-common" , version = "2.1.0" }
-recursion_framework = { path = "../recursion-framework" , version = "2.1.0" }
-ryhope = { path = "../ryhope" , version = "2.1.0" }
-mp2_test = { path = "../mp2-test" , version = "2.1.0" }
+mp2_common = { path = "../mp2-common" , version = "2.1.1" }
+recursion_framework = { path = "../recursion-framework" , version = "2.1.1" }
+ryhope = { path = "../ryhope" , version = "2.1.1" }
+mp2_test = { path = "../mp2-test" , version = "2.1.1" }
 
 [dev-dependencies]
 futures.workspace = true
