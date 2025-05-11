@@ -1,5 +1,5 @@
 use super::{
-    slot_info::{LargeStruct, MappingKey, MappingOfMappingsKey, StorageSlotValue},
+    slot_info::{LargeStruct, MappingKey, MappingOfMappingsKey},
     table_source::DEFAULT_ADDRESS,
 };
 use crate::common::{
@@ -30,11 +30,11 @@ impl Contract {
     pub(crate) async fn deploy_simple_contract(ctx: &TestContext) -> Self {
         // Create a provider with the wallet for contract deployment and interaction.
         let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
+            .connect_http(ctx.rpc_url.parse().unwrap());
 
         let contract = Simple::deploy(&provider).await.unwrap();
+
         let address = *contract.address();
         info!("Deployed Simple contract at address: {address}");
         let chain_id = ctx.rpc.get_chain_id().await.unwrap();
@@ -63,24 +63,22 @@ pub struct SimpleSingleValues {
 impl ContractController for SimpleSingleValues {
     async fn current_values(ctx: &TestContext, contract: &Contract) -> Self {
         let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
+            .connect_http(ctx.rpc_url.parse().unwrap());
         let contract = Simple::new(contract.address, &provider);
 
         SimpleSingleValues {
-            s1: contract.s1().call().await.unwrap()._0,
-            s2: contract.s2().call().await.unwrap()._0,
-            s3: contract.s3().call().await.unwrap()._0,
-            s4: contract.s4().call().await.unwrap()._0,
+            s1: contract.s1().call().await.unwrap(),
+            s2: contract.s2().call().await.unwrap(),
+            s3: contract.s3().call().await.unwrap(),
+            s4: contract.s4().call().await.unwrap(),
         }
     }
 
     async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
+            .connect_http(ctx.rpc_url.parse().unwrap());
         let simple_contract = Simple::new(contract.address, &provider);
 
         let call = simple_contract.setSimples(self.s1, self.s2, self.s3.clone(), self.s4);
@@ -97,9 +95,8 @@ impl ContractController for SimpleSingleValues {
 impl ContractController for LargeStruct {
     async fn current_values(ctx: &TestContext, contract: &Contract) -> Self {
         let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
+            .connect_http(ctx.rpc_url.parse().unwrap());
         let contract = Simple::new(contract.address, &provider);
 
         contract.simpleStruct().call().await.unwrap().into()
@@ -107,9 +104,8 @@ impl ContractController for LargeStruct {
 
     async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
+            .connect_http(ctx.rpc_url.parse().unwrap());
         let simple_contract = Simple::new(contract.address, &provider);
 
         let call = simple_contract.setSimpleStruct(self.field1, self.field2, self.field3);
@@ -150,22 +146,20 @@ impl ContractController for Vec<MappingUpdate<MappingKey, Address>> {
 
     async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
+            .connect_http(ctx.rpc_url.parse().unwrap());
         let contract = Simple::new(contract.address, &provider);
 
         let changes = self
             .iter()
             .map(|tuple| {
                 let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
                 let (key, value) = match tuple {
                     MappingUpdate::Deletion(k, _) => (*k, *DEFAULT_ADDRESS),
                     MappingUpdate::Update(k, _, v) | MappingUpdate::Insertion(k, v) => (*k, *v),
                 };
                 MappingChange {
-                    operation,
+                    operation: operation.into(),
                     key,
                     value,
                 }
@@ -179,19 +173,17 @@ impl ContractController for Vec<MappingUpdate<MappingKey, Address>> {
             match update {
                 MappingUpdate::Deletion(k, _) => {
                     let res = contract.m1(*k).call().await.unwrap();
-                    let v: U256 = res._0.into_word().into();
-                    assert_eq!(v, U256::ZERO, "Key deletion is wrong on contract");
+                    let v: Address = res.0.into();
+                    assert_eq!(v, Address::ZERO, "Key deletion is wrong on contract");
                 }
                 MappingUpdate::Insertion(k, v) => {
                     let res = contract.m1(*k).call().await.unwrap();
-                    let new_value: U256 = res._0.into_word().into();
-                    let new_value = Address::from_u256_slice(&[new_value]);
+                    let new_value: Address = res.0.into();
                     assert_eq!(&new_value, v, "Key insertion is wrong on contract");
                 }
                 MappingUpdate::Update(k, _, v) => {
                     let res = contract.m1(*k).call().await.unwrap();
-                    let new_value: U256 = res._0.into_word().into();
-                    let new_value = Address::from_u256_slice(&[new_value]);
+                    let new_value: Address = res.0.into();
                     assert_eq!(&new_value, v, "Key update is wrong on contract");
                 }
             }
@@ -207,23 +199,21 @@ impl ContractController for Vec<MappingUpdate<MappingKey, LargeStruct>> {
 
     async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
+            .connect_http(ctx.rpc_url.parse().unwrap());
         let contract = Simple::new(contract.address, &provider);
 
         let changes = self
             .iter()
             .map(|tuple| {
                 let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
                 let (key, field1, field2, field3) = match tuple {
                     MappingUpdate::Insertion(k, v)
                     | MappingUpdate::Deletion(k, v)
                     | MappingUpdate::Update(k, _, v) => (*k, v.field1, v.field2, v.field3),
                 };
                 MappingStructChange {
-                    operation,
+                    operation: operation.into(),
                     key,
                     field1,
                     field2,
@@ -262,16 +252,14 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, U256>> {
 
     async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
+            .connect_http(ctx.rpc_url.parse().unwrap());
         let contract = Simple::new(contract.address, &provider);
 
         let changes = self
             .iter()
             .map(|tuple| {
                 let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
                 let (k, v) = match tuple {
                     MappingUpdate::Insertion(k, v)
                     | MappingUpdate::Deletion(k, v)
@@ -279,7 +267,7 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, U256>> {
                 };
 
                 MappingOfSingleValueMappingsChange {
-                    operation,
+                    operation: operation.into(),
                     outerKey: k.outer_key,
                     innerKey: k.inner_key,
                     value: *v,
@@ -298,7 +286,7 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, U256>> {
                         .call()
                         .await
                         .unwrap();
-                    assert_eq!(&res._0, v, "Insertion is wrong on contract");
+                    assert_eq!(&res, v, "Insertion is wrong on contract");
                 }
                 MappingUpdate::Deletion(k, _) => {
                     let res = contract
@@ -306,7 +294,7 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, U256>> {
                         .call()
                         .await
                         .unwrap();
-                    assert_eq!(res._0, U256::ZERO, "Deletion is wrong on contract");
+                    assert_eq!(res, U256::ZERO, "Deletion is wrong on contract");
                 }
                 MappingUpdate::Update(k, _, v) => {
                     let res = contract
@@ -314,7 +302,7 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, U256>> {
                         .call()
                         .await
                         .unwrap();
-                    assert_eq!(&res._0, v, "Update is wrong on contract");
+                    assert_eq!(&res, v, "Update is wrong on contract");
                 }
             }
         }
@@ -329,16 +317,14 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, LargeStruct>
 
     async fn update_contract(&self, ctx: &TestContext, contract: &Contract) {
         let provider = ProviderBuilder::new()
-            .with_recommended_fillers()
             .wallet(ctx.wallet())
-            .on_http(ctx.rpc_url.parse().unwrap());
+            .connect_http(ctx.rpc_url.parse().unwrap());
         let contract = Simple::new(contract.address, &provider);
 
         let changes = self
             .iter()
             .map(|tuple| {
                 let operation: MappingOperation = tuple.into();
-                let operation = operation.into();
                 let (k, v) = match tuple {
                     MappingUpdate::Insertion(k, v)
                     | MappingUpdate::Deletion(k, v)
@@ -346,7 +332,7 @@ impl ContractController for Vec<MappingUpdate<MappingOfMappingsKey, LargeStruct>
                 };
 
                 MappingOfStructMappingsChange {
-                    operation,
+                    operation: operation.into(),
                     outerKey: k.outer_key,
                     innerKey: k.inner_key,
                     field1: v.field1,

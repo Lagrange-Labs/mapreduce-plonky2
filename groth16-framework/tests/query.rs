@@ -139,7 +139,7 @@ fn verify_query_in_solidity(asset_dir: &str) {
 
     // Parse the output returned from the Solidity function.
     let mut output = contract
-        .decode_output("processQuery", &output, true)
+        .decode_output("processQuery", &output)
         .expect("Failed to decode the Solidity output");
     // Should return one query output struct.
     assert_eq!(output.len(), 1);

@@ -152,10 +152,11 @@ mod test {
     #[tokio::test]
     async fn prove_and_verify_block_extraction_circuit() -> Result<()> {
         let url = get_sepolia_url();
-        let provider = ProviderBuilder::new().on_http(url.parse().unwrap());
+        let provider = ProviderBuilder::new().connect_http(url.parse().unwrap());
         let block_number = BlockNumberOrTag::Latest;
         let block = provider
-            .get_block_by_number(block_number, true.into())
+            .get_block_by_number(block_number)
+            .full()
             .await
             .unwrap()
             .unwrap();
