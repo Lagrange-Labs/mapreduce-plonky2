@@ -24,7 +24,7 @@ use crate::{
     },
     MAX_LEAF_NODE_LEN,
 };
-use alloy::primitives::{Address, U256};
+pub use alloy::primitives::{Address, U256};
 use anyhow::Result;
 use itertools::Itertools;
 use log::debug;
@@ -117,7 +117,7 @@ pub fn build_circuits_params<const MAX_COLUMNS: usize>() -> PublicParameters<MAX
     sanity_check();
 
     assert!(MAX_COLUMNS >= MAX_FIELD_PER_EVM,
-        "MAX_COLUMNS must be greater than the maximum number of fields extarcted per evm word, which is 
+        "MAX_COLUMNS must be greater than the maximum number of fields extarcted per evm word, which is
         {MAX_FIELD_PER_EVM}; please, instantiate the `PublicParameters` with a big enough value"
     );
 
