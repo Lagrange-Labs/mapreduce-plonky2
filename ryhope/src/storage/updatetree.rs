@@ -1,9 +1,9 @@
 use crate::{
-    UserEpoch,
     error::RyhopeError,
     tree::{NodeContext, TreeTopology},
+    UserEpoch,
 };
-use futures::{FutureExt, future::BoxFuture};
+use futures::{future::BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},

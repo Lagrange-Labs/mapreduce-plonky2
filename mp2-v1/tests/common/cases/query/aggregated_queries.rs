@@ -4,52 +4,53 @@ use plonky2::{
 use std::{cmp::max, collections::HashMap};
 
 use crate::common::{
-    TableInfo,
     cases::{
         indexing::BLOCK_COLUMN_NAME,
-        query::{NUM_CHUNKS, NUM_ROWS, QueryCooking, SqlReturn, SqlType},
+        query::{QueryCooking, SqlReturn, SqlType, NUM_CHUNKS, NUM_ROWS},
         table_source::BASE_VALUE,
     },
     proof_storage::{ProofKey, ProofStorage},
     table::Table,
+    TableInfo,
 };
 
 use crate::context::TestContext;
 use alloy::primitives::U256;
 use anyhow::Result;
-use futures::{FutureExt, StreamExt, stream};
+use futures::{stream, FutureExt, StreamExt};
 
 use itertools::Itertools;
 use log::*;
 use mp2_common::{
-    C, D, F,
-    proof::{ProofWithVK, deserialize_proof},
+    proof::{deserialize_proof, ProofWithVK},
     types::HashOutput,
+    C, D, F,
 };
 use mp2_v1::{
     api::MetadataHash,
     indexing::{
-        self, LagrangeNode,
+        self,
         block::BlockPrimaryIndex,
         cell::MerkleCell,
         row::{MerkleRowTree, Row, RowPayload, RowTreeKey},
+        LagrangeNode,
     },
     query::{
-        batching_planner::{UTForChunkProofs, UTKey, generate_chunks_and_update_tree},
-        planner::{NonExistenceInputIndex, NonExistenceInputRow, TreeFetcher, execute_row_query},
+        batching_planner::{generate_chunks_and_update_tree, UTForChunkProofs, UTKey},
+        planner::{execute_row_query, NonExistenceInputIndex, NonExistenceInputRow, TreeFetcher},
     },
 };
 use parsil::{
-    DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
     assembler::{DynamicCircuitPis, StaticCircuitPis},
     queries::{core_keys_for_index_tree, core_keys_for_row_tree},
+    DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
-    UserEpoch,
     storage::{
-        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
         updatetree::{Next, WorkplanItem},
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
     },
+    UserEpoch,
 };
 use sqlparser::ast::Query;
 use tokio_postgres::Row as PsqlRow;
@@ -63,8 +64,8 @@ use verifiable_db::{
 };
 
 use super::{
-    GlobalCircuitInput, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
-    QueryCircuitInput, QueryPlanner, RevelationCircuitInput,
+    GlobalCircuitInput, QueryCircuitInput, QueryPlanner, RevelationCircuitInput,
+    MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
 };
 
 pub type RevelationPublicInputs<'a> =
