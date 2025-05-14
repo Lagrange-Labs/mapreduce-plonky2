@@ -199,7 +199,7 @@ where
                 .await?
                 .expect("the node can not not be present");
             payload.aggregate(child_data.into_iter());
-            plan.done(&item)?;
+            plan.done(item.k())?;
             self.storage
                 .data_mut()
                 .store(item.k().to_owned(), payload)
