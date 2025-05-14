@@ -251,7 +251,7 @@ pub(crate) async fn prove_query(
             ));
             planner.ctx.storage.store_proof(proof_key.clone(), proof)?;
             proof_id = Some(proof_key);
-            workplan.done(&wk)?;
+            workplan.done(&wk.k())?;
         }
         proof_id.unwrap()
     };
