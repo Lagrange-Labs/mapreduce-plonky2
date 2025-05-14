@@ -4,53 +4,52 @@ use plonky2::{
 use std::{cmp::max, collections::HashMap};
 
 use crate::common::{
+    TableInfo,
     cases::{
         indexing::BLOCK_COLUMN_NAME,
-        query::{QueryCooking, SqlReturn, SqlType, NUM_CHUNKS, NUM_ROWS},
+        query::{NUM_CHUNKS, NUM_ROWS, QueryCooking, SqlReturn, SqlType},
         table_source::BASE_VALUE,
     },
     proof_storage::{ProofKey, ProofStorage},
     table::Table,
-    TableInfo,
 };
 
 use crate::context::TestContext;
 use alloy::primitives::U256;
 use anyhow::Result;
-use futures::{stream, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, stream};
 
 use itertools::Itertools;
 use log::*;
 use mp2_common::{
-    proof::{deserialize_proof, ProofWithVK},
-    types::HashOutput,
     C, D, F,
+    proof::{ProofWithVK, deserialize_proof},
+    types::HashOutput,
 };
 use mp2_v1::{
     api::MetadataHash,
     indexing::{
-        self,
+        self, LagrangeNode,
         block::BlockPrimaryIndex,
         cell::MerkleCell,
         row::{MerkleRowTree, Row, RowPayload, RowTreeKey},
-        LagrangeNode,
     },
     query::{
-        batching_planner::{generate_chunks_and_update_tree, UTForChunkProofs, UTKey},
-        planner::{execute_row_query, NonExistenceInputIndex, NonExistenceInputRow, TreeFetcher},
+        batching_planner::{UTForChunkProofs, UTKey, generate_chunks_and_update_tree},
+        planner::{NonExistenceInputIndex, NonExistenceInputRow, TreeFetcher, execute_row_query},
     },
 };
 use parsil::{
+    DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
     assembler::{DynamicCircuitPis, StaticCircuitPis},
     queries::{core_keys_for_index_tree, core_keys_for_row_tree},
-    DEFAULT_MAX_BLOCK_PLACEHOLDER, DEFAULT_MIN_BLOCK_PLACEHOLDER,
 };
 use ryhope::{
-    storage::{
-        updatetree::{Next, WorkplanItem},
-        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
-    },
     UserEpoch,
+    storage::{
+        EpochKvStorage, RoEpochKvStorage, TreeTransactionalStorage,
+        updatetree::{Next, WorkplanItem},
+    },
 };
 use sqlparser::ast::Query;
 use tokio_postgres::Row as PsqlRow;
@@ -64,8 +63,8 @@ use verifiable_db::{
 };
 
 use super::{
-    GlobalCircuitInput, QueryCircuitInput, QueryPlanner, RevelationCircuitInput,
-    MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
+    GlobalCircuitInput, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS, MAX_NUM_PLACEHOLDERS,
+    QueryCircuitInput, QueryPlanner, RevelationCircuitInput,
 };
 
 pub type RevelationPublicInputs<'a> =
@@ -251,7 +250,7 @@ pub(crate) async fn prove_query(
             ));
             planner.ctx.storage.store_proof(proof_key.clone(), proof)?;
             proof_id = Some(proof_key);
-            workplan.done(&wk.k())?;
+            workplan.done(wk.k())?;
         }
         proof_id.unwrap()
     };
