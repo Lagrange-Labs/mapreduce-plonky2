@@ -59,8 +59,7 @@ jobs:
       - name: Generate a random port number
         run: echo PGSQL_PORT=$(shuf -i 5000-30000 -n1) > .env
       - name: Install foundry
-        shell: devenv shell bash -- -e {0}
-        run: cargo install --root ${HOME}/.cargo --git https://github.com/foundry-rs/foundry --rev v1.1.0 forge anvil
+        uses: foundry-rs/foundry-toolchain@v1
       - name: Put cargo in PATH
         shell: devenv shell bash -- -e {0}
         run: echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
