@@ -216,6 +216,18 @@ mod test {
             provable_data_commitment,
             first_block_proof.serialize()?,
         )?;
+        // get previous block hash
+        let prev_block_hash = {
+            let CircuitInput::FirstProof {
+                provable_data_commitment: _,
+                dummy,
+                block_proof: _,
+            } = &input
+            else {
+                unreachable!("Expected first proof input")
+            };
+            dummy.block_hash.to_vec()
+        };
         println!("generating first ivc proof");
         let first_ivc_proof_buff =
             params.generate_proof(input, block_set.get_recursive_circuit_set())?;
@@ -247,9 +259,10 @@ mod test {
             assert_eq!(ivc_pi.z0_u256(), min);
             assert_eq!(ivc_pi.zi_u256(), min);
             let commitment = if provable_data_commitment {
-                flatten_poseidon_hash_value(compute_data_commitment(&weierstrass_to_point(
-                    &block_pi.new_value_set_digest_point(),
-                )))
+                flatten_poseidon_hash_value(compute_data_commitment(
+                    prev_block_hash,
+                    &weierstrass_to_point(&block_pi.new_value_set_digest_point()),
+                ))
             } else {
                 block_pi.block_hash()
             };
@@ -319,7 +332,10 @@ mod test {
             assert_eq!(
                 ivc_pi.block_hash_fields(),
                 if provable_data_commitment {
-                    flatten_poseidon_hash_value(compute_data_commitment(&exp_digest))
+                    flatten_poseidon_hash_value(compute_data_commitment(
+                        prev_block_hash.to_vec(),
+                        &Point::from_fields(&next_value_digest),
+                    ))
                 } else {
                     block_pi.block_hash()
                 }
