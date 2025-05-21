@@ -485,7 +485,7 @@ impl<M: Debug + Default, P: Debug + Clone> ScopeTable<M, P> {
     /// Resolve a free-standing (non-qualified) identifier in the current
     /// context.
     pub fn resolve_freestanding(&self, symbol: &Ident) -> Result<Symbol<P>> {
-        self.resolve_handle(&Handle::Simple(symbol.value.clone()))
+        self.resolve_handle(&Handle::Simple(symbol.to_string()))
     }
 
     /// Resolve a string identifier in the current context.
