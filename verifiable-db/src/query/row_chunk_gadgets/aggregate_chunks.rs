@@ -1,13 +1,14 @@
+use crate::{
+    query::universal_circuit::universal_query_gadget::{
+        OutputValuesTarget, UniversalQueryOutputWires,
+    },
+    CBuilder,
+};
 use mp2_common::{
-    types::CBuilder,
     u256::UInt256Target,
     utils::{FromTargets, SelectTarget},
 };
 use plonky2::iop::target::{BoolTarget, Target};
-
-use crate::query::universal_circuit::universal_query_gadget::{
-    OutputValuesTarget, UniversalQueryOutputWires,
-};
 
 use super::{consecutive_rows::are_consecutive_rows, BoundaryRowDataTarget, RowChunkDataTarget};
 
@@ -97,15 +98,15 @@ where
 mod tests {
     use std::array;
 
+    use crate::{CBuilder, C, D, F};
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
         array::ToField,
         check_panic,
-        types::{CBuilder, HashOutput},
+        types::HashOutput,
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
         utils::{FromFields, ToFields, ToTargets},
-        C, D, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

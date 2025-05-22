@@ -22,7 +22,7 @@ use crate::{
         identifier_for_inner_mapping_key_column, identifier_for_mapping_key_column,
         identifier_for_outer_mapping_key_column, identifier_for_value_column, ColumnId,
     },
-    MAX_LEAF_NODE_LEN,
+    F, H, MAX_LEAF_NODE_LEN,
 };
 use alloy::primitives::{Address, U256};
 use anyhow::Result;
@@ -31,10 +31,9 @@ use log::debug;
 use mp2_common::{
     digest::Digest,
     group_hashing::map_to_curve_point,
-    poseidon::{flatten_poseidon_hash_value, FLATTEN_POSEIDON_LEN, H},
+    poseidon::{flatten_poseidon_hash_value, FLATTEN_POSEIDON_LEN},
     types::HashOutput,
     utils::{Endianness, Fieldable, Packer, ToFields},
-    F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},

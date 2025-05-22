@@ -171,7 +171,7 @@ impl<F: SerializableRichField<D>, const D: usize, const NUM_PUBLIC_INPUTS: usize
 mod tests {
     use std::array;
 
-    use mp2_common::{C, D, F};
+    use crate::{C, D, F};
     use plonky2::plonk::circuit_data::CircuitData;
 
     use plonky2::field::types::Sample;
@@ -514,7 +514,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(
-            format!("{}", err),
+            format!("{err}"),
             "circuit digest not found",
             "universal verifier didn't fail when verifying a proof not belonging to circuit set"
         );

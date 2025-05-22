@@ -882,7 +882,7 @@ impl TableIndexing {
                 expected_root_of_trust,
             )
             .await;
-        info!("Generated final IVC proof for block {}", current_block);
+        info!("Generated final IVC proof for block {current_block}");
 
         Ok(())
     }
@@ -903,10 +903,7 @@ impl TableIndexing {
                 ProofKey::ContractExtraction((self.contract.as_ref().unwrap().address, bn));
             let contract_proof = match ctx.storage.get_proof_exact(&contract_proof_key) {
                 Ok(proof) => {
-                    info!(
-                        "Loaded Contract Extraction (C.3) proof for block number {}",
-                        bn
-                    );
+                    info!("Loaded Contract Extraction (C.3) proof for block number {bn}");
                     proof
                 }
                 Err(_) => {
@@ -919,10 +916,7 @@ impl TableIndexing {
                         .await;
                     ctx.storage
                         .store_proof(contract_proof_key, contract_proof.clone())?;
-                    info!(
-                        "Generated Contract Extraction (C.3) proof for block number {}",
-                        bn
-                    );
+                    info!("Generated Contract Extraction (C.3) proof for block number {bn}");
                     {
                         let pvk = ProofWithVK::deserialize(&contract_proof)?;
                         let pis = contract_extraction::PublicInputs::from_slice(
@@ -946,10 +940,7 @@ impl TableIndexing {
             let block_proof_key = ProofKey::BlockExtraction(bn as BlockPrimaryIndex);
             let block_proof = match ctx.storage.get_proof_exact(&block_proof_key) {
                 Ok(proof) => {
-                    info!(
-                        "Loaded Block Extraction (C.4) proof for block number {}",
-                        bn
-                    );
+                    info!("Loaded Block Extraction (C.4) proof for block number {bn}");
                     proof
                 }
                 Err(_) => {
@@ -958,10 +949,7 @@ impl TableIndexing {
                         .await
                         .unwrap();
                     ctx.storage.store_proof(block_proof_key, proof.clone())?;
-                    info!(
-                        "Generated Block Extraction (C.4) proof for block number {}",
-                        bn
-                    );
+                    info!("Generated Block Extraction (C.4) proof for block number {bn}");
                     proof
                 }
             };
@@ -1085,7 +1073,7 @@ async fn build_mapping_table(
         secondary: secondary_column,
         rest: rest_columns,
     };
-    debug!("MAPPING ZK COLUMNS -> {:?}", columns);
+    debug!("MAPPING ZK COLUMNS -> {columns:?}");
     let index_genesis_block = ctx.block_number().await;
     let row_unique_id = TableRowUniqueID::Mapping(key_id);
     Table::new(
@@ -1198,7 +1186,7 @@ async fn build_mapping_of_mappings_table(
         secondary: secondary_column,
         rest: rest_columns,
     };
-    debug!("MAPPING OF MAPPINGS ZK COLUMNS -> {:?}", columns);
+    debug!("MAPPING OF MAPPINGS ZK COLUMNS -> {columns:?}");
     let index_genesis_block = ctx.block_number().await;
     let row_unique_id = TableRowUniqueID::MappingOfMappings(outer_key_id, inner_key_id);
     Table::new(

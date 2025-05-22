@@ -1,4 +1,5 @@
-use mp2_common::{types::CBuilder, u256::CircuitBuilderU256, utils::FromTargets, F};
+use mp2_common::{u256::CircuitBuilderU256, utils::FromTargets, };
+use crate::{CBuilder, F};
 use plonky2::iop::{target::Target, witness::PartialWitness};
 use serde::{Deserialize, Serialize};
 
@@ -166,11 +167,10 @@ mod tests {
     use itertools::Itertools;
     use mp2_common::{
         array::ToField,
-        poseidon::{flatten_poseidon_hash_value, H},
-        types::CBuilder,
+        poseidon::flatten_poseidon_hash_value,
         utils::{FromFields, ToFields},
-        C, D, F,
     };
+    use crate::{D, F, C, H, CBuilder};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,

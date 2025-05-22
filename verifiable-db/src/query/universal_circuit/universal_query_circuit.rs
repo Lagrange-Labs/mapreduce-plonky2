@@ -1,22 +1,23 @@
 use std::iter::once;
 
-use crate::query::{
-    computational_hash_ids::{Output, PlaceholderIdentifier},
-    pi_len,
-    public_inputs::PublicInputsUniversalCircuit,
-    row_chunk_gadgets::BoundaryRowDataTarget,
-    utils::QueryBounds,
+use crate::{
+    query::{
+        computational_hash_ids::{Output, PlaceholderIdentifier},
+        pi_len,
+        public_inputs::PublicInputsUniversalCircuit,
+        row_chunk_gadgets::BoundaryRowDataTarget,
+        utils::QueryBounds,
+    },
+    CBuilder, CHasher, HashPermutation, C, D, F,
 };
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    poseidon::{empty_poseidon_hash, HashPermutation},
+    poseidon::empty_poseidon_hash,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    types::CBuilder,
     utils::{FromTargets, HashBuilder, ToFields, ToTargets},
-    CHasher, C, D, F,
 };
 use plonky2::{
     field::types::Field,
@@ -482,6 +483,7 @@ where
 mod tests {
     use std::{array, iter::once};
 
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
@@ -490,7 +492,6 @@ mod tests {
         group_hashing::map_to_curve_point,
         poseidon::empty_poseidon_hash,
         utils::{FromFields, ToFields, TryIntoBool},
-        C, D, F,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},

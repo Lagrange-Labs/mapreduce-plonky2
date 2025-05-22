@@ -91,7 +91,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use mp2_common::{C, D, F};
+    use crate::{C, D, F};
     use plonky2::plonk::circuit_data::CircuitConfig;
 
     use super::{build_data_for_universal_verifier, RECURSION_THRESHOLD};

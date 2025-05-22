@@ -1,3 +1,4 @@
+use crate::{C, D, F};
 use alloy::primitives::U256;
 use anyhow::{anyhow, ensure, Result};
 use itertools::Itertools;
@@ -6,7 +7,6 @@ use mp2_common::{
     proof::ProofWithVK,
     types::HashOutput,
     utils::{keccak256, Packer},
-    C, D, F,
 };
 use plonky2::{field::types::Field, iop::target::Target, plonk::circuit_data::VerifierCircuitData};
 use recursion_framework::{
@@ -280,12 +280,12 @@ impl CircuitInput {
     /// It requires the following inputs:
     /// - `primary_index`: the primary index value for all the rows we are adding to the table
     /// - `root_of_trust`: the root of trust for the data placed in the table, if any;
-    ///    `OffChainRootOfTrust::Dummy` is expected if there is no root of trust for the table
+    ///   `OffChainRootOfTrust::Dummy` is expected if there is no root of trust for the table
     /// - `prev_epoch_proof`: The final IVC proof for the off-chain table, proving updates up to the table up
-    ///    to the previous epoch, if any
+    ///   to the previous epoch, if any
     /// - `table_rows` : Rows to be added to the table; they are assumed to all have the same primary index
     /// - `row_unique_columns` : The identifiers of the columns that uniquely identifies each row (i.e., primary key
-    ///    columns)
+    ///   columns)
     pub fn new_no_provable_input<
         PrimaryIndex: PartialEq + Eq + Default + Clone + Debug + TryInto<U256>,
     >(
@@ -337,12 +337,9 @@ impl CircuitInput {
 
 #[cfg(test)]
 mod tests {
-    use mp2_common::{
-        proof::{serialize_proof, ProofWithVK},
-        C, D, F,
-    };
+    use crate::{C, D, F};
+    use mp2_common::proof::{serialize_proof, ProofWithVK};
     use mp2_test::circuit::TestDummyCircuit;
-
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
 
     use crate::{

@@ -1,5 +1,6 @@
 use std::{array, iter::repeat};
 
+use crate::{CBuilder, F};
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 use itertools::Itertools;
@@ -8,9 +9,7 @@ use mp2_common::{
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
-    F,
 };
 use plonky2::iop::{
     target::{BoolTarget, Target},
@@ -220,13 +219,13 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
 mod tests {
     use std::{array, iter::repeat};
 
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
         array::ToField,
         poseidon::empty_poseidon_hash,
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-        C, D, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

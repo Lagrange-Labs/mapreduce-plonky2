@@ -2,14 +2,14 @@
 
 use std::array::from_fn as create_array;
 
+use crate::{CBuilder, F};
 use alloy::primitives::U256;
 use mp2_common::{
     keccak::PACKED_HASH_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::{CBuilder, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     u256::{self, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
-    F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
@@ -221,7 +221,7 @@ mod tests {
     use crate::block_tree::tests::random_block_index_pi;
 
     use super::*;
-    use mp2_common::{C, D, F};
+    use crate::{C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::{
         target::Target,

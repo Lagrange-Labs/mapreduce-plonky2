@@ -3,15 +3,14 @@
 //! of the tree, proving over the same path.
 
 use super::public_inputs::PublicInputs;
+use crate::{CBuilder, CHasher, D, F};
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{FromTargets, ToTargets},
-    CHasher, D, F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
@@ -172,11 +171,8 @@ impl CircuitLogicWires<F, D, 1> for MembershipWires {
 #[cfg(test)]
 mod tests {
     use super::{super::tests::random_block_index_pi, *};
-    use mp2_common::{
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-        C,
-    };
+    use crate::{C, H};
+    use mp2_common::utils::{Fieldable, ToFields};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

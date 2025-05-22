@@ -1,3 +1,4 @@
+use crate::{C, D, F};
 use itertools::Itertools;
 use mp2_common::{
     default_config,
@@ -6,7 +7,6 @@ use mp2_common::{
     proof::{deserialize_proof, verify_proof_fixed_circuit, ProofWithVK},
     serialization::{deserialize, serialize},
     u256::UInt256Target,
-    C, D, F,
 };
 use plonky2::{
     field::{goldilocks_field::GoldilocksField, types::Field},

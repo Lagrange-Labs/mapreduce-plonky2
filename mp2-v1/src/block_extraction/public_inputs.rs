@@ -1,7 +1,7 @@
+use crate::{CBuilder, OutputHash};
 use mp2_common::{
-    keccak::{OutputHash, PACKED_HASH_LEN},
+    keccak::PACKED_HASH_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::CBuilder,
     u256::{self, UInt256Target},
     utils::FromTargets,
 };

@@ -268,10 +268,7 @@ impl TestContext {
             || cells_update.previous_row_key == Default::default());
         // impacted keys by the update
         let impacted_keys = cells_update.to_update.nodes().collect_vec();
-        debug!(
-            "  -- -CELL TREE impacted keys in new update: {:?}",
-            impacted_keys
-        );
+        debug!("  -- -CELL TREE impacted keys in new update: {impacted_keys:?}");
         let updated_cells = CellCollection(
             all_cells
                 .0

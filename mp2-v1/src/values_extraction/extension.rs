@@ -3,15 +3,14 @@
 use crate::MAX_EXTENSION_NODE_LEN;
 
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
+use crate::{CBuilder, D, F as GFp};
 use anyhow::Result;
 use mp2_common::{
     array::{Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTLeafOrExtensionNode, PAD_LEN},
     public_inputs::PublicInputCommon,
-    types::{CBuilder, GFp},
     utils::Endianness,
-    D,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -98,12 +97,12 @@ impl CircuitLogicWires<GFp, D, 1> for ExtensionNodeWires {
 #[cfg(test)]
 mod tests {
     use super::{super::public_inputs::tests::new_extraction_public_inputs, *};
+    use crate::{C, D, F};
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer},
-        C, D, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

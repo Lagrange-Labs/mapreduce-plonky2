@@ -290,7 +290,7 @@ mod tests {
     use crate::framework::tests::check_panic;
 
     use super::*;
-    use mp2_common::{C, D, F};
+    use crate::{C, D, F};
     use plonky2::field::types::{Field, Sample};
 
     #[test]

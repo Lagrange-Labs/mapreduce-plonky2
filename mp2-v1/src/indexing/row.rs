@@ -1,16 +1,12 @@
 use std::{collections::HashSet, fmt::Debug};
 
 use super::{block::BlockPrimaryIndex, cell::CellTreeKey, ColumnID};
+use crate::{F, H};
 use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{Deref, From};
 use hashbrown::HashMap;
-use mp2_common::{
-    poseidon::{empty_poseidon_hash, H},
-    types::HashOutput,
-    utils::ToFields,
-    F,
-};
+use mp2_common::{poseidon::empty_poseidon_hash, types::HashOutput, utils::ToFields};
 use plonky2::{
     field::types::Field,
     hash::hash_types::HashOut,
@@ -202,8 +198,8 @@ impl<PrimaryIndex: std::fmt::Debug + Clone + Default + PartialEq + Eq> RowPayloa
     /// * the collection of cells, which MUST include the value of the secondary index
     /// * the hash of the cells tree associated to that row
     /// * the primary index value when that cells tree root proof was generated. In most cases, the
-    ///     primary value is the block index. The block would refer to the last time the cells tree
-    ///     changed for that row.
+    ///   primary value is the block index. The block would refer to the last time the cells tree
+    ///   changed for that row.
     /// * The key of the root of the cells tree.
     pub fn new(
         cells: CellCollection<PrimaryIndex>,

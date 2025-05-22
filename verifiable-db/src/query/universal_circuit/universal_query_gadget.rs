@@ -1,19 +1,19 @@
 use std::{
     fmt::Debug,
-    iter::{once, repeat},
+    iter::{once, repeat, repeat_n},
 };
 
+use crate::{CBuilder, CHasher, F, H};
 use alloy::primitives::U256;
 use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::empty_poseidon_hash,
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
-    types::{CBuilder, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
     utils::{FromFields, FromTargets, ToFields, ToTargets},
-    CHasher, F,
 };
 use plonky2::{
     field::types::Field,
@@ -953,7 +953,7 @@ where
         // we pad ops_wires up to `MAX_NUM_OPS` with dummy operations; we pad at
         // the beginning of the array since the circuits expects to find the operation computing
         // the actual result values as the last of the `MAX_NUM_OPS` operations
-        Ok(repeat(
+        Ok(repeat_n(
             // dummy operation
             BasicOperationInputs {
                 constant_operand: U256::ZERO,
@@ -966,8 +966,8 @@ where
                 second_input_selector: F::ZERO,
                 op_selector: Operation::EqOp.to_field(),
             },
+            MAX_NUM_OPS - operations.len(),
         )
-        .take(MAX_NUM_OPS - operations.len())
         .chain(ops_wires)
         .collect_vec()
         .try_into()

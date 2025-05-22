@@ -139,8 +139,7 @@ where
             .try_to_incremental_epoch(epoch)
             .await
             .ok_or(RyhopeError::epoch_error(format!(
-                "trying to rollback to an invalid epoch {}",
-                epoch
+                "trying to rollback to an invalid epoch {epoch}"
             )))?;
         self.rollback_to_incremental_epoch(inner_epoch)
     }

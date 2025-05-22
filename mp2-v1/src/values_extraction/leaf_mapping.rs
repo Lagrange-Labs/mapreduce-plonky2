@@ -1,12 +1,15 @@
 //! Module handling the mapping entries inside a storage trie
 
-use crate::values_extraction::{
-    gadgets::{
-        column_gadget::ColumnGadget,
-        metadata_gadget::{ColumnsMetadata, MetadataTarget},
+use crate::{
+    values_extraction::{
+        gadgets::{
+            column_gadget::ColumnGadget,
+            metadata_gadget::{ColumnsMetadata, MetadataTarget},
+        },
+        public_inputs::{PublicInputs, PublicInputsArgs},
+        KEY_ID_PREFIX,
     },
-    public_inputs::{PublicInputs, PublicInputsArgs},
-    KEY_ID_PREFIX,
+    CBuilder, CHasher, D, F,
 };
 use anyhow::Result;
 use itertools::Itertools;
@@ -20,9 +23,8 @@ use mp2_common::{
     poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
     storage_key::{MappingSlot, MappingStructSlotWires},
-    types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
+    types::MAPPING_LEAF_VALUE_LEN,
     utils::{Endianness, PackerTarget, ToTargets},
-    CHasher, D, F,
 };
 use plonky2::{
     field::types::Field,
@@ -182,7 +184,7 @@ where
 
     pub fn assign(
         &self,
-        pw: &mut PartialWitness<GFp>,
+        pw: &mut PartialWitness<F>,
         wires: &LeafMappingWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
     ) {
         let padded_node =
@@ -233,7 +235,7 @@ mod tests {
         values_extraction::{
             compute_leaf_mapping_metadata_digest, compute_leaf_mapping_values_digest,
         },
-        MAX_LEAF_NODE_LEN,
+        C, D, F, MAX_LEAF_NODE_LEN,
     };
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
@@ -242,7 +244,6 @@ mod tests {
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer},
-        C, D, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

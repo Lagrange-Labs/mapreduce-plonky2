@@ -606,10 +606,7 @@ impl<const IS_EPOCH_TREE: bool> MutableTree for Tree<IS_EPOCH_TREE> {
         let shift = shift(s).await?;
         crate::error::ensure(
             k >= shift,
-            format!(
-                "invalid insert in SBST: index `{k}` smaller than origin `{}`",
-                shift
-            ),
+            format!("invalid insert in SBST: index `{k}` smaller than origin `{shift}`"),
         )?;
 
         let state = s.state().fetch().await?;

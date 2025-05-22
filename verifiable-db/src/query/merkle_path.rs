@@ -2,6 +2,7 @@
 
 use std::{array, iter::once};
 
+use crate::{CBuilder, D, F};
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 use itertools::Itertools;
@@ -12,10 +13,9 @@ use mp2_common::{
         circuit_data_serialization::SerializableRichField, deserialize, deserialize_array,
         deserialize_long_array, serialize, serialize_array, serialize_long_array,
     },
-    types::{CBuilder, HashOutput},
+    types::HashOutput,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
     utils::{FromFields, FromTargets, HashBuilder, SelectTarget, ToFields, ToTargets, TryIntoBool},
-    D, F,
 };
 use mp2_test::utils::gen_random_field_hash;
 use plonky2::{
@@ -357,7 +357,7 @@ where
     /// Build wires for `MerklePathGadget`. The required inputs are:
     /// - `end_node`: The hash of the first node in the path
     /// - `index_id`: Integer identifier of the index column to be placed in the hash
-    ///     of the nodes of the path
+    ///   of the nodes of the path
     pub fn build(
         b: &mut CircuitBuilder<F, D>,
         end_node: HashOutTarget,
@@ -512,7 +512,7 @@ where
     /// - `end_node_value`: Value stored in the first node in the path
     /// - `end_node_tree_hash` : Hash of the embedded tree stored in the first node in the path
     /// - `index_id`: Integer identifier of the index column to be placed in the hash
-    ///     of the nodes of the path
+    ///   of the nodes of the path
     pub fn build(
         b: &mut CircuitBuilder<F, D>,
         end_node_value: UInt256Target,
@@ -755,13 +755,13 @@ impl NeighborInfo {
 pub(crate) mod tests {
     use std::array;
 
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use mp2_common::{
         poseidon::empty_poseidon_hash,
         types::HashOutput,
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
         utils::{FromFields, FromTargets, ToTargets},
-        C, D, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

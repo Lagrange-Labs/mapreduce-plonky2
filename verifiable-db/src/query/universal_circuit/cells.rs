@@ -1,11 +1,10 @@
 //! Cells tree utilities for query circuit
 
+use crate::{CBuilder, CHasher};
 use mp2_common::{
     poseidon::empty_poseidon_hash,
-    types::CBuilder,
     u256::UInt256Target,
     utils::{HashBuilder, ToTargets},
-    CHasher,
 };
 use plonky2::{
     hash::hash_types::HashOutTarget,
@@ -105,7 +104,7 @@ fn build_cells_subtree_at_key(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{C, D, F};
+    use crate::{C, D, F};
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell, TestCellTarget},
         circuit::{run_circuit, UserCircuit},

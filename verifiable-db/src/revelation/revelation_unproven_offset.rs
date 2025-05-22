@@ -10,22 +10,22 @@ use std::{
     iter::{once, repeat},
 };
 
+use crate::{CBuilder, C, D, F, H};
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     default_config,
     group_hashing::CircuitBuilderGroupHashing,
-    poseidon::{flatten_poseidon_hash_target, H},
+    poseidon::flatten_poseidon_hash_target,
     proof::verify_proof_fixed_circuit,
     public_inputs::PublicInputCommon,
     serialization::{
         deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
         serialize_long_array,
     },
-    types::{CBuilder, HashOutput},
+    types::HashOutput,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{Fieldable, HashBuilder, ToTargets},
-    C, D, F,
 };
 use plonky2::{
     hash::hash_types::HashOutTarget,
@@ -93,11 +93,11 @@ impl RowPath {
     /// Instantiate a new instance of `RowPath` for a given proven row from the following input data:
     /// - `row_node_info`: data about the node of the row tree storing the row
     /// - `row_tree_path`: data about the nodes in the path of the rows tree for the node storing the row;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
+    ///   The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
     /// - `row_path_siblings`: hash of the siblings of the node in the rows tree path (except for the root)
     /// - `index_node_info`: data about the node of the index tree storing the rows tree containing the row
     /// - `index_tree_path`: data about the nodes in the path of the index tree for the index_node;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
+    ///   The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
     /// - `index_path_siblings`: hash of the siblings of the nodes in the index tree path (except for the root)
     pub fn new(
         row_node_info: NodeInfo,
@@ -824,6 +824,7 @@ mod tests {
 
     use std::{array, cmp::Ordering, iter::once};
 
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use futures::{stream, StreamExt};
     use itertools::Itertools;
@@ -832,7 +833,6 @@ mod tests {
         types::{HashOutput, CURVE_TARGET_LEN},
         u256::is_less_than_or_equal_to_u256_arr,
         utils::ToFields,
-        C, D, F,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},

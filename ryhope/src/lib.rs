@@ -53,11 +53,11 @@ pub type IncrementalEpoch = i64;
 pub type UserEpoch = i64;
 
 pub fn mapper_table_name(table_name: &str) -> String {
-    format!("{}_mapper", table_name)
+    format!("{table_name}_mapper")
 }
 
 pub(crate) fn metadata_table_name(table_name: &str) -> String {
-    format!("{}_meta", table_name)
+    format!("{table_name}_meta")
 }
 
 /// A payload attached to a node, that may need to compute aggregated values

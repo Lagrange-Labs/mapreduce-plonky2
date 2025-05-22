@@ -232,7 +232,8 @@ impl PublicInputs<'_, F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields, C, D, F};
+    use crate::D;
+    use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields, C, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

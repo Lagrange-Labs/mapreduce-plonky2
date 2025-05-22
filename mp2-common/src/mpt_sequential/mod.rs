@@ -743,7 +743,7 @@ mod test {
         let leaf_partial_key_ptr = MAX_KEY_NIBBLE_LEN - 1 - leaf_partial_key_nibbles.len();
         // since it's a branch node, we know the pointer is one less
         let node_partial_key_ptr = leaf_partial_key_ptr - 1;
-        println!("[+] Node partial key ptr = {}", node_partial_key_ptr);
+        println!("[+] Node partial key ptr = {node_partial_key_ptr}");
 
         let try_with =
             |mut chosen_node: Vec<u8>, exp_byte_value: Vec<u8>, input_ptr: i32, output_ptr: i32| {
@@ -855,7 +855,7 @@ mod test {
         let leaf_partial_key_ptr = MAX_KEY_NIBBLE_LEN - 1 - leaf_partial_key_nibbles.len();
         // since it's a branch node, we know the pointer is one less
         let node_partial_key_ptr = leaf_partial_key_ptr - 1;
-        println!("[+] Node partial key ptr = {}", node_partial_key_ptr);
+        println!("[+] Node partial key ptr = {node_partial_key_ptr}");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut pw = PartialWitness::new();
@@ -926,7 +926,7 @@ mod test {
             "[+] leaf partial key nibbles = {:?}",
             hex::encode(nibbles_to_bytes(partial_key_nibbles))
         );
-        println!("[+] key pointer = {}", partial_key_ptr);
+        println!("[+] key pointer = {partial_key_ptr}");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut pw = PartialWitness::new();

@@ -84,7 +84,7 @@ impl TestContext {
         table: &Table,
         ut: UpdateTree<RowTreeKey>,
     ) -> anyhow::Result<RowProofIdentifier<BlockPrimaryIndex>> {
-        debug!("PROVE_ROW_TREE -- BEGIN for block {}", primary);
+        debug!("PROVE_ROW_TREE -- BEGIN for block {primary}");
         let t = &table.row;
         let mut workplan = ut.into_workplan();
         while let Some(Next::Ready(wk)) = workplan.next() {
@@ -165,10 +165,7 @@ impl TestContext {
                 .storage
                 .get_proof_exact(&ProofKey::Cell(cell_proof_key))
                 .expect("should find cell root proof");
-            debug!(
-                "After fetching cell proof for row key {:?} & primary {}",
-                k, primary
-            );
+            debug!("After fetching cell proof for row key {k:?} & primary {primary}");
             let cell_root_hash_from_proof = cells_tree::extract_hash_from_proof(&cell_tree_proof)
                 .unwrap()
                 .to_bytes();
@@ -210,7 +207,7 @@ impl TestContext {
                     )
                     .unwrap(),
                 );
-                debug!("Before proving leaf node row tree key {:?}", k);
+                debug!("Before proving leaf node row tree key {k:?}");
                 let proof = self
                     .b
                     .bench("indexing::row_tree::leaf", || {
@@ -314,7 +311,7 @@ impl TestContext {
                     )
                     .unwrap(),
                 );
-                debug!("Before proving full node row tree key {:?}", k);
+                debug!("Before proving full node row tree key {k:?}");
                 self.b
                     .bench("indexing::row_tree::full", || {
                         api::generate_proof(self.params(), inputs)
@@ -362,7 +359,7 @@ impl TestContext {
             debug!("[--] NO UPDATES on row this turn? row.root().primary = {} vs new primary proving step {}",root_proof_key.primary,primary);
         };
 
-        debug!("PROVE_ROW_TREE -- END for block {}", primary);
+        debug!("PROVE_ROW_TREE -- END for block {primary}");
         Ok(root_proof_key)
     }
 

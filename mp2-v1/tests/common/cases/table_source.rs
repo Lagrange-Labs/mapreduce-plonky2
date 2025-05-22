@@ -250,8 +250,7 @@ impl<K: StorageSlotMappingKey, V: StorageSlotValue> UniqueMappingEntry<K, V> {
             MappingIndex::None => unreachable!(),
         };
         debug!(
-            " --- MAPPING to row: secondary index {:?}  -- cells {:?}",
-            secondary_cell, current_cells,
+            " --- MAPPING to row: secondary index {secondary_cell:?}  -- cells {current_cells:?}"
         );
         let current_secondary = Some(SecondaryIndexCell::new_from(secondary_cell, U256::from(0)));
         TableRowValues {
@@ -1425,10 +1424,7 @@ where
             evm_word_col.column_info().iter().for_each(|col_info| {
                 let bytes = extract_value(&value_bytes, col_info);
                 let value = U256::from_be_bytes(bytes);
-                debug!(
-                    "Mapping extract value: column: {:?}, value = {}",
-                    col_info, value,
-                );
+                debug!("Mapping extract value: column: {col_info:?}, value = {value}");
 
                 extracted_values.push(value);
             });

@@ -2,15 +2,11 @@ use super::{
     public_inputs::PublicInputs,
     secondary_index_cell::{SecondaryIndexCell, SecondaryIndexCellWire},
 };
-use crate::cells_tree;
+use crate::{cells_tree, C, D, F, H};
 use derive_more::{From, Into};
 use mp2_common::{
-    default_config,
-    poseidon::{empty_poseidon_hash, H},
-    proof::ProofWithVK,
-    public_inputs::PublicInputCommon,
-    utils::ToTargets,
-    C, D, F,
+    default_config, poseidon::empty_poseidon_hash, proof::ProofWithVK,
+    public_inputs::PublicInputCommon, utils::ToTargets,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -129,10 +125,11 @@ impl CircuitLogicWires<F, D, 0> for RecursiveLeafWires {
 mod test {
     use super::*;
     use crate::{
-        cells_tree::PublicInputs as CellsPublicInputs, row_tree::public_inputs::PublicInputs,
+        cells_tree::PublicInputs as CellsPublicInputs, row_tree::public_inputs::PublicInputs, C, D,
+        F,
     };
     use itertools::Itertools;
-    use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields, C, D, F};
+    use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         iop::{target::Target, witness::WitnessWrite},

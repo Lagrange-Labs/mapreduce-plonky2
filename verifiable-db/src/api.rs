@@ -7,15 +7,14 @@ use crate::{
     query::{self, api::Parameters as QueryParams, pi_len as query_pi_len},
     revelation::{self, api::Parameters as RevelationParams, pi_len as revelation_pi_len},
     row_tree::{self},
+    C, D, F, H,
 };
 use anyhow::Result;
 use log::info;
 use mp2_common::{
     default_config,
-    poseidon::H,
     proof::{serialize_proof, ProofWithVK},
     serialization::{deserialize, serialize},
-    C, D, F,
 };
 use plonky2::{
     iop::witness::PartialWitness,

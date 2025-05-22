@@ -3,13 +3,12 @@ use std::{array, cmp::Ordering, collections::BTreeSet, fmt::Debug, iter::repeat}
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 
+use crate::{C, D, F, H};
 use itertools::Itertools;
 use mp2_common::{
     default_config,
-    poseidon::H,
     proof::{deserialize_proof, ProofWithVK},
     u256::is_less_than_or_equal_to_u256_arr,
-    C, D, F,
 };
 use plonky2::plonk::{
     circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData},
@@ -135,7 +134,7 @@ impl Ord for MatchingRow {
 /// - `MAX_NUM_RESULT_OPS`: upper bound on the number of basic operations allowed in the `SELECT` statement of a query
 /// - `MAX_NUM_OUTPUTS`: upper bound on the number of output rows which can be exposed as public outputs of the circuit
 /// - `MAX_NUM_ITEMS_PER_OUTPUT`: upper bound on the number of items per output row; should correspond to the
-///     upper bound on the number of items being found in `SELECT` statement of a query
+///   upper bound on the number of items being found in `SELECT` statement of a query
 /// - `MAX_NUM_PLACEHOLDERS`: upper bound on the number of placeholders we allow in a query
 /// - `NUM_PLACEHOLDERS_HASHED`: number of placeholders being hashed in the placeholder hash
 pub struct Parameters<
@@ -194,7 +193,7 @@ pub struct Parameters<
 /// - `MAX_NUM_RESULT_OPS`: upper bound on the number of basic operations allowed in the `SELECT` statement of a query
 /// - `MAX_NUM_OUTPUTS`: upper bound on the number of output rows which can be exposed as public outputs of the circuit
 /// - `MAX_NUM_ITEMS_PER_OUTPUT`: upper bound on the number of items per output row; should correspond to the
-///     upper bound on the number of items being found in `SELECT` statement of the query
+///   upper bound on the number of items being found in `SELECT` statement of the query
 /// - `MAX_NUM_PLACEHOLDERS`: upper bound on the number of placeholders we allow in a query
 /// - `NUM_PLACEHOLDERS_HASHED`: number of placeholders being hashed in the placeholder hash
 #[allow(clippy::large_enum_variant)]
@@ -277,7 +276,7 @@ where
     /// The method requires the following inputs:
     /// - `query_proof`: Proof computing the results of the query, generated with circuit set in `query::api::Paramaters`
     /// - `preprocessing_proof`: Proof of construction of the tree over which the query was performed, generated with the
-    ///     IVC set of circuit
+    ///   IVC set of circuit
     /// - `query_bounds`: bounds on values of primary and secondary indexes specified in the query
     /// - `placeholders`: set of placeholders employed in the query. They must be less than `MAX_NUM_PLACEHOLDERS`
     /// - `predicate_operations`: Operations employed in the query to compute the filtering predicate in the `WHERE` clause
@@ -321,13 +320,13 @@ where
     /// Initialize circuit inputs for the revelation circuit for queries with unproven offset.
     /// The method requires the following inputs:
     /// - `preprocessing_proof`: Proof of construction of the tree over which the query was performed, generated with the
-    ///     IVC set of circuit
+    ///   IVC set of circuit
     /// - `matching_rows`: Data about the matching rows employed to compute the results of the query; they have to be at
-    ///     most `MAX_NUM_OUTPUTS`
+    ///   most `MAX_NUM_OUTPUTS`
     /// - `query_bounds`: bounds on values of primary and secondary indexes specified in the query
     /// - `placeholders`: set of placeholders employed in the query. They must be less than `MAX_NUM_PLACEHOLDERS`
     /// - `placeholder_hash_ids`: Identifiers of the placeholders employed to compute the placeholder hash; they can be
-    ///     obtained by the method `ids_for_placeholder_hash` of `query::api::Parameters`
+    ///   obtained by the method `ids_for_placeholder_hash` of `query::api::Parameters`
     /// - `column_ids`: Ids of the columns of the original table
     /// - `predicate_operations`: Operations employed in the query to compute the filtering predicate in the `WHERE` clause
     /// - `results_structure`: Data about the operations and items returned in the `SELECT` clause of the query
@@ -587,13 +586,13 @@ mod tests {
             TestRevelationData, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
             MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
         },
+        C, D, F,
     };
     use itertools::Itertools;
     use mp2_common::{
         array::ToField,
         proof::{serialize_proof, ProofWithVK},
         types::HashOutput,
-        C, D, F,
     };
     use mp2_test::{circuit::TestDummyCircuit, log::init_logging};
     use plonky2::{
