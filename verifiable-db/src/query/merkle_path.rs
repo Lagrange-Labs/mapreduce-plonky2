@@ -755,13 +755,14 @@ impl NeighborInfo {
 pub(crate) mod tests {
     use std::array;
 
+    use crate::D;
     use alloy::primitives::U256;
     use mp2_common::{
         poseidon::empty_poseidon_hash,
         types::HashOutput,
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
         utils::{FromFields, FromTargets, ToTargets},
-        C, D, F,
+        C, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

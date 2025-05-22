@@ -289,12 +289,13 @@ pub(super) mod test {
 
     use anyhow::Result;
 
+    use crate::D;
     use alloy::primitives::U256;
     use mp2_common::{
         group_hashing::weierstrass_to_point,
         poseidon::{empty_poseidon_hash, flatten_poseidon_hash_value, HashPermutation},
         utils::ToFields,
-        C, D, F,
+        C, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{

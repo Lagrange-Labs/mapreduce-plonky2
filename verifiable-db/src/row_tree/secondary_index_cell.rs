@@ -143,11 +143,12 @@ impl SecondaryIndexCellWire {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::D;
     use itertools::Itertools;
     use mp2_common::{
         poseidon::hash_to_int_value,
         utils::{FromFields, ToFields},
-        C, D, F,
+        C, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{

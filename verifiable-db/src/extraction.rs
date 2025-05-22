@@ -28,6 +28,7 @@ pub trait ExtractionPIWrap: Serialize + DeserializeOwned {
 #[cfg(test)]
 pub mod test {
 
+    use crate::D;
     use alloy::primitives::U256;
     use mp2_common::{
         keccak::{OutputHash, PACKED_HASH_LEN},
@@ -35,7 +36,7 @@ pub mod test {
         types::{CBuilder, GFp, CURVE_TARGET_LEN},
         u256::{self},
         utils::{FromFields, FromTargets, ToTargets},
-        D, F,
+        F,
     };
     use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use serde::Deserialize;

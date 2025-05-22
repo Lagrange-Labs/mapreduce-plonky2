@@ -98,6 +98,7 @@ where
 mod tests {
     use std::array;
 
+    use crate::D;
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
@@ -106,7 +107,7 @@ mod tests {
         types::{CBuilder, HashOutput},
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
         utils::{FromFields, ToFields, ToTargets},
-        C, D, F,
+        C, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

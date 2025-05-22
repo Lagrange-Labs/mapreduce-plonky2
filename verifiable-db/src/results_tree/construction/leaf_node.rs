@@ -1,13 +1,13 @@
 //! Module handling the leaf node of the results tree for query circuits
 
-use crate::results_tree::construction::public_inputs::PublicInputs;
+use crate::{results_tree::construction::public_inputs::PublicInputs, D};
 use anyhow::Result;
 use mp2_common::{
     poseidon::{empty_poseidon_hash, H},
     public_inputs::PublicInputCommon,
     types::CBuilder,
     utils::ToTargets,
-    D, F,
+    F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},

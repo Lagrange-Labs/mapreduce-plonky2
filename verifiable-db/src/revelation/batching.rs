@@ -170,8 +170,9 @@ mod tests {
         poseidon::{flatten_poseidon_hash_value, H},
         types::CBuilder,
         utils::{FromFields, ToFields},
-        C, D, F,
+        C, F,
     };
+    use crate::D;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,

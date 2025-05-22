@@ -120,10 +120,11 @@ impl CellWire {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::D;
     use mp2_common::{
         types::CURVE_TARGET_LEN,
         utils::{Fieldable, FromFields},
-        C, D, F,
+        C, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::field::types::Sample;

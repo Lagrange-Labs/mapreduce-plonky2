@@ -824,6 +824,7 @@ mod tests {
 
     use std::{array, cmp::Ordering, iter::once};
 
+    use crate::D;
     use alloy::primitives::U256;
     use futures::{stream, StreamExt};
     use itertools::Itertools;
@@ -832,7 +833,7 @@ mod tests {
         types::{HashOutput, CURVE_TARGET_LEN},
         u256::is_less_than_or_equal_to_u256_arr,
         utils::ToFields,
-        C, D, F,
+        C, F,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},

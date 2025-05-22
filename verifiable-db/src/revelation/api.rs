@@ -586,13 +586,14 @@ mod tests {
             TestRevelationData, MAX_NUM_COLUMNS, MAX_NUM_ITEMS_PER_OUTPUT, MAX_NUM_OUTPUTS,
             MAX_NUM_PLACEHOLDERS, MAX_NUM_PREDICATE_OPS, MAX_NUM_RESULT_OPS,
         },
+        D,
     };
     use itertools::Itertools;
     use mp2_common::{
         array::ToField,
         proof::{serialize_proof, ProofWithVK},
         types::HashOutput,
-        C, D, F,
+        C, F,
     };
     use mp2_test::{circuit::TestDummyCircuit, log::init_logging};
     use plonky2::{

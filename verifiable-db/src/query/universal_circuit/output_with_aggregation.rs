@@ -219,13 +219,14 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
 mod tests {
     use std::{array, iter::repeat};
 
+    use crate::D;
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
         array::ToField,
         poseidon::empty_poseidon_hash,
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-        C, D, F,
+        C, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

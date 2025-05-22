@@ -375,6 +375,7 @@ where
 mod tests {
     use std::array;
 
+    use crate::D;
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
@@ -382,7 +383,7 @@ mod tests {
         poseidon::{flatten_poseidon_hash_value, H},
         types::CBuilder,
         utils::{FromFields, ToFields},
-        C, D, F,
+        C, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{

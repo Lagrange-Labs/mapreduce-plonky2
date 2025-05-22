@@ -158,6 +158,7 @@ impl PublicParameters {
 mod test {
 
     use super::*;
+    use crate::D;
     use alloy::primitives::U256;
     use anyhow::Result;
     use mp2_common::{
@@ -165,7 +166,7 @@ mod test {
         keccak::PACKED_HASH_LEN,
         poseidon::{empty_poseidon_hash, flatten_poseidon_hash_value},
         utils::{FromFields, ToFields},
-        C, D, F,
+        C, F,
     };
     use mp2_test::utils::random_vector;
     use plonky2::field::types::Sample;

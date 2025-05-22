@@ -262,9 +262,10 @@ mod tests {
     };
 
     use super::*;
+    use crate::D;
     use alloy::primitives::U256;
     use mp2_common::{
-        group_hashing::map_to_curve_point, u256::WitnessWriteU256, utils::ToFields, C, D,
+        group_hashing::map_to_curve_point, u256::WitnessWriteU256, utils::ToFields, C,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},

@@ -1,6 +1,6 @@
 //! Module handling the node with two children of the results tree for query circuits
 
-use crate::results_tree::construction::public_inputs::PublicInputs;
+use crate::{results_tree::construction::public_inputs::PublicInputs, D};
 use anyhow::Result;
 use mp2_common::{
     array::Array,
@@ -11,7 +11,7 @@ use mp2_common::{
     types::CBuilder,
     u256::CircuitBuilderU256,
     utils::ToTargets,
-    D, F,
+    F,
 };
 use plonky2::{
     field::types::Field,
