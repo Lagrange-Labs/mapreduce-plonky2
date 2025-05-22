@@ -93,11 +93,11 @@ impl RowPath {
     /// Instantiate a new instance of `RowPath` for a given proven row from the following input data:
     /// - `row_node_info`: data about the node of the row tree storing the row
     /// - `row_tree_path`: data about the nodes in the path of the rows tree for the node storing the row;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
+    ///   The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
     /// - `row_path_siblings`: hash of the siblings of the node in the rows tree path (except for the root)
     /// - `index_node_info`: data about the node of the index tree storing the rows tree containing the row
     /// - `index_tree_path`: data about the nodes in the path of the index tree for the index_node;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
+    ///   The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
     /// - `index_path_siblings`: hash of the siblings of the nodes in the index tree path (except for the root)
     pub fn new(
         row_node_info: NodeInfo,
@@ -824,7 +824,7 @@ mod tests {
 
     use std::{array, cmp::Ordering, iter::once};
 
-    use crate::D;
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use futures::{stream, StreamExt};
     use itertools::Itertools;
@@ -833,7 +833,6 @@ mod tests {
         types::{HashOutput, CURVE_TARGET_LEN},
         u256::is_less_than_or_equal_to_u256_arr,
         utils::ToFields,
-        C, F,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},

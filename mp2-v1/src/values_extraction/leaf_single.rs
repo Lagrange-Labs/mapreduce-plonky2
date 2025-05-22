@@ -185,7 +185,7 @@ mod tests {
     use crate::{
         tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
         values_extraction::compute_leaf_single_values_digest,
-        MAX_LEAF_NODE_LEN,
+        C, D, F, MAX_LEAF_NODE_LEN,
     };
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
@@ -195,7 +195,6 @@ mod tests {
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer},
     };
-    use crate::{C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         mpt_sequential::generate_random_storage_mpt,

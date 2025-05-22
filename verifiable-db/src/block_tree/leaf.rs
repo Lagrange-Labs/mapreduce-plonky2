@@ -208,13 +208,10 @@ pub mod tests {
             compute_final_digest, compute_index_digest,
             tests::{TestPIField, TestPITargets},
         },
-        extraction,
+        extraction, H,
     };
     use alloy::primitives::U256;
-    use mp2_common::{
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-    };
+    use mp2_common::utils::{Fieldable, ToFields};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::curve::Point;

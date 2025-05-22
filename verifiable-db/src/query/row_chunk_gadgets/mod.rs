@@ -117,7 +117,7 @@ impl ToTargets for BoundaryRowNodeInfoTarget {
 /// `BoundaryRowNodeInfoTarget` related to the following nodes:
 /// - `row_node`: the node of the rows tree containing the given boundary row
 /// - `index_node`: the node of the index tree that stores the rows tree containing
-///     `row_node`
+///   `row_node`
 #[derive(Clone, Debug)]
 pub(crate) struct BoundaryRowDataTarget {
     pub(crate) row_node_info: BoundaryRowNodeInfoTarget,

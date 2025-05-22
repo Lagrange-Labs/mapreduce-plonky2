@@ -233,7 +233,7 @@ pub trait TreeFetcher<K: Debug + Clone + Eq + PartialEq, V: LagrangeNode>: Sized
                     .fetch_ctx_and_payload_at(current_node_key.as_ref().unwrap(), epoch)
                     .await
                     .unwrap_or_else(|| {
-                        panic!("node with key {:?} not found in tree", current_node_key)
+                        panic!("node with key {current_node_key:?} not found in tree")
                     });
                 let child_position = match ctx
                     .iter_children()
@@ -519,7 +519,7 @@ where
         Some(
             tree.fetch_ctx_and_payload_at(k, epoch)
                 .await
-                .unwrap_or_else(|| panic!("Node context not found for node {:?}", k)),
+                .unwrap_or_else(|| panic!("Node context not found for node {k:?}")),
         )
     }
 }
@@ -633,7 +633,7 @@ async fn get_node_info_from_ctx_and_payload<
                 let (child_ctx, child_payload) = tree
                     .fetch_ctx_and_payload_at(&child_k, at)
                     .await
-                    .unwrap_or_else(|| panic!("key {:?} not found in the tree", child_k));
+                    .unwrap_or_else(|| panic!("key {child_k:?} not found in the tree"));
                 // we need the grand child hashes for constructing the node info of the
                 // children of the node in argument
                 let child_left_hash = match child_ctx.left {
@@ -641,9 +641,7 @@ async fn get_node_info_from_ctx_and_payload<
                         let (_, payload) = tree
                             .fetch_ctx_and_payload_at(&left_left_k, at)
                             .await
-                            .unwrap_or_else(|| {
-                                panic!("key {:?} not found in the tree", left_left_k)
-                            });
+                            .unwrap_or_else(|| panic!("key {left_left_k:?} not found in the tree"));
                         Some(payload.hash())
                     }
                     None => None,
@@ -654,7 +652,7 @@ async fn get_node_info_from_ctx_and_payload<
                             .fetch_ctx_and_payload_at(&left_right_k, at)
                             .await
                             .unwrap_or_else(|| {
-                                panic!("key {:?} not found in the tree", left_right_k)
+                                panic!("key {left_right_k:?} not found in the tree")
                             });
                         Some(payload.hash())
                     }
@@ -700,6 +698,6 @@ pub async fn get_node_info<
     let (node_ctx, node_payload) = tree
         .fetch_ctx_and_payload_at(k, at)
         .await
-        .unwrap_or_else(|| panic!("key {:?} not found in the tree", k));
+        .unwrap_or_else(|| panic!("key {k:?} not found in the tree"));
     get_node_info_from_ctx_and_payload(tree, node_ctx, node_payload, at).await
 }

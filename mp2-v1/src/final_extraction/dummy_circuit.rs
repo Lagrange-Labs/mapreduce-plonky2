@@ -158,8 +158,8 @@ impl CircuitLogicWires<F, D, 0> for DummyWires {
 #[cfg(test)]
 mod test {
     use super::*;
-    use mp2_common::group_hashing::map_to_curve_point;
     use crate::C;
+    use mp2_common::group_hashing::map_to_curve_point;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::field::types::Sample;
     use rand::{thread_rng, Rng};

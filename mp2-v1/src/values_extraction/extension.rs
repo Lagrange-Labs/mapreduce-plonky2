@@ -97,13 +97,13 @@ impl CircuitLogicWires<GFp, D, 1> for ExtensionNodeWires {
 #[cfg(test)]
 mod tests {
     use super::{super::public_inputs::tests::new_extraction_public_inputs, *};
+    use crate::{C, D, F};
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer},
     };
-    use crate::{C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

@@ -182,15 +182,11 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursivePartialWires {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use crate::D;
+    use crate::{CBuilder, C, D, F, H};
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
-        group_hashing::weierstrass_to_point,
-        poseidon::{empty_poseidon_hash, H},
-        types::CBuilder,
-        utils::ToFields,
-        C, F,
+        group_hashing::weierstrass_to_point, poseidon::empty_poseidon_hash, utils::ToFields,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{field::types::PrimeField64, plonk::config::Hasher};

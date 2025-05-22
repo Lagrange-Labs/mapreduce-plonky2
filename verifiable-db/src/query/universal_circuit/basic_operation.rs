@@ -291,13 +291,12 @@ impl BasicOperationInputs {
 mod tests {
     use std::array;
 
-    use crate::D;
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use mp2_common::{
         array::ToField,
         default_config,
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-        C, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

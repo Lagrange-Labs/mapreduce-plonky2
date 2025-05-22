@@ -564,9 +564,12 @@ pub(crate) mod tests {
             .skip(NUM_VERIFIERS)
             .chain(once(rec_proof))
             .collect::<Vec<_>>();
-        let input_vd = repeat_n(&leaf_circuit.circuit_data().verifier_only, NUM_VERIFIERS - 1)
-            .chain(once(&recursive_circuit.circuit_data().verifier_only))
-            .collect::<Vec<_>>();
+        let input_vd = repeat_n(
+            &leaf_circuit.circuit_data().verifier_only,
+            NUM_VERIFIERS - 1,
+        )
+        .chain(once(&recursive_circuit.circuit_data().verifier_only))
+        .collect::<Vec<_>>();
         let rec_proof = recursive_circuit
             .generate_proof(
                 input_proofs.try_into().unwrap(),

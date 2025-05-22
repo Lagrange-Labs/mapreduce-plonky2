@@ -12,15 +12,10 @@
 // Add this so we don't need to always specify const generic in generic
 // parameters (i.e. use "_")
 #![feature(generic_arg_infer)]
-// stylistic feature
-#![feature(async_closure)]
 use mp2_common::{array::Array, keccak::PACKED_HASH_LEN, mpt_sequential::PAD_LEN};
 use plonky2::{
     field::extension::quintic::QuinticExtension,
-    plonk::{
-        circuit_builder::CircuitBuilder,
-        config::{GenericConfig, Hasher},
-    },
+    plonk::{circuit_builder::CircuitBuilder, config::GenericConfig},
 };
 use plonky2_crypto::u32::arithmetic_u32::U32Target;
 
@@ -50,7 +45,6 @@ pub(crate) type F = <C as GenericConfig<D>>::F;
 pub(crate) type CHasher = <C as GenericConfig<D>>::Hasher;
 pub(crate) type H = <C as GenericConfig<D>>::Hasher;
 pub(crate) type CBuilder = CircuitBuilder<F, D>;
-pub(crate) type HashPermutation = <H as Hasher<F>>::Permutation;
 pub(crate) type GFp5 = QuinticExtension<F>;
 pub(crate) type OutputHash = Array<U32Target, PACKED_HASH_LEN>;
 

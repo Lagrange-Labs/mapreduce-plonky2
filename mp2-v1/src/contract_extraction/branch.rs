@@ -122,6 +122,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::C;
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use mp2_common::{
         array::ToField,
@@ -131,7 +132,6 @@ mod tests {
         types::PACKED_ADDRESS_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
     };
-    use crate::C;
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

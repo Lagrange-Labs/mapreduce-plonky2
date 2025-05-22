@@ -195,8 +195,7 @@ impl<const PH: usize, const PP: usize> CheckPlaceholderGadget<PH, PP> {
             assert_eq!(
                 padded_placeholder_values[pos.unwrap().0],
                 value,
-                "placehoder values doesn't match for id {:?}",
-                placeholder_id
+                "placehoder values doesn't match for id {placeholder_id:?}"
             );
             Ok(CheckedPlaceholder {
                 id: placeholder_id.to_field(),

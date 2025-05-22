@@ -245,13 +245,10 @@ pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::cells_tree;
+    use crate::{cells_tree, F, H};
     use itertools::Itertools;
     use mp2_common::{
-        group_hashing::weierstrass_to_point,
-        poseidon::{empty_poseidon_hash, H},
-        utils::ToFields,
-        F,
+        group_hashing::weierstrass_to_point, poseidon::empty_poseidon_hash, utils::ToFields,
     };
     use mp2_test::log::init_logging;
     use partial_node::test::partial_safety_check;

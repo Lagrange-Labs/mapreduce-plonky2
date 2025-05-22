@@ -93,8 +93,9 @@ impl CircuitLogicWires<F, D, 1> for PartialNodeWires {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{C, H};
     use itertools::Itertools;
-    use mp2_common::{poseidon::H, utils::ToFields, C};
+    use mp2_common::utils::ToFields;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{field::types::Field, iop::witness::WitnessWrite, plonk::config::Hasher};
 

@@ -192,6 +192,7 @@ impl PublicParameters {
 mod tests {
     use std::sync::Arc;
 
+    use crate::F as GFp;
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
@@ -199,7 +200,6 @@ mod tests {
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
     };
-    use crate::F as GFp;
     use plonky2::field::types::Field;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 

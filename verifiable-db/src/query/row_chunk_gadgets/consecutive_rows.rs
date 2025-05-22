@@ -211,13 +211,12 @@ pub(crate) fn are_consecutive_rows(
 mod tests {
     use std::array;
 
-    use crate::D;
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use mp2_common::{
         types::HashOutput,
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
         utils::TryIntoBool,
-        C, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

@@ -167,12 +167,10 @@ mod tests {
     use itertools::Itertools;
     use mp2_common::{
         array::ToField,
-        poseidon::{flatten_poseidon_hash_value, H},
-        types::CBuilder,
+        poseidon::flatten_poseidon_hash_value,
         utils::{FromFields, ToFields},
-        C, F,
     };
-    use crate::D;
+    use crate::{D, F, C, H, CBuilder};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,

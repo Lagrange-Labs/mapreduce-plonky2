@@ -7,7 +7,6 @@
 // Add this to allow generic const items, e.g. `const IO_LEN<const MAX_NUM: usize>`
 #![feature(generic_const_items)]
 #![feature(variant_count)]
-#![feature(async_closure)]
 
 use git_version::git_version;
 use plonky2::plonk::{
@@ -55,7 +54,7 @@ pub const GIT_VERSION: &str = git_version!(args = ["--abbrev=7", "--always"]);
 ///
 /// Return `77fa458` if the full git version is `v1.1.1-8-g77fa458`.
 pub fn short_git_version() -> String {
-    let commit_version = GIT_VERSION.split('-').last().unwrap();
+    let commit_version = GIT_VERSION.split('-').next_back().unwrap();
 
     // Check if use commit object as fallback.
     if commit_version.len() < 8 {
@@ -66,8 +65,13 @@ pub fn short_git_version() -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use mp2_common::{array::Array, keccak::PACKED_HASH_LEN};
+    use plonky2_crypto::u32::arithmetic_u32::U32Target;
+
     use super::*;
+
+    pub(crate) type OutputHash = Array<U32Target, PACKED_HASH_LEN>;
 
     #[test]
     fn test_short_git_version() {

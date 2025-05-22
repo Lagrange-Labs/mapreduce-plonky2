@@ -38,12 +38,12 @@ async fn compute_input_for_row<T: TreeFetcher<RowTreeKey, RowPayload<BlockPrimar
     let row_path = tree
         .compute_path(row_key, index_value as UserEpoch)
         .await
-        .unwrap_or_else(|| panic!("node with key {:?} not found in cache", row_key));
+        .unwrap_or_else(|| panic!("node with key {row_key:?} not found in cache"));
     let path = NodePath::new(row_path, index_path.clone());
     let (_, row_payload) = tree
         .fetch_ctx_and_payload_at(row_key, index_value as UserEpoch)
         .await
-        .unwrap_or_else(|| panic!("node with key {:?} not found in cache", row_key));
+        .unwrap_or_else(|| panic!("node with key {row_key:?} not found in cache"));
     // build row cells
     let primary_index_cell = ColumnCell::new(column_ids.primary_column(), U256::from(index_value));
     let secondary_index_cell = ColumnCell::new(
@@ -73,16 +73,16 @@ async fn compute_input_for_row<T: TreeFetcher<RowTreeKey, RowPayload<BlockPrimar
 /// circuit, and will thus correspond to the arity of the constructed `UpdateTree`.
 /// The method requires the following inputs:
 /// - `row_cache` : Wide lineage of rows tree nodes in the subtree build from the rows
-///     satisfying the the query ranges on primary and secondary indexes
+///   satisfying the the query ranges on primary and secondary indexes
 /// - `index_cache` : Wide lineage of index tree nodes in the subtree build from the rows
-///     satisfying the the query ranges on primary and secondary indexes
+///   satisfying the the query ranges on primary and secondary indexes
 /// - `column_ids` : Identifiers of the columns of the table, including primary and
-///     secondary indexes columns
+///   secondary indexes columns
 /// - `non_existence_inputs` : This set of data is employed to find the proper row to be
-///     proven for a rows tree that contains no rows with a secondary index value lying
-///     in the query range over secondary index, which still needs to be proven for
-///     completeness (i.e., proving that we are not skipping potentially matching rows
-///     for the query); this data structure can be instantiated with its own `new` method
+///   proven for a rows tree that contains no rows with a secondary index value lying
+///   in the query range over secondary index, which still needs to be proven for
+///   completeness (i.e., proving that we are not skipping potentially matching rows
+///   for the query); this data structure can be instantiated with its own `new` method
 /// - `epoch` : Last epoch inserted in the index tree
 pub async fn generate_chunks_and_update_tree<
     const CHUNK_SIZE: usize,
@@ -323,10 +323,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
         if let Some(parent_key) = parent_node_key {
             // get parent node
             let parent_node = self.nodes.get_mut(parent_key).unwrap_or_else(|| {
-                panic!(
-                    "Providing a non-existing parent key for insertion: {:?}",
-                    parent_key
-                )
+                panic!("Providing a non-existing parent key for insertion: {parent_key:?}")
             });
             // get number of existing children for the parent node, which is needed to compute
             // the key of the child to be inserted
@@ -340,8 +337,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
             parent_node.children_keys.push(new_child_key);
             assert!(
                 self.nodes.insert(new_child_key, child_node).is_none(),
-                "Node with key {:?} already found in the tree",
-                new_child_key
+                "Node with key {new_child_key:?} already found in the tree"
             );
             new_child_key
         } else {
@@ -430,7 +426,7 @@ impl<const ARITY: usize> ProvingTree<ARITY> {
             node_key = self
                 .nodes
                 .get(key)
-                .unwrap_or_else(|| panic!("Node with key {:?} not found", key))
+                .unwrap_or_else(|| panic!("Node with key {key:?} not found"))
                 .parent_key
                 .as_ref();
         }

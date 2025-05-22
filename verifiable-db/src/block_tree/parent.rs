@@ -279,10 +279,8 @@ mod tests {
         super::tests::{random_extraction_pi, random_rows_tree_pi},
         *,
     };
-    use mp2_common::{
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-    };
+    use crate::H;
+    use mp2_common::utils::{Fieldable, ToFields};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

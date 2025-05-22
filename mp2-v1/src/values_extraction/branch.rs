@@ -213,6 +213,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{super::public_inputs::tests::new_extraction_public_inputs, *};
+    use crate::{C, D, F};
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         group_hashing::map_to_curve_point,
@@ -220,7 +221,6 @@ mod tests {
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer},
     };
-    use crate::{C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
@@ -382,7 +382,7 @@ mod tests {
         // Extend the children public inputs by repeatedly copying the last real one as paddings.
         let mut child_pis: Vec<_> = children.iter().map(|child| child.pi.clone()).collect();
         let last_pi = child_pis.last().unwrap().clone();
-        child_pis.extend(iter::repeat(last_pi).take(N_PADDING));
+        child_pis.extend(iter::repeat_n(last_pi, N_PADDING));
         let child_pis: Vec<_> = child_pis.iter().map(|pi| PublicInputs::new(pi)).collect();
 
         let circuit = TestBranchCircuit::<NODE_LEN, { N_REAL + N_PADDING }> {

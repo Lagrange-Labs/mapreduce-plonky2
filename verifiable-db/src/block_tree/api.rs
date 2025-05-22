@@ -279,10 +279,10 @@ mod tests {
             compute_final_digest,
             leaf::tests::{compute_expected_hash, compute_expected_set_digest},
         },
-        extraction, row_tree,
+        extraction, row_tree, H,
     };
     use mp2_common::{
-        poseidon::{empty_poseidon_hash, H},
+        poseidon::empty_poseidon_hash,
         utils::{Fieldable, ToFields},
     };
     use mp2_test::utils::random_vector;

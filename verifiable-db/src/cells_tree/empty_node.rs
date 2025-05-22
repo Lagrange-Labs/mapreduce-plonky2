@@ -60,7 +60,7 @@ impl CircuitLogicWires<F, D, 0> for EmptyNodeWires {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::C;
+    use crate::C;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::field::types::Field;
     use plonky2_ecgfp5::curve::curve::WeierstrassPoint;

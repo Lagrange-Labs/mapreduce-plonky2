@@ -177,6 +177,7 @@ mod tests {
     use crate::contract_extraction::compute_metadata_digest;
 
     use super::*;
+    use crate::C;
     use alloy::primitives::Address;
     use eth_trie::Trie;
     use mp2_common::{
@@ -185,7 +186,6 @@ mod tests {
         types::MAPPING_LEAF_VALUE_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
     };
-    use crate::C;
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         mpt_sequential::generate_random_storage_mpt,

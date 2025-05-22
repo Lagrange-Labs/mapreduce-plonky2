@@ -135,13 +135,13 @@ impl LeafLengthCircuit {
 pub mod tests {
     use std::sync::Arc;
 
+    use crate::{CBuilder, C, D, F as GFp};
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
     };
-    use crate::{C, D, CBuilder, F as GFp};
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
     use plonky2::{field::types::Field, iop::witness::PartialWitness};
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};

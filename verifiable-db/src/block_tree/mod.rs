@@ -147,13 +147,11 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::row_tree;
+    use crate::{row_tree, CBuilder, C, F};
     use alloy::primitives::U256;
     use mp2_common::{
         keccak::PACKED_HASH_LEN,
-        types::CBuilder,
         utils::{FromFields, ToFields},
-        C, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

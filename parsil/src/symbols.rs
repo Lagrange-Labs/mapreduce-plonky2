@@ -95,8 +95,8 @@ impl Handle {
 impl std::fmt::Display for Handle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Handle::Simple(name) => write!(f, "{}", name),
-            Handle::Qualified { table, name } => write!(f, "{}.{}", table, name),
+            Handle::Simple(name) => write!(f, "{name}"),
+            Handle::Qualified { table, name } => write!(f, "{table}.{name}"),
         }
     }
 }
@@ -344,10 +344,10 @@ impl<P: Debug + Clone> Symbol<P> {
 impl<P: Debug + Clone> std::fmt::Display for Symbol<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Symbol::Column { handle, target, .. } => write!(f, "{}: {}", handle, target),
-            Symbol::Alias { from, to } => write!(f, "{}: {}", from, to),
-            Symbol::NamedExpression { name, payload: id } => write!(f, "{}: {:?}", name, id),
-            Symbol::Expression(e) => write!(f, "{:?}", e),
+            Symbol::Column { handle, target, .. } => write!(f, "{handle}: {target}"),
+            Symbol::Alias { from, to } => write!(f, "{from}: {to}"),
+            Symbol::NamedExpression { name, payload: id } => write!(f, "{name}: {id:?}"),
+            Symbol::Expression(e) => write!(f, "{e:?}"),
             Symbol::Wildcard => write!(f, "*"),
         }
     }
@@ -394,7 +394,7 @@ impl<M: Debug + Default, P: Debug + Clone> ScopeTable<M, P> {
                 spacer,
                 s.handle()
                     .map(|h| h.to_string())
-                    .unwrap_or(format!("unnamed term: {}", s))
+                    .unwrap_or(format!("unnamed term: {s}"))
             )
         }
         println!();

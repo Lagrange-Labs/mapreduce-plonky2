@@ -235,7 +235,7 @@ mod tests {
         values_extraction::{
             compute_leaf_mapping_metadata_digest, compute_leaf_mapping_values_digest,
         },
-        MAX_LEAF_NODE_LEN,
+        C, D, F, MAX_LEAF_NODE_LEN,
     };
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
@@ -245,7 +245,6 @@ mod tests {
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer},
     };
-    use crate::{C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         mpt_sequential::generate_random_storage_mpt,

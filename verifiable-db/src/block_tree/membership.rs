@@ -171,11 +171,8 @@ impl CircuitLogicWires<F, D, 1> for MembershipWires {
 #[cfg(test)]
 mod tests {
     use super::{super::tests::random_block_index_pi, *};
-    use mp2_common::{
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-        C,
-    };
+    use crate::{C, H};
+    use mp2_common::utils::{Fieldable, ToFields};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

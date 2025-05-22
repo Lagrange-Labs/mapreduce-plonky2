@@ -65,6 +65,7 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod test {
+    use crate::{C, D, F};
     use alloy::{
         eips::BlockNumberOrTag,
         primitives::U256,
@@ -76,7 +77,6 @@ mod test {
         proof::deserialize_proof,
         utils::{Endianness, FromFields, Packer, ToFields},
     };
-    use crate::{C, D, F};
     use mp2_test::eth::get_sepolia_url;
 
     use crate::block_extraction::{public_inputs::PublicInputs, PublicParameters};

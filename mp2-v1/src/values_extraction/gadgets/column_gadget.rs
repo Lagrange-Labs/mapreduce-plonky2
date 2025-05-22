@@ -396,8 +396,8 @@ pub(crate) mod tests {
         values_extraction::gadgets::column_info::{
             CircuitBuilderColumnInfo, WitnessWriteColumnInfo,
         },
+        C, D,
     };
-    use crate::{C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2_ecgfp5::gadgets::curve::PartialWitnessCurve;

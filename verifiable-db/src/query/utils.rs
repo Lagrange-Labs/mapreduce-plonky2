@@ -442,10 +442,13 @@ pub struct NonExistenceInput<const MAX_NUM_RESULTS: usize> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::query::{
-        computational_hash_ids::{AggregationOperation, Identifiers},
-        public_inputs::PublicInputsQueryCircuits,
-        universal_circuit::universal_query_gadget::{CurveOrU256, OutputValues},
+    use crate::{
+        query::{
+            computational_hash_ids::{AggregationOperation, Identifiers},
+            public_inputs::PublicInputsQueryCircuits,
+            universal_circuit::universal_query_gadget::{CurveOrU256, OutputValues},
+        },
+        F,
     };
     use alloy::primitives::U256;
     use itertools::Itertools;
@@ -453,7 +456,6 @@ pub(crate) mod tests {
         array::ToField,
         group_hashing::add_curve_point,
         utils::{FromFields, ToFields},
-        F,
     };
     use plonky2_ecgfp5::curve::curve::Point;
 

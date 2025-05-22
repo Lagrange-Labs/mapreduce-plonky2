@@ -38,9 +38,7 @@ async fn run() -> Result<()> {
         .expect("this should work");
 
     let first_stamp = tree.current_epoch().await?;
-    println!(
-        "Current version of the tree after insertion: {first_stamp}",
-    );
+    println!("Current version of the tree after insertion: {first_stamp}",);
 
     println!("Tree of keys to update:");
     res.print();
@@ -70,9 +68,7 @@ async fn run() -> Result<()> {
 
     // Now try to fetch from previous version
     match tree.try_fetch_at(&fetch_key, first_stamp).await.unwrap() {
-        Some(v) => println!(
-            "Fetching {fetch_key} at previous stamp {first_stamp} works: {v}",
-        ),
+        Some(v) => println!("Fetching {fetch_key} at previous stamp {first_stamp} works: {v}",),
         None => panic!("We should have fetched something for {fetch_key:?}"),
     }
 

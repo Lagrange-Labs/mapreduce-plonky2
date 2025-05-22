@@ -198,8 +198,8 @@ impl<PrimaryIndex: std::fmt::Debug + Clone + Default + PartialEq + Eq> RowPayloa
     /// * the collection of cells, which MUST include the value of the secondary index
     /// * the hash of the cells tree associated to that row
     /// * the primary index value when that cells tree root proof was generated. In most cases, the
-    ///     primary value is the block index. The block would refer to the last time the cells tree
-    ///     changed for that row.
+    ///   primary value is the block index. The block would refer to the last time the cells tree
+    ///   changed for that row.
     /// * The key of the root of the cells tree.
     pub fn new(
         cells: CellCollection<PrimaryIndex>,

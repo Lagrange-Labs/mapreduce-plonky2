@@ -483,7 +483,7 @@ where
 mod tests {
     use std::{array, iter::once};
 
-    use crate::D;
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use itertools::Itertools;
     use mp2_common::{
@@ -492,7 +492,6 @@ mod tests {
         group_hashing::map_to_curve_point,
         poseidon::empty_poseidon_hash,
         utils::{FromFields, ToFields, TryIntoBool},
-        C, F,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},

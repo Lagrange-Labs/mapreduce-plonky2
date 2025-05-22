@@ -1266,23 +1266,20 @@ mod tests {
         // check that result is the same as the one exposed by the proof
         assert_eq!(
             result, proven_res,
-            "result not correct for test: {}",
-            test_case
+            "result not correct for test: {test_case}"
         );
         // check carry
         if carry {
             assert_eq!(
                 GFp::ONE,
                 proof.public_inputs[NUM_LIMBS],
-                "carry not correct for test: {}",
-                test_case
+                "carry not correct for test: {test_case}"
             )
         } else {
             assert_eq!(
                 GFp::ZERO,
                 proof.public_inputs[NUM_LIMBS],
-                "carry not correct for test: {}",
-                test_case
+                "carry not correct for test: {test_case}"
             )
         }
     }
@@ -1413,31 +1410,27 @@ mod tests {
             let proven_quotient = U256::from_fields(&proof.public_inputs[..NUM_LIMBS]);
             assert_eq!(
                 quotient, proven_quotient,
-                "quotient not correct for test: {}",
-                test_case
+                "quotient not correct for test: {test_case}"
             );
             // check that remainder is the same as the one exposed by the proof
             let proven_remainder =
                 U256::from_fields(&proof.public_inputs[NUM_LIMBS..2 * NUM_LIMBS]);
             assert_eq!(
                 remainder, proven_remainder,
-                "remainder not correct for test: {}",
-                test_case
+                "remainder not correct for test: {test_case}"
             );
             // check division by zero flag
             if div_zero {
                 assert_eq!(
                     GFp::ONE,
                     proof.public_inputs[2 * NUM_LIMBS],
-                    "div by zero flag not correct for test: {}",
-                    test_case
+                    "div by zero flag not correct for test: {test_case}"
                 )
             } else {
                 assert_eq!(
                     GFp::ZERO,
                     proof.public_inputs[2 * NUM_LIMBS],
-                    "div by zero flag not correct for test: {}",
-                    test_case
+                    "div by zero flag not correct for test: {test_case}"
                 )
             }
         };

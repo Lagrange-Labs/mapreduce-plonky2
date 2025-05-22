@@ -161,8 +161,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use mp2_common::mpt_sequential::MPTKeyWire;
     use crate::{C, D, F};
+    use mp2_common::mpt_sequential::MPTKeyWire;
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

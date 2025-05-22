@@ -221,8 +221,7 @@ mod tests {
     use crate::block_tree::tests::random_block_index_pi;
 
     use super::*;
-    use crate::D;
-    use mp2_common::{C, F};
+    use crate::{C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::{
         target::Target,
