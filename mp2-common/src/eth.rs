@@ -258,8 +258,7 @@ impl StorageSlot {
                     .unwrap()
                     .to_be_bytes();
                 debug!(
-                    "Storage slot struct: parent_location = {}, evm_offset = {}",
-                    parent_location, evm_offset,
+                    "Storage slot struct: parent_location = {parent_location}, evm_offset = {evm_offset}"
                 );
                 B256::from_slice(&location)
             }

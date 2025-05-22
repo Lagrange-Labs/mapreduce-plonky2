@@ -607,8 +607,7 @@ impl<const IS_EPOCH_TREE: bool> MutableTree for Tree<IS_EPOCH_TREE> {
         crate::error::ensure(
             k >= shift,
             format!(
-                "invalid insert in SBST: index `{k}` smaller than origin `{}`",
-                shift
+                "invalid insert in SBST: index `{k}` smaller than origin `{shift}`"
             ),
         )?;
 

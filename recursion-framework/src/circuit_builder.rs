@@ -335,7 +335,7 @@ where
 pub(crate) mod tests {
     use std::{
         array, cmp,
-        iter::{once, repeat},
+        iter::{once, repeat_n},
         marker::PhantomData,
     };
 
@@ -564,8 +564,7 @@ pub(crate) mod tests {
             .skip(NUM_VERIFIERS)
             .chain(once(rec_proof))
             .collect::<Vec<_>>();
-        let input_vd = repeat(&leaf_circuit.circuit_data().verifier_only)
-            .take(NUM_VERIFIERS - 1)
+        let input_vd = repeat_n(&leaf_circuit.circuit_data().verifier_only, NUM_VERIFIERS - 1)
             .chain(once(&recursive_circuit.circuit_data().verifier_only))
             .collect::<Vec<_>>();
         let rec_proof = recursive_circuit

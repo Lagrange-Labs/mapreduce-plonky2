@@ -514,7 +514,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(
-            format!("{}", err),
+            format!("{err}"),
             "circuit digest not found",
             "universal verifier didn't fail when verifying a proof not belonging to circuit set"
         );

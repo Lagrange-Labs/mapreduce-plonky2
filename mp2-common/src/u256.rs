@@ -4,7 +4,7 @@
 use itertools::zip_eq;
 use std::{
     array::{self, from_fn as create_array},
-    iter::{once, repeat},
+    iter::{once, repeat, repeat_n},
 };
 
 use crate::{
@@ -687,8 +687,7 @@ impl UInt256Target {
         b: &mut CircuitBuilder<F, D>,
         target: Target,
     ) -> Self {
-        let limbs = repeat(b.zero_u32())
-            .take(NUM_LIMBS - 1)
+        let limbs = repeat_n(b.zero_u32(), NUM_LIMBS - 1)
             .chain(once(U32Target::from_target(target)))
             .collect_vec();
         Self::new_from_be_limbs(&limbs).unwrap()

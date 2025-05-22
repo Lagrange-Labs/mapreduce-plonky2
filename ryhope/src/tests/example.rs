@@ -39,8 +39,7 @@ async fn run() -> Result<()> {
 
     let first_stamp = tree.current_epoch().await?;
     println!(
-        "Current version of the tree after insertion: {}",
-        first_stamp
+        "Current version of the tree after insertion: {first_stamp}",
     );
 
     println!("Tree of keys to update:");
@@ -52,7 +51,7 @@ async fn run() -> Result<()> {
         .unwrap()
         .expect("that should exist");
     assert_eq!(fetch_key, v);
-    println!("Fetching value from key {} = {}", fetch_key, v);
+    println!("Fetching value from key {fetch_key} = {v}");
 
     // Now try to add more keys , delete the one just fetched
     let _ = tree
@@ -66,16 +65,15 @@ async fn run() -> Result<()> {
 
     match tree.try_fetch(&fetch_key).await.unwrap() {
         Some(_) => panic!("that should not happen"),
-        None => println!("Fetching deleted key {} fails", fetch_key),
+        None => println!("Fetching deleted key {fetch_key} fails"),
     }
 
     // Now try to fetch from previous version
     match tree.try_fetch_at(&fetch_key, first_stamp).await.unwrap() {
         Some(v) => println!(
-            "Fetching {} at previous stamp {} works: {}",
-            fetch_key, first_stamp, v
+            "Fetching {fetch_key} at previous stamp {first_stamp} works: {v}",
         ),
-        None => panic!("We should have fetched something for {:?}", fetch_key),
+        None => panic!("We should have fetched something for {fetch_key:?}"),
     }
 
     // Printing the tree at its previous versions

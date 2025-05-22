@@ -108,7 +108,7 @@ async fn delete_storage_table<const EXTERNAL_EPOCH_MAPPER: bool>(
 ) -> Result<(), RyhopeError> {
     let connection = db.get().await.unwrap();
     connection
-        .execute(&format!("DROP TABLE IF EXISTS {}", table), &[])
+        .execute(&format!("DROP TABLE IF EXISTS {table}"), &[])
         .await
         .map_err(|err| RyhopeError::from_db(format!("unable to delete table `{table}`"), err))
         .map(|_| ())?;
@@ -168,8 +168,8 @@ impl<T: Clone> CachedValue<T> {
 impl<T: Clone + Debug> Debug for CachedValue<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CachedValue::Read(r) => write!(f, "R:{:?}", r),
-            CachedValue::Written(w) => write!(f, "W:{:?}", w),
+            CachedValue::Read(r) => write!(f, "R:{r:?}"),
+            CachedValue::Written(w) => write!(f, "W:{w:?}"),
         }
     }
 }
@@ -570,7 +570,7 @@ where
                 let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
                     .map_err(|err| {
                         RyhopeError::from_db(
-                            format!("while connecting to postgreSQL with `{}`", db_url),
+                            format!("while connecting to postgreSQL with `{db_url}`"),
                             err,
                         )
                     })?;
