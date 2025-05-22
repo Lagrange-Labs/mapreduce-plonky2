@@ -102,8 +102,8 @@ mod tests {
         group_hashing::map_to_curve_point,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer},
-        C, D, F,
     };
+    use crate::{C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

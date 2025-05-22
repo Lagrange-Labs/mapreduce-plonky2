@@ -184,8 +184,8 @@ mod tests {
         mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
         types::MAPPING_LEAF_VALUE_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
-        C,
     };
+    use crate::C;
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         mpt_sequential::generate_random_storage_mpt,

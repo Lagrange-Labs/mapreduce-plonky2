@@ -337,12 +337,9 @@ impl CircuitInput {
 
 #[cfg(test)]
 mod tests {
-    use mp2_common::{
-        proof::{serialize_proof, ProofWithVK},
-        C, D, F,
-    };
+    use mp2_common::proof::{serialize_proof, ProofWithVK};
     use mp2_test::circuit::TestDummyCircuit;
-
+    use crate::{C, D, F};
     use recursion_framework::framework_testing::TestingRecursiveCircuits;
 
     use crate::{

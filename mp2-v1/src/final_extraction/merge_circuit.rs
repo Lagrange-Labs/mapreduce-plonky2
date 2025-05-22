@@ -148,8 +148,8 @@ mod test {
     use mp2_common::{
         digest::SplitDigestPoint,
         group_hashing::{map_to_curve_point, weierstrass_to_point as wp},
-        C, D, F,
     };
+    use crate::{C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::witness::WitnessWrite;
 

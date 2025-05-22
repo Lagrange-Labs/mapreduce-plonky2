@@ -94,7 +94,7 @@ impl CircuitLogicWires<F, D, 0> for SimpleCircuitRecursiveWires {
 mod test {
     use super::*;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
-    use mp2_common::C;
+    use crate::C;
     use mp2_test::circuit::{run_circuit, UserCircuit};
 
     #[derive(Clone, Debug)]

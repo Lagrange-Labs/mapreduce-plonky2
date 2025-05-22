@@ -117,10 +117,9 @@ pub mod tests {
     use mp2_common::{
         eth::StorageSlot,
         rlp::MAX_KEY_NIBBLE_LEN,
-        types::{CBuilder, GFp},
         utils::{keccak256, Endianness, Packer, ToFields},
-        C, D,
     };
+    use crate::{C, D, CBuilder, F as GFp};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,

@@ -201,7 +201,7 @@ impl<T: WitnessWrite<F>> WitnessWriteColumnInfo for T {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use mp2_common::{C, D};
+    use crate::{C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::witness::PartialWitness;
 

@@ -124,10 +124,9 @@ pub mod tests {
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use mp2_common::{
         eth::StorageSlot,
-        types::{CBuilder, GFp},
         utils::{keccak256, Endianness, Packer, ToFields},
-        C, D,
     };
+    use crate::{C, D, CBuilder, F as GFp};
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,

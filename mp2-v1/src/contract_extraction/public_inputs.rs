@@ -150,10 +150,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{
-        utils::{Fieldable, ToFields},
-        C, D, F,
-    };
+    use mp2_common::utils::{Fieldable, ToFields};
+    use crate::{C, D, F};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

@@ -197,9 +197,9 @@ mod tests {
         eth::StorageSlot,
         proof::ProofWithVK,
         rlp::MAX_KEY_NIBBLE_LEN,
-        types::GFp,
         utils::{keccak256, Endianness, Packer, ToFields},
     };
+    use crate::F as GFp;
     use plonky2::field::types::Field;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 

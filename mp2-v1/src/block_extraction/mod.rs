@@ -75,8 +75,8 @@ mod test {
         eth::BlockUtil,
         proof::deserialize_proof,
         utils::{Endianness, FromFields, Packer, ToFields},
-        C, D, F,
     };
+    use crate::{C, D, F};
     use mp2_test::eth::get_sepolia_url;
 
     use crate::block_extraction::{public_inputs::PublicInputs, PublicParameters};

@@ -130,8 +130,8 @@ mod tests {
         mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
         types::PACKED_ADDRESS_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
-        C,
     };
+    use crate::C;
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

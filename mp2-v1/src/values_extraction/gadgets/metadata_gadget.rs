@@ -313,7 +313,7 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
 pub(crate) mod tests {
     use super::*;
     use crate::tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM};
-    use mp2_common::{C, D};
+    use crate::{C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2_ecgfp5::gadgets::curve::PartialWitnessCurve;
 

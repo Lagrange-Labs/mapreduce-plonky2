@@ -100,8 +100,8 @@ mod tests {
         rlp::MAX_KEY_NIBBLE_LEN,
         types::PACKED_ADDRESS_LEN,
         utils::{keccak256, Endianness, Fieldable, Packer, ToFields},
-        C,
     };
+    use crate::C;
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

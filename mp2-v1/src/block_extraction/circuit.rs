@@ -130,14 +130,13 @@ mod test {
         eips::BlockNumberOrTag,
         providers::{Provider, ProviderBuilder},
     };
-    use mp2_common::{eth::left_pad_generic, u256, utils::ToFields, C, F};
+    use mp2_common::{eth::left_pad_generic, u256, utils::ToFields};
 
     use mp2_common::{
         eth::BlockUtil,
-        types::CBuilder,
         utils::{Endianness, Packer},
-        D,
     };
+    use crate::{C, D, F, CBuilder};
     use mp2_test::{
         circuit::{prove_circuit, setup_circuit, UserCircuit},
         eth::get_sepolia_url,

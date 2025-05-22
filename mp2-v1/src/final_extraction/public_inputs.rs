@@ -230,11 +230,12 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{utils::ToFields, C, D, F};
+    use mp2_common::utils::ToFields;
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,
     };
+    use crate::{C, D, F};
     use plonky2::{
         field::types::{Field, Sample},
         iop::{
