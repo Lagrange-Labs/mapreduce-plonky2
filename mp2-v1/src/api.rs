@@ -1,7 +1,7 @@
 //! Main APIs and related structures
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     fmt::Debug,
     hash::Hash,
     iter::once,
@@ -31,16 +31,15 @@ use log::debug;
 use mp2_common::{
     digest::Digest,
     group_hashing::map_to_curve_point,
-    poseidon::flatten_poseidon_hash_value,
+    poseidon::{flatten_poseidon_hash_value, FLATTEN_POSEIDON_LEN},
     types::HashOutput,
-    utils::{Fieldable, ToFields},
+    utils::{Endianness, Fieldable, Packer, ToFields},
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
     iop::target::Target,
     plonk::config::{GenericHashOut, Hasher},
 };
-use plonky2_ecgfp5::curve::curve::Point;
 use serde::{Deserialize, Serialize};
 use verifiable_db::{
     block_tree::add_primary_index_to_digest, ivc::add_provable_data_commitment_prefix,
@@ -551,14 +550,17 @@ impl AsRef<TableRow> for TableRow {
     }
 }
 
-/// Compute the provable commitment to the data found in an off-chain table
-pub fn off_chain_data_commitment(
-    table_rows: &[TableRow],
+/// Incrementally update the provable commitment for the data of an off-chain table.
+/// It computes an updated commitment taking as input the new rows and the previously
+/// computed commitment, if any.  
+pub fn update_off_chain_data_commitment(
+    new_rows: &[TableRow],
+    old_commitment: Option<HashOutput>,
     row_unique_columns: &[ColumnId],
 ) -> Result<HashOutput> {
-    // first, group rows by primary index values
-    let mut grouped_rows = HashMap::new();
-    for row in table_rows {
+    // first, group rows by increasing values of primary index values
+    let mut grouped_rows = BTreeMap::new();
+    for row in new_rows {
         let primary = row.primary_index_column.value();
         grouped_rows
             .entry(primary)
@@ -566,24 +568,46 @@ pub fn off_chain_data_commitment(
             .or_insert(vec![row]);
     }
 
-    // then, for each group of rows with the same primary index, compute the row value digest
-    let digest = grouped_rows
+    let old_commitment: [F; FLATTEN_POSEIDON_LEN] = old_commitment
+        .unwrap_or_default()
+        .as_ref()
+        .pack(Endianness::Little)
         .into_iter()
-        .try_fold(Point::NEUTRAL, |acc, (primary, rows)| {
-            let row_digest = compute_table_row_digest(&rows, row_unique_columns)?;
-            let primary_index_column = rows[0].primary_index_column.identifier();
-            // add primary index value to digest
-            let digest = add_primary_index_to_digest(primary_index_column, primary, row_digest);
-            // accumulate with the previous digest
-            anyhow::Ok(acc + digest)
-        })?;
-
+        .map(F::from_canonical_u32)
+        .collect_vec()
+        .try_into()
+        .unwrap();
+    // then, for each group of rows with the same primary index, update the commitment
+    let new_commitment =
+        grouped_rows
+            .into_iter()
+            .try_fold(old_commitment, |commitment, (primary, rows)| {
+                let row_digest = compute_table_row_digest(&rows, row_unique_columns)?;
+                let primary_index_column = rows[0].primary_index_column.identifier();
+                // add primary index value to digest
+                let digest = add_primary_index_to_digest(primary_index_column, primary, row_digest);
+                // compute the new commitment
+                let payload = commitment
+                    .into_iter()
+                    .chain(digest.to_fields())
+                    .collect_vec();
+                anyhow::Ok(flatten_poseidon_hash_value(H::hash_no_pad(&payload)))
+            })?;
+    // convert to bytes
     // hash the digest
-    let hash_bytes = flatten_poseidon_hash_value(H::hash_no_pad(&digest.to_fields()))
+    let hash_bytes = new_commitment
         .into_iter()
         .flat_map(|f| (f.to_canonical_u64() as u32).to_le_bytes())
         .collect_vec();
     Ok(HashOutput::try_from(hash_bytes).unwrap())
+}
+
+/// Compute the provable commitment to the data found in an off-chain table
+pub fn off_chain_data_commitment(
+    table_rows: &[TableRow],
+    row_unique_columns: &[ColumnId],
+) -> Result<HashOutput> {
+    update_off_chain_data_commitment(table_rows, None, row_unique_columns)
 }
 
 #[cfg(test)]

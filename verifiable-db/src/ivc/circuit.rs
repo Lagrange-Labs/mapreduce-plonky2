@@ -62,13 +62,14 @@ impl IVCCircuit {
         let block_pi = crate::block_tree::PublicInputs::from_slice(block_pi);
         let prev_pi = super::PublicInputs::from_slice(prev_proof);
 
-        // accumulate the order-agnostic digest of all the previously
-        // inserted nodes with the one of the new node
-        // expose prev_proof.DT + new_block_proof.new_node_digest as DT
-        let new_value_set_digest =
-            c.curve_add(prev_pi.value_set_digest(), block_pi.new_value_set_digest());
-        // compute block hash as the hash of multiset digest of the table in case `commit_to_data` is true
-        let data_hash = c.hash_n_to_hash_no_pad::<CHasher>(new_value_set_digest.to_targets());
+        // compute block hash as H(prev_commitment || current_multiset_digest) in case `commit_to_data` is true
+        let data_hash = c.hash_n_to_hash_no_pad::<CHasher>(
+            prev_pi
+                .block_hash()
+                .into_iter()
+                .chain(block_pi.new_node_digest.to_vec())
+                .collect(),
+        );
         let flattened_hash = flatten_poseidon_hash_target(c, data_hash);
         let block_hash = block_pi.current_block_hash();
         // select between flattener hash and block hash depending on `commit_to_data` flag
@@ -122,6 +123,12 @@ impl IVCCircuit {
         let andded = c.and(cond1, cond2);
         let final_cond = c.select(is_this_first_proof, andded.target, _true.target);
         c.connect(final_cond, _true.target);
+
+        // accumulate the order-agnostic digest of all the previously
+        // inserted nodes with the one of the new node
+        // expose prev_proof.DT + new_block_proof.new_node_digest as DT
+        let new_value_set_digest =
+            c.curve_add(prev_pi.value_set_digest(), block_pi.new_value_set_digest());
 
         super::PublicInputs::new(
             &block_pi.new_merkle_hash_target().to_targets(),
@@ -291,6 +298,7 @@ pub(super) mod test {
 
     use crate::{C, D, F};
     use alloy::primitives::U256;
+    use itertools::Itertools;
     use mp2_common::{
         group_hashing::weierstrass_to_point,
         poseidon::{empty_poseidon_hash, flatten_poseidon_hash_value, HashPermutation},
@@ -346,8 +354,14 @@ pub(super) mod test {
         }
     }
 
-    pub(crate) fn compute_data_commitment(value_digest: &Point) -> HashOut<F> {
-        let inputs = value_digest.to_fields();
+    pub(crate) fn compute_data_commitment(
+        prev_commitment: Vec<F>,
+        new_rows_digest: &Point,
+    ) -> HashOut<F> {
+        let inputs = prev_commitment
+            .into_iter()
+            .chain(new_rows_digest.to_fields())
+            .collect_vec();
         hash_n_to_hash_no_pad::<F, HashPermutation>(&inputs)
     }
 
@@ -418,7 +432,10 @@ pub(super) mod test {
             assert_eq!(
                 pi.block_hash_fields(),
                 if commit_to_data {
-                    flatten_poseidon_hash_value(compute_data_commitment(&exp_set_digest))
+                    flatten_poseidon_hash_value(compute_data_commitment(
+                        prev_pi.block_hash_fields().to_vec(),
+                        &weierstrass_to_point(&block_pi.new_value_set_digest_point()),
+                    ))
                 } else {
                     block_pi.block_hash()
                 }
@@ -473,6 +490,7 @@ pub(super) mod test {
             crate::block_tree::PublicInputs::<F>::TOTAL_LEN
         );
         assert_eq!(tc.prev_pi.len(), crate::ivc::NUM_IO);
+        let prev_pi = IVCPI::from_slice(&prev_pi);
         let proof = run_circuit::<F, D, C, _>(tc);
         let pi = super::super::PublicInputs::from_slice(&proof.public_inputs);
         {
@@ -490,9 +508,10 @@ pub(super) mod test {
             assert_eq!(
                 pi.block_hash_fields(),
                 if commit_to_data {
-                    flatten_poseidon_hash_value(compute_data_commitment(&weierstrass_to_point(
-                        &block_pi.new_value_set_digest_point(),
-                    )))
+                    flatten_poseidon_hash_value(compute_data_commitment(
+                        prev_pi.block_hash_fields().to_vec(),
+                        &weierstrass_to_point(&block_pi.new_value_set_digest_point()),
+                    ))
                 } else {
                     block_pi.block_hash()
                 }
