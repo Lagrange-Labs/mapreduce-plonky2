@@ -8,12 +8,12 @@ use super::{
     public_inputs::PublicInputs,
     Cell,
 };
+use crate::{C, D, F};
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     default_config,
     proof::{ProofInputSerialized, ProofWithVK},
-    C, D, F,
 };
 use plonky2::{field::types::Field, hash::hash_types::HashOut};
 use recursion_framework::{
@@ -245,11 +245,9 @@ pub fn extract_hash_from_proof(proof: &[u8]) -> Result<HashOut<F>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::H;
     use itertools::Itertools;
-    use mp2_common::{
-        poseidon::{empty_poseidon_hash, H},
-        utils::ToFields,
-    };
+    use mp2_common::{poseidon::empty_poseidon_hash, utils::ToFields};
     use plonky2::{field::types::PrimeField64, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use serial_test::serial;

@@ -1,16 +1,14 @@
 //! Module handling the extension node inside a state trie
 
 use super::public_inputs::PublicInputs;
-use crate::MAX_EXTENSION_NODE_LEN;
+use crate::{CBuilder, D, F, MAX_EXTENSION_NODE_LEN};
 use anyhow::Result;
 use mp2_common::{
     array::{Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTLeafOrExtensionNode, PAD_LEN},
     public_inputs::PublicInputCommon,
-    types::CBuilder,
     utils::Endianness,
-    D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -95,6 +93,7 @@ impl CircuitLogicWires<F, D, 1> for ExtensionWires {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::C;
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         group_hashing::map_to_curve_point,
@@ -102,7 +101,6 @@ mod tests {
         rlp::MAX_KEY_NIBBLE_LEN,
         types::PACKED_ADDRESS_LEN,
         utils::{keccak256, Endianness, Fieldable, Packer, ToFields},
-        C,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

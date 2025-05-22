@@ -10,16 +10,14 @@ use super::{
     public_inputs::PublicInputs,
     ColumnId, ColumnInfo, MappingKey,
 };
-use crate::{api::InputNode, MAX_BRANCH_NODE_LEN};
+use crate::{api::InputNode, C, D, F, H, MAX_BRANCH_NODE_LEN};
 use anyhow::{bail, ensure, Result};
 use log::debug;
 use mp2_common::{
     default_config,
     mpt_sequential::PAD_LEN,
-    poseidon::H,
     proof::{ProofInputSerialized, ProofWithVK},
     storage_key::{MappingSlot, SimpleSlot},
-    C, D, F,
 };
 use paste::paste;
 use plonky2::{

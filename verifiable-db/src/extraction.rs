@@ -1,6 +1,6 @@
 //! Public inputs for Contract Extraction circuits
 
-use mp2_common::{D, F};
+use crate::{D, F};
 use plonky2::{
     iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,
@@ -28,14 +28,14 @@ pub trait ExtractionPIWrap: Serialize + DeserializeOwned {
 #[cfg(test)]
 pub mod test {
 
+    use crate::{tests::OutputHash, CBuilder, D, F};
     use alloy::primitives::U256;
     use mp2_common::{
-        keccak::{OutputHash, PACKED_HASH_LEN},
+        keccak::PACKED_HASH_LEN,
         public_inputs::{PublicInputCommon, PublicInputRange},
-        types::{CBuilder, GFp, CURVE_TARGET_LEN},
+        types::CURVE_TARGET_LEN,
         u256::{self},
         utils::{FromFields, FromTargets, ToTargets},
-        D, F,
     };
     use plonky2_ecgfp5::curve::curve::WeierstrassPoint;
     use serde::Deserialize;
@@ -121,7 +121,7 @@ pub mod test {
         }
     }
 
-    impl PublicInputs<'_, GFp> {
+    impl PublicInputs<'_, F> {
         /// Get the metadata point.
         pub fn metadata_point(&self) -> WeierstrassPoint {
             WeierstrassPoint::from_fields(self.dm)

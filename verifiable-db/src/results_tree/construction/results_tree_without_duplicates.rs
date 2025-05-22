@@ -1,5 +1,5 @@
 use super::public_inputs::PublicInputs;
-use crate::query::universal_circuit::build_cells_tree;
+use crate::{query::universal_circuit::build_cells_tree, D};
 use alloy::primitives::U256;
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
@@ -12,7 +12,7 @@ use mp2_common::{
     types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{HashBuilder, ToTargets},
-    D, F,
+    F,
 };
 use plonky2::{
     iop::{

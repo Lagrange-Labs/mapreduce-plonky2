@@ -89,8 +89,7 @@ where
             db_tx
             .execute(
                 &format!(
-                    "UPDATE {} SET {PAYLOAD}=$3 WHERE {KEY}=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}",
-                    table
+                    "UPDATE {table} SET {PAYLOAD}=$3 WHERE {KEY}=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}"
                 ),
                 &[&k.to_bytea(), &epoch, &Json(v)],
             )
@@ -118,8 +117,7 @@ where
             Ok(connection
                 .query(
                     &format!(
-                        "SELECT {KEY} FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
-                        table
+                        "SELECT {KEY} FROM {table} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}"
                     ),
                     &[&epoch],
                 )
@@ -142,8 +140,7 @@ where
             Ok(connection
                 .query(
                     &format!(
-                        "SELECT {KEY} FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL} LIMIT 1",
-                        table
+                        "SELECT {KEY} FROM {table} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL} LIMIT 1"
                     ),
                     &[&epoch],
                 )
@@ -166,8 +163,7 @@ where
             Ok(connection
                 .query(
                     &format!(
-                        "SELECT {KEY}, {PAYLOAD} FROM {} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}",
-                        table
+                        "SELECT {KEY}, {PAYLOAD} FROM {table} WHERE {VALID_FROM} <= $1 AND $1 <= {VALID_UNTIL}"
                     ),
                     &[&epoch],
                 )
@@ -191,8 +187,7 @@ where
             connection
             .query(
                 &format!(
-                    "SELECT {PAYLOAD} FROM {} WHERE {KEY}=$1 AND {VALID_FROM} <= $2 AND $2 <= {VALID_UNTIL}",
-                    table
+                    "SELECT {PAYLOAD} FROM {table} WHERE {KEY}=$1 AND {VALID_FROM} <= $2 AND $2 <= {VALID_UNTIL}"
                 ),
                 &[&(k.to_bytea()), &epoch],
             )
@@ -201,7 +196,7 @@ where
             .and_then(|rows| match rows.len() {
                 0 => Ok(None),
                 1 => Ok(Some(rows[0].get::<_, Json<V>>(0).0)),
-                _ => Err(RyhopeError::internal(format!("internal coherency error: {:?}", rows))),
+                _ => Err(RyhopeError::internal(format!("internal coherency error: {rows:?}"))),
             })
         }
     }
@@ -261,8 +256,7 @@ where
         connection
             .query(
                 &format!(
-                    "SELECT * FROM {} WHERE {KEY}=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}",
-                    table
+                    "SELECT * FROM {table} WHERE {KEY}=$1 AND {VALID_FROM}<=$2 AND $2<={VALID_UNTIL}"
                 ),
                 &[&k.to_bytea(), &epoch],
             )
@@ -288,9 +282,8 @@ where
             .execute(
                 &format!(
                     "INSERT INTO
-                     {} ({KEY}, {VALID_FROM}, {VALID_UNTIL})
-                     VALUES ($1, $2, $3)",
-                    table
+                     {table} ({KEY}, {VALID_FROM}, {VALID_UNTIL})
+                     VALUES ($1, $2, $3)"
                 ),
                 &[&k.to_bytea(), &birth_epoch, &MAX_PGSQL_BIGINT],
             )
@@ -316,7 +309,7 @@ where
             .await
             .map_err(|err| {
                 RyhopeError::from_db(
-                    format!("failed to execute `{}` on `{}`", keys_query, table),
+                    format!("failed to execute `{keys_query}` on `{table}`"),
                     err,
                 )
             })?
@@ -483,9 +476,8 @@ where
         connection
             .query(
                 &format!(
-                    "SELECT {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD}, {SUBTREE_SIZE} FROM {}
-                       WHERE {KEY}=$1 AND {VALID_FROM} <= $2 AND $2 <= {VALID_UNTIL}",
-                    table
+                    "SELECT {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD}, {SUBTREE_SIZE} FROM {table}
+                       WHERE {KEY}=$1 AND {VALID_FROM} <= $2 AND $2 <= {VALID_UNTIL}"
                 ),
                 &[&k.to_bytea(), &epoch],
             )
@@ -530,9 +522,8 @@ where
             .execute(
                 &format!(
                     "INSERT INTO
-                     {} ({KEY}, {VALID_FROM}, {VALID_UNTIL}, {SUBTREE_SIZE}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD})
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                    table
+                     {table} ({KEY}, {VALID_FROM}, {VALID_UNTIL}, {SUBTREE_SIZE}, {PARENT}, {LEFT_CHILD}, {RIGHT_CHILD})
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)"
                 ),
                 &[
                     &k.to_bytea(),
@@ -672,11 +663,10 @@ where
                         batch.key, batch.user_epoch, {table}.{PAYLOAD},
                         {table}.{PARENT}, {table}.{LEFT_CHILD}, {table}.{RIGHT_CHILD}
                       FROM
-                        (VALUES {}) AS batch (user_epoch, incremental_epoch, key)
+                        (VALUES {immediate_table}) AS batch (user_epoch, incremental_epoch, key)
                       LEFT JOIN {table} ON
                         batch.key = {table}.{KEY} AND {table}.{VALID_FROM} <= batch.incremental_epoch 
-                        AND batch.incremental_epoch <= {table}.{VALID_UNTIL}",
-                    immediate_table
+                        AND batch.incremental_epoch <= {table}.{VALID_UNTIL}"
                 ),
                 &[],
             )
@@ -761,7 +751,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
                 )
                 .await
                 .map_err(|err| {
-                    RyhopeError::from_db(format!("initializing new store in `{}`", table), err)
+                    RyhopeError::from_db(format!("initializing new store in `{table}`"), err)
                 })?;
         }
 
@@ -871,8 +861,7 @@ impl<T: Debug + Clone + Send + Sync + Serialize + for<'a> Deserialize<'a>> Cache
         ensure(
             new_epoch >= INITIAL_INCREMENTAL_EPOCH,
             format!(
-                "unable to rollback to {} before initial epoch {}",
-                new_epoch, INITIAL_INCREMENTAL_EPOCH
+                "unable to rollback to {new_epoch} before initial epoch {INITIAL_INCREMENTAL_EPOCH}"
             ),
         )?;
 
@@ -1145,8 +1134,7 @@ where
         ensure(
             new_epoch >= INITIAL_INCREMENTAL_EPOCH,
             format!(
-                "unable to rollback to {} before initial epoch {}",
-                new_epoch, INITIAL_INCREMENTAL_EPOCH
+                "unable to rollback to {new_epoch} before initial epoch {INITIAL_INCREMENTAL_EPOCH}",
             ),
         )?;
         ensure(

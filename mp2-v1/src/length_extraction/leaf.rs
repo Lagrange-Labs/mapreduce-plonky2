@@ -2,6 +2,7 @@
 
 use core::array;
 
+use crate::{CBuilder, D, F as GFp};
 use mp2_common::{
     array::Vector,
     group_hashing::CircuitBuilderGroupHashing,
@@ -12,9 +13,7 @@ use mp2_common::{
     },
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleSlotWires},
-    types::{CBuilder, GFp},
     utils::{Endianness, ToTargets},
-    D,
 };
 use plonky2::{
     field::types::Field,
@@ -136,13 +135,12 @@ impl LeafLengthCircuit {
 pub mod tests {
     use std::sync::Arc;
 
+    use crate::{CBuilder, C, D, F as GFp};
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         eth::StorageSlot,
         rlp::MAX_KEY_NIBBLE_LEN,
-        types::{CBuilder, GFp},
         utils::{keccak256, Endianness, Packer, ToFields},
-        C, D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
     use plonky2::{field::types::Field, iop::witness::PartialWitness};

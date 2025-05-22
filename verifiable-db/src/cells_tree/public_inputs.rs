@@ -1,12 +1,12 @@
 //! Public inputs for Cells Tree Construction circuits
 
+use crate::{CBuilder, F};
 use mp2_common::{
     digest::{SplitDigestPoint, SplitDigestTarget},
     group_hashing::weierstrass_to_point,
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::{CBuilder, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     utils::{FromFields, FromTargets},
-    F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
@@ -214,7 +214,8 @@ impl PublicInputs<'_, F> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use mp2_common::{utils::ToFields, C, D, F};
+    use crate::{C, D, F};
+    use mp2_common::utils::ToFields;
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

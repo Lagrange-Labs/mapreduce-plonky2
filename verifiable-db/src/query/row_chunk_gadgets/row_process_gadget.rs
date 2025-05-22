@@ -1,7 +1,8 @@
 use anyhow::Result;
 use std::array;
 
-use mp2_common::{types::CBuilder, u256::UInt256Target, F};
+use crate::{CBuilder, F};
+use mp2_common::u256::UInt256Target;
 use plonky2::iop::witness::PartialWitness;
 use serde::{Deserialize, Serialize};
 

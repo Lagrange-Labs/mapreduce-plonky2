@@ -1,5 +1,6 @@
+use crate::{C, D, F};
 use mp2_common::{
-    default_config, proof::ProofWithVK, public_inputs::PublicInputCommon, utils::ToTargets, C, D, F,
+    default_config, proof::ProofWithVK, public_inputs::PublicInputCommon, utils::ToTargets,
 };
 use plonky2::{
     field::types::Field,

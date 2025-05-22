@@ -107,9 +107,10 @@ mod tests {
             tests::random_aggregation_public_inputs,
         },
         test_utils::random_aggregation_operations,
+        C, D, F, H,
     };
     use itertools::Itertools;
-    use mp2_common::{poseidon::H, utils::ToFields, C, D, F};
+    use mp2_common::utils::ToFields;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,

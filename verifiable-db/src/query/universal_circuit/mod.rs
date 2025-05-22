@@ -1,4 +1,4 @@
-use mp2_common::F;
+use crate::F;
 use plonky2::hash::hash_types::{HashOut, HashOutTarget};
 
 /// Component implementing the basic operation supported in the universal query circuit, described here

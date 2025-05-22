@@ -90,7 +90,7 @@ fn verify_query_in_solidity(asset_dir: &str) {
     verify_pi_sha256(&proof);
     // Extend the proof length to a multiple of `32` for encoding to `bytes32`.
     let proof_len = proof.len();
-    let new_proof_len = (proof_len + 31) / 32 * 32;
+    let new_proof_len = proof_len.div_ceil(32);
     proof.resize(new_proof_len, 0);
 
     // Encode to a `bytes32` array.

@@ -2,15 +2,14 @@ use std::iter::{repeat, repeat_with};
 
 use anyhow::{bail, ensure, Result};
 
+use crate::{HashPermutation, C, D, F, H};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     default_config,
-    poseidon::{HashPermutation, H},
     proof::{serialize_proof, ProofWithVK},
     types::HashOutput,
     utils::ToFields,
-    C, D, F,
 };
 use plonky2::{
     hash::hashing::hash_n_to_hash_no_pad,
@@ -67,7 +66,7 @@ impl TreePathInputs {
     /// Instantiate a new instance of `TreePathInputs` for a given node from the following input data:
     /// - `node_info`: data about the given node
     /// - `path`: data about the nodes in the path from the node up to the root of the tree;
-    ///     The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
+    ///   The `ChildPosition` refers to the position of the previous node in the path as a child of the current node
     /// - `siblings`: hash of the siblings of the nodes in the path (except for the root)
     /// - `children`: data about the children of the given node
     pub fn new(
@@ -107,7 +106,7 @@ impl NodePath {
     /// Instantiate a new instance of `NodePath` for a given proven row from the following input data:
     /// - `row_path`: path from the node to the root of the rows tree storing the node
     /// - `index_path` : path from the index tree node storing the rows tree containing the node, up to the
-    ///     root of the index tree
+    ///   root of the index tree
     pub fn new(row_path: TreePathInputs, index_path: TreePathInputs) -> Self {
         Self {
             row_tree_path: row_path,

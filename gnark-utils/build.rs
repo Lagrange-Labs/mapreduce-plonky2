@@ -17,10 +17,10 @@ fn main() {
         )
         .try_compile(lib_name)
     {
-        if format!("{}", e).starts_with("Failed to find tool.") {
+        if format!("{e}").starts_with("Failed to find tool.") {
             fail(" Failed to find Go. Please install Go 1.20.".to_string());
         } else {
-            fail(format!("{}", e));
+            fail(format!("{e}"));
         }
     }
 
@@ -32,15 +32,14 @@ fn main() {
     }
 
     // Links
-    println!("cargo:rustc-link-search=native={}", out_dir);
-    println!("cargo:rustc-link-lib=static={}", lib_name);
+    println!("cargo:rustc-link-search=native={out_dir}");
+    println!("cargo:rustc-link-lib=static={lib_name}");
 }
 
 fn fail(message: String) {
     let _ = writeln!(
         io::stderr(),
-        "\n\nError while building gnark-utils: {}\n\n",
-        message
+        "\n\nError while building gnark-utils: {message}\n\n"
     );
     std::process::exit(1);
 }

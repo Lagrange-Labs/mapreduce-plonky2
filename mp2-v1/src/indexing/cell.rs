@@ -1,14 +1,10 @@
 use std::iter;
 
+use crate::{F, H};
 use alloy::primitives::U256;
 use derive_more::Deref;
 use log::debug;
-use mp2_common::{
-    poseidon::{empty_poseidon_hash, H},
-    types::HashOutput,
-    utils::ToFields,
-    F,
-};
+use mp2_common::{poseidon::empty_poseidon_hash, types::HashOutput, utils::ToFields};
 use plonky2::{
     field::types::Field,
     hash::hash_types::HashOut,

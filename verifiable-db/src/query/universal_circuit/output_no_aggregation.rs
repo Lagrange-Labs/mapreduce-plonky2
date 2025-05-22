@@ -1,4 +1,7 @@
-use crate::query::computational_hash_ids::{AggregationOperation, Identifiers, Output};
+use crate::{
+    query::computational_hash_ids::{AggregationOperation, Identifiers, Output},
+    CBuilder, F,
+};
 use anyhow::ensure;
 use itertools::Itertools;
 use mp2_common::{
@@ -7,10 +10,8 @@ use mp2_common::{
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
     utils::ToTargets,
-    F,
 };
 use plonky2::iop::{
     target::{BoolTarget, Target},
@@ -241,7 +242,7 @@ impl<const MAX_NUM_RESULTS: usize> OutputComponent<MAX_NUM_RESULTS> for Circuit<
         let [op_id, op_sum] = [AggregationOperation::IdOp, AggregationOperation::SumOp]
             .map(|op| b.constant(Identifiers::AggregationOperations(op).to_field()));
         let ops_ids: Vec<_> = iter::once(op_id)
-            .chain(iter::repeat(op_sum).take(MAX_NUM_RESULTS - 1))
+            .chain(iter::repeat_n(op_sum, MAX_NUM_RESULTS - 1))
             .collect();
         let ops_ids = ops_ids.try_into().unwrap();
 
@@ -261,10 +262,9 @@ mod tests {
     };
 
     use super::*;
+    use crate::{C, D};
     use alloy::primitives::U256;
-    use mp2_common::{
-        group_hashing::map_to_curve_point, u256::WitnessWriteU256, utils::ToFields, C, D,
-    };
+    use mp2_common::{group_hashing::map_to_curve_point, u256::WitnessWriteU256, utils::ToFields};
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
         circuit::{run_circuit, UserCircuit},

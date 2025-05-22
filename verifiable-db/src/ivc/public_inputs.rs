@@ -1,3 +1,4 @@
+use crate::{CBuilder, F};
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
@@ -6,7 +7,6 @@ use mp2_common::{
     types::{HashOutput, CURVE_TARGET_LEN},
     u256::{self, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
-    F,
 };
 use plonky2::{
     field::types::PrimeField64,
@@ -45,7 +45,7 @@ impl PublicInputCommon for PublicInputs<'_, Target> {
     const RANGES: &'static [PublicInputRange] =
         &[H_RANGE, DM_RANGE, DV_RANGE, Z0_RANGE, ZI_RANGE, O_RANGE];
 
-    fn register_args(&self, cb: &mut mp2_common::types::CBuilder) {
+    fn register_args(&self, cb: &mut CBuilder) {
         cb.register_public_inputs(self.h);
         cb.register_public_inputs(self.dm);
         cb.register_public_inputs(self.dv);
@@ -171,7 +171,8 @@ impl PublicInputs<'_, F> {
 #[cfg(test)]
 mod tests {
 
-    use mp2_common::{utils::ToFields, C, D};
+    use crate::{C, D};
+    use mp2_common::utils::ToFields;
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

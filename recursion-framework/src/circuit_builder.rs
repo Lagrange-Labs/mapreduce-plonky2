@@ -335,7 +335,7 @@ where
 pub(crate) mod tests {
     use std::{
         array, cmp,
-        iter::{once, repeat},
+        iter::{once, repeat_n},
         marker::PhantomData,
     };
 
@@ -347,13 +347,11 @@ pub(crate) mod tests {
 
     use plonky2_monolith::{gates::monolith::MonolithGate, monolith_hash::MonolithHash};
 
-    use mp2_common::{
-        poseidon::H,
-        serialization::{
-            circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array,
-        },
-        C, D, F,
+    use mp2_common::serialization::{
+        circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array,
     };
+
+    use crate::{C, D, F, H};
 
     use super::*;
 
@@ -566,10 +564,12 @@ pub(crate) mod tests {
             .skip(NUM_VERIFIERS)
             .chain(once(rec_proof))
             .collect::<Vec<_>>();
-        let input_vd = repeat(&leaf_circuit.circuit_data().verifier_only)
-            .take(NUM_VERIFIERS - 1)
-            .chain(once(&recursive_circuit.circuit_data().verifier_only))
-            .collect::<Vec<_>>();
+        let input_vd = repeat_n(
+            &leaf_circuit.circuit_data().verifier_only,
+            NUM_VERIFIERS - 1,
+        )
+        .chain(once(&recursive_circuit.circuit_data().verifier_only))
+        .collect::<Vec<_>>();
         let rec_proof = recursive_circuit
             .generate_proof(
                 input_proofs.try_into().unwrap(),

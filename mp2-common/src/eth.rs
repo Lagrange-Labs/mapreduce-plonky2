@@ -258,8 +258,7 @@ impl StorageSlot {
                     .unwrap()
                     .to_be_bytes();
                 debug!(
-                    "Storage slot struct: parent_location = {}, evm_offset = {}",
-                    parent_location, evm_offset,
+                    "Storage slot struct: parent_location = {parent_location}, evm_offset = {evm_offset}"
                 );
                 B256::from_slice(&location)
             }
@@ -474,7 +473,7 @@ mod test {
             .await?;
         let tree_res = ProofQuery::verify_storage_proof(&res)?;
         println!("official response: {}", res.storage_proof[0].value);
-        println!("tree response = {:?}", tree_res);
+        println!("tree response = {tree_res:?}");
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         assert_eq!(leaf_list.len(), 2);
@@ -495,7 +494,7 @@ mod test {
             .rev()
             .collect::<Vec<u8>>()
             .pack(Endianness::Little)[0];
-        println!("length extracted = {}", length);
+        println!("length extracted = {length}");
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);
         assert_eq!(length, 2); // custom value that may change if we update contract!
         Ok(())
@@ -517,7 +516,7 @@ mod test {
             .await?;
         let tree_res = ProofQuery::verify_storage_proof(&res)?;
         println!("official response: {}", res.storage_proof[0].value);
-        println!("tree response = {:?}", tree_res);
+        println!("tree response = {tree_res:?}");
         let leaf = res.storage_proof[0].proof.last().unwrap().to_vec();
         let leaf_list: Vec<Vec<u8>> = rlp::decode_list(&leaf);
         println!("leaf[1].len() = {}", leaf_list[1].len());
@@ -549,8 +548,8 @@ mod test {
             .rev()
             .collect::<Vec<u8>>()
             .pack(Endianness::Little)[0];
-        println!("length extracted = {}", length);
-        println!("length 2 extracted = {}", length2);
+        println!("length extracted = {length}");
+        println!("length 2 extracted = {length2}");
         println!("res.storage_proof.value = {}", res.storage_proof[0].value);
         let analyze = |proof: Vec<Bytes>| {
             proof.iter().fold(HashMap::new(), |mut acc, p| {
@@ -564,8 +563,8 @@ mod test {
         };
         let storage_sizes = analyze(res.storage_proof[0].proof.clone());
         let state_sizes = analyze(res.account_proof.clone());
-        println!("storage_sizes = {:?}", storage_sizes);
-        println!("state_sizes = {:?}", state_sizes);
+        println!("storage_sizes = {storage_sizes:?}");
+        println!("state_sizes = {state_sizes:?}");
         Ok(())
     }
 
@@ -608,7 +607,7 @@ mod test {
         // uint256 public n_registered; // storage slot 0
         // mapping(address => uint256) public holders; // storage slot 1
         let url = get_sepolia_url();
-        println!("URL given = {}", url);
+        println!("URL given = {url}");
         let provider = ProviderBuilder::new().connect_http(url.parse().unwrap());
 
         // sepolia contract
@@ -638,7 +637,7 @@ mod test {
     #[tokio::test]
     async fn test_alloy_header_conversion() -> Result<()> {
         let url = get_sepolia_url();
-        println!("URL given = {}", url);
+        println!("URL given = {url}");
         let provider = ProviderBuilder::new().connect_http(url.parse().unwrap());
         let block = provider
             .get_block_by_number(BlockNumberOrTag::Latest)

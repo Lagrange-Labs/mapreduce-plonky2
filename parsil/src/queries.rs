@@ -31,7 +31,7 @@ pub fn core_keys_for_index_tree(
         query_max_block.min(
             execution_epoch
                 .try_into()
-                .with_context(|| format!("unable to convert {} to i64", execution_epoch))?,
+                .with_context(|| format!("unable to convert {execution_epoch} to i64"))?,
         ),
     );
 

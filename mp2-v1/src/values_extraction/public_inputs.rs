@@ -1,12 +1,13 @@
 //! Public inputs for Extraction Leaf/Extension/Branch circuits
 
+use crate::{CBuilder, GFp5, OutputHash, F as GFp};
 use mp2_common::{
     array::Array,
-    keccak::{OutputHash, PACKED_HASH_LEN},
+    keccak::PACKED_HASH_LEN,
     mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
-    types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point, FromTargets},
 };
 use plonky2::{
@@ -160,7 +161,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use mp2_common::{mpt_sequential::MPTKeyWire, C, D, F};
+    use crate::{C, D, F};
+    use mp2_common::mpt_sequential::MPTKeyWire;
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

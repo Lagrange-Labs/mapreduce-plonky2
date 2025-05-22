@@ -1,4 +1,7 @@
-use crate::api::{SlotInput, TableRow};
+use crate::{
+    api::{SlotInput, TableRow},
+    F, H,
+};
 use alloy::primitives::Address;
 use anyhow::{ensure, Result};
 use gadgets::{
@@ -10,10 +13,9 @@ use itertools::Itertools;
 use mp2_common::{
     eth::{left_pad32, StorageSlot},
     group_hashing::map_to_curve_point,
-    poseidon::{hash_to_int_value, H},
+    poseidon::hash_to_int_value,
     types::{HashOutput, MAPPING_LEAF_VALUE_LEN},
     utils::{Endianness, Packer, ToFields},
-    F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},

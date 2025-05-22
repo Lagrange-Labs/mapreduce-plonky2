@@ -1,6 +1,7 @@
 //! Module handling the branch node inside a state trie
 
 use super::public_inputs::PublicInputs;
+use crate::{CBuilder, D, F};
 use anyhow::Result;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
@@ -8,9 +9,7 @@ use mp2_common::{
     mpt_sequential::{Circuit as MPTCircuit, PAD_LEN},
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
-    types::{CBuilder, GFp},
     utils::{Endianness, PackerTarget},
-    D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -82,7 +81,7 @@ where
         BranchWires { node, root }
     }
 
-    fn assign(&self, pw: &mut PartialWitness<GFp>, wires: &BranchWires<NODE_LEN>) {
+    fn assign(&self, pw: &mut PartialWitness<F>, wires: &BranchWires<NODE_LEN>) {
         let node = Vector::<u8, { PAD_LEN(NODE_LEN) }>::from_vec(&self.node).unwrap();
         wires.node.assign(pw, &node);
 
@@ -114,7 +113,7 @@ where
         BranchCircuit::build(builder, inputs)
     }
 
-    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<GFp>) -> Result<()> {
+    fn assign_input(&self, inputs: Self::Inputs, pw: &mut PartialWitness<F>) -> Result<()> {
         inputs.assign(pw, self);
         Ok(())
     }
@@ -123,6 +122,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::C;
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use mp2_common::{
         array::ToField,
@@ -131,7 +131,6 @@ mod tests {
         mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
         types::PACKED_ADDRESS_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
-        C,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

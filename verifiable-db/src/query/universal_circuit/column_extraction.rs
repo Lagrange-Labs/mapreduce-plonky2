@@ -1,14 +1,15 @@
 use super::{cells::build_cells_tree, ComputationalHashTarget, MembershipHashTarget};
-use crate::query::computational_hash_ids::{Extraction, Identifiers};
+use crate::{
+    query::computational_hash_ids::{Extraction, Identifiers},
+    CBuilder, F,
+};
 use mp2_common::{
     poseidon::empty_poseidon_hash,
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
     utils::HashBuilder,
-    F,
 };
 use plonky2::iop::{
     target::{BoolTarget, Target},
@@ -152,8 +153,9 @@ mod tests {
     use crate::query::universal_circuit::{ComputationalHash, MembershipHash};
 
     use super::*;
+    use crate::{C, D};
     use alloy::primitives::U256;
-    use mp2_common::{u256::WitnessWriteU256, C, D};
+    use mp2_common::u256::WitnessWriteU256;
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
         circuit::{run_circuit, UserCircuit},

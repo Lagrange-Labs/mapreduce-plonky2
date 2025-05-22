@@ -1,11 +1,11 @@
 use std::iter::once;
 
+use crate::{D, F};
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     array::{Targetable, ToField},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-    D, F,
 };
 use plonky2::{
     iop::{
@@ -291,12 +291,12 @@ impl BasicOperationInputs {
 mod tests {
     use std::array;
 
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use mp2_common::{
         array::ToField,
         default_config,
         u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
-        C, D, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

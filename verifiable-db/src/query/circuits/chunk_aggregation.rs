@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::array;
 
+use crate::{D, F};
 use itertools::Itertools;
 use mp2_common::{
     proof::ProofWithVK,
@@ -10,7 +11,6 @@ use mp2_common::{
     },
     u256::CircuitBuilderU256,
     utils::ToTargets,
-    D, F,
 };
 use plonky2::{
     iop::{
@@ -186,8 +186,9 @@ pub struct ChunkAggregationInputs<const NUM_CHUNKS: usize, const MAX_NUM_RESULTS
 mod tests {
     use std::array;
 
+    use crate::{C, D, F};
     use itertools::Itertools;
-    use mp2_common::{array::ToField, utils::FromFields, C, D, F};
+    use mp2_common::{array::ToField, utils::FromFields};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,

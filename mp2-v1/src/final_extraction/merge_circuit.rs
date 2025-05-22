@@ -5,12 +5,11 @@ use super::{
     base_circuit::{self, BaseCircuitProofWires},
     BaseCircuitProofInputs, PublicInputs,
 };
+use crate::{CBuilder, D, F};
 use mp2_common::{
     digest::SplitDigestTarget,
     serialization::{deserialize, serialize},
-    types::CBuilder,
     utils::ToTargets,
-    D, F,
 };
 use plonky2::{
     iop::{
@@ -145,11 +144,11 @@ mod test {
     use crate::values_extraction;
 
     use super::*;
+    use crate::{C, D, F};
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
     use mp2_common::{
         digest::SplitDigestPoint,
         group_hashing::{map_to_curve_point, weierstrass_to_point as wp},
-        C, D, F,
     };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::witness::WitnessWrite;

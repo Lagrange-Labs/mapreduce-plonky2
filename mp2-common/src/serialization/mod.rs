@@ -25,7 +25,7 @@ pub struct SerializationError(String);
 
 impl From<IoError> for SerializationError {
     fn from(value: IoError) -> Self {
-        Self(format!("{}", value))
+        Self(format!("{value}"))
     }
 }
 

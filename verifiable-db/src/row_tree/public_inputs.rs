@@ -1,12 +1,12 @@
 //! Public inputs for rows trees creation circuits
 
+use crate::{CBuilder, F};
 use alloy::primitives::U256;
 use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::{CBuilder, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     u256::{self, UInt256Target},
     utils::{FromFields, FromTargets},
-    F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, NUM_HASH_OUT_ELTS},
@@ -223,7 +223,8 @@ impl PublicInputs<'_, F> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use mp2_common::{utils::ToFields, C, D, F};
+    use crate::{C, D, F};
+    use mp2_common::utils::ToFields;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::{Field, Sample},

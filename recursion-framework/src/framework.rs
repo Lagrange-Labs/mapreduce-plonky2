@@ -271,7 +271,7 @@ pub(crate) mod tests {
     use std::array;
     use std::marker::PhantomData;
 
-    use mp2_common::{C, D, F};
+    use crate::{C, D, F};
     use plonky2::field::types::Sample;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::plonk::circuit_data::CircuitConfig;

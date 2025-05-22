@@ -9,7 +9,6 @@ mod tests {
     use mp2_common::{
         types::HashOutput,
         utils::{FromFields, TryIntoBool},
-        F,
     };
     use mp2_test::{
         cells_tree::{compute_cells_tree_hash, TestCell},
@@ -30,6 +29,7 @@ mod tests {
             utils::{NodeInfo, QueryBounds},
         },
         test_utils::gen_values_in_range,
+        F,
     };
 
     /// Data structure employed to represent a node of a rows tree in the tests
