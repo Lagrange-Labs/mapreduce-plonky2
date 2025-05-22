@@ -1,4 +1,4 @@
-FROM rustlang/rust@nightly as base
+FROM rustlang/rust:nightly as base
 
 ARG GO_VERSION=1.22.2
 
