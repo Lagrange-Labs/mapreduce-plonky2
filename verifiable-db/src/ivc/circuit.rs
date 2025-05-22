@@ -1,16 +1,16 @@
+use crate::{CHasher, HashPermutation, C, D, F};
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     default_config,
     keccak::PACKED_HASH_LEN,
-    poseidon::{empty_poseidon_hash, flatten_poseidon_hash_target, HashPermutation},
+    poseidon::{empty_poseidon_hash, flatten_poseidon_hash_target},
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
     types::HashOutput,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{HashBuilder, TargetsConnector, ToFields, ToTargets},
-    CHasher, C, D, F,
 };
 use plonky2::{
     field::types::Field,

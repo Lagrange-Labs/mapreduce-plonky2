@@ -3,15 +3,14 @@
 use crate::MAX_EXTENSION_NODE_LEN;
 
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
+use crate::{CBuilder, D, F as GFp};
 use anyhow::Result;
 use mp2_common::{
     array::{Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{MPTLeafOrExtensionNode, PAD_LEN},
     public_inputs::PublicInputCommon,
-    types::{CBuilder, GFp},
     utils::Endianness,
-    D,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},

@@ -2,14 +2,14 @@
 //! multiple columns for struct.
 
 use super::column_info::{ColumnInfo, ColumnInfoTarget};
+use crate::{CBuilder, F};
 use itertools::Itertools;
 use mp2_common::{
     array::{Array, VectorWire},
     eth::left_pad32,
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
-    types::{CBuilder, MAPPING_LEAF_VALUE_LEN},
+    types::MAPPING_LEAF_VALUE_LEN,
     utils::{Endianness, Packer, PackerTarget},
-    F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},

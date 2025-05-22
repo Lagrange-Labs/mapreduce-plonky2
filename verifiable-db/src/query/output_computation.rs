@@ -1,14 +1,16 @@
 //! Compute each node output item by the input proofs
 
-use crate::query::{
-    computational_hash_ids::{AggregationOperation, Identifiers},
-    universal_circuit::universal_query_gadget::{CurveOrU256Target, OutputValuesTarget},
+use crate::{
+    query::{
+        computational_hash_ids::{AggregationOperation, Identifiers},
+        universal_circuit::universal_query_gadget::{CurveOrU256Target, OutputValuesTarget},
+    },
+    CBuilder,
 };
 use alloy::primitives::U256;
 use mp2_common::{
     array::ToField,
     group_hashing::CircuitBuilderGroupHashing,
-    types::CBuilder,
     u256::CircuitBuilderU256,
     utils::{FromTargets, ToTargets},
 };
@@ -161,9 +163,10 @@ pub(crate) mod tests {
             utils::tests::compute_output_item_value,
         },
         test_utils::random_aggregation_operations,
+        C, D, F,
     };
     use itertools::Itertools;
-    use mp2_common::{types::CURVE_TARGET_LEN, u256::NUM_LIMBS, utils::ToFields, C, D, F};
+    use mp2_common::{types::CURVE_TARGET_LEN, u256::NUM_LIMBS, utils::ToFields};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,

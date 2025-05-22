@@ -1,7 +1,7 @@
 //! Module handling the leaf node inside a state trie
 
 use super::public_inputs::PublicInputs;
-use crate::MAX_LEAF_NODE_LEN;
+use crate::{CBuilder, D, F, MAX_LEAF_NODE_LEN};
 use alloy::primitives::Address;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
@@ -9,9 +9,8 @@ use mp2_common::{
     keccak::{InputData, KeccakCircuit, KeccakWires, OutputByteHash, HASH_LEN},
     mpt_sequential::{MPTKeyWire, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN},
     public_inputs::PublicInputCommon,
-    types::{AddressTarget, CBuilder, ADDRESS_LEN},
+    types::{AddressTarget, ADDRESS_LEN},
     utils::{less_than, Endianness, ToTargets},
-    D, F,
 };
 use plonky2::{
     field::types::Field,

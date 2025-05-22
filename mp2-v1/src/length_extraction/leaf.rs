@@ -2,6 +2,7 @@
 
 use core::array;
 
+use crate::{CBuilder, D, F as GFp};
 use mp2_common::{
     array::Vector,
     group_hashing::CircuitBuilderGroupHashing,
@@ -12,9 +13,7 @@ use mp2_common::{
     },
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleSlotWires},
-    types::{CBuilder, GFp},
     utils::{Endianness, ToTargets},
-    D,
 };
 use plonky2::{
     field::types::Field,

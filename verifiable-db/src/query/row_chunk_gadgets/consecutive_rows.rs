@@ -1,8 +1,7 @@
+use crate::{CBuilder, F};
 use mp2_common::{
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
     utils::HashBuilder,
-    F,
 };
 use plonky2::{field::types::Field, iop::target::BoolTarget};
 

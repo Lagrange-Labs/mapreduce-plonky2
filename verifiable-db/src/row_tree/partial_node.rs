@@ -1,5 +1,5 @@
 use super::secondary_index_cell::{SecondaryIndexCell, SecondaryIndexCellWire};
-use crate::cells_tree;
+use crate::{cells_tree, C, D, F};
 use mp2_common::{
     default_config,
     group_hashing::CircuitBuilderGroupHashing,
@@ -10,7 +10,6 @@ use mp2_common::{
     serialization::{deserialize, serialize},
     u256::CircuitBuilderU256,
     utils::ToTargets,
-    C, D, F,
 };
 use plonky2::{
     self,

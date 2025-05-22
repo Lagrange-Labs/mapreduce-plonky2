@@ -10,22 +10,22 @@ use std::{
     iter::{once, repeat},
 };
 
+use crate::{CBuilder, C, D, F, H};
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     default_config,
     group_hashing::CircuitBuilderGroupHashing,
-    poseidon::{flatten_poseidon_hash_target, H},
+    poseidon::flatten_poseidon_hash_target,
     proof::verify_proof_fixed_circuit,
     public_inputs::PublicInputCommon,
     serialization::{
         deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
         serialize_long_array,
     },
-    types::{CBuilder, HashOutput},
+    types::HashOutput,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{Fieldable, HashBuilder, ToTargets},
-    C, D, F,
 };
 use plonky2::{
     hash::hash_types::HashOutTarget,

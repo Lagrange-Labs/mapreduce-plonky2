@@ -2,6 +2,7 @@
 
 use std::{array, iter::once};
 
+use crate::{CBuilder, D, F};
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 use itertools::Itertools;
@@ -12,10 +13,9 @@ use mp2_common::{
         circuit_data_serialization::SerializableRichField, deserialize, deserialize_array,
         deserialize_long_array, serialize, serialize_array, serialize_long_array,
     },
-    types::{CBuilder, HashOutput},
+    types::HashOutput,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
     utils::{FromFields, FromTargets, HashBuilder, SelectTarget, ToFields, ToTargets, TryIntoBool},
-    D, F,
 };
 use mp2_test::utils::gen_random_field_hash;
 use plonky2::{

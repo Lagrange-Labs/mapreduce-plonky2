@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::array;
 
+use crate::{D, F};
 use alloy::primitives::U256;
 use mp2_common::{
     poseidon::empty_poseidon_hash,
@@ -8,7 +9,6 @@ use mp2_common::{
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::ToTargets,
-    D, F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
@@ -273,8 +273,9 @@ where
 mod tests {
     use std::array;
 
+    use crate::{C, D, F};
     use alloy::primitives::U256;
-    use mp2_common::{check_panic, poseidon::empty_poseidon_hash, utils::ToFields, C, D, F};
+    use mp2_common::{check_panic, poseidon::empty_poseidon_hash, utils::ToFields};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::gen_random_field_hash,

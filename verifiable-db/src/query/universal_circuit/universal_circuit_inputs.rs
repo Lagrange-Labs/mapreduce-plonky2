@@ -2,12 +2,12 @@ use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_set, BTreeSet, HashMap};
 
+use crate::F;
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     utils::{Fieldable, TryIntoBool},
-    F,
 };
 
 use crate::query::computational_hash_ids::{

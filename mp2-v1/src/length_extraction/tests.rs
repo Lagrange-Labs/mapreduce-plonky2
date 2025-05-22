@@ -1,12 +1,11 @@
+use crate::{C, D, F as GFp};
 use alloy::rpc::types::EIP1186AccountProofResponse;
 use eth_trie::Nibbles;
 use mp2_common::{
     eth::{left_pad, ProofQuery},
     mpt_sequential::utils::visit_proof,
     rlp::MAX_KEY_NIBBLE_LEN,
-    types::GFp,
     utils::{keccak256, Endianness, Packer, ToFields},
-    C, D,
 };
 use mp2_test::circuit::{prove_circuit, setup_circuit};
 use plonky2::field::types::Field;

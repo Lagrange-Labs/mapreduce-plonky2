@@ -239,7 +239,7 @@ where
 mod tests {
     use std::array;
 
-    use mp2_common::{C, D, F};
+    use crate::{C, D, F};
     use plonky2::field::types::Sample;
 
     use crate::{

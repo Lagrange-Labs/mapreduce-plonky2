@@ -10,6 +10,10 @@
 #![feature(async_closure)]
 
 use git_version::git_version;
+use plonky2::plonk::{
+    circuit_builder::CircuitBuilder,
+    config::{GenericConfig, Hasher},
+};
 
 pub mod api;
 pub mod block_tree;
@@ -24,6 +28,17 @@ pub mod results_tree;
 pub mod revelation;
 pub mod row_tree;
 pub mod test_utils;
+
+pub(crate) const D: usize = 2;
+#[cfg(feature = "original_poseidon")]
+pub(crate) type C = plonky2::plonk::config::PoseidonGoldilocksConfig;
+#[cfg(not(feature = "original_poseidon"))]
+pub(crate) type C = poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
+pub(crate) type F = <C as GenericConfig<D>>::F;
+pub(crate) type CHasher = <C as GenericConfig<D>>::Hasher;
+pub(crate) type H = <C as GenericConfig<D>>::Hasher;
+pub(crate) type CBuilder = CircuitBuilder<F, D>;
+pub(crate) type HashPermutation = <H as Hasher<F>>::Permutation;
 
 /// Return the current version of the library.
 pub fn version() -> &'static str {

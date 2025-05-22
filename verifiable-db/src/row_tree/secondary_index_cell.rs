@@ -1,14 +1,16 @@
 //! Row information for the rows tree
 
-use crate::cells_tree::{Cell, CellWire, PublicInputs as CellsPublicInputs};
+use crate::{
+    cells_tree::{Cell, CellWire, PublicInputs as CellsPublicInputs},
+    CBuilder, F, H,
+};
 use derive_more::Constructor;
 use mp2_common::{
-    poseidon::{hash_to_int_target, H},
+    poseidon::hash_to_int_target,
     serialization::{deserialize, serialize},
-    types::{CBuilder, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     u256::UInt256Target,
     utils::{FromFields, ToTargets},
-    F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},

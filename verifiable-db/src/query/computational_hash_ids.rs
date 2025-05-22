@@ -8,13 +8,13 @@ use alloy::primitives::U256;
 use anyhow::{anyhow, ensure, Context, Result};
 use itertools::Itertools;
 
+use crate::{CBuilder, CHasher, F, H};
 use mp2_common::{
     array::ToField,
-    poseidon::{empty_poseidon_hash, H},
-    types::{CBuilder, HashOutput},
+    poseidon::empty_poseidon_hash,
+    types::HashOutput,
     u256::UInt256Target,
     utils::{Fieldable, FromFields, HashBuilder, ToFields, ToTargets},
-    CHasher, F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},

@@ -1,4 +1,5 @@
-use mp2_common::{types::CBuilder, u256::CircuitBuilderU256, utils::FromTargets, F};
+use mp2_common::{u256::CircuitBuilderU256, utils::FromTargets, };
+use crate::{CBuilder, F};
 use plonky2::iop::{target::Target, witness::PartialWitness};
 use serde::{Deserialize, Serialize};
 

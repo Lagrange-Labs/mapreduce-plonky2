@@ -7,20 +7,19 @@ use crate::{
         public_inputs::PublicInputsQueryCircuits as QueryProofPublicInputs,
     },
     revelation::PublicInputs,
+    CBuilder, C, D, F, H,
 };
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     default_config,
-    poseidon::{flatten_poseidon_hash_target, H},
+    poseidon::flatten_poseidon_hash_target,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
     utils::ToTargets,
-    C, D, F,
 };
 use plonky2::{
     iop::{

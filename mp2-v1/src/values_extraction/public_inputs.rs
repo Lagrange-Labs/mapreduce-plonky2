@@ -1,12 +1,13 @@
 //! Public inputs for Extraction Leaf/Extension/Branch circuits
 
+use crate::{CBuilder, GFp5, OutputHash, F as GFp};
 use mp2_common::{
     array::Array,
-    keccak::{OutputHash, PACKED_HASH_LEN},
+    keccak::PACKED_HASH_LEN,
     mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
-    types::{CBuilder, GFp, GFp5, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     utils::{convert_point_to_curve_target, convert_slice_to_curve_point, FromTargets},
 };
 use plonky2::{

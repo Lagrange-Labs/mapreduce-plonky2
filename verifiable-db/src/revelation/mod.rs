@@ -1,7 +1,6 @@
 //! Module including the revelation circuits for query
 
-use crate::ivc::NUM_IO;
-use mp2_common::F;
+use crate::{ivc::NUM_IO, F};
 
 pub mod api;
 pub(crate) mod placeholders_check;
@@ -23,13 +22,16 @@ pub const NUM_PREPROCESSING_IO: usize = NUM_IO;
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::query::{
-        computational_hash_ids::{AggregationOperation, PlaceholderIdentifier},
-        universal_circuit::universal_query_gadget::OutputValues,
+    use crate::{
+        query::{
+            computational_hash_ids::{AggregationOperation, PlaceholderIdentifier},
+            universal_circuit::universal_query_gadget::OutputValues,
+        },
+        F, H,
     };
     use alloy::primitives::U256;
     use itertools::Itertools;
-    use mp2_common::{array::ToField, poseidon::H, utils::ToFields, F};
+    use mp2_common::{array::ToField, utils::ToFields};
     use mp2_test::utils::gen_random_u256;
     use placeholders_check::{placeholder_ids_hash, CheckPlaceholderGadget, CheckedPlaceholder};
     use plonky2::{field::types::PrimeField64, hash::hash_types::HashOut, plonk::config::Hasher};

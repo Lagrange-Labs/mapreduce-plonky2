@@ -1,15 +1,14 @@
 //! The public inputs of the query revelation circuits
 
+use crate::{CBuilder, F};
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     keccak::PACKED_HASH_LEN,
     poseidon::FLATTEN_POSEIDON_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::CBuilder,
     u256::{UInt256Target, NUM_LIMBS},
     utils::{FromFields, FromTargets},
-    F,
 };
 use plonky2::{
     field::types::Field,
@@ -374,7 +373,8 @@ impl<const L: usize, const S: usize, const PH: usize> PublicInputs<'_, F, L, S, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields, C, D, F};
+    use crate::{C, D, F};
+    use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

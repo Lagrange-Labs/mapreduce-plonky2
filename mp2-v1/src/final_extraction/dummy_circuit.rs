@@ -4,6 +4,7 @@ use super::{
     api::{FinalExtractionBuilderParams, NUM_IO},
     PublicInputs, DUMMY_METADATA_DIGEST_PREFIX,
 };
+use crate::{CBuilder, D, F};
 use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::derive::Constructor;
@@ -14,10 +15,8 @@ use mp2_common::{
     keccak::PACKED_HASH_LEN,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{ToFields, ToTargets},
-    D, F,
 };
 use plonky2::{
     field::{extension::quintic::QuinticExtension, goldilocks_field::GoldilocksField},

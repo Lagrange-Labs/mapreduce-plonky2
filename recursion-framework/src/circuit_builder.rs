@@ -347,13 +347,11 @@ pub(crate) mod tests {
 
     use plonky2_monolith::{gates::monolith::MonolithGate, monolith_hash::MonolithHash};
 
-    use mp2_common::{
-        poseidon::H,
-        serialization::{
-            circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array,
-        },
-        C, D, F,
+    use mp2_common::serialization::{
+        circuit_data_serialization::SerializableRichField, deserialize_array, serialize_array,
     };
+
+    use crate::{C, D, F, H};
 
     use super::*;
 

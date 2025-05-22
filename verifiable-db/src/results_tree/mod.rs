@@ -8,7 +8,8 @@ pub(crate) mod old_public_inputs;
 pub(crate) mod tests {
     use std::array;
 
-    use mp2_common::{array::ToField, types::CURVE_TARGET_LEN, utils::ToFields, F};
+    use crate::F;
+    use mp2_common::{array::ToField, types::CURVE_TARGET_LEN, utils::ToFields};
     use plonky2::{
         field::types::{Field, Sample},
         hash::hash_types::NUM_HASH_OUT_ELTS,

@@ -2,15 +2,14 @@
 
 use core::array;
 
+use crate::{CBuilder, D, F as GFp};
 use mp2_common::{
     array::{Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, PACKED_HASH_LEN},
     mpt_sequential::Circuit as MPTCircuit,
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
-    types::{CBuilder, GFp},
     utils::{Endianness, PackerTarget},
-    D,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},

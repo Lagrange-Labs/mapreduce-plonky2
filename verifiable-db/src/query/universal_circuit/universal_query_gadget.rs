@@ -3,17 +3,17 @@ use std::{
     iter::{once, repeat},
 };
 
+use crate::{CBuilder, CHasher, F, H};
 use alloy::primitives::U256;
 use anyhow::{bail, ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::empty_poseidon_hash,
     serialization::{deserialize, deserialize_long_array, serialize, serialize_long_array},
-    types::{CBuilder, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256, NUM_LIMBS},
     utils::{FromFields, FromTargets, ToFields, ToTargets},
-    CHasher, F,
 };
 use plonky2::{
     field::types::Field,

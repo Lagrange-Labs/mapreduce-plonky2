@@ -3,15 +3,14 @@
 //! of the tree, proving over the same path.
 
 use super::public_inputs::PublicInputs;
+use crate::{CBuilder, CHasher, D, F};
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{FromTargets, ToTargets},
-    CHasher, D, F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},

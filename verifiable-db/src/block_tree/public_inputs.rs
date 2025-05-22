@@ -2,14 +2,14 @@
 
 use std::array::from_fn as create_array;
 
+use crate::{CBuilder, F};
 use alloy::primitives::U256;
 use mp2_common::{
     keccak::PACKED_HASH_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::{CBuilder, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     u256::{self, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets},
-    F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},

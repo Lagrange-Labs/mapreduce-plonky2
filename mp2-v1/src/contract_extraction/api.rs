@@ -6,14 +6,13 @@ use super::{
     leaf::{self, LeafCircuit},
     public_inputs::PublicInputs,
 };
-use crate::{api::InputNode, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
+use crate::{api::InputNode, C, D, F, MAX_BRANCH_NODE_LEN, MAX_LEAF_NODE_LEN};
 use alloy::primitives::Address;
 use anyhow::Result;
 use mp2_common::{
     default_config,
     proof::{ProofInputSerialized, ProofWithVK},
     utils::find_index_subvector,
-    C, D, F,
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},

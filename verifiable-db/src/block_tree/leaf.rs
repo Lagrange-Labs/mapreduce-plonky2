@@ -7,17 +7,12 @@ use super::{
 };
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
-    row_tree,
+    row_tree, CBuilder, CHasher, C, D, F, H,
 };
 use anyhow::Result;
 use mp2_common::{
-    default_config,
-    poseidon::{empty_poseidon_hash, H},
-    proof::ProofWithVK,
-    public_inputs::PublicInputCommon,
-    types::CBuilder,
-    utils::ToTargets,
-    CHasher, C, D, F,
+    default_config, poseidon::empty_poseidon_hash, proof::ProofWithVK,
+    public_inputs::PublicInputCommon, utils::ToTargets,
 };
 use plonky2::{
     iop::{

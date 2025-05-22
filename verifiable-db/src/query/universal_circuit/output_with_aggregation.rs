@@ -1,5 +1,6 @@
 use std::{array, iter::repeat};
 
+use crate::{CBuilder, F};
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 use itertools::Itertools;
@@ -8,9 +9,7 @@ use mp2_common::{
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
-    F,
 };
 use plonky2::iop::{
     target::{BoolTarget, Target},

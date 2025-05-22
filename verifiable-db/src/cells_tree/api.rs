@@ -8,12 +8,12 @@ use super::{
     public_inputs::PublicInputs,
     Cell,
 };
+use crate::{C, D, F};
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     default_config,
     proof::{ProofInputSerialized, ProofWithVK},
-    C, D, F,
 };
 use plonky2::{field::types::Field, hash::hash_types::HashOut};
 use recursion_framework::{

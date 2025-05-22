@@ -2,13 +2,16 @@
 //! is another mapping. In this case, we refer to the key for the first-layer mapping entry as the
 //! outer key, while the key for the mapping stored in the entry mapping is referred to as inner key.
 
-use crate::values_extraction::{
-    gadgets::{
-        column_gadget::ColumnGadget,
-        metadata_gadget::{ColumnsMetadata, MetadataTarget},
+use crate::{
+    values_extraction::{
+        gadgets::{
+            column_gadget::ColumnGadget,
+            metadata_gadget::{ColumnsMetadata, MetadataTarget},
+        },
+        public_inputs::{PublicInputs, PublicInputsArgs},
+        INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
     },
-    public_inputs::{PublicInputs, PublicInputsArgs},
-    INNER_KEY_ID_PREFIX, OUTER_KEY_ID_PREFIX,
+    CBuilder, CHasher, D, F,
 };
 use anyhow::Result;
 use itertools::Itertools;
@@ -22,9 +25,8 @@ use mp2_common::{
     poseidon::hash_to_int_target,
     public_inputs::PublicInputCommon,
     storage_key::{MappingOfMappingsSlotWires, MappingSlot},
-    types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
+    types::MAPPING_LEAF_VALUE_LEN,
     utils::{Endianness, ToTargets},
-    CHasher, D, F,
 };
 use plonky2::{
     field::types::Field,
@@ -217,7 +219,7 @@ where
 
     pub fn assign(
         &self,
-        pw: &mut PartialWitness<GFp>,
+        pw: &mut PartialWitness<F>,
         wires: &LeafMappingOfMappingsWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
     ) {
         let padded_node =

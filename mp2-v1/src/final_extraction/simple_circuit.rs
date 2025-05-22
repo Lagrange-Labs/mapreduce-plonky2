@@ -1,5 +1,6 @@
+use crate::{D, F};
 use derive_more::From;
-use mp2_common::{public_inputs::PublicInputCommon, utils::ToTargets, D, F};
+use mp2_common::{public_inputs::PublicInputCommon, utils::ToTargets};
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,

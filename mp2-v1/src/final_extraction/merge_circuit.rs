@@ -5,12 +5,11 @@ use super::{
     base_circuit::{self, BaseCircuitProofWires},
     BaseCircuitProofInputs, PublicInputs,
 };
+use crate::{CBuilder, D, F};
 use mp2_common::{
     digest::SplitDigestTarget,
     serialization::{deserialize, serialize},
-    types::CBuilder,
     utils::ToTargets,
-    D, F,
 };
 use plonky2::{
     iop::{

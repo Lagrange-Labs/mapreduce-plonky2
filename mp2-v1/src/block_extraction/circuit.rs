@@ -2,12 +2,13 @@ use super::public_inputs;
 use anyhow::{ensure, Result};
 use std::array::from_fn as create_array;
 
+use crate::{CBuilder, F as GFp};
 use mp2_common::{
     array::{Array, Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, HASH_LEN},
     mpt_sequential::{utils::left_pad_leaf_value, PAD_LEN},
     public_inputs::PublicInputCommon,
-    types::{CBuilder, GFp, MAX_BLOCK_LEN},
+    types::MAX_BLOCK_LEN,
     u256::UInt256Target,
     utils::{Endianness, ToTargets},
 };

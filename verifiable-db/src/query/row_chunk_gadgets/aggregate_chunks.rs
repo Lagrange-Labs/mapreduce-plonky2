@@ -1,13 +1,14 @@
+use crate::{
+    query::universal_circuit::universal_query_gadget::{
+        OutputValuesTarget, UniversalQueryOutputWires,
+    },
+    CBuilder,
+};
 use mp2_common::{
-    types::CBuilder,
     u256::UInt256Target,
     utils::{FromTargets, SelectTarget},
 };
 use plonky2::iop::target::{BoolTarget, Target};
-
-use crate::query::universal_circuit::universal_query_gadget::{
-    OutputValuesTarget, UniversalQueryOutputWires,
-};
 
 use super::{consecutive_rows::are_consecutive_rows, BoundaryRowDataTarget, RowChunkDataTarget};
 

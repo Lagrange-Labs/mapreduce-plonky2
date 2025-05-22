@@ -1,13 +1,8 @@
 //! Column information for values extraction
 
-use crate::api::SlotInput;
+use crate::{api::SlotInput, CBuilder, F, H};
 use itertools::{zip_eq, Itertools};
-use mp2_common::{
-    group_hashing::map_to_curve_point,
-    poseidon::H,
-    types::{CBuilder, MAPPING_LEAF_VALUE_LEN},
-    F,
-};
+use mp2_common::{group_hashing::map_to_curve_point, types::MAPPING_LEAF_VALUE_LEN};
 use plonky2::{
     field::types::{Field, Sample},
     hash::hash_types::HashOut,

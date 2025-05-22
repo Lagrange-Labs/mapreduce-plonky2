@@ -8,7 +8,7 @@ use std::iter::once;
 
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
-    row_tree,
+    row_tree, CBuilder, CHasher, D, F, H,
 };
 use alloy::primitives::U256;
 pub use api::{CircuitInput, PublicParameters};
@@ -18,10 +18,8 @@ use mp2_common::{
         circuit_hashed_scalar_mul, field_hashed_scalar_mul, weierstrass_to_point,
         CircuitBuilderGroupHashing,
     },
-    poseidon::{empty_poseidon_hash, hash_to_int_target, hash_to_int_value, H},
-    types::CBuilder,
+    poseidon::{empty_poseidon_hash, hash_to_int_target, hash_to_int_value},
     utils::{ToFields, ToTargets},
-    CHasher, D, F,
 };
 use plonky2::{
     field::types::Field,

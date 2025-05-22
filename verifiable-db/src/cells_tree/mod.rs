@@ -5,6 +5,7 @@ mod leaf;
 mod partial_node;
 mod public_inputs;
 
+use crate::{CBuilder, F};
 use alloy::primitives::U256;
 pub use api::{build_circuits_params, extract_hash_from_proof, CircuitInput, PublicParameters};
 use derive_more::Constructor;
@@ -13,10 +14,8 @@ use mp2_common::{
     digest::{Digest, SplitDigestPoint, SplitDigestTarget},
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
     serialization::{deserialize, serialize},
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{ToFields, ToTargets},
-    F,
 };
 use serde::{Deserialize, Serialize};
 use std::iter::once;

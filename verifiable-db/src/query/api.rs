@@ -2,15 +2,14 @@ use std::iter::{repeat, repeat_with};
 
 use anyhow::{bail, ensure, Result};
 
+use crate::{HashPermutation, C, D, F, H};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     default_config,
-    poseidon::{HashPermutation, H},
     proof::{serialize_proof, ProofWithVK},
     types::HashOutput,
     utils::ToFields,
-    C, D, F,
 };
 use plonky2::{
     hash::hashing::hash_n_to_hash_no_pad,

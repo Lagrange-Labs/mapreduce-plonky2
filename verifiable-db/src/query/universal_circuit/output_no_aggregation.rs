@@ -1,4 +1,7 @@
-use crate::query::computational_hash_ids::{AggregationOperation, Identifiers, Output};
+use crate::{
+    query::computational_hash_ids::{AggregationOperation, Identifiers, Output},
+    CBuilder, F,
+};
 use anyhow::ensure;
 use itertools::Itertools;
 use mp2_common::{
@@ -7,10 +10,8 @@ use mp2_common::{
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target},
     utils::ToTargets,
-    F,
 };
 use plonky2::iop::{
     target::{BoolTarget, Target},

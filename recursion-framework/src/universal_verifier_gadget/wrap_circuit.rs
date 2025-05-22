@@ -166,7 +166,9 @@ pub(crate) mod test {
         circuit_builder::{tests::LeafCircuitWires, CircuitLogicWires},
         framework::tests::check_panic,
     };
-    use mp2_common::{serialization::circuit_data_serialization::SerializableRichField, C, D, F};
+    use mp2_common::serialization::circuit_data_serialization::SerializableRichField;
+
+    use crate::{C, D, F};
 
     use serial_test::serial;
 

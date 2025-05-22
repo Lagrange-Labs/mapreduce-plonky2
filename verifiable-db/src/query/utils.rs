@@ -1,18 +1,18 @@
 use std::{array, cmp::Ordering, iter::once};
 
+use crate::{CBuilder, CHasher, HashPermutation, F};
 use alloy::primitives::U256;
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
-    poseidon::{empty_poseidon_hash, HashPermutation},
+    poseidon::empty_poseidon_hash,
     serialization::{
         deserialize, deserialize_array, deserialize_long_array, serialize, serialize_array,
         serialize_long_array,
     },
-    types::{CBuilder, HashOutput},
+    types::HashOutput,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{Fieldable, ToFields, ToTargets},
-    CHasher, F,
 };
 use plonky2::{
     hash::{

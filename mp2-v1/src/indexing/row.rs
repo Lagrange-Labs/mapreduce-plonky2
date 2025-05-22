@@ -1,16 +1,12 @@
 use std::{collections::HashSet, fmt::Debug};
 
 use super::{block::BlockPrimaryIndex, cell::CellTreeKey, ColumnID};
+use crate::{F, H};
 use alloy::primitives::U256;
 use anyhow::Result;
 use derive_more::{Deref, From};
 use hashbrown::HashMap;
-use mp2_common::{
-    poseidon::{empty_poseidon_hash, H},
-    types::HashOutput,
-    utils::ToFields,
-    F,
-};
+use mp2_common::{poseidon::empty_poseidon_hash, types::HashOutput, utils::ToFields};
 use plonky2::{
     field::types::Field,
     hash::hash_types::HashOut,

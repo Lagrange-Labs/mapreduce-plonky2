@@ -1,9 +1,9 @@
 use super::secondary_index_cell::{SecondaryIndexCell, SecondaryIndexCellWire};
-use crate::cells_tree;
+use crate::{cells_tree, C, D, F, H};
 use derive_more::{From, Into};
 use mp2_common::{
-    default_config, group_hashing::CircuitBuilderGroupHashing, poseidon::H, proof::ProofWithVK,
-    public_inputs::PublicInputCommon, u256::CircuitBuilderU256, utils::ToTargets, C, D, F,
+    default_config, group_hashing::CircuitBuilderGroupHashing, proof::ProofWithVK,
+    public_inputs::PublicInputCommon, u256::CircuitBuilderU256, utils::ToTargets,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -149,9 +149,10 @@ impl CircuitLogicWires<F, D, NUM_CHILDREN> for RecursiveFullWires {
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use itertools::Itertools;
-    use mp2_common::{group_hashing::weierstrass_to_point, utils::ToFields, C, D, F};
+    use mp2_common::{group_hashing::weierstrass_to_point, utils::ToFields};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{field::types::PrimeField64, iop::witness::WitnessWrite, plonk::config::Hasher};
 

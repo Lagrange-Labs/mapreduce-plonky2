@@ -1,5 +1,6 @@
+use crate::{C, D, F};
 use anyhow::Result;
-use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
+use mp2_common::{default_config, proof::ProofWithVK};
 use plonky2::{hash::hash_types::HashOut, plonk::circuit_data::CircuitData};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},

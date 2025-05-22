@@ -1,8 +1,7 @@
+use crate::{C, D, F};
 use mp2_common::{
     default_config,
     proof::{ProofInputSerialized, ProofWithVK},
-    types::GFp,
-    C, D, F,
 };
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -81,7 +80,7 @@ pub struct PublicParameters {
 
 impl PublicParameters {
     /// Number of public inputs used in the circuits.
-    pub const NUM_PUBLIC_INPUTS: usize = PublicInputs::<GFp>::TOTAL_LEN;
+    pub const NUM_PUBLIC_INPUTS: usize = PublicInputs::<F>::TOTAL_LEN;
 
     /// Number of circuit variants.
     pub const CIRCUIT_SET_SIZE: usize = 3;

@@ -3,13 +3,12 @@ use std::{array, cmp::Ordering, collections::BTreeSet, fmt::Debug, iter::repeat}
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 
+use crate::{C, D, F, H};
 use itertools::Itertools;
 use mp2_common::{
     default_config,
-    poseidon::H,
     proof::{deserialize_proof, ProofWithVK},
     u256::is_less_than_or_equal_to_u256_arr,
-    C, D, F,
 };
 use plonky2::plonk::{
     circuit_data::{VerifierCircuitData, VerifierOnlyCircuitData},

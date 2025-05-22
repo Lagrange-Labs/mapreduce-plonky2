@@ -3,15 +3,14 @@
 use super::column_info::{
     CircuitBuilderColumnInfo, ColumnInfo, ColumnInfoTarget, WitnessWriteColumnInfo,
 };
+use crate::{CBuilder, CHasher, F};
 use itertools::Itertools;
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
-    types::CBuilder,
     utils::less_than_or_equal_to_unsafe,
-    CHasher, F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},

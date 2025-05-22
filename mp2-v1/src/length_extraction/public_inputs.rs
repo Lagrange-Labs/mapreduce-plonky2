@@ -1,12 +1,13 @@
 use core::{array, iter};
 
+use crate::{CBuilder, OutputHash, F as GFp};
 use mp2_common::{
     array::Array,
-    keccak::{OutputHash, PACKED_HASH_LEN},
+    keccak::PACKED_HASH_LEN,
     mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
-    types::{CBuilder, GFp, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     utils::{FromFields, FromTargets},
 };
 use plonky2::iop::target::Target;

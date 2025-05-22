@@ -1,6 +1,6 @@
 //! Public inputs for Contract Extraction circuits
 
-use mp2_common::{D, F};
+use crate::{D, F};
 use plonky2::{
     iop::target::{BoolTarget, Target},
     plonk::circuit_builder::CircuitBuilder,

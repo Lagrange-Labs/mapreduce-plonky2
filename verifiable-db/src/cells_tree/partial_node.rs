@@ -1,14 +1,11 @@
 //! Module handling the intermediate node with 1 child inside a cells tree
 
 use super::{public_inputs::PublicInputs, Cell, CellWire};
+use crate::{CBuilder, D, F, H};
 use anyhow::Result;
 use derive_more::{From, Into};
 use mp2_common::{
-    poseidon::{empty_poseidon_hash, H},
-    public_inputs::PublicInputCommon,
-    types::CBuilder,
-    utils::ToTargets,
-    D, F,
+    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, utils::ToTargets,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},

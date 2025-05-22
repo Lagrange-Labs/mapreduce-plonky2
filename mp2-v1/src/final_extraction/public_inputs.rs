@@ -1,13 +1,13 @@
 //! Public inputs for Contract Extraction circuits
 
+use crate::{CBuilder, OutputHash, F};
 use alloy::primitives::U256;
 use mp2_common::{
-    keccak::{OutputHash, PACKED_HASH_LEN},
+    keccak::PACKED_HASH_LEN,
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::{CBuilder, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     u256::{self, UInt256Target},
     utils::{FromFields, FromTargets, ToTargets, TryIntoBool},
-    F,
 };
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2_ecgfp5::{curve::curve::WeierstrassPoint, gadgets::curve::CurveTarget};

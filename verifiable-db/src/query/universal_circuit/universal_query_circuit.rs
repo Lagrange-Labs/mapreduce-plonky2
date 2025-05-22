@@ -1,22 +1,23 @@
 use std::iter::once;
 
-use crate::query::{
-    computational_hash_ids::{Output, PlaceholderIdentifier},
-    pi_len,
-    public_inputs::PublicInputsUniversalCircuit,
-    row_chunk_gadgets::BoundaryRowDataTarget,
-    utils::QueryBounds,
+use crate::{
+    query::{
+        computational_hash_ids::{Output, PlaceholderIdentifier},
+        pi_len,
+        public_inputs::PublicInputsUniversalCircuit,
+        row_chunk_gadgets::BoundaryRowDataTarget,
+        utils::QueryBounds,
+    },
+    CBuilder, CHasher, HashPermutation, C, D, F,
 };
 use anyhow::Result;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    poseidon::{empty_poseidon_hash, HashPermutation},
+    poseidon::empty_poseidon_hash,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    types::CBuilder,
     utils::{FromTargets, HashBuilder, ToFields, ToTargets},
-    CHasher, C, D, F,
 };
 use plonky2::{
     field::types::Field,

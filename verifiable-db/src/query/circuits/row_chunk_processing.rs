@@ -9,29 +9,31 @@ use plonky2::{
 use recursion_framework::circuit_builder::CircuitLogicWires;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::query::{
-    computational_hash_ids::ColumnIDs,
-    pi_len,
-    public_inputs::PublicInputsQueryCircuits,
-    row_chunk_gadgets::{
-        aggregate_chunks::aggregate_chunks,
-        row_process_gadget::{RowProcessingGadgetInputWires, RowProcessingGadgetInputs},
-        RowChunkDataTarget,
-    },
-    universal_circuit::{
-        universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure},
-        universal_query_gadget::{
-            OutputComponent, UniversalQueryHashInputWires, UniversalQueryHashInputs,
+use crate::{
+    query::{
+        computational_hash_ids::ColumnIDs,
+        pi_len,
+        public_inputs::PublicInputsQueryCircuits,
+        row_chunk_gadgets::{
+            aggregate_chunks::aggregate_chunks,
+            row_process_gadget::{RowProcessingGadgetInputWires, RowProcessingGadgetInputs},
+            RowChunkDataTarget,
         },
+        universal_circuit::{
+            universal_circuit_inputs::{BasicOperation, Placeholders, ResultStructure},
+            universal_query_gadget::{
+                OutputComponent, UniversalQueryHashInputWires, UniversalQueryHashInputs,
+            },
+        },
+        utils::QueryBounds,
     },
-    utils::QueryBounds,
+    D, F,
 };
 
 use mp2_common::{
     public_inputs::PublicInputCommon,
     serialization::{deserialize_long_array, serialize_long_array},
     utils::ToTargets,
-    D, F,
 };
 
 use anyhow::{ensure, Result};

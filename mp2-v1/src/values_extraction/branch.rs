@@ -1,6 +1,7 @@
 //! Module handling the branch node inside a storage trie
 
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
+use crate::{CBuilder, D, F as GFp};
 use anyhow::Result;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
@@ -9,9 +10,7 @@ use mp2_common::{
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
-    types::{CBuilder, GFp},
     utils::{less_than, Endianness, PackerTarget},
-    D,
 };
 use plonky2::{
     field::types::Field,

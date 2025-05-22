@@ -1,3 +1,4 @@
+use crate::{C, D, F};
 use alloy::primitives::U256;
 use anyhow::{anyhow, ensure, Result};
 use itertools::Itertools;
@@ -6,7 +7,6 @@ use mp2_common::{
     proof::ProofWithVK,
     types::HashOutput,
     utils::{keccak256, Packer},
-    C, D, F,
 };
 use plonky2::{field::types::Field, iop::target::Target, plonk::circuit_data::VerifierCircuitData};
 use recursion_framework::{

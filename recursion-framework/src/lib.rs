@@ -18,6 +18,8 @@
 //! logic to be enforced in the circuit besides verifying proofs.
 //! For an example of how to use the framework, take a look at the integration tests, located in `tests/integration.rs`
 
+use plonky2::plonk::config::GenericConfig;
+
 /// This module contains data structures useful to instantiate circuits that either employ the universal verifier
 /// or whose proofs needs to be verified by a circuit employing the universal verifier
 pub mod circuit_builder;
@@ -31,3 +33,18 @@ pub mod framework;
 pub mod framework_testing;
 /// Internal module that contains the core data structures and gadgets for the universal verifier
 pub(crate) mod universal_verifier_gadget;
+
+pub const D: usize = 2;
+#[cfg(feature = "original_poseidon")]
+pub type C = plonky2::plonk::config::PoseidonGoldilocksConfig;
+#[cfg(not(feature = "original_poseidon"))]
+pub type C = poseidon2_plonky2::poseidon2_goldilock::Poseidon2GoldilocksConfig;
+pub type F = <C as GenericConfig<D>>::F;
+pub type CHasher = <C as GenericConfig<D>>::Hasher;
+pub type H = <C as GenericConfig<D>>::Hasher;
+
+/*pub const D: usize = mp2_common::D;
+pub type C = mp2_common::C;
+pub type F = mp2_common::F;
+pub type CHasher = mp2_common::CHasher;
+pub type H = mp2_common::poseidon::H;*/
