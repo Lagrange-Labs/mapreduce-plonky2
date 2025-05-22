@@ -1,26 +1,27 @@
 //! Check the placeholder identifiers and values with the specified `final_placeholder_hash`,
 //! compute and return the `num_placeholders` and the `placeholder_ids_hash`.
 
-use crate::query::{
-    computational_hash_ids::PlaceholderIdentifier,
-    universal_circuit::{
-        universal_circuit_inputs::Placeholders, universal_query_gadget::QueryBound,
+use crate::{
+    query::{
+        computational_hash_ids::PlaceholderIdentifier,
+        universal_circuit::{
+            universal_circuit_inputs::Placeholders, universal_query_gadget::QueryBound,
+        },
+        utils::QueryBounds,
     },
-    utils::QueryBounds,
+    CBuilder, F, H,
 };
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::empty_poseidon_hash,
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{FromFields, HashBuilder, ToFields, ToTargets},
-    F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
@@ -194,8 +195,7 @@ impl<const PH: usize, const PP: usize> CheckPlaceholderGadget<PH, PP> {
             assert_eq!(
                 padded_placeholder_values[pos.unwrap().0],
                 value,
-                "placehoder values doesn't match for id {:?}",
-                placeholder_id
+                "placehoder values doesn't match for id {placeholder_id:?}"
             );
             Ok(CheckedPlaceholder {
                 id: placeholder_id.to_field(),
@@ -462,8 +462,7 @@ pub(crate) fn placeholder_ids_hash<I: IntoIterator<Item = PlaceholderIdentifier>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::revelation::tests::TestPlaceholders;
-    use mp2_common::{C, D, F};
+    use crate::{revelation::tests::TestPlaceholders, C, D, F};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{
         field::types::Field,

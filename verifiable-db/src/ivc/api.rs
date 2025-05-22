@@ -1,5 +1,6 @@
+use crate::{C, D, F};
 use anyhow::Result;
-use mp2_common::{default_config, proof::ProofWithVK, C, D, F};
+use mp2_common::{default_config, proof::ProofWithVK};
 use plonky2::{hash::hash_types::HashOut, plonk::circuit_data::CircuitData};
 use recursion_framework::{
     circuit_builder::{CircuitWithUniversalVerifier, CircuitWithUniversalVerifierBuilder},
@@ -27,8 +28,8 @@ impl CircuitInput {
     /// Build input for the first IVC proof being generated. Requires as inputs:
     /// - `block_proof`: the proof of the block tree construction for the current block
     /// - `provable_data_commitment`: this flag must be true iff a commitment to the data
-    ///     found in the tree has to be provably computed and used as a root of trust for
-    ///     the data
+    ///   found in the tree has to be provably computed and used as a root of trust for
+    ///   the data
     pub fn new_first_input(provable_data_commitment: bool, block_proof: Vec<u8>) -> Result<Self> {
         let p = ProofWithVK::deserialize(&block_proof)?;
         let pi = crate::block_tree::PublicInputs::<F>::from_slice(&p.proof.public_inputs);
@@ -55,8 +56,8 @@ impl CircuitInput {
     /// - `block_proof`: the proof of the block tree construction for the current block
     /// - `prev_proof`:  the IVC proof generated for the previous block
     /// - `provable_data_commitment`: this flag must be true iff a commitment to the data
-    ///     found in the tree has to be provably computed and used as a root of trust for
-    ///     the data
+    ///   found in the tree has to be provably computed and used as a root of trust for
+    ///   the data
     pub fn new_subsequent_input(
         provable_data_commitment: bool,
         block_proof: Vec<u8>,
@@ -157,6 +158,7 @@ impl PublicParameters {
 mod test {
 
     use super::*;
+    use crate::{C, D, F};
     use alloy::primitives::U256;
     use anyhow::Result;
     use mp2_common::{
@@ -164,7 +166,6 @@ mod test {
         keccak::PACKED_HASH_LEN,
         poseidon::{empty_poseidon_hash, flatten_poseidon_hash_value},
         utils::{FromFields, ToFields},
-        C, D, F,
     };
     use mp2_test::utils::random_vector;
     use plonky2::field::types::Sample;

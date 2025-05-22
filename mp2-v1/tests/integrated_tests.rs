@@ -3,7 +3,6 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(let_chains)]
-#![feature(async_closure)]
 #![feature(assert_matches)]
 #![feature(associated_type_defaults)]
 

@@ -35,7 +35,7 @@ fn menu(tty: &mut console::Term, title: &str, choices: &[(char, &str)]) -> Optio
         "[q]".red().bold(),
     );
     loop {
-        writeln!(tty, "{}", prompt).unwrap();
+        writeln!(tty, "{prompt}").unwrap();
         match tty.read_char().unwrap() {
             x if choices.iter().any(|(trigger, _)| *trigger == x) => return Some(x),
             'q' => return None,
@@ -129,7 +129,7 @@ impl<
 
     async fn select_key(&self) -> Option<T::Key> {
         let keys = self.db.keys_at(self.current_epoch).await;
-        let keys_str = keys.iter().map(|k| format!("{:?}", k)).collect::<Vec<_>>();
+        let keys_str = keys.iter().map(|k| format!("{k:?}")).collect::<Vec<_>>();
 
         FuzzySelect::with_theme(&ColorfulTheme::default())
             .with_prompt(format!("{} validate", "[enter]".yellow().bold()))
@@ -279,7 +279,7 @@ impl<
         }
         let mut table = builder.build();
         table.with(Style::blank());
-        write!(self.tty, "{}", table).unwrap();
+        write!(self.tty, "{table}").unwrap();
         Ok(())
     }
 
@@ -322,7 +322,7 @@ impl<
                             .tree()
                             .lineage(&key, &self.db.view_at(self.current_epoch))
                             .await;
-                        println!("{key:?} -> {:?}", ascendance);
+                        println!("{key:?} -> {ascendance:?}");
 
                         println!()
                     }

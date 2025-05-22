@@ -78,7 +78,7 @@ pub async fn new_local_chain(storage: ProofKV) -> TestContext {
     let anvil = Anvil::new().spawn();
     // Create a provider with the wallet for contract deployment and interaction.
     let rpc_url = anvil.endpoint();
-    info!("Anvil running at `{}`", rpc_url);
+    info!("Anvil running at `{rpc_url}`");
     let rpc = ProviderBuilder::new().connect_http(rpc_url.parse().unwrap());
 
     TestContext {

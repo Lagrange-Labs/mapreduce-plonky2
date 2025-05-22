@@ -109,7 +109,7 @@ async fn _storage_in_pgsql(initial_epoch: UserEpoch) -> Result<()> {
 
     type TestTree = scapegoat::Tree<K>;
     type Storage = PgsqlStorage<TestTree, V, false>;
-    let table = format!("simple_{}", initial_epoch);
+    let table = format!("simple_{initial_epoch}");
 
     let mut s = MerkleTreeKvDb::<TestTree, V, Storage>::new(
         InitSettings::ResetAt(
@@ -1069,7 +1069,7 @@ async fn initial_state() {
         let tree_state = s_init.storage.state().fetch().await.unwrap();
         assert_eq!(tree_state.alpha, Alpha::new(0.8));
         assert_eq!(tree_state.node_count, 0);
-        println!("Tree alpha is {:?}", tree_state);
+        println!("Tree alpha is {tree_state:?}");
     }
 }
 

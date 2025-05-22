@@ -7,17 +7,12 @@ use super::{
 };
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
-    row_tree,
+    row_tree, CBuilder, CHasher, C, D, F, H,
 };
 use anyhow::Result;
 use mp2_common::{
-    default_config,
-    poseidon::{empty_poseidon_hash, H},
-    proof::ProofWithVK,
-    public_inputs::PublicInputCommon,
-    types::CBuilder,
-    utils::ToTargets,
-    CHasher, C, D, F,
+    default_config, poseidon::empty_poseidon_hash, proof::ProofWithVK,
+    public_inputs::PublicInputCommon, utils::ToTargets,
 };
 use plonky2::{
     iop::{
@@ -213,13 +208,10 @@ pub mod tests {
             compute_final_digest, compute_index_digest,
             tests::{TestPIField, TestPITargets},
         },
-        extraction,
+        extraction, H,
     };
     use alloy::primitives::U256;
-    use mp2_common::{
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-    };
+    use mp2_common::utils::{Fieldable, ToFields};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{hash::hash_types::HashOut, plonk::config::Hasher};
     use plonky2_ecgfp5::curve::curve::Point;

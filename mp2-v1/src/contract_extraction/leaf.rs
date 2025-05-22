@@ -1,7 +1,7 @@
 //! Module handling the leaf node inside a state trie
 
 use super::public_inputs::PublicInputs;
-use crate::MAX_LEAF_NODE_LEN;
+use crate::{CBuilder, D, F, MAX_LEAF_NODE_LEN};
 use alloy::primitives::Address;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
@@ -9,9 +9,8 @@ use mp2_common::{
     keccak::{InputData, KeccakCircuit, KeccakWires, OutputByteHash, HASH_LEN},
     mpt_sequential::{MPTKeyWire, MPTLeafOrExtensionNode, MAX_LEAF_VALUE_LEN, PAD_LEN},
     public_inputs::PublicInputCommon,
-    types::{AddressTarget, CBuilder, ADDRESS_LEN},
+    types::{AddressTarget, ADDRESS_LEN},
     utils::{less_than, Endianness, ToTargets},
-    D, F,
 };
 use plonky2::{
     field::types::Field,
@@ -178,6 +177,7 @@ mod tests {
     use crate::contract_extraction::compute_metadata_digest;
 
     use super::*;
+    use crate::C;
     use alloy::primitives::Address;
     use eth_trie::Trie;
     use mp2_common::{
@@ -185,7 +185,6 @@ mod tests {
         mpt_sequential::{mpt_key_ptr, utils::bytes_to_nibbles},
         types::MAPPING_LEAF_VALUE_LEN,
         utils::{keccak256, Endianness, Packer, ToFields},
-        C,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

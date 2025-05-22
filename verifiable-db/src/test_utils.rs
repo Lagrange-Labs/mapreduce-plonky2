@@ -19,13 +19,13 @@ use crate::{
         utils::{QueryBoundSource, QueryBounds, QueryHashNonExistenceCircuits},
     },
     revelation::NUM_PREPROCESSING_IO,
+    F,
 };
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     array::ToField,
     utils::{Fieldable, ToFields},
-    F,
 };
 use mp2_test::utils::{gen_random_field_hash, gen_random_u256};
 use plonky2::{

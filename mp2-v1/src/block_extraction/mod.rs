@@ -6,12 +6,12 @@ use plonky2::{
 mod circuit;
 pub(crate) mod public_inputs;
 
+use crate::{C, D, F};
 use anyhow::Result;
 use mp2_common::{
     default_config,
     proof::serialize_proof,
     serialization::{deserialize, serialize},
-    C, D, F,
 };
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +65,7 @@ impl PublicParameters {
 
 #[cfg(test)]
 mod test {
+    use crate::{C, D, F};
     use alloy::{
         eips::BlockNumberOrTag,
         primitives::U256,
@@ -75,7 +76,6 @@ mod test {
         eth::BlockUtil,
         proof::deserialize_proof,
         utils::{Endianness, FromFields, Packer, ToFields},
-        C, D, F,
     };
     use mp2_test::eth::get_sepolia_url;
 

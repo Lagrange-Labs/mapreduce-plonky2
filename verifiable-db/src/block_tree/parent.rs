@@ -6,20 +6,18 @@ use super::{
 };
 use crate::{
     extraction::{ExtractionPI, ExtractionPIWrap},
-    row_tree,
+    row_tree, CBuilder, CHasher, C, D, F, H,
 };
 use alloy::primitives::U256;
 use anyhow::Result;
 use mp2_common::{
     default_config,
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::empty_poseidon_hash,
     proof::ProofWithVK,
     public_inputs::PublicInputCommon,
     serialization::{deserialize, serialize},
-    types::CBuilder,
     u256::{CircuitBuilderU256, UInt256Target, WitnessWriteU256},
     utils::{FromTargets, ToTargets},
-    CHasher, C, D, F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
@@ -281,10 +279,8 @@ mod tests {
         super::tests::{random_extraction_pi, random_rows_tree_pi},
         *,
     };
-    use mp2_common::{
-        poseidon::H,
-        utils::{Fieldable, ToFields},
-    };
+    use crate::H;
+    use mp2_common::utils::{Fieldable, ToFields};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

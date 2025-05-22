@@ -1,13 +1,12 @@
 use std::iter::once;
 
+use crate::{CBuilder, F};
 use alloy::primitives::U256;
 use itertools::Itertools;
 use mp2_common::{
     public_inputs::{PublicInputCommon, PublicInputRange},
-    types::CBuilder,
     u256::UInt256Target,
     utils::{FromFields, FromTargets, TryIntoBool},
-    F,
 };
 use plonky2::{
     hash::hash_types::{HashOut, HashOutTarget},
@@ -600,7 +599,8 @@ impl<const S: usize> PublicInputsUniversalCircuit<'_, F, S> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields, C, D, F};
+    use crate::{C, D, F};
+    use mp2_common::{public_inputs::PublicInputCommon, utils::ToFields};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

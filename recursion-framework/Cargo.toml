@@ -8,6 +8,7 @@ anyhow.workspace = true
 log.workspace = true
 plonky2.workspace = true
 serde.workspace = true
+poseidon2_plonky2.workspace = true
 
 mp2_common = { path = "../mp2-common" , version = "2.1.1" }
 

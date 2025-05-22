@@ -3,15 +3,14 @@
 use super::column_info::{
     CircuitBuilderColumnInfo, ColumnInfo, ColumnInfoTarget, WitnessWriteColumnInfo,
 };
+use crate::{CBuilder, CHasher, F};
 use itertools::Itertools;
 use mp2_common::{
     group_hashing::CircuitBuilderGroupHashing,
     serialization::{
         deserialize_array, deserialize_long_array, serialize_array, serialize_long_array,
     },
-    types::CBuilder,
     utils::less_than_or_equal_to_unsafe,
-    CHasher, F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
@@ -313,8 +312,10 @@ impl<const MAX_COLUMNS: usize, const MAX_FIELD_PER_EVM: usize>
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM};
-    use mp2_common::{C, D};
+    use crate::{
+        tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
+        C, D,
+    };
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2_ecgfp5::gadgets::curve::PartialWitnessCurve;
 

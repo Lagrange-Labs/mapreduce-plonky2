@@ -1,11 +1,14 @@
 //! Module handling the single variable inside a storage trie
 
-use crate::values_extraction::{
-    gadgets::{
-        column_gadget::ColumnGadget,
-        metadata_gadget::{ColumnsMetadata, MetadataTarget},
+use crate::{
+    values_extraction::{
+        gadgets::{
+            column_gadget::ColumnGadget,
+            metadata_gadget::{ColumnsMetadata, MetadataTarget},
+        },
+        public_inputs::{PublicInputs, PublicInputsArgs},
     },
-    public_inputs::{PublicInputs, PublicInputsArgs},
+    CBuilder, CHasher, D, F,
 };
 use anyhow::Result;
 use mp2_common::{
@@ -17,9 +20,8 @@ use mp2_common::{
     poseidon::{empty_poseidon_hash, hash_to_int_target},
     public_inputs::PublicInputCommon,
     storage_key::{SimpleSlot, SimpleStructSlotWires},
-    types::{CBuilder, GFp, MAPPING_LEAF_VALUE_LEN},
+    types::MAPPING_LEAF_VALUE_LEN,
     utils::ToTargets,
-    CHasher, D, F,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -135,7 +137,7 @@ where
 
     pub fn assign(
         &self,
-        pw: &mut PartialWitness<GFp>,
+        pw: &mut PartialWitness<F>,
         wires: &LeafSingleWires<NODE_LEN, MAX_COLUMNS, MAX_FIELD_PER_EVM>,
     ) {
         let padded_node =
@@ -183,7 +185,7 @@ mod tests {
     use crate::{
         tests::{TEST_MAX_COLUMNS, TEST_MAX_FIELD_PER_EVM},
         values_extraction::compute_leaf_single_values_digest,
-        MAX_LEAF_NODE_LEN,
+        C, D, F, MAX_LEAF_NODE_LEN,
     };
     use eth_trie::{Nibbles, Trie};
     use mp2_common::{
@@ -192,7 +194,6 @@ mod tests {
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer},
-        C, D, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},

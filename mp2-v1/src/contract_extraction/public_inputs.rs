@@ -1,12 +1,13 @@
 //! Public inputs for Contract Extraction circuits
 
+use crate::{CBuilder, OutputHash, F as GFp};
 use mp2_common::{
     array::Array,
-    keccak::{OutputHash, PACKED_HASH_LEN},
+    keccak::PACKED_HASH_LEN,
     mpt_sequential::MPTKeyWire,
     public_inputs::{PublicInputCommon, PublicInputRange},
     rlp::MAX_KEY_NIBBLE_LEN,
-    types::{CBuilder, GFp, CURVE_TARGET_LEN},
+    types::CURVE_TARGET_LEN,
     utils::{FromFields, FromTargets},
 };
 use plonky2::iop::target::Target;
@@ -149,10 +150,8 @@ impl<'a, T: Copy> PublicInputs<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::{
-        utils::{Fieldable, ToFields},
-        C, D, F,
-    };
+    use crate::{C, D, F};
+    use mp2_common::utils::{Fieldable, ToFields};
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
         utils::random_vector,

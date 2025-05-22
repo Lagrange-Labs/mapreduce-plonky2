@@ -1,14 +1,14 @@
 use plonky2::field::types::Field;
 use std::iter::once;
 
+use crate::{F, H};
 use alloy::primitives::U256;
 use derive_more::From;
 use mp2_common::{
-    poseidon::{empty_poseidon_hash, H},
+    poseidon::empty_poseidon_hash,
     serialization::{deserialize, serialize, FromBytes, ToBytes},
     types::HashOutput,
     utils::ToFields,
-    F,
 };
 use plonky2::{
     hash::hash_types::HashOut,

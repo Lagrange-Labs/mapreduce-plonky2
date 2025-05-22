@@ -79,7 +79,7 @@ impl<'a, C: ContextProvider> Isolator<'a, C> {
                         let handle = symbol
                             .handle()
                             .ok_or(anyhow!("Cannot convert symbol {symbol} to handle"))?;
-                        Some(format!("{}", handle))
+                        Some(format!("{handle}"))
                     } else {
                         primary
                     },
@@ -91,7 +91,7 @@ impl<'a, C: ContextProvider> Isolator<'a, C> {
                         let handle = symbol
                             .handle()
                             .ok_or(anyhow!("Cannot convert symbol {symbol} to handle"))?;
-                        Some(format!("{}", handle))
+                        Some(format!("{handle}"))
                     } else {
                         secondary
                     },

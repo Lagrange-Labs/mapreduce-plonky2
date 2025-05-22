@@ -101,10 +101,7 @@ pub(crate) async fn prove_query(
     let block_range =
         planner.query.min_block.max(initial_epoch)..=planner.query.max_block.min(current_epoch);
     let num_blocks_in_range = big_index_cache.num_touched_rows();
-    info!(
-        "found {} blocks in range: {:?}",
-        num_blocks_in_range, block_range
-    );
+    info!("found {num_blocks_in_range} blocks in range: {block_range:?}");
     let column_ids = ColumnIDs::from(&planner.table.columns);
     let query_proof_id = if num_blocks_in_range == 0 {
         info!("Running INDEX TREE proving for EMPTY query");
@@ -209,7 +206,7 @@ pub(crate) async fn prove_query(
                 // this is a row chunk to be proven
                 let to_be_proven_chunk = proven_chunks
                     .get(k)
-                    .unwrap_or_else(|| panic!("chunk for key {:?} not found", k));
+                    .unwrap_or_else(|| panic!("chunk for key {k:?} not found"));
                 let input = QueryCircuitInput::new_row_chunks_input(
                     to_be_proven_chunk,
                     &planner.pis.predication_operations,
@@ -217,14 +214,14 @@ pub(crate) async fn prove_query(
                     &planner.pis.bounds,
                     &planner.pis.result,
                 )?;
-                info!("Proving chunk {:?}", k);
+                info!("Proving chunk {k:?}");
                 planner.ctx.run_query_proof(
                     "batching::chunk_processing",
                     GlobalCircuitInput::Query(input),
                 )
             } else {
                 let children_keys = workplan.tree().get_children_keys(k);
-                info!("children keys: {:?}", children_keys);
+                info!("children keys: {children_keys:?}");
                 // fetch the proof for each child from the storage
                 let child_proofs = children_keys
                     .into_iter()
@@ -238,7 +235,7 @@ pub(crate) async fn prove_query(
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let input = QueryCircuitInput::new_chunk_aggregation_input(&child_proofs)?;
-                info!("Aggregating chunk {:?}", k);
+                info!("Aggregating chunk {k:?}");
                 planner.ctx.run_query_proof(
                     "batching::chunk_aggregation",
                     GlobalCircuitInput::Query(input),
@@ -468,8 +465,7 @@ pub(crate) async fn cook_query_secondary_index_nonexisting_placeholder(
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block, max_block, key_value
+        "Longest sequence is for key {longest_key:?} -> from block {min_block:?} to  {max_block:?}, hex -> {key_value}"
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
@@ -516,8 +512,7 @@ pub(crate) async fn cook_query_secondary_index_placeholder(
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block, max_block, key_value
+        "Longest sequence is for key {longest_key:?} -> from block {min_block:?} to  {max_block:?}, hex -> {key_value}"
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
@@ -561,8 +556,7 @@ pub(crate) async fn cook_query_unique_secondary_index(
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block, max_block, key_value
+        "Longest sequence is for key {longest_key:?} -> from block {min_block:?} to  {max_block:?}, hex -> {key_value}"
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
@@ -637,8 +631,7 @@ pub(crate) async fn cook_query_partial_block_range(
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block, max_block, key_value
+        "Longest sequence is for key {longest_key:?} -> from block {min_block:?} to  {max_block:?}, hex -> {key_value}"
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
@@ -705,8 +698,7 @@ pub(crate) async fn cook_query_non_matching_entries_some_blocks(
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, true).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block, max_block, key_value
+        "Longest sequence is for key {longest_key:?} -> from block {min_block:?} to  {max_block:?}, hex -> {key_value}"
     );
     // now we can fetch the key that we want
     let key_column = &table.columns.secondary.name;

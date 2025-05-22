@@ -265,7 +265,7 @@ impl ProofStorage for ProofKV {
         let bucket = tx.get_bucket(BUCKET_NAME)?;
         let d = bucket
             .get(store_key.to_be_bytes())
-            .context(format!("proof with key {:?} not found", key))?;
+            .context(format!("proof with key {key:?} not found"))?;
         match d {
             Data::Bucket(_) => bail!("bucket found while required proofs"),
             Data::KeyValue(kv) => Ok(kv.value().to_vec()),

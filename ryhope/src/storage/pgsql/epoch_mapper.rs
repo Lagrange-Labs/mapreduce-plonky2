@@ -63,8 +63,7 @@ impl EpochMapperStorage {
             let rows = connection
                 .query(
                     &format!(
-                        "SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {} ORDER BY {USER_EPOCH}",
-                        mapper_table_name,
+                        "SELECT {USER_EPOCH}, {INCREMENTAL_EPOCH} FROM {mapper_table_name} ORDER BY {USER_EPOCH}"
                     ),
                     &[],
                 )
@@ -125,9 +124,8 @@ impl EpochMapperStorage {
                 .map_err(|err| RyhopeError::from_bb8("getting a connection", err))?
                 .query(
                     &format!(
-                        "INSERT INTO {} ({USER_EPOCH}, {INCREMENTAL_EPOCH})
-                            VALUES ($1, $2)",
-                        mapper_table_name,
+                        "INSERT INTO {mapper_table_name} ({USER_EPOCH}, {INCREMENTAL_EPOCH})
+                            VALUES ($1, $2)"
                     ),
                     &[&(initial_epoch as UserEpoch), &INITIAL_INCREMENTAL_EPOCH],
                 )

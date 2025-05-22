@@ -2,14 +2,14 @@
 //! multiple columns for struct.
 
 use super::column_info::{ColumnInfo, ColumnInfoTarget};
+use crate::{CBuilder, F};
 use itertools::Itertools;
 use mp2_common::{
     array::{Array, VectorWire},
     eth::left_pad32,
     group_hashing::{map_to_curve_point, CircuitBuilderGroupHashing},
-    types::{CBuilder, MAPPING_LEAF_VALUE_LEN},
+    types::MAPPING_LEAF_VALUE_LEN,
     utils::{Endianness, Packer, PackerTarget},
-    F,
 };
 use plonky2::{
     field::types::{Field, PrimeField64},
@@ -396,8 +396,8 @@ pub(crate) mod tests {
         values_extraction::gadgets::column_info::{
             CircuitBuilderColumnInfo, WitnessWriteColumnInfo,
         },
+        C, D,
     };
-    use mp2_common::{C, D};
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2_ecgfp5::gadgets::curve::PartialWitnessCurve;

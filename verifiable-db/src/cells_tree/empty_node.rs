@@ -1,10 +1,10 @@
 //! Module handling the empty node inside a cells tree
 
 use super::public_inputs::PublicInputs;
+use crate::{CBuilder, D, F};
 use anyhow::Result;
 use mp2_common::{
-    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, types::CBuilder,
-    utils::ToTargets, D, F,
+    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, utils::ToTargets,
 };
 use plonky2::{iop::witness::PartialWitness, plonk::proof::ProofWithPublicInputsTarget};
 use plonky2_ecgfp5::gadgets::curve::CircuitBuilderEcGFp5;
@@ -60,7 +60,7 @@ impl CircuitLogicWires<F, D, 0> for EmptyNodeWires {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mp2_common::C;
+    use crate::C;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::field::types::Field;
     use plonky2_ecgfp5::curve::curve::WeierstrassPoint;

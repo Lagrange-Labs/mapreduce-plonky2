@@ -109,7 +109,7 @@ impl TableColumns {
             .iter()
             .chain(once(&self.secondary))
             .find(|c| c.identifier() == identifier)
-            .unwrap_or_else(|| panic!("can't find cell from identifier {}", identifier))
+            .unwrap_or_else(|| panic!("can't find cell from identifier {identifier}"))
             .clone()
     }
     pub fn ordered_cells(
@@ -171,7 +171,7 @@ impl From<&TableColumns> for ColumnIDs {
 pub type DBPool = Pool<PostgresConnectionManager<NoTls>>;
 async fn new_db_pool(db_url: &str) -> anyhow::Result<DBPool> {
     let db_manager = PostgresConnectionManager::new_from_stringlike(db_url, NoTls)
-        .with_context(|| format!("while connecting to postgreSQL with `{}`", db_url))?;
+        .with_context(|| format!("while connecting to postgreSQL with `{db_url}`"))?;
 
     let db_pool = DBPool::builder()
         .build(db_manager)
@@ -196,10 +196,10 @@ pub struct Table {
 }
 
 fn row_table_name(name: &str) -> String {
-    format!("row_{}", name)
+    format!("row_{name}")
 }
 fn index_table_name(name: &str) -> String {
-    format!("index_{}", name)
+    format!("index_{name}")
 }
 
 impl Table {
@@ -330,10 +330,7 @@ impl Table {
         // reconstruct the _current_ cell tree before update
         // note we ignore the update plan here since we assume it already has been proven
         // or is empty
-        println!(
-            "BEFORE construct cell tree - previous_cells {:?}",
-            previous_cells
-        );
+        println!("BEFORE construct cell tree - previous_cells {previous_cells:?}");
         let mut cell_tree = self.construct_cell_tree(&previous_cells).await;
         println!(
             "BEFORE update cell tree -> going over {} new updated cells",
@@ -402,7 +399,7 @@ impl Table {
                     // apply all the updates and then look at the touched ones to update to the new
                     // primary
                     for update in updates {
-                        debug!("Apply update to row tree: {:?}", update);
+                        debug!("Apply update to row tree: {update:?}");
                         match update {
                             TreeRowUpdate::Update(row) => {
                                 t.update(row.k.clone(), row.payload.clone()).await?;

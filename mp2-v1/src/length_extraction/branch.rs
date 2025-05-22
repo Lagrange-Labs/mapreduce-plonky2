@@ -2,15 +2,14 @@
 
 use core::array;
 
+use crate::{CBuilder, D, F as GFp};
 use mp2_common::{
     array::{Vector, VectorWire},
     keccak::{InputData, KeccakCircuit, KeccakWires, PACKED_HASH_LEN},
     mpt_sequential::Circuit as MPTCircuit,
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
-    types::{CBuilder, GFp},
     utils::{Endianness, PackerTarget},
-    D,
 };
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
@@ -122,12 +121,11 @@ impl BranchLengthCircuit {
 pub mod tests {
     use std::sync::Arc;
 
+    use crate::{CBuilder, C, D, F as GFp};
     use eth_trie::{EthTrie, MemoryDB, Trie};
     use mp2_common::{
         eth::StorageSlot,
-        types::{CBuilder, GFp},
         utils::{keccak256, Endianness, Packer, ToFields},
-        C, D,
     };
     use mp2_test::circuit::{prove_circuit, setup_circuit, UserCircuit};
     use plonky2::{

@@ -27,7 +27,7 @@ use plonky2::{
 };
 use plonky2_crypto::u32::arithmetic_u32::{CircuitBuilderU32, U32Target};
 use serde::{Deserialize, Serialize};
-use std::{array, iter::repeat};
+use std::{array, iter::repeat_n};
 
 /// One input element length to Keccak
 const INPUT_ELEMENT_LEN: usize = 32;
@@ -88,7 +88,7 @@ impl KeccakMPT {
         let zero = b.zero();
         let arr = location_bytes
             .into_iter()
-            .chain(repeat(zero).take(PAD_LEN(HASH_LEN) - HASH_LEN))
+            .chain(repeat_n(zero, PAD_LEN(HASH_LEN) - HASH_LEN))
             .collect_vec()
             .try_into()
             .unwrap();
@@ -335,7 +335,7 @@ impl SimpleSlot {
         let zero = b.zero();
         let arr = location
             .into_iter()
-            .chain(repeat(zero).take(INPUT_PADDED_LEN - INPUT_ELEMENT_LEN))
+            .chain(repeat_n(zero, INPUT_PADDED_LEN - INPUT_ELEMENT_LEN))
             .collect_vec()
             .try_into()
             .unwrap();

@@ -1,13 +1,10 @@
 //! Module handling the leaf node inside a cells tree
 
 use super::{public_inputs::PublicInputs, Cell, CellWire};
+use crate::{CBuilder, D, F, H};
 use derive_more::{From, Into};
 use mp2_common::{
-    poseidon::{empty_poseidon_hash, H},
-    public_inputs::PublicInputCommon,
-    types::CBuilder,
-    utils::ToTargets,
-    D, F,
+    poseidon::empty_poseidon_hash, public_inputs::PublicInputCommon, utils::ToTargets,
 };
 use plonky2::{
     iop::witness::PartialWitness,
@@ -85,8 +82,9 @@ impl CircuitLogicWires<F, D, 0> for LeafWires {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{C, H};
     use itertools::Itertools;
-    use mp2_common::{poseidon::H, utils::ToFields, C};
+    use mp2_common::utils::ToFields;
     use mp2_test::circuit::{run_circuit, UserCircuit};
     use plonky2::{field::types::Field, plonk::config::Hasher};
 

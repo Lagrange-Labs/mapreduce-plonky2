@@ -1,6 +1,7 @@
 //! Module handling the branch node inside a storage trie
 
 use super::public_inputs::{PublicInputs, PublicInputsArgs};
+use crate::{CBuilder, D, F as GFp};
 use anyhow::Result;
 use mp2_common::{
     array::{Array, Vector, VectorWire},
@@ -9,9 +10,7 @@ use mp2_common::{
     mpt_sequential::{Circuit as MPTCircuit, MPTKeyWire, PAD_LEN},
     public_inputs::PublicInputCommon,
     rlp::{decode_fixed_list, MAX_ITEMS_IN_LIST},
-    types::{CBuilder, GFp},
     utils::{less_than, Endianness, PackerTarget},
-    D,
 };
 use plonky2::{
     field::types::Field,
@@ -214,13 +213,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::{super::public_inputs::tests::new_extraction_public_inputs, *};
+    use crate::{C, D, F};
     use eth_trie::{EthTrie, MemoryDB, Nibbles, Trie};
     use mp2_common::{
         group_hashing::map_to_curve_point,
         mpt_sequential::utils::bytes_to_nibbles,
         rlp::MAX_KEY_NIBBLE_LEN,
         utils::{keccak256, Endianness, Packer},
-        C, D, F,
     };
     use mp2_test::{
         circuit::{run_circuit, UserCircuit},
@@ -383,7 +382,7 @@ mod tests {
         // Extend the children public inputs by repeatedly copying the last real one as paddings.
         let mut child_pis: Vec<_> = children.iter().map(|child| child.pi.clone()).collect();
         let last_pi = child_pis.last().unwrap().clone();
-        child_pis.extend(iter::repeat(last_pi).take(N_PADDING));
+        child_pis.extend(iter::repeat_n(last_pi, N_PADDING));
         let child_pis: Vec<_> = child_pis.iter().map(|pi| PublicInputs::new(pi)).collect();
 
         let circuit = TestBranchCircuit::<NODE_LEN, { N_REAL + N_PADDING }> {

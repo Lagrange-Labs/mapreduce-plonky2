@@ -1,5 +1,6 @@
+use crate::{D, F};
 use derive_more::From;
-use mp2_common::{public_inputs::PublicInputCommon, utils::ToTargets, D, F};
+use mp2_common::{public_inputs::PublicInputCommon, utils::ToTargets};
 use plonky2::{
     iop::{target::Target, witness::PartialWitness},
     plonk::circuit_builder::CircuitBuilder,
@@ -92,8 +93,8 @@ impl CircuitLogicWires<F, D, 0> for SimpleCircuitRecursiveWires {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::C;
     use base_circuit::test::{ProofsPi, ProofsPiTarget};
-    use mp2_common::C;
     use mp2_test::circuit::{run_circuit, UserCircuit};
 
     #[derive(Clone, Debug)]

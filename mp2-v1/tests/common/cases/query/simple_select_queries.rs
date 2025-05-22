@@ -168,7 +168,7 @@ where
     let (mut node_ctx, mut node_payload) = tree_info
         .fetch_ctx_and_payload_at(key, epoch)
         .await
-        .ok_or(Error::msg(format!("Node not found for key {:?}", key)))?;
+        .ok_or(Error::msg(format!("Node not found for key {key:?}")))?;
     let mut previous_node_hash = node_payload.hash();
     let mut previous_node_key = key.clone();
     while node_ctx.parent.is_some() {
@@ -176,10 +176,7 @@ where
         (node_ctx, node_payload) = tree_info
             .fetch_ctx_and_payload_at(&parent_key, epoch)
             .await
-            .ok_or(Error::msg(format!(
-                "Node not found for key {:?}",
-                parent_key
-            )))?;
+            .ok_or(Error::msg(format!("Node not found for key {parent_key:?}")))?;
         let child_pos = node_ctx
             .iter_children()
             .position(|child| child.map(|c| *c == previous_node_key).unwrap_or(false));
@@ -192,7 +189,7 @@ where
                         let (_, payload) = tree_info
                             .fetch_ctx_and_payload_at(&k, epoch)
                             .await
-                            .ok_or(Error::msg(format!("Node not found for key {:?}", k)))?;
+                            .ok_or(Error::msg(format!("Node not found for key {k:?}")))?;
                         Some(payload.hash())
                     }
                     None => None,
@@ -205,7 +202,7 @@ where
                         let (_, payload) = tree_info
                             .fetch_ctx_and_payload_at(&k, epoch)
                             .await
-                            .ok_or(Error::msg(format!("Node not found for key {:?}", k)))?;
+                            .ok_or(Error::msg(format!("Node not found for key {k:?}")))?;
                         Some(payload.hash())
                     }
                     None => None,
@@ -315,8 +312,7 @@ pub(crate) async fn cook_query_with_max_num_matching_rows(
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block, max_block, key_value
+        "Longest sequence is for key {longest_key:?} -> from block {min_block:?} to  {max_block:?}, hex -> {key_value}"
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
@@ -358,8 +354,7 @@ pub(crate) async fn cook_query_with_matching_rows(
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block, max_block, key_value
+        "Longest sequence is for key {longest_key:?} -> from block {min_block:?} to  {max_block:?}, hex -> {key_value}"
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
@@ -404,8 +399,7 @@ pub(crate) async fn cook_query_too_big_offset(
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block, max_block, key_value
+        "Longest sequence is for key {longest_key:?} -> from block {min_block:?} to  {max_block:?}, hex -> {key_value}"
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
@@ -493,8 +487,7 @@ pub(crate) async fn cook_query_with_distinct(
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block, max_block, key_value
+        "Longest sequence is for key {longest_key:?} -> from block {min_block:?} to  {max_block:?}, hex -> {key_value}"
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();
@@ -537,8 +530,7 @@ pub(crate) async fn cook_query_with_wildcard(
     let (longest_key, (min_block, max_block)) = find_longest_lived_key(table, false).await?;
     let key_value = hex::encode(longest_key.value.to_be_bytes_trimmed_vec());
     info!(
-        "Longest sequence is for key {longest_key:?} -> from block {:?} to  {:?}, hex -> {}",
-        min_block, max_block, key_value
+        "Longest sequence is for key {longest_key:?} -> from block {min_block:?} to  {max_block:?}, hex -> {key_value}"
     );
     // now we can fetch the key that we want
     let key_column = table.columns.secondary.name.clone();

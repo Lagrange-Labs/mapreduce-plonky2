@@ -4,11 +4,11 @@
 //! the chunk are labelled as the `left_boundary_row` and the `right_boundary_row`,
 //! respectively, and are the rows employed to aggregate 2 different chunks.
 
+use crate::F;
 use alloy::primitives::U256;
 use mp2_common::{
     serialization::circuit_data_serialization::SerializableRichField,
     utils::{FromFields, FromTargets, HashBuilder, SelectTarget, ToFields, ToTargets},
-    F,
 };
 use mp2_test::utils::gen_random_field_hash;
 use plonky2::{
@@ -117,7 +117,7 @@ impl ToTargets for BoundaryRowNodeInfoTarget {
 /// `BoundaryRowNodeInfoTarget` related to the following nodes:
 /// - `row_node`: the node of the rows tree containing the given boundary row
 /// - `index_node`: the node of the index tree that stores the rows tree containing
-///     `row_node`
+///   `row_node`
 #[derive(Clone, Debug)]
 pub(crate) struct BoundaryRowDataTarget {
     pub(crate) row_node_info: BoundaryRowNodeInfoTarget,
@@ -483,7 +483,8 @@ impl BoundaryRowData {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use mp2_common::{utils::ToFields, F};
+    use crate::F;
+    use mp2_common::utils::ToFields;
     use plonky2::{field::types::Field, hash::hash_types::HashOut};
 
     use crate::query::universal_circuit::universal_query_gadget::OutputValues;

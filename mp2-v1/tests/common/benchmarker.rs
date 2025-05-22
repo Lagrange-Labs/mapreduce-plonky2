@@ -29,7 +29,7 @@ impl Benchmarker {
             let mut wtr = csv::Writer::from_writer(writer);
             wtr.write_record(["name", "time"])?;
         }
-        info!("Benchmarker setup to write output in {:?}", path);
+        info!("Benchmarker setup to write output in {path:?}");
         Ok(Self { csv_path: path })
     }
 
