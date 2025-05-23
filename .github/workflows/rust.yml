@@ -8,43 +8,24 @@ on:
 name: Check, Test, and Format
 
 jobs:
-  base:
-    name: build base
-    runs-on: ['hostname:hetzner-dedicated-6']
-    outputs:
-     RUNNER: ${{ steps.get-label.outputs.runner_name }}
+  check-format:
+    runs-on: ubuntu-latest
     steps:
-      - name: Get Runner Label
-        id: get-label
-        run: |
-          if [[ "${{ runner.name }}" == *"@hetzner-dedicated-6" ]]; then
-            echo "runner_name=hostname:hetzner-dedicated-6" >> $GITHUB_OUTPUT
-          else
-            echo "runner_name=nix-128g" >> $GITHUB_OUTPUT
-          fi
-      - name: Cleanup docker build cache
-        run: |
-          docker system prune --force
-          docker builder prune --all --force
-      - name: Checkout code
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 'nightly-2025-05-22'
+          components: rustfmt,clippy
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Checkout sources
         uses: actions/checkout@v4
-
-      - name: Build base
-        env:
-          DOCKER_BUILDKIT: 1
-        run: |
-          docker build --tag base --file docker/base/Dockerfile . --platform linux/amd64 --build-arg INSTRUCTION_SET="x86-64-v3"
-  clippy-fmt-check:
-    needs: base
-    runs-on: ${{needs.base.outputs.RUNNER}}
-    steps:
-      - name: clippy
-        run: docker run --rm base cargo clippy --all-targets --all -- -D warnings
-      - name: fmt
-        run: docker run --rm base cargo fmt --all -- --check
       - name: check
-        run: docker run --rm base cargo check --tests
-
+        run: cargo check --all --tests
+      - name: clippy
+        run: cargo clippy --all-targets --all -- -D warnings
+      - name: fmt
+        run: cargo fmt --all -- --check
 
   test:
     name: Test Suite
