@@ -1,8 +1,47 @@
 # Changelog
 
-## [2.1.1] - 2025-05-11
+## [3.0.0] - 2025-05-26
 
-[Compare 1b23c63 ... c2df1e2](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/1b23c637f120352cae399ca329e5292d3354408f...c2df1e28f8bbbc17e46c3156c5945f4f1839bc3e)
+[Compare 399b10c ... c6f3af4](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/399b10c44232935e6da8af4e64b9e172dd228eaf...c6f3af4f37cfd284a9bfca3c14945123183b2c78)
+
+### Features
+
+
+
+- Incrementally updatable off-chain data commitment - in [PR #495](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/495)
+
+
+### Bug Fixes
+
+
+
+- Resolving quoted freestanding symbols - in [PR #493](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/493)
+
+- Build with latest nightly - in [PR #496](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/496)
+
+
+### Refactor
+
+
+
+- More ergonomic `WorkplanItem` - in [PR #383](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/383)
+
+
+### Miscellaneous Tasks
+
+
+
+- Use foundry from a github action instead of building - in [PR #494](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/494)
+
+- Bump alloy to stable version - in [PR #492](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/492)
+
+- Pin rust - in [PR #497](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/497)
+
+- Update devenv - in [PR #498](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/498)
+
+## [2.1.1] - 2025-05-12
+
+[Compare 1b23c63 ... 399b10c](https://github.com/Lagrange-Labs/mapreduce-plonky2/compare/1b23c637f120352cae399ca329e5292d3354408f...399b10c44232935e6da8af4e64b9e172dd228eaf)
 
 ### Miscellaneous Tasks
 
@@ -13,6 +52,13 @@
 - Update dependencies - in [PR #487](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/487)
 
 - Updates alloy dependency - in [PR #489](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/489)
+
+
+### Release
+
+
+
+- V2.1.1 - in [PR #490](https://github.com/Lagrange-Labs/mapreduce-plonky2/pull/490)
 
 ## [2.1.0] - 2025-05-05
 
