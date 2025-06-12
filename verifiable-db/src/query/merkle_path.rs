@@ -2,7 +2,7 @@
 
 use std::{array, iter::once};
 
-use crate::{CBuilder, D, F};
+use crate::{CBuilder, HashPermutation, D, F};
 use alloy::primitives::U256;
 use anyhow::{ensure, Result};
 use itertools::Itertools;
@@ -20,7 +20,10 @@ use mp2_common::{
 use mp2_test::utils::gen_random_field_hash;
 use plonky2::{
     field::types::Field,
-    hash::hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+    hash::{
+        hash_types::{HashOut, HashOutTarget, NUM_HASH_OUT_ELTS},
+        hashing::hash_n_to_hash_no_pad,
+    },
     iop::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
@@ -352,6 +355,33 @@ where
             embedded_tree_hash,
             num_real_nodes,
         })
+    }
+
+    pub fn compute_root(&self, end_node: &NodeInfo, index_id: u64) -> HashOutput {
+        HashOutput::from(self.compute_root_path(end_node, F::from_canonical_u64(index_id)))
+    }
+
+    pub(crate) fn compute_root_path(&self, end_node: &NodeInfo, index_id: F) -> HashOut<F> {
+        let mut current_hash = end_node.compute_node_hash(index_id);
+        for i in 0..self.num_real_nodes {
+            let child_hashes = if self.is_left_child[i] {
+                [current_hash, self.sibling_hash[i]]
+            } else {
+                [self.sibling_hash[i], current_hash]
+            };
+            let inputs = child_hashes
+                .into_iter()
+                .flat_map(|hash| hash.to_fields())
+                .chain(self.node_min[i].to_fields())
+                .chain(self.node_max[i].to_fields())
+                .chain(once(index_id))
+                .chain(self.node_value[i].to_fields())
+                .chain(self.embedded_tree_hash[i].to_fields())
+                .collect_vec();
+
+            current_hash = hash_n_to_hash_no_pad::<F, HashPermutation>(&inputs);
+        }
+        current_hash
     }
 
     /// Build wires for `MerklePathGadget`. The required inputs are:
